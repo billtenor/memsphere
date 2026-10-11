@@ -1,0 +1,61 @@
+{
+  "run": "run-20261011-112708z-81640985",
+  "date": "2026-10-11",
+  "sourceSha256": {
+    "modules/org.memsphere.memory/adapter/view/index.ts": "a208cfd075cd8de705186939e6b49b4742b238f068e2d20ea89abe330936d748",
+    "test/builtin-memory-view.test.ts": "d7e167edf635cf8782a9a6454321a635bf7beca694f250795565c2d9bc03f3da",
+    "reserved-memory/system-memory/concepts/memsphere-view.yaml": "f8721ff46dc439cccb2344618a4baecb6b9dc7ad46474e62354f2a33b3819653",
+    ".memsphere/memory/concepts/memsphere-view.yaml": "f8721ff46dc439cccb2344618a4baecb6b9dc7ad46474e62354f2a33b3819653"
+  },
+  "focused": {
+    "command": "node --import tsx --test test/builtin-memory-view.test.ts test/reserved-store.test.ts",
+    "exitCode": 0,
+    "passed": 16,
+    "log": "/tmp/human-executor-agile-focused-final.log",
+    "logSha256": "c55e48b3c6db11864ff6780b51b17568b1db22870f22f8abef8b26ab805bba44"
+  },
+  "actualView": {
+    "origin": "http://127.0.0.1:30000",
+    "memory": "/projects/memsphere/memories/procedures/memsphere-changeset-comment-processing",
+    "humanLabel": "执行者: Human",
+    "disclosure": "passed",
+    "viewportWidth": 390,
+    "horizontalOverflow": false,
+    "change": "change-20261011-113701828z-5e5f5ab7",
+    "fullAndDiff": "passed",
+    "commentComposer": "opened, filled, cancelled",
+    "changeFinalStatus": "abandoned",
+    "commentCount": 0,
+    "consoleErrors": 0,
+    "cleanupNote": "Initial DOM cleanup assertion timed out because read-only content retains plus DOM; backend status verified abandoned instead. No product change for this pre-existing behavior."
+  },
+  "memory": {
+    "changeId": "change-20261011-070405378z-c1dc8736",
+    "status": "passed",
+    "digest": "f9eec90090f2ec26735eac736d8f7b1a9f2b50ec01765b34428a1cf9141b8f00",
+    "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261011-070405378z-c1dc8736"
+  },
+  "full": {
+    "command": "npm test",
+    "exitCode": 0,
+    "files": 141,
+    "elapsedSeconds": 294.75,
+    "tests": 1169,
+    "pass": 1168,
+    "fail": 0,
+    "skipped": 1,
+    "log": "/tmp/human-executor-agile-full.log",
+    "logSha256": "cd28e1e49929d3d8680d606183037dab22bf529d076b7d62befd06f279010158"
+  },
+  "typecheck": {
+    "command": "npm run typecheck",
+    "exitCode": 0,
+    "log": "/tmp/human-executor-agile-typecheck.log",
+    "logSha256": "072e1ec238b34ee728ff99c11b4b7043b463790a6354d8ef2395aa16265ba53a"
+  },
+  "build": {
+    "command": "npm run build",
+    "exitCode": 0,
+    "source": "npm test pretest, current final code and Memory"
+  }
+}

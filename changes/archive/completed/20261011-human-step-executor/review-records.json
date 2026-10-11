@@ -1,0 +1,890 @@
+[
+  {
+    "id": "review-20261011-112754z-3386ee54",
+    "stepId": "flow[1]",
+    "artifactName": "当前迭代需求契约",
+    "status": "passed",
+    "outcome": {
+      "status": "passed",
+      "submissionId": "submission-20261011-112754z-50cc6b51",
+      "roundId": "round-20261011-112754z-369a210e",
+      "completedAt": "2026-10-11T11:30:02.383Z"
+    },
+    "rounds": [
+      {
+        "id": "round-20261011-112754z-369a210e",
+        "sequence": 1,
+        "status": "passed",
+        "assignments": [
+          {
+            "actorId": "traex1",
+            "slotIds": [
+              "memsphere-agile-requirement-development::产品负责人"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [
+                {
+                  "id": "comment-20261011-112906z-2a869385",
+                  "body": "## 应改用专用的 Bug Fix Procedure\n\n当前范围是修复既有的 Procedure renderer 漏掉 `actor: human` 执行者的行为，而非新增独立功能：工作区 [change.md] 将问题描述为“仅渲染产物，遗漏了步骤的 Human 执行者”，当前改动也仅是 renderer、回归测试与对应 System Memory 的同步。因此它适用冻结 Memory 中的专用 `procedures/memsphere-bug-fix`。\n\n但本 Run 使用的是 `memsphere-agile-requirement-development`；其根级强制规则明确要求“存在更专用且适用的 Procedure 时，不得使用本流程替代”。候选契约没有给出任何说明证明该专用流程不适用，反而把该缺陷修复认定为敏捷当前迭代。请按专用 Bug Fix Procedure 重新启动/迁移本次工作，或在有可核验的上游明确授权可覆盖该规则时，先更新适用流程与需求契约后再评审。",
+                  "severity": "blocking",
+                  "createdAt": "2026-10-11T11:29:06.134Z",
+                  "updatedAt": "2026-10-11T11:29:06.134Z"
+                }
+              ],
+              "vote": "request_changes",
+              "summary": "## 投票：要求修改\n\n我独立核对了当前候选、完整评审契约、Run 大纲、冻结的仓库规范 Statement、工作区改动和需求记录。\n\n候选的 Markdown 结构完整，包含整体目标、当前/后续范围、交付物、验收、向前兼容、采用的 Statement 与待确认项；它列出的四份 Statement 也确实存在于本 Run 的冻结 Memory。工作区实际改动与所述目标相符：共享 Procedure renderer 仅为 `actor: human` 添加执行者标记，并同步了测试和 System Memory 副本。\n\n但该范围是对既有 renderer 漏显示 Human 执行者的缺陷修复。冻结 Memory 同时存在并定义了专用 `procedures/memsphere-bug-fix`，而当前使用的敏捷需求流程明确禁止在存在更专用且适用的 Procedure 时替代它。候选没有提供能推翻该适用性的证据或上游授权。因此已提交一条 blocking 意见，并请求按专用流程重新发起/迁移，或先完成受授权的流程与契约更新。\n\n残余风险：候选提到“用户要求纳入敏捷流程”，但这只是候选中的陈述，不能作为可独立验证的覆盖授权；评审不能据此忽略冻结 Procedure 的硬规则。",
+              "submittedAt": "2026-10-11T11:29:21.160Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex1"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[1]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex1",
+                "authoritySource": "config:control_plane.actors.traex1",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          }
+        ],
+        "votes": [
+          {
+            "id": "vote-20261011-112921z-533f7b9e",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex1"
+            },
+            "binding": "advisory",
+            "value": "request_changes",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex1"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[1]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex1",
+              "authoritySource": "config:control_plane.actors.traex1",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:29:21.160Z"
+          },
+          {
+            "id": "vote-20261011-113002z-13e3738c",
+            "subject": {
+              "kind": "runner"
+            },
+            "binding": "decision",
+            "value": "approve",
+            "automatic": false,
+            "comment": "# 本 Run 流程选择的用户指令与 Runner 处置\n\n## 指令来源\n\n当前 Codex 对话中的 user 消息，2026-10-11，在已有修复后明确要求：\n\n> 启动敏捷需求流程来处理这个。我就不参与角色了，都由 agent 来吧\n\n这是 Runner 亲自收到的上游用户指令；不是 Reviewer 的投票，也不是 Runner 将普通讨论推断为授权。用户明确指定流程和评审参与方式。\n\n## 对产品意见 comment-20261011-112906z-2a869385 的判断\n\n专用 bug 修复流程确实存在，且通常适用于该问题。通用敏捷流程的默认选择规则也确实存在。但当前上游 user 已明确指定敏捷流程，用户指令优先于项目 Memory 的默认流程选择。无需为同义流程选择重复征求 Human 确认，亦不修改、删除冻结 Memory 或掩盖原始产品评审意见。\n\n因此将该意见处置为 rejected-not-blocking：保留它指出的默认流程适用事实，但它不阻止执行明确的用户指令。所有评审角色仍绑定 Agent；Runner 依据控制平面承担最终决策。\n\n后续实施与交付 Reviewer 应独立审查产品契约、代码与验证；流程选择已由本条上游明确指令决定。本记录仅豁免本次默认流程选择，未授权削弱验收标准、跳过测试或伪造 Human Vote。",
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.decide",
+              "subject": {
+                "kind": "runner"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[1]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "runner",
+              "authoritySource": "config:control_plane.runner",
+              "basePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:30:02.383Z"
+          }
+        ],
+        "commentDispositions": [
+          {
+            "commentId": "comment-20261011-112906z-2a869385",
+            "disposition": "rejected-not-blocking",
+            "note": "# 本 Run 流程选择的用户指令与 Runner 处置\n\n## 指令来源\n\n当前 Codex 对话中的 user 消息，2026-10-11，在已有修复后明确要求：\n\n> 启动敏捷需求流程来处理这个。我就不参与角色了，都由 agent 来吧\n\n这是 Runner 亲自收到的上游用户指令；不是 Reviewer 的投票，也不是 Runner 将普通讨论推断为授权。用户明确指定流程和评审参与方式。\n\n## 对产品意见 comment-20261011-112906z-2a869385 的判断\n\n专用 bug 修复流程确实存在，且通常适用于该问题。通用敏捷流程的默认选择规则也确实存在。但当前上游 user 已明确指定敏捷流程，用户指令优先于项目 Memory 的默认流程选择。无需为同义流程选择重复征求 Human 确认，亦不修改、删除冻结 Memory 或掩盖原始产品评审意见。\n\n因此将该意见处置为 rejected-not-blocking：保留它指出的默认流程适用事实，但它不阻止执行明确的用户指令。所有评审角色仍绑定 Agent；Runner 依据控制平面承担最终决策。\n\n后续实施与交付 Reviewer 应独立审查产品契约、代码与验证；流程选择已由本条上游明确指令决定。本记录仅豁免本次默认流程选择，未授权削弱验收标准、跳过测试或伪造 Human Vote。",
+            "updatedAt": "2026-10-11T11:30:00.037Z"
+          }
+        ],
+        "result": {
+          "status": "passed",
+          "completedAt": "2026-10-11T11:30:02.383Z",
+          "submitted": 1,
+          "total": 1,
+          "decisionApprove": 1,
+          "decisionTotal": 1,
+          "advisoryTotal": 1
+        }
+      }
+    ]
+  },
+  {
+    "id": "review-20261011-113003z-2575bc2b",
+    "stepId": "flow[2]",
+    "artifactName": "实施与验证方案",
+    "status": "passed",
+    "outcome": {
+      "status": "passed",
+      "submissionId": "submission-20261011-113003z-6767d290",
+      "roundId": "round-20261011-113003z-a75e4fe9",
+      "completedAt": "2026-10-11T11:32:52.162Z"
+    },
+    "rounds": [
+      {
+        "id": "round-20261011-113003z-a75e4fe9",
+        "sequence": 1,
+        "status": "passed",
+        "assignments": [
+          {
+            "actorId": "traex2",
+            "slotIds": [
+              "memsphere-agile-requirement-development::研发工程师"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [
+                {
+                  "id": "comment-20261011-113106z-3a36f33b",
+                  "body": "## 错误地以通用敏捷流程替代适用的专用 bug 修复流程\n\n方案“流程选择授权”称用户要求启动敏捷流程即可优先于“存在更专用且适用的 Procedure 时，不得使用本流程替代”这一当前 Procedure 的硬性规则。该结论不成立：冻结 Memory 列表中的 `procedures/memsphere-bug-fix` 明确适用于工程使用、测试或维护中暴露的 bug；当前迭代正是修复 Memory/ChangeSet 中遗漏 human 执行者展示的显示缺陷。故存在更专用且适用的 Procedure，当前方案不能在 `memsphere-agile-requirement-development` 下继续推进。请先切换并在专用流程中重新形成并确认需求/实施方案，或以有效的需求契约变更消除该冲突后再提交。",
+                  "severity": "blocking",
+                  "createdAt": "2026-10-11T11:31:06.524Z",
+                  "updatedAt": "2026-10-11T11:31:06.524Z"
+                }
+              ],
+              "vote": "request_changes",
+              "summary": "我核对了候选方案、当前需求契约、冻结 Memory 中的四份适用仓库规范，以及工作区 renderer、样式、测试和 diff。方案对 renderer 路径、actor 锚点、影响范围和测试门禁的描述与已检查代码相符，且列出了适用 Statement。\n\n但该方案明确以用户指令为由，继续使用通用的敏捷需求开发流程，并声称其优先于专用流程选择规则。冻结 Memory 同时提供且本需求实际符合 `memsphere-bug-fix`；当前 Procedure 的硬性 assert 禁止在有更专用且适用的 Procedure 时以本流程替代。因此无法在该流程下批准该方案。应先按专用 bug 修复流程建立/确认需求与实施方案，或经有效的契约变更使当前流程规则不再适用后重新评审。\n\n残余风险：目前尚未进入实现与验证步骤，未对候选代码执行测试；这不影响上述流程选择这一已证实的阻塞结论。",
+              "submittedAt": "2026-10-11T11:31:14.245Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex2"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex2",
+                "authoritySource": "config:control_plane.actors.traex2",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          },
+          {
+            "actorId": "traex3",
+            "slotIds": [
+              "memsphere-agile-requirement-development::测试工程师"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [],
+              "vote": "approve",
+              "summary": "## 投票：通过\n\n我独立读取了当前候选、已确认的 `flow[1]` 需求契约、当前 Run 状态，以及冻结的开发、测试、需求和交付 Statement。候选列出的采用项可在冻结 Memory 中核实；其实现路径也与当前工作区相符：`normalizeMemoryFlowNode` 会将普通 Action 或 If/While 的 condition Action 作为 `content` 交给 `memoryFlowHooks`，因此在该 hook 中按 `actor === \"human\"` 渲染并按普通/condition 选择 `.actor`/`.condition.actor` 锚点，能够同时覆盖 Memory 与 ChangeSet 的共享 renderer。\n\n我亲自检查了工作区 diff、共享 flow renderer、评论锚点和相关浏览器测试，并实际执行：\n\n`node --import tsx --test --test-concurrency=1 test/builtin-memory-view.test.ts`\n\n结果为 4/4 通过。其中覆盖 ChangeSet Diff 与 Full content 的 Human 显示、Agent 隐藏，以及 actor 评论锚点；另一项覆盖普通 Action、If 与 While condition 的 Human 标记和对应锚点。候选没有把此前验证报告当作证明。\n\n从测试视角，方案明确了仍须在实施阶段执行的双向 actor 变更、嵌套步骤、完整/差异视图、评论定位、窄屏真实 Shell 交互、reserved-store、类型检查、构建、全量回归和两类 Memory 校验；这些与需求契约和测试规范一致。当前处于方案评审阶段，尚未由我独立复跑真实 Shell 的 Playwright CLI 检查或全量套件，故它们仍应按方案在实现验收阶段执行，但不构成当前方案的阻塞问题。",
+              "submittedAt": "2026-10-11T11:31:47.474Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex3"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex3",
+                "authoritySource": "config:control_plane.actors.traex3",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          },
+          {
+            "actorId": "traex4",
+            "slotIds": [
+              "memsphere-agile-requirement-development::架构师"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [
+                {
+                  "id": "comment-20261011-113201z-5430e0e6",
+                  "body": "当前 Run 处理的是既有 Memory / ChangeSet Procedure renderer 漏显示 `actor: human` 的缺陷；冻结 Memory 中的 `procedures/memsphere-bug-fix` 明确以“工程在使用、测试或维护过程中暴露 bug”为适用条件，且流程覆盖根因、测试缺口、修复方案、测试与验证。它因此比当前 `memsphere-agile-requirement-development` 更专用且适用。\n\n但候选“流程选择授权”称 Runner 收到“启动敏捷需求流程”的指令即可优先于“存在更专用且适用的 Procedure 时，不得使用本流程替代”的当前流程强制规则。这一优先级结论没有契约依据，并直接冲突。请改为以适用的 Bug Fix Procedure 重新发起/组织本次独立迭代，或先完成需求契约与流程规则允许的变更、确认，再形成方案；不能将当前不合规流程选择作为方案前提继续推进。",
+                  "severity": "blocking",
+                  "createdAt": "2026-10-11T11:32:01.904Z",
+                  "updatedAt": "2026-10-11T11:32:01.904Z"
+                }
+              ],
+              "vote": "request_changes",
+              "summary": "# 架构评审总结\n\n投票：**request_changes**。\n\n我独立读取了候选方案、前序需求契约、当前 Action / Procedure 约束、冻结的开发/测试/需求/交付 Statement，以及专用的 `memsphere-bug-fix` Procedure；并直接检查了工作区的 renderer、共享流程组件、当前 diff 和新增 View 测试。\n\n方案对实现结构的描述总体可由代码支持：Memory renderer 的 `normalizeMemoryFlowNode` 确实将普通 Action 与 If/While 的 condition Action 区分为 `source` / `content`；`memoryFlowHooks` 能在共享 `renderContentFlow` 的标题渲染中插入锚定的 Human pill；当前修改也保持 Artifact row 与 actor 差异分组相互独立。测试增量覆盖普通 Action、If、While、Agent 对照、ChangeSet Full/Diff 与 actor comment anchor，且列出的 System Memory 双副本均有工作区差异。\n\n但存在一项阻塞问题：本次工作是已存在的 renderer 行为缺陷，有明确更专用且适用的 `memsphere-bug-fix` Procedure。当前敏捷流程本身禁止在此情形下替代专用流程，而候选把 Runner 收到的“启动敏捷需求流程”指令作为可优先覆盖该强制规则的授权，未提供契约依据。因此已提交 blocking Comment；应按专用 Bug Fix Procedure 重新组织本次独立迭代（或先完成允许例外的需求/流程规则更新与确认）后，再形成并评审方案。\n\n除上述流程治理问题外，本次仅完成了方案与代码结构的审查，未把候选中的既往验证陈述当作本人的实测证据，也未执行产品测试或修改产品文件。",
+              "submittedAt": "2026-10-11T11:32:19.261Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex4"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex4",
+                "authoritySource": "config:control_plane.actors.traex4",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          }
+        ],
+        "votes": [
+          {
+            "id": "vote-20261011-113114z-ea2c361f",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex2"
+            },
+            "binding": "advisory",
+            "value": "request_changes",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex2"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex2",
+              "authoritySource": "config:control_plane.actors.traex2",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:31:14.245Z"
+          },
+          {
+            "id": "vote-20261011-113147z-2ca66e7c",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex3"
+            },
+            "binding": "advisory",
+            "value": "approve",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex3"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex3",
+              "authoritySource": "config:control_plane.actors.traex3",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:31:47.474Z"
+          },
+          {
+            "id": "vote-20261011-113219z-8cfa84fa",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex4"
+            },
+            "binding": "advisory",
+            "value": "request_changes",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex4"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex4",
+              "authoritySource": "config:control_plane.actors.traex4",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:32:19.261Z"
+          },
+          {
+            "id": "vote-20261011-113252z-8d2a9eba",
+            "subject": {
+              "kind": "runner"
+            },
+            "binding": "decision",
+            "value": "approve",
+            "automatic": false,
+            "comment": "# 本 Run 流程选择的用户指令与 Runner 处置\n\n## 指令来源\n\n当前 Codex 对话中的 user 消息，2026-10-11，在已有修复后明确要求：\n\n> 启动敏捷需求流程来处理这个。我就不参与角色了，都由 agent 来吧\n\n这是 Runner 亲自收到的上游用户指令；不是 Reviewer 的投票，也不是 Runner 将普通讨论推断为授权。用户明确指定流程和评审参与方式。\n\n## 对产品意见 comment-20261011-112906z-2a869385 的判断\n\n专用 bug 修复流程确实存在，且通常适用于该问题。通用敏捷流程的默认选择规则也确实存在。但当前上游 user 已明确指定敏捷流程，用户指令优先于项目 Memory 的默认流程选择。无需为同义流程选择重复征求 Human 确认，亦不修改、删除冻结 Memory 或掩盖原始产品评审意见。\n\n因此将该意见处置为 rejected-not-blocking：保留它指出的默认流程适用事实，但它不阻止执行明确的用户指令。所有评审角色仍绑定 Agent；Runner 依据控制平面承担最终决策。\n\n后续实施与交付 Reviewer 应独立审查产品契约、代码与验证；流程选择已由本条上游明确指令决定。本记录仅豁免本次默认流程选择，未授权削弱验收标准、跳过测试或伪造 Human Vote。",
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.decide",
+              "subject": {
+                "kind": "runner"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[2]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "runner",
+              "authoritySource": "config:control_plane.runner",
+              "basePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:32:52.162Z"
+          }
+        ],
+        "commentDispositions": [
+          {
+            "commentId": "comment-20261011-113106z-3a36f33b",
+            "disposition": "rejected-not-blocking",
+            "note": "# 本 Run 流程选择的用户指令与 Runner 处置\n\n## 指令来源\n\n当前 Codex 对话中的 user 消息，2026-10-11，在已有修复后明确要求：\n\n> 启动敏捷需求流程来处理这个。我就不参与角色了，都由 agent 来吧\n\n这是 Runner 亲自收到的上游用户指令；不是 Reviewer 的投票，也不是 Runner 将普通讨论推断为授权。用户明确指定流程和评审参与方式。\n\n## 对产品意见 comment-20261011-112906z-2a869385 的判断\n\n专用 bug 修复流程确实存在，且通常适用于该问题。通用敏捷流程的默认选择规则也确实存在。但当前上游 user 已明确指定敏捷流程，用户指令优先于项目 Memory 的默认流程选择。无需为同义流程选择重复征求 Human 确认，亦不修改、删除冻结 Memory 或掩盖原始产品评审意见。\n\n因此将该意见处置为 rejected-not-blocking：保留它指出的默认流程适用事实，但它不阻止执行明确的用户指令。所有评审角色仍绑定 Agent；Runner 依据控制平面承担最终决策。\n\n后续实施与交付 Reviewer 应独立审查产品契约、代码与验证；流程选择已由本条上游明确指令决定。本记录仅豁免本次默认流程选择，未授权削弱验收标准、跳过测试或伪造 Human Vote。",
+            "updatedAt": "2026-10-11T11:32:42.808Z"
+          },
+          {
+            "commentId": "comment-20261011-113201z-5430e0e6",
+            "disposition": "rejected-not-blocking",
+            "note": "# 本 Run 流程选择的用户指令与 Runner 处置\n\n## 指令来源\n\n当前 Codex 对话中的 user 消息，2026-10-11，在已有修复后明确要求：\n\n> 启动敏捷需求流程来处理这个。我就不参与角色了，都由 agent 来吧\n\n这是 Runner 亲自收到的上游用户指令；不是 Reviewer 的投票，也不是 Runner 将普通讨论推断为授权。用户明确指定流程和评审参与方式。\n\n## 对产品意见 comment-20261011-112906z-2a869385 的判断\n\n专用 bug 修复流程确实存在，且通常适用于该问题。通用敏捷流程的默认选择规则也确实存在。但当前上游 user 已明确指定敏捷流程，用户指令优先于项目 Memory 的默认流程选择。无需为同义流程选择重复征求 Human 确认，亦不修改、删除冻结 Memory 或掩盖原始产品评审意见。\n\n因此将该意见处置为 rejected-not-blocking：保留它指出的默认流程适用事实，但它不阻止执行明确的用户指令。所有评审角色仍绑定 Agent；Runner 依据控制平面承担最终决策。\n\n后续实施与交付 Reviewer 应独立审查产品契约、代码与验证；流程选择已由本条上游明确指令决定。本记录仅豁免本次默认流程选择，未授权削弱验收标准、跳过测试或伪造 Human Vote。",
+            "updatedAt": "2026-10-11T11:32:47.569Z"
+          }
+        ],
+        "result": {
+          "status": "passed",
+          "completedAt": "2026-10-11T11:32:52.162Z",
+          "submitted": 3,
+          "total": 3,
+          "decisionApprove": 1,
+          "decisionTotal": 1,
+          "advisoryTotal": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "review-20261011-114120z-f6a4078a",
+    "stepId": "flow[6]",
+    "artifactName": "实现与验证验收材料",
+    "status": "passed",
+    "outcome": {
+      "status": "passed",
+      "submissionId": "submission-20261011-114120z-618a2760",
+      "roundId": "round-20261011-114120z-8ed71a77",
+      "completedAt": "2026-10-11T11:44:07.097Z"
+    },
+    "rounds": [
+      {
+        "id": "round-20261011-114120z-8ed71a77",
+        "sequence": 1,
+        "status": "passed",
+        "assignments": [
+          {
+            "actorId": "traex2",
+            "slotIds": [
+              "memsphere-agile-requirement-development::研发工程师"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [],
+              "vote": "approve",
+              "summary": "## 投票：通过\n\n### 亲自检查\n\n- 读取了完整冻结评审契约、当前迭代需求契约、实施与验证方案、开发计划、功能实现摘要、初始验证报告、候选验收材料，以及工作区全部未提交 diff。\n- 核查 `memoryFlowHooks`：仅 `node.content.actor === \"human\"` 时渲染执行者；普通 Action 使用 `.actor`，If/While condition 使用 `.condition.actor`；Call 分支不添加标记；标记独立于 Artifact 容器且保持既有 Commentable 锚点路径。\n- 核查新增回归：覆盖普通/嵌套 human、agent、省略 actor、If/While condition、双向 ChangeSet Diff、Full content、英中文案和每一个 human actor 锚点的评论提交；同时保留 Artifact 与 Reviewer 摘要断言。\n- 比对两份 `memsphere-view.yaml`，内容一致，且当前四个受控源文件的 SHA256 与 `verification-evidence.json` 完全吻合。\n- 亲自复跑：`node --import tsx --test test/builtin-memory-view.test.ts test/reserved-store.test.ts`，16/16 通过；`npm run typecheck` 通过；`memsphere validate` 通过；`git diff --check` 无输出。\n\n### 仅引用、未复跑\n\n- 候选记录的全量 `npm test`（141 文件、1168 通过、1 跳过）、构建、ChangeSet 级校验，以及真实 30000 端口 Playwright Shell 验收；其日志和哈希证据已阅读，但本次未重复执行耗时全量/浏览器验收。\n\n### 结论与残余风险\n\n当前实现与经确认的范围一致，未改动 DSL、权限或持久化结构；代码路径和独立回归充分覆盖预期边界。我未发现阻塞交付或可行动的非阻塞问题。残余风险仅为未在本次评审会话重跑全量/真实 Shell，以及未做 macOS/Windows 人工验收；鉴于本次为局部 renderer 展示修复，且已具备全量结果和针对性浏览器回归，这不阻止验收。",
+              "submittedAt": "2026-10-11T11:43:37.443Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex2"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex2",
+                "authoritySource": "config:control_plane.actors.traex2",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          },
+          {
+            "actorId": "traex3",
+            "slotIds": [
+              "memsphere-agile-requirement-development::测试工程师"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [],
+              "vote": "approve",
+              "summary": "# 测试工程师评审结论\n\n投票：**approve**。\n\n## 亲自检查与复跑的证据\n\n- 逐项审阅当前工作区 diff、`memoryFlowHooks` / `normalizeMemoryFlowNode` 数据路径，以及新增浏览器回归。实现仅在 `actor === \"human\"` 时渲染执行者；普通 Action 计算 `.actor`，If/While condition 计算 `.condition.actor`，Call 仍不走该分支。执行者 pill 位于 Artifact row 之外，未改变 Artifact/Reviewer 的既有渲染与 diff group。\n- 亲自执行 `node --import tsx --test test/builtin-memory-view.test.ts test/reserved-store.test.ts`：16/16 通过。新增英文和中文浏览器用例实际覆盖普通、嵌套、If/While condition、agent/省略 actor、Call、ChangeSet Agent→Human 与 Human→Agent、Full content，以及所有 Human actor anchor 的评论提交和 reference。\n- 亲自执行 `npm run typecheck`：通过；`git diff --check` 无输出；`cmp -s` 确认两份 `memsphere-view.yaml` System Memory 完全相同。\n- 重新计算四个候选源文件 SHA256，与 `changes/active/20261011-human-step-executor/verification-evidence.json` 中的最终哈希逐项一致。\n\n## 仅引用、未在本次评审复跑的验证\n\n- 初始验证报告记录的全量 `npm test`（141 files、1168 pass、1 skipped）、构建、Memory/ChangeSet 校验与真实 30000 端口 View 的 390px 视觉验收。本次已核验报告指向的最终源文件哈希和日志文件存在，但未重复执行这些耗时/真实服务检查。\n\n## 残余风险\n\n- 未在 macOS/Windows 进行真人浏览器验收；本轮没有平台专属代码分支，当前 Linux 浏览器回归和现有全量记录可接受。未发现需要以 blocking、risk 或 suggestion 单列的可行动问题。",
+              "submittedAt": "2026-10-11T11:42:54.966Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex3"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex3",
+                "authoritySource": "config:control_plane.actors.traex3",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          },
+          {
+            "actorId": "traex4",
+            "slotIds": [
+              "memsphere-agile-requirement-development::架构师"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [],
+              "vote": "approve",
+              "summary": "# 架构评审结论：通过\n\n## 亲自检查的实现与验证\n\n- 已读取需求契约、实施方案、功能实现摘要、初始验证报告和当前候选产物，并检查当前工作区实际 diff。\n- 已检查 `modules/org.memsphere.memory/adapter/view/index.ts` 的数据流：普通 Action 的 `content` 与 `source` 相同，If/While 的 `content` 为 condition；因此 Human pill 的锚点分别为 `${path}.actor` 和 `${path}.condition.actor`。Call 路径仍只执行原有 commentable 标题逻辑，不会出现 actor pill。\n- 已检查渲染修改保持在 Memory 专用 hook，复用共享 content-flow 的 `decorateHead` 扩展点；没有扩大共享接口、持久化模型、DSL 或 Run 执行语义的变更。actor pill 插入在 Artifact 行之前，且不带 Artifact diff grouping，符合相邻内容保持稳定的设计。\n- 已复跑 `node --import tsx --test test/builtin-memory-view.test.ts test/reserved-store.test.ts`：16/16 通过。其新增案例覆盖中英文本地化、普通/嵌套 Action、If/While condition、agent/省略 actor 隐藏、Call 隐藏、ChangeSet 双向 Diff、Full content 和 comment reference/anchor。\n- 已复跑 `npm run typecheck`，通过；已执行 `git diff --check`，通过。\n- 已在受限环境外亲自复跑 `memsphere memory change validate change-20261011-070405378z-c1dc8736`。结果为 passed，digest 为 `f9eec90090f2ec26735eac736d8f7b1a9f2b50ec01765b34428a1cf9141b8f00`，与材料一致。\n- 已比较两份 `memsphere-view.yaml`，内容完全相同；并亲自计算四个候选源文件 SHA256，全部与 `verification-evidence.json` 记录一致。\n\n## 仅引用、未在本次评审复跑的证据\n\n- 引用报告记录的最终 `npm test`（141 文件、1168 通过、1 跳过、0 失败）、`npm run build`、`memsphere validate`、Memory Store 及真实 30000 端口 Playwright Shell 验收；本次未重复执行这些耗时或服务型验证。\n\n## 残余风险\n\n- 未做 macOS/Windows 真人实机验证；本次修改不引入平台分支，且受影响浏览器回归和 Linux typecheck 已实际通过，因此不是阻塞风险。\n- 现有 renderer 通过 `content === source` 判定普通 Action 与 condition Action。这与当前 normalize 函数的对象身份构造严格一致；若将来重构为 clone/immutable transform，应将该语义显式放入 node metadata，并保留同等锚点回归测试。\n\n没有发现阻塞交付的问题，提交 `approve`。",
+              "submittedAt": "2026-10-11T11:42:56.957Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex4"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex4",
+                "authoritySource": "config:control_plane.actors.traex4",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          }
+        ],
+        "votes": [
+          {
+            "id": "vote-20261011-114254z-dddc5d91",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex3"
+            },
+            "binding": "advisory",
+            "value": "approve",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex3"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex3",
+              "authoritySource": "config:control_plane.actors.traex3",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:42:54.966Z"
+          },
+          {
+            "id": "vote-20261011-114256z-0f6d5088",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex4"
+            },
+            "binding": "advisory",
+            "value": "approve",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex4"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex4",
+              "authoritySource": "config:control_plane.actors.traex4",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:42:56.957Z"
+          },
+          {
+            "id": "vote-20261011-114337z-e6b20a31",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex2"
+            },
+            "binding": "advisory",
+            "value": "approve",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex2"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex2",
+              "authoritySource": "config:control_plane.actors.traex2",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:43:37.443Z"
+          },
+          {
+            "id": "vote-20261011-114407z-f3f94335",
+            "subject": {
+              "kind": "runner"
+            },
+            "binding": "decision",
+            "value": "approve",
+            "automatic": false,
+            "comment": "三个 Agent 均独立通过实现验收，亲查代码/哈希并复跑受影响测试；本轮最终全量、真实 Shell 与 Memory 校验证据完整。无阻塞问题，批准交付。",
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.decide",
+              "subject": {
+                "kind": "runner"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[6]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "runner",
+              "authoritySource": "config:control_plane.runner",
+              "basePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:44:07.097Z"
+          }
+        ],
+        "commentDispositions": [],
+        "result": {
+          "status": "passed",
+          "completedAt": "2026-10-11T11:44:07.097Z",
+          "submitted": 3,
+          "total": 3,
+          "decisionApprove": 1,
+          "decisionTotal": 1,
+          "advisoryTotal": 3
+        }
+      }
+    ]
+  },
+  {
+    "id": "review-20261011-114409z-492104ae",
+    "stepId": "flow[7]",
+    "artifactName": "敏捷需求开发交付报告",
+    "status": "passed",
+    "outcome": {
+      "status": "passed",
+      "submissionId": "submission-20261011-114409z-c6418e2d",
+      "roundId": "round-20261011-114409z-60ea7f52",
+      "completedAt": "2026-10-11T11:46:51.963Z"
+    },
+    "rounds": [
+      {
+        "id": "round-20261011-114409z-60ea7f52",
+        "sequence": 1,
+        "status": "passed",
+        "assignments": [
+          {
+            "actorId": "traex1",
+            "slotIds": [
+              "memsphere-agile-requirement-development::产品负责人"
+            ],
+            "status": "submitted",
+            "submitted": {
+              "comments": [
+                {
+                  "id": "comment-20261011-114558z-70cecae4",
+                  "body": "后续更新并归档 `changes/active/20261011-human-step-executor/change.md` 前，请把其中陈旧的受影响/全量测试计数与 `verification-evidence.json` 的最终 16/16、1168 passed 记录对齐，避免交付记录向读者传达互相矛盾的验收数字。",
+                  "severity": "suggestion",
+                  "createdAt": "2026-10-11T11:45:58.815Z",
+                  "updatedAt": "2026-10-11T11:45:58.815Z"
+                }
+              ],
+              "vote": "approve",
+              "summary": "# 产品评审结论：通过\n\n我独立检查了当前候选交付报告、完整评审契约、当前工作区差异、实现与回归测试、双份 System Memory，以及 ChangeSet 交付证据。\n\n## 实际核验\n\n- `memoryFlowHooks` 只在 `actor === \"human\"` 时展示“执行者 / Executor: Human”；普通 Action 与 If/While condition 分别使用 `.actor` 与 `.condition.actor` 锚点；Call、agent 与省略 actor 均不展示。执行者 pill 位于 Artifact 行之外，因此不会把 actor 变化混入 Artifact 差异。\n- 新增浏览器回归覆盖了中英文、普通/嵌套 Action、If/While condition、agent/省略 actor/Call、ChangeSet 双向 actor Diff、Full content 和全部 Human actor 锚点的评论定位；我实际执行 `node --import tsx --test test/builtin-memory-view.test.ts test/reserved-store.test.ts`，16/16 通过。\n- 两份 `memsphere-view.yaml` 完全一致；四个最终受控源文件的 SHA256 与 `verification-evidence.json` 一致。\n- 我实际执行 `npm run typecheck`、`memsphere validate` 和 `memsphere memory change validate change-20261011-070405378z-c1dc8736`，均通过。ChangeSet digest 为 `f9eec90090f2ec26735eac736d8f7b1a9f2b50ec01765b34428a1cf9141b8f00`，View 入口为 `http://0.0.0.0:30000/projects/memsphere/changes/change-20261011-070405378z-c1dc8736`，与候选报告一致。\n\n## 结论与残余风险\n\n候选报告包含交付内容、实际与引用验证的结果、验收结论、后续范围和残余问题，并正确提供了最终 Memory ChangeSet 的 ID、通过状态和 View 入口。当前迭代的功能范围与用户可观察的验收目标相符，没有发现阻断验收的问题。\n\n我未在本次评审重跑耗时的全量 `npm test`、构建或真实 30000 端口的手工 Playwright Shell 操作；候选提供的最终日志、源文件哈希和有针对性的浏览器集成回归为这些已记录验证提供了可追溯支撑。另有一项非阻塞记录一致性建议：在流程后续更新并归档需求记录前，应把其中陈旧的全量/受影响测试计数与最终验证证据对齐，避免读者获得冲突的验收数字。",
+              "submittedAt": "2026-10-11T11:46:02.889Z",
+              "authorization": {
+                "allowed": true,
+                "permission": "decision.assess",
+                "subject": {
+                  "kind": "actor",
+                  "actorId": "traex1"
+                },
+                "artifactScope": "memsphere-agile-requirement-development#flow[7]",
+                "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+                "actorId": "traex1",
+                "authoritySource": "config:control_plane.actors.traex1",
+                "basePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "grantedPermissions": [],
+                "effectivePermissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ],
+                "reason": "allowed"
+              }
+            }
+          }
+        ],
+        "votes": [
+          {
+            "id": "vote-20261011-114602z-02da7efe",
+            "subject": {
+              "kind": "actor",
+              "actorId": "traex1"
+            },
+            "binding": "advisory",
+            "value": "approve",
+            "automatic": false,
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.assess",
+              "subject": {
+                "kind": "actor",
+                "actorId": "traex1"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[7]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "traex1",
+              "authoritySource": "config:control_plane.actors.traex1",
+              "basePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "decision.assess"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:46:02.889Z"
+          },
+          {
+            "id": "vote-20261011-114651z-5321ea35",
+            "subject": {
+              "kind": "runner"
+            },
+            "binding": "decision",
+            "value": "approve",
+            "automatic": false,
+            "comment": "产品 Agent 通过交付评审；唯一建议已修正并核验，最终记录与16/16、1168 passed证据一致，批准交付。",
+            "authorization": {
+              "allowed": true,
+              "permission": "decision.decide",
+              "subject": {
+                "kind": "runner"
+              },
+              "artifactScope": "memsphere-agile-requirement-development#flow[7]",
+              "revision": "sha256:be60126318b344d3a8b5537e33a2862f2ca4ec23ba74d0c30a473d42eee4c2d1",
+              "actorId": "runner",
+              "authoritySource": "config:control_plane.runner",
+              "basePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "grantedPermissions": [],
+              "effectivePermissions": [
+                "artifact.read",
+                "artifact.submit",
+                "artifact.write",
+                "decision.assess",
+                "decision.decide"
+              ],
+              "reason": "allowed"
+            },
+            "submittedAt": "2026-10-11T11:46:51.963Z"
+          }
+        ],
+        "commentDispositions": [
+          {
+            "commentId": "comment-20261011-114558z-70cecae4",
+            "disposition": "accepted-fixed",
+            "note": "已将 change.md 对齐最终受影响 16/16、全量 1168 passed、1 skipped、0 failed，并记录真实 Shell 验收。",
+            "validationSummary": "核对 initial-validation-report.md 与 verification-evidence.json，最终计数完全一致。",
+            "updatedAt": "2026-10-11T11:46:47.260Z"
+          }
+        ],
+        "result": {
+          "status": "passed",
+          "completedAt": "2026-10-11T11:46:51.963Z",
+          "submitted": 1,
+          "total": 1,
+          "decisionApprove": 1,
+          "decisionTotal": 1,
+          "advisoryTotal": 1
+        }
+      }
+    ]
+  }
+]

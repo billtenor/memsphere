@@ -197,8 +197,8 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
       }, {
         reference: "procedures/delivery",
         operation: "update",
-        baseMemory: { id: "procedures/delivery", kind: "procedures", path: "procedures/delivery.yaml", entity: { names: ["delivery", "Procedure delivery"], flow: [{ tag: "!action", action: "Deliver the result", artifact: { name: "Old artifact", format: "markdown", review: ["Product"] } }] } },
-        memory: { id: "procedures/delivery", kind: "procedures", path: "procedures/delivery.yaml", entity: { names: ["delivery", "Procedure delivery"], flow: [{ tag: "!action", action: "Deliver the result", artifact: { name: "New artifact", format: "markdown", review: ["Product"] } }] } }
+        baseMemory: { id: "procedures/delivery", kind: "procedures", path: "procedures/delivery.yaml", entity: { names: ["delivery", "Procedure delivery"], flow: [{ tag: "!action", action: "Deliver the result", actor: "agent", artifact: { name: "Old artifact", format: "markdown", review: ["Product"] } }] } },
+        memory: { id: "procedures/delivery", kind: "procedures", path: "procedures/delivery.yaml", entity: { names: ["delivery", "Procedure delivery"], flow: [{ tag: "!action", action: "Deliver the result", actor: "human", artifact: { name: "New artifact", format: "markdown", review: ["Product"] } }] } }
       }, {
         reference: "statements/created",
         operation: "create",
@@ -386,9 +386,23 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.deepEqual(fullBodyTypography, diffBodyTypography);
     await page.getByRole("button", { name: "Procedure delivery", exact: true }).click();
     await page.getByRole("radio", { name: "Diff", exact: true }).click();
+    const actorDiff = page.locator('.memory-inline-new [data-anchor="procedure.flow[1].actor"]');
+    assert.match(await actorDiff.textContent() ?? "", /Executor Human/);
+    assert.equal(await page.locator('.memory-inline-old .memory-flow-actor').count(), 0);
+    await page.getByRole("radio", { name: "Full content", exact: true }).click();
+    assert.match(await page.locator('.memory-flow-actor').textContent() ?? "", /Executor Human/);
+    await page.getByRole("radio", { name: "Diff", exact: true }).click();
     const artifactDiff = page.locator(".memory-inline-diff-pair").filter({ hasText: "Old artifact" });
     assert.equal(await artifactDiff.locator(".memory-artifact-row").count(), 2);
     assert.equal(await artifactDiff.locator(".memory-artifact-row").evaluateAll(rows => rows.every(row => /Artifact/.test(row.textContent ?? "") && /markdown/.test(row.textContent ?? "") && /Product/.test(row.textContent ?? ""))), true);
+    await actorDiff.hover();
+    await actorDiff.locator('.memory-inline-plus').click();
+    const actorEditor = page.locator('.memory-inline-comment-editor');
+    await actorEditor.locator('textarea').fill('Keep this step assigned to Human');
+    await actorEditor.getByRole('button', { name: 'Submit comment', exact: true }).click();
+    await actorEditor.waitFor({ state: 'detached' });
+    assert.equal(submittedComments.at(-1)?.memoryReference, 'procedures/delivery');
+    assert.equal((submittedComments.at(-1)?.location as Record<string, unknown>)?.anchor, 'procedure.flow[1].actor');
     const candidateArtifactRow = artifactDiff.locator(".memory-inline-new .memory-artifact-row");
     assert.equal(await candidateArtifactRow.locator(":scope > .memory-artifact-summary").count(), 1);
     assert.equal(await candidateArtifactRow.locator(":scope > .memory-review-summary").count(), 1);
@@ -465,7 +479,7 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
           names: ["demo-flow", "Demo Flow"], defines: ["A readable flow"],
           flow: [
             {
-              tag: "!action", action: "Prepare input",
+              tag: "!action", action: "Prepare input", actor: "agent",
               asserts: ["Use traceable source material"],
               suggests: ["Prefer concise supporting context"],
               artifact: {
@@ -478,7 +492,9 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
                 }
               }
             },
-            { tag: "!while", condition: { tag: "!action", action: "Needs another pass", artifact: "decision", format: "plain" }, do: [] }
+            { tag: "!action", action: "Approve input", actor: "human" },
+            { tag: "!if", condition: { tag: "!action", action: "Accept input", actor: "human", artifact: "acceptance" }, then: [] },
+            { tag: "!while", condition: { tag: "!action", action: "Needs another pass", actor: "human", artifact: "decision", format: "plain" }, do: [] }
           ]
         }
       }
@@ -505,9 +521,14 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     assert.equal(await rulesList.getAttribute("open"), null);
     assert.equal(await rulesList.locator(":scope > summary .memory-block-title").innerText(), "Required rules");
     assert.equal(await rulesList.locator(":scope > summary .memory-list-count").innerText(), "1");
-    assert.equal(await page.locator(".memory-flow-item").count(), 2);
+    assert.equal(await page.locator(".memory-flow-item").count(), 4);
     assert.match(await page.locator(".memory-flow").innerText(), /Prepare input/);
     assert.match(await page.locator(".memory-flow").innerText(), /Needs another pass/);
+    assert.equal(await page.locator('.memory-flow-actor').count(), 3);
+    for (const path of ['procedure.flow[2].actor', 'procedure.flow[3].condition.actor', 'procedure.flow[4].condition.actor']) {
+      assert.equal(await page.locator(`[data-anchor="${path}"]`).textContent(), 'Executor Human');
+    }
+    assert.equal(await page.locator('.memory-flow-item').first().locator('.memory-flow-actor').count(), 0);
     const inlineSchema = page.locator('[data-anchor="procedure.flow[1].artifact.schema"]');
     assert.equal(await inlineSchema.count(), 1);
     assert.equal(await inlineSchema.evaluate(node => node.classList.contains("open")), false);
@@ -536,6 +557,93 @@ test("Memory builtin keeps Procedure content structured instead of exposing obje
     await close(server);
   }
 });
+
+for (const locale of ["en", "zh-CN"] as const) {
+  test(`Human executor visibility and anchors cover nested steps and both ChangeSet directions (${locale})`, async () => {
+    const [bundle, sdk, runtime] = await Promise.all([
+      buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()
+    ]);
+    const instances: ViewHostBootInstance[] = [{
+      pluginPath: memoryBundlePath, routeBasePath: "/",
+      module: { projectId: "demo", moduleId: "org.memsphere.memory", moduleVersion: "0.1.2", instanceId: "memory" }
+    }];
+    const action = (name: string, actor?: string) => ({
+      tag: "!action", action: name, ...(actor ? { actor } : {}), artifact: { name: `${name} result`, review: ["Product"] }
+    });
+    const memory = {
+      id: "procedures/executors", kind: "procedures", path: "procedures/executors.yaml",
+      entity: { names: ["executors", "Executor Flow"], flow: [
+        action("Human step", "human"), action("Agent step", "agent"), action("Default step"),
+        { tag: "!if", condition: action("Human condition", "human"), then: [action("Nested human", "human"), action("Nested agent", "agent"), action("Nested default")] },
+        { tag: "!while", condition: action("Human loop condition", "human"), do: [action("Human loop body", "human")] },
+        action("New human", "human"), action("Former human", "agent"),
+        { tag: "!call", target: "procedures/executors" }
+      ] }
+    };
+    const baseMemory = structuredClone(memory);
+    Object.assign(baseMemory.entity.flow[5]!, { actor: "agent" });
+    Object.assign(baseMemory.entity.flow[6]!, { actor: "human" });
+    const comments: Record<string, unknown>[] = [];
+    const server = createServer(async (request, response) => {
+      const url = new URL(request.url ?? "/", "http://localhost");
+      if (url.pathname === memoryBundlePath) return send(response, 200, "text/javascript", bundle);
+      if (url.pathname === viewSdkBundlePath) return send(response, 200, "text/javascript", sdk);
+      if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
+      if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
+      if (url.pathname === "/api/memories") return json(response, { memories: [memory] });
+      if (url.pathname === "/api/memories/procedures/executors") return json(response, { memory });
+      if (url.pathname === "/api/changes") return json(response, { changes: [{ id: "change-executors", status: "active", memoryPaths: [memory.path] }] });
+      if (url.pathname === "/api/changes/change-executors/comments" && request.method === "POST") {
+        let body = "";
+        for await (const chunk of request) body += chunk;
+        const comment = JSON.parse(body) as Record<string, unknown>;
+        comments.push(comment);
+        return json(response, { comment: { id: `comment-${comments.length}`, ...comment } });
+      }
+      if (url.pathname === "/api/changes/change-executors") return json(response, {
+        change: { id: "change-executors", status: "active", valid: true, memoryPaths: [memory.path] },
+        targetMemories: [{ reference: memory.id, operation: "update", baseMemory, memory }], comments: []
+      });
+      return send(response, 200, "text/html", renderViewHostHtml(locale, instances));
+    });
+    const origin = await listen(server);
+    const browser = await browserScope();
+    try {
+      const page = await browser.newPage();
+      const label = locale === "en" ? "Executor Human" : "执行者 Human";
+      const humanPaths = ["flow[1].actor", "flow[4].condition.actor", "flow[4].then[1].actor", "flow[5].condition.actor", "flow[5].do[1].actor", "flow[6].actor"];
+      await page.goto(`${origin}/memories/procedures/executors`, { waitUntil: "networkidle" });
+      await page.getByRole("heading", { name: "Executor Flow", exact: true }).waitFor();
+      assert.equal(await page.locator(".memory-flow-actor").count(), humanPaths.length);
+      for (const path of humanPaths) assert.equal(await page.locator(`[data-anchor="procedure.${path}"]`).textContent(), label);
+      for (const path of ["flow[2]", "flow[3]", "flow[4].then[2]", "flow[4].then[3]", "flow[7]", "flow[8]"]) {
+        assert.equal(await page.locator(`[data-flow-node-path="procedure.${path}"] > .memory-flow-head .memory-flow-actor`).count(), 0);
+      }
+      await page.goto(`${origin}/projects/demo/changes/change-executors`, { waitUntil: "networkidle" });
+      await page.locator(".memory-change-layout").getByRole("heading", { name: "Executor Flow", exact: true }).waitFor();
+      assert.match(await page.locator('.memory-inline-new [data-anchor="procedure.flow[6].actor"]').textContent() ?? "", new RegExp(label));
+      assert.match(await page.locator('.memory-inline-old [data-anchor="procedure.flow[7].actor"]').textContent() ?? "", new RegExp(label));
+      assert.equal(await page.locator(".memory-artifact-row .memory-flow-actor").count(), 0, "actor changes stay outside the Artifact contract");
+      await page.getByRole("radio", { name: locale === "en" ? "Full content" : "完整内容", exact: true }).click();
+      assert.equal(await page.locator(".memory-flow-actor").count(), humanPaths.length);
+      for (const path of humanPaths) {
+        const actor = page.locator(`[data-anchor="procedure.${path}"]`);
+        assert.match(await actor.textContent() ?? "", new RegExp(label));
+        await actor.hover();
+        await actor.locator(".memory-inline-plus").click();
+        const editor = page.locator(".memory-inline-comment-editor");
+        await editor.locator("textarea").fill(`Check ${path}`);
+        await editor.getByRole("button", { name: locale === "en" ? "Submit comment" : "提交意见", exact: true }).click();
+        await editor.waitFor({ state: "detached" });
+        assert.equal(comments.at(-1)?.memoryReference, memory.id);
+        assert.equal((comments.at(-1)?.location as Record<string, unknown>)?.anchor, `procedure.${path}`);
+      }
+    } finally {
+      await browser.close();
+      await close(server);
+    }
+  });
+}
 
 async function buildMemoryBundle(): Promise<string> {
   const result = await build({
