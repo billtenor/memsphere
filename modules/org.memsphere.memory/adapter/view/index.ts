@@ -172,6 +172,8 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "while": "循环",
   "else": "否则",
   "step": "步骤",
+  "executor": "执行者",
+  "human": "Human",
   "artifact": "产物",
   "final": "最终产物",
   "inlineSchema": "产物格式与结构",
@@ -209,6 +211,7 @@ const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze(
   names: "Aliases", defines: "Defines", asserts: "Required rules", suggests: "Suggested rules",
   goals: "Goals", flow: "Flow", format: "Format", repeat: "Repeat", unbounded: "Unbounded",
   sections: "Sections", call: "Call", if: "If", while: "While", else: "Else", step: "Step",
+  executor: "Executor", human: "Human",
   artifact: "Artifact", final: "Final", inlineSchema: "Artifact format & structure", review: "Review",
   reviewerCount: "Reviewers: {count}", expandAll: "Expand all", collapseAll: "Collapse all"
 });
@@ -2574,7 +2577,14 @@ function memoryFlowHooks(t: (key: string) => string, comment?: CommentCallback, 
     renderAction: node => commentable(el("span", "memory-flow-action mem-content-flow-action", node.action), `${node.path}.action`, node.action, comment),
     renderCallTarget: node => renderMemoryReference({ tag: "!ref", target: node.target ?? "" }, options, t),
     renderMeta: node => renderArtifactMeta(node.content, node.path, t, comment),
-    decorateHead: (head, node) => { if (node.kind === "call") commentable(head, node.path, node.source, comment); },
+    decorateHead: (head, node) => {
+      if (node.kind === "call") commentable(head, node.path, node.source, comment);
+      else if (node.content.actor === "human") {
+        const path = `${node.path}${node.content === node.source ? "" : ".condition"}.actor`;
+        const actor = commentable(el("span", "memory-pill memory-flow-actor", `${t("executor")}: ${t("human")}`), path, "human", comment);
+        head.insertBefore(actor, head.querySelector(".memory-artifact-row"));
+      }
+    },
     renderBody: node => {
       const holder = el("div");
       for (const key of ["asserts", "suggests"] as const) appendRuleList(holder, key, array(node.content[key]), node.content.effectiveRules as JsonRecord | undefined, node.path, t, comment, options, "action-contracts");
