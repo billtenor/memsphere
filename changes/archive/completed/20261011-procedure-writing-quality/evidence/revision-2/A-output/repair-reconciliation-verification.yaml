@@ -1,0 +1,64 @@
+!procedure
+syntax: memsphere-20260721-stable
+names: [repair-reconciliation-verification, 修复对账验证子流程]
+defines:
+  - 对指定工单的一次演练结果进行对账并返回验证结果，可被交付主流程调用或独立复用。
+asserts:
+  - 本次运行只处理指定工单；所有证据和决策不得混用其他工单。
+goals:
+  - 给出能供调用方决定是否继续演练的对账验证结果。
+flow:
+  - !action
+    action: 对指定影响对象逐项核对本轮演练结果与预期数据。
+    asserts:
+      - 调用时从当前调用链取得工单、证据整理结果中的指定影响对象、已批准方案及本轮演练记录；独立使用时必须先取得同等输入，缺失输入不得视为验证通过。
+    artifact: !artifact
+      name: 对账记录
+      type: object
+      format: yaml
+      schema: !schema
+        fields:
+          - 工单
+          - 方案版本
+          - !schema
+            name: 对象对账
+            type: array
+            item: !schema
+              fields:
+                - 影响对象
+                - !schema
+                  name: 是否完成对账
+                  type: boolean
+                - !schema
+                  name: 偏差项
+                  type: array
+                  item: !schema
+                    fields: [偏差, 解释]
+  - !action
+    action: 根据对账记录判定本轮验证结果并返回调用方。
+    artifact: !artifact
+      name: 验证结果
+      type: object
+      format: yaml
+      final: true
+      schema: !schema
+        fields:
+          - 工单
+          - 方案版本
+          - !schema
+            name: 偏差项
+            type: array
+            item: !schema
+              fields: [影响对象, 偏差, 解释]
+          - !schema
+            name: 证据
+            type: array
+            item: !schema
+              type: string
+            asserts:
+              - 必须能追溯指定影响对象的逐项对账结果及偏差解释。
+          - !schema
+            name: 是否通过
+            type: boolean
+            asserts:
+              - 当且仅当指定影响对象全部完成对账且不存在未解释偏差时为 true；否则为 false。

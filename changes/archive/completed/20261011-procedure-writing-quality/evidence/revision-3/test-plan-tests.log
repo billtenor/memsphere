@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: Test categories describe the primary contract and automatically include new tests
+ok 1 - Test categories describe the primary contract and automatically include new tests
+  ---
+  duration_ms: 1.715524
+  type: 'test'
+  ...
+# Subtest: Scheduling orders expensive files first within their category without changing membership
+ok 2 - Scheduling orders expensive files first within their category without changing membership
+  ---
+  duration_ms: 0.598753
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 8.94544

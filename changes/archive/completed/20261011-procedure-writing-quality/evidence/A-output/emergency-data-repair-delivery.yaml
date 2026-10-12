@@ -1,0 +1,234 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - emergency-data-repair-delivery
+  - 紧急数据修复交付流程
+defines:
+  - 为指定工单组织证据补齐、风险判断、方案批准、演练与独立对账验证，最终交付报告。
+asserts:
+  - 本次运行只处理指定工单；条件判断、分支、循环及全部子流程使用的证据和决策均不得混用其他工单。
+goals:
+  - 交付经当前版本方案批准、演练和对账验证通过的修复交付报告。
+flow:
+  - !action
+    action: 整理指定工单的日志和对账证据。
+    artifact: !artifact
+      name: 工单证据整理结果
+      type: object
+      format: yaml
+      schema: !schema
+        fields:
+          - 工单
+          - !schema
+            name: 影响对象
+            type: array
+            item: !schema
+              type: string
+          - !schema
+            name: 证据引用
+            type: array
+            item: !schema
+              type: string
+  - !while
+    condition: !action
+      action: 判断最新工单证据是否仍不足以确定影响对象。
+      artifact: !artifact
+        name: 是否需要补充证据
+        type: boolean
+    do:
+      - !action
+        action: 根据证据缺口向业务方询问所需补充资料。
+        artifact: !artifact
+          name: 缺失资料请求
+          format: markdown
+      - !action
+        action: 根据缺失资料请求提供补充资料。
+        actor: human
+        artifact: !artifact
+          name: 补充资料
+          format: markdown
+      - !action
+        action: 合并补充资料与现有日志、对账证据，更新工单证据整理结果。
+        artifact: !artifact
+          name: 工单证据整理结果
+          type: object
+          format: yaml
+          schema: !schema
+            fields:
+              - 工单
+              - !schema
+                name: 影响对象
+                type: array
+                item: !schema
+                  type: string
+              - !schema
+                name: 证据引用
+                type: array
+                item: !schema
+                  type: string
+  - !if
+    condition: !action
+      action: 根据最新工单证据和已确定的影响对象判断修复是否属于高风险。
+      artifact: !artifact
+        name: 是否高风险
+        type: boolean
+    then:
+      - !action
+        action: 针对高风险修复提供风险缓解意见。
+        actor: human
+        artifact: !artifact
+          name: 风险缓解意见
+          format: markdown
+    else:
+      - !action
+        action: 根据低风险判断准备修复方案的执行依据。
+        artifact: !artifact
+          name: 低风险方案准备材料
+          format: markdown
+  - !action
+    action: 根据工单证据、影响对象及当前风险分支材料生成修复方案。
+    asserts:
+      - 方案必须引用本工单的证据。
+    artifact: !artifact
+      name: 修复方案
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        fields:
+          - !schema
+            name: 版本
+            asserts:
+              - 必须能唯一识别当前方案版本。
+          - 修复动作
+          - !schema
+            name: 风险解释
+            asserts:
+              - 每项风险必须关联支持该判断的证据；尚未确认的风险必须明确标为假设。
+            suggests:
+              - 风险按影响程度从高到低排列。
+          - 验证计划
+          - 证据引用
+  - !while
+    condition: !action
+      action: 根据最近一次验证子流程返回的验证结果判断是否仍需演练。
+      asserts:
+        - 首次尚无验证结果时返回 true；此后只采用当前演练轮次的验证结果，是否通过为 true 时返回 false，否则返回 true。
+      artifact: !artifact
+        name: 是否继续演练
+        type: boolean
+    do:
+      - !while
+        condition: !action
+          action: 审批当前版本修复方案，判断是否尚未批准。
+          actor: human
+          asserts:
+            - 只有 Human 明确批准当前方案版本时才返回 false；未批准、要求修改或批准目标不明确时均返回 true。
+          artifact: !artifact
+            name: 当前版本方案是否尚未批准
+            type: boolean
+        do:
+          - !action
+            action: 提供当前版本修复方案的修改意见。
+            actor: human
+            artifact: !artifact
+              name: 方案修改意见
+              format: markdown
+          - !action
+            action: 根据 Human 修改意见修订当前修复方案。
+            asserts:
+              - 方案必须引用本工单的证据。
+              - 更新方案版本，使此前版本的批准不再适用于当前方案。
+            artifact: !artifact
+              name: 修复方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: !schema
+                fields:
+                  - !schema
+                    name: 版本
+                    asserts:
+                      - 必须能唯一识别当前方案版本。
+                  - 修复动作
+                  - !schema
+                    name: 风险解释
+                    asserts:
+                      - 每项风险必须关联支持该判断的证据；尚未确认的风险必须明确标为假设。
+                    suggests:
+                      - 风险按影响程度从高到低排列。
+                  - 验证计划
+                  - 证据引用
+      - !action
+        action: 按当前版本修复方案进行演练。
+        asserts:
+          - 仅允许演练本轮已明确批准的方案版本。
+        artifact: !artifact
+          name: 演练记录
+          type: object
+          format: yaml
+          schema: !schema
+            fields: [工单, 方案版本, 演练结果]
+      - !call
+        target: data-repair-reconciliation-verification
+      - !if
+        condition: !action
+          action: 根据本轮验证子流程返回的验证结果判断演练是否失败。
+          asserts:
+            - 仅在本轮验证结果的是否通过为 false 时返回 true；为 true 时返回 false。
+          artifact: !artifact
+            name: 本轮演练是否失败
+            type: boolean
+        then:
+          - !action
+            action: 分析本轮演练记录和验证结果中的失败原因，提出改进方案。
+            artifact: !artifact
+              name: 原因分析和改进方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: !schema
+                fields: [原因分析, 改进方案]
+          - !action
+            action: 根据原因分析和改进方案修订修复方案。
+            asserts:
+              - 方案必须引用本工单的证据。
+              - 更新方案版本，使此前版本的批准不再适用于当前方案。
+            artifact: !artifact
+              name: 修复方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: !schema
+                fields:
+                  - !schema
+                    name: 版本
+                    asserts:
+                      - 必须能唯一识别当前方案版本。
+                  - 修复动作
+                  - !schema
+                    name: 风险解释
+                    asserts:
+                      - 每项风险必须关联支持该判断的证据；尚未确认的风险必须明确标为假设。
+                    suggests:
+                      - 风险按影响程度从高到低排列。
+                  - 验证计划
+                  - 证据引用
+  - !action
+    action: 根据最终验证结果及演练记录编写交付报告。
+    asserts:
+      - 报告必须引用本工单的证据。
+    artifact: !artifact
+      name: 交付报告
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        fields:
+          - !schema
+            name: 结论
+            asserts:
+              - 解释最终修复对账结果。
+            suggests:
+              - 使用简短句子。
+          - 证据引用
+          - !schema
+            name: 遗留问题
+            asserts:
+              - 若无遗留问题，必须说明判定为空的依据。
+      final: true

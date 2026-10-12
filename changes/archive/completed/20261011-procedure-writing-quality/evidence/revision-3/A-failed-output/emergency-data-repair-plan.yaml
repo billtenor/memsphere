@@ -1,0 +1,24 @@
+!schema
+syntax: memsphere-20260721-stable
+names: [emergency-data-repair-plan, 紧急数据修复方案]
+defines:
+  - 紧急数据修复方案及其修改版本的交付结构。
+type: object
+format: { name: markdown, layout: outline }
+fields:
+  - !schema
+    name: 方案版本
+    asserts:
+      - 每次修改必须产生可区分的新版本，供 Human 批准和演练结果关联。
+  - 修复动作
+  - !schema
+    name: 风险解释
+    asserts:
+      - 每项风险必须关联证据；未确认的风险必须明确标为假设。
+    suggests:
+      - 按影响程度排序。
+  - 验证计划
+  - !schema
+    name: 证据引用
+    asserts:
+      - 引用本工单的证据，引用应能定位原始材料。

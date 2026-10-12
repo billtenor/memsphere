@@ -1,0 +1,10 @@
+{
+  "rootAssertsAbsent": true,
+  "chapterNames": [
+    "字段职责",
+    "语义去重",
+    "约束作用域"
+  ],
+  "effectiveStrongRuleCount": 10,
+  "unchangedStrongRules": true
+}

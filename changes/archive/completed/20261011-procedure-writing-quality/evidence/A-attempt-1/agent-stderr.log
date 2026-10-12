@@ -1,0 +1,6 @@
+2026-10-12T03:58:15.520686Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-10-12T03:58:15.531428Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-10-12T03:58:31.378354Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
+2026-10-12T03:58:45.538736Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
+2026-10-12T03:59:01.074264Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
+2026-10-12T03:59:15.538378Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: route-aware request timed out")))

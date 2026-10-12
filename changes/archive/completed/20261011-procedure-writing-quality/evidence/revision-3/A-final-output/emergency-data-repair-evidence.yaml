@@ -1,0 +1,25 @@
+!schema
+syntax: memsphere-20260721-stable
+names:
+  - emergency-data-repair-evidence
+  - 紧急数据修复证据整理结果
+defines:
+  - 记录指定工单的日志、对账证据及可据此确定的影响对象，供补证检查和修复方案使用。
+type: object
+format: yaml
+fields:
+  - 工单
+  - !schema
+    name: 影响对象
+    type: array
+    item: !schema
+      type: string
+    asserts:
+      - 仅列出已有证据支持的影响对象；尚不能确定时保留待查范围，不把猜测当作已确定对象。
+  - !schema
+    name: 证据引用
+    type: array
+    item: !schema
+      type: string
+    asserts:
+      - 引用应能定位到本工单的日志或对账材料，并区分已确认事实与待补充信息。

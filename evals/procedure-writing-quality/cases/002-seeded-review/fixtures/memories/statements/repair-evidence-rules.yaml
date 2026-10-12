@@ -1,0 +1,6 @@
+!statement
+syntax: memsphere-20260721-stable
+names: [repair-evidence-rules]
+defines: [方案和最终报告共享的工单证据引用规范。]
+asserts:
+  - 产物必须引用当前工单的证据以支撑业务判断。

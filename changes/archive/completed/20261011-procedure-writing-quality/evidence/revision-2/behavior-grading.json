@@ -1,0 +1,109 @@
+{
+  "A": {
+    "result": "passed",
+    "score": "10/10",
+    "dimensions": {
+      "A1": {
+        "passed": true,
+        "evidence": "主/子流程 action 均为动作、输入或产物指称；未混入格式、字段清单、质量验收、建议或历史。审批动作的当前版本是执行对象，不是结构复述。"
+      },
+      "A2": {
+        "passed": true,
+        "evidence": "证据为 object/yaml、方案和报告为 object/markdown outline；风险解释和报告结论/遗留问题规范位于对应字段 Schema。三种方案生成动作复用 schemas/repair-plan。"
+      },
+      "A3": {
+        "passed": true,
+        "evidence": "asserts/suggests 未重述格式或必填字段；审批/验证执行判据、证据关联和报告内容规范均是结构未表达的语义。"
+      },
+      "A4": {
+        "passed": true,
+        "evidence": "主/子流程全局仅保留单工单边界；证据引用要求位于方案生成、修订、改进及最终报告 Action，没有错误全局化。"
+      },
+      "A5": {
+        "passed": true,
+        "evidence": "风险逐项关联证据及假设标识位于 repair-plan 风险解释字段；报告结论解释对账和遗留为空说明依据仅位于报告字段。"
+      },
+      "A6": {
+        "passed": true,
+        "evidence": "风险排序是风险字段 suggests；短句是报告结论字段 suggests；均未成为全局或强制门槛。"
+      },
+      "A7": {
+        "passed": true,
+        "evidence": "证据不足 while 显式包含 Human 补充；高风险 if 由 Human 提供缓解意见，低风险直接汇合；当前版本审批 while 未批准时取得 Human 意见并修订。"
+      },
+      "A8": {
+        "passed": true,
+        "evidence": "每轮演练前都审批当前版本；验证失败分析后改进方案，下一轮重新审批，验证通过才退出至报告。"
+      },
+      "A9": {
+        "passed": true,
+        "evidence": "主流程有真正 !call repair-reconciliation-verification；子流程最终返回 YAML object，是否通过 boolean 的字段判据为全部指定对象对账且无未解释偏差，主流程读取最近一次调用结果控制循环。"
+      },
+      "A10": {
+        "passed": true,
+        "evidence": "最终报告 final:true；引用和语法通过正确隔离 Project 的 Store 与 ChangeSet 校验；候选不含试验路径或固定工单号。"
+      }
+    },
+    "complexity": {
+      "while": 3,
+      "if": 2,
+      "call": 1,
+      "independentProcedures": 2,
+      "sharedSchema": 1
+    }
+  },
+  "B": {
+    "result": "passed",
+    "score": "10/10",
+    "seededPointMapping": {
+      "B1": {
+        "passed": true,
+        "reviewIssue": 5
+      },
+      "B2": {
+        "passed": true,
+        "reviewIssue": 6
+      },
+      "B3": {
+        "passed": true,
+        "reviewIssue": 5
+      },
+      "B4": {
+        "passed": true,
+        "reviewIssue": 7
+      },
+      "B5": {
+        "passed": true,
+        "reviewIssue": 7
+      },
+      "B6": {
+        "passed": true,
+        "reviewIssue": 8
+      },
+      "B7": {
+        "passed": true,
+        "reviewIssue": 2
+      },
+      "B8": {
+        "passed": true,
+        "reviewIssue": 1
+      },
+      "B9": {
+        "passed": true,
+        "reviewIssue": 3
+      },
+      "B10": {
+        "passed": true,
+        "reviewIssue": 4
+      }
+    },
+    "falsePositiveCount": 0,
+    "additionalIssues": {
+      "9": "修订与改进方案丢失原格式/结构/语义契约，当前批准版本未明确；对照原样本确实存在。",
+      "10": "改进审批 boolean 否决后直接修订，没有 Human 意见产物；原样本确实缺少该输入步骤。",
+      "11": "是否通过简写 Schema 字段默认 string，不自动成为 boolean；返回本轮结果的要求与业务一致。"
+    },
+    "controls": "review 明确保留单工单全局边界、原条件/循环/call、结论对账语义、风险假设、局部短句建议和子流程通过判据。"
+  },
+  "limits": "使用同一冻结任务和评分表、最终安装规范、当前 gpt-6.1-sol medium；不宣称覆盖其他模型或批量历史流程。B 内部记录 Run 因禁止提权未上报，但完整独立 review 已交付；不把内部 Run 状态作为通过依据。"
+}

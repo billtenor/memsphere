@@ -10,8 +10,6 @@ defines:
   - 只保留会改变执行、判断或验收结果的内容，不把对话记录、临时尝试和通用常识照搬进 Memory。
   - 同一交付意图下围绕目标 Procedure 产生的相关 Memory 修改，可以在一个 Run 中复用同一 ChangeSet 多轮完成，直到 human 接受整个 ChangeSet 候选。
 asserts:
-  - 开始前必须使用 memsphere memory list 和 memory read 查找并应用当前工程中的 Memory 撰写、类型契约和 YAML 语法规则。
-  - Memory 精简总则：asserts 只保留当前工程或 Memsphere 框架特有、且会改变执行、判断、控制流或验收结果的强制规则；行业共识、模型默认能力、通用安全与质量规范不得写入 Memory。
   - 同一交付意图必须在一个 Run 中持续复用同一个 ChangeSet，且只能包含与主要目标 Procedure 直接相关的 Memory；转入无关任务或改变主要目标时必须新建 Run 和 ChangeSet。
 goals:
   - 明确 Procedure 的触发场景、边界、目标和最终交付物。
@@ -42,6 +40,7 @@ flow:
         actor: agent
         asserts:
           - 首轮必须使用 Procedure 提取请求；后续轮次必须同时使用上一轮 Memory ChangeSet 候选验收意见中的增量要求。
+          - 调查和提取前必须使用 memsphere memory list 和 memory read 发现并完整读取适用的撰写规范、类型契约与 YAML 语法规则；必须完整读取 memsphere-procedure-writing-rules 的正反例，不能只依赖 !ref 投影。
           - 写入依据必须来自 human 明确输入、实际执行证据或可验证来源；未执行的思路不得描述为已验证经验。
           - 更新或删除已有 Memory 时必须完整读取原文件及适用规则，并识别逻辑引用、Reserved/System 来源和需要同步的副本。
         artifact: !artifact
@@ -80,10 +79,12 @@ flow:
         actor: agent
         asserts:
           - Memory 精简写入要求：每条 asserts 必须同时满足“当前工程或 Memsphere 特有”与“会改变执行、判断、控制流或验收结果”；不满足的条目必须删除，不得平移到 suggests。
-          - 能由 Artifact、Schema、已读取的其他 Memory 或当前 Action 明确表达的契约不得在 asserts 中重复。
           - defines 只用非空字符串说明流程的含义、用途和边界，不得写入 !ref 或匿名 Statement/Schema。
           - 复用外部规则时必须按强制程度投影到 Statement、Schema、Action 或 Procedure 的 asserts/suggests；无法确定投影通道时必须由 human 选择。
           - flow 只保留必要步骤；每个 Action 必须职责单一，并产出后续步骤或 human 实际使用的 Artifact。
+          - !ref
+            target: statements/memsphere-procedure-writing-rules
+          - 撰写时先将信息归属到四个字段及最小适用范围，再落笔和去重；不得以删掉业务要求或必要控制流的方式避免混写。
           - 只有真正改变控制流时才使用 !if 或 !while；只有已存在且可独立复用的 Procedure 才使用 !call。
           - Artifact 的评审修改必须使用当前 revision round；只有 human 新增修改要求才进入下一次外层循环。
           - "相关 Memory 必须遵循各自类型契约；只有循环外最终发布的 ChangeSet 和处理摘要可以标记 final: true。"
@@ -98,6 +99,9 @@ flow:
         asserts:
           - 必须使用 memsphere memory change validate [change-id] 复用同一 ChangeSet，并更新可通过 Memory 入口和 ChangeSet 详情查看的单一当前验证内容；普通 memsphere validate 不能代替。
           - 必须检查完整 target 清单、目标关系、Procedure 控制流、类型契约、引用完整性和 Reserved/System 同步状态。
+          - !ref
+            target: statements/memsphere-procedure-writing-rules
+          - 评审前必须完整读取字段职责规范与正反例；逐个检查 Action、Schema 字段及全局规则的职责、重复和作用域，结合“删除或下沉后是否丢失要求”修订候选，不能仅以 YAML 合法性判断通过。
           - 未通过 change validate 时不得提交评审；Reviewer 或 Runner 要求修改时必须使用当前 Artifact Review 的 revision round 修订并重报。
         artifact: !artifact
           name: 本轮已验证的 Memory ChangeSet

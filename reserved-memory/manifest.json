@@ -20,6 +20,7 @@
       "schemas/memsphere-schema-schema.yaml",
       "statements/memsphere-memory-access-rules.yaml",
       "statements/memsphere-yaml-syntax-rules.yaml",
+      "statements/memsphere-procedure-writing-rules.yaml",
       "procedures/memsphere-general-task-execution.yaml",
       "procedures/memsphere-procedure-construction.yaml",
       "procedures/memsphere-changeset-comment-processing.yaml",

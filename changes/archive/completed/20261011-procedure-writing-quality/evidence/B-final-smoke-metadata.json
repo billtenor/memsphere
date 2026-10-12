@@ -1,0 +1,123 @@
+{
+  "case": "002-seeded-review",
+  "createdAt": "2026-10-12T03:56:58.671Z",
+  "trial": "/tmp/procedure-writing-quality/B",
+  "workspace": "/tmp/procedure-writing-quality/B/workspace",
+  "memoryHome": "/tmp/procedure-writing-quality/B/memsphere-home",
+  "taskDigest": "04f613836d39adbab582071d86e46177fdbf5d59dfbb55875460e54fdd513c20",
+  "rubricDigest": "63c2f299dda71bc7d14dffab0d3956875806b9e2a56d35d11248aca0554c3d53",
+  "rulesDigest": "269fd239c75cae99087e1adf4a782617ccc9562992674d7132aa246d983cc0cb",
+  "skillDigest": "fb3e9cb81a51d648105e3457e04326e423f0f61ba5c77524eb4034b127cb7248",
+  "isolation": "bubblewrap-filesystem-and-pid",
+  "modelPolicy": "existing Codex configuration, no model override",
+  "attempt": "/tmp/procedure-writing-quality/B/runs/smoke-1791778127666",
+  "smokeOnly": true,
+  "settings": {
+    "model": "gpt-6.1-sol",
+    "model_reasoning_effort": "medium",
+    "service_tier": "priority"
+  },
+  "codexVersion": "codex-cli 0.162.1",
+  "command": [
+    "/tmp/procedure-writing-quality/B/runtime/codex-package/bin/codex",
+    "exec",
+    "--cd",
+    "/tmp/procedure-writing-quality/B/workspace",
+    "--sandbox",
+    "workspace-write",
+    "--ephemeral",
+    "--ignore-user-config",
+    "--ignore-rules",
+    "--disable",
+    "apps",
+    "--json",
+    "--output-last-message",
+    "/tmp/procedure-writing-quality/B/runs/smoke-1791778127666/final-answer.md",
+    "-c",
+    "model=\"gpt-6.1-sol\"",
+    "-c",
+    "model_reasoning_effort=\"medium\"",
+    "-c",
+    "service_tier=\"priority\"",
+    "-"
+  ],
+  "mounts": [
+    {
+      "mode": "--ro-bind",
+      "source": "/usr",
+      "target": "/usr"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/bin",
+      "target": "/bin"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/lib",
+      "target": "/lib"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/lib64",
+      "target": "/lib64"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/etc/ssl",
+      "target": "/etc/ssl"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/etc/hosts",
+      "target": "/etc/hosts"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/etc/resolv.conf",
+      "target": "/etc/resolv.conf"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/usr/local/share/ca-certificates",
+      "target": "/usr/local/share/ca-certificates"
+    },
+    {
+      "mode": "--bind",
+      "source": "/tmp/procedure-writing-quality/B/workspace",
+      "target": "/tmp/procedure-writing-quality/B/workspace"
+    },
+    {
+      "mode": "--bind",
+      "source": "/tmp/procedure-writing-quality/B/memsphere-home",
+      "target": "/tmp/procedure-writing-quality/B/memsphere-home"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "/tmp/procedure-writing-quality/B/runtime",
+      "target": "/tmp/procedure-writing-quality/B/runtime"
+    },
+    {
+      "mode": "--bind",
+      "source": "/tmp/procedure-writing-quality/B/runs/smoke-1791778127666",
+      "target": "/tmp/procedure-writing-quality/B/runs/smoke-1791778127666"
+    },
+    {
+      "mode": "--bind",
+      "source": "/tmp/procedure-writing-quality/B/runs/smoke-1791778127666/home",
+      "target": "/home/liuyanjun.lyj"
+    },
+    {
+      "mode": "--bind",
+      "source": "/tmp/procedure-writing-quality/B/runs/smoke-1791778127666/codex-home",
+      "target": "/data00/home/liuyanjun.lyj/.codex"
+    },
+    {
+      "mode": "--ro-bind",
+      "source": "[credential-file]",
+      "target": "[credential-file]"
+    }
+  ],
+  "promptDigest": "4dac7ecb9e5be0f6c7f9a9a42ed9b9102cd80fd99046e6330fd10cc0577507c7",
+  "startedAt": "2026-10-12T04:08:48.685Z"
+}

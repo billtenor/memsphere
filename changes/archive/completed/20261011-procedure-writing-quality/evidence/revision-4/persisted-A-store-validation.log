@@ -1,0 +1,4 @@
+memsphere validation passed
+memoryRoot: /tmp/procedure-persisted-A-i7em031z
+Validation scope: stateless Memory root.
+ChangeSet: not applicable in --memory-root mode.

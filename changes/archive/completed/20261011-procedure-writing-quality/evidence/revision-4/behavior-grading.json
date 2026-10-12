@@ -1,0 +1,109 @@
+{
+  "A": {
+    "result": "passed",
+    "score": "10/10",
+    "dimensions": {
+      "A1": {
+        "passed": true,
+        "evidence": "动作只包含动作、对象与必要输入；格式、必填清单、验收规范和建议未混入 action。"
+      },
+      "A2": {
+        "passed": true,
+        "evidence": "证据 YAML object，方案与报告 Markdown outline object，验证 YAML object；Schema 字段分别承载风险与报告内容规范。"
+      },
+      "A3": {
+        "passed": true,
+        "evidence": "asserts/suggests 未复述机器格式或必填结构；版本明确批准、同一轮状态组合、证据关联均为独有语义。"
+      },
+      "A4": {
+        "passed": true,
+        "evidence": "全局只有指定工单边界；证据引用仅在方案和报告字段，不要求审批和条件列证据清单。"
+      },
+      "A5": {
+        "passed": true,
+        "evidence": "风险关联证据及假设规则属于共用方案风险字段；结论对账与空遗留依据仅约束报告字段。"
+      },
+      "A6": {
+        "passed": true,
+        "evidence": "风险排序和结论短句分别为 Schema.suggests，非强制且不全局化。"
+      },
+      "A7": {
+        "passed": true,
+        "evidence": "补证循环有请求、Human 补充、更新；高风险 Human 分支与低风险汇合；每轮当前版本 Human 审批、否决意见、修订再审完整。"
+      },
+      "A8": {
+        "passed": true,
+        "evidence": "原冻结 task 下明确区分执行成功与验证是否通过；任一失败进入原因分析/改进，下一轮先 Human 重新批准；同一轮两者成功才退出交付。"
+      },
+      "A9": {
+        "passed": true,
+        "evidence": "唯一 Procedure 内部逐对象对账，验证结果偏差/证据/是否通过结构正确，bool 通过判据全部对象完成且无未解释偏差，主流程基于最近轮两个结果重试；无 call。"
+      },
+      "A10": {
+        "passed": true,
+        "evidence": "引用与语法经 Store 和子 Agent ChangeSet 校验通过，报告 final:true；无试验目录或固定工单号。"
+      }
+    },
+    "complexity": {
+      "procedureCount": 1,
+      "schemaCount": 1,
+      "whileCount": 3,
+      "ifCount": 2,
+      "callCount": 0
+    }
+  },
+  "B": {
+    "result": "passed",
+    "score": "10/10",
+    "seededPointMapping": {
+      "B1": {
+        "passed": true,
+        "reviewIssue": 8
+      },
+      "B2": {
+        "passed": true,
+        "reviewIssue": 7
+      },
+      "B3": {
+        "passed": true,
+        "reviewIssue": 8
+      },
+      "B4": {
+        "passed": true,
+        "reviewIssue": 9
+      },
+      "B5": {
+        "passed": true,
+        "reviewIssue": 9
+      },
+      "B6": {
+        "passed": true,
+        "reviewIssue": 10
+      },
+      "B7": {
+        "passed": true,
+        "reviewIssue": 6
+      },
+      "B8": {
+        "passed": true,
+        "reviewIssue": 4
+      },
+      "B9": {
+        "passed": true,
+        "reviewIssue": 7
+      },
+      "B10": {
+        "passed": true,
+        "reviewIssue": 5
+      }
+    },
+    "falsePositiveCount": 0,
+    "additionalReviewIssues": {
+      "1": "演练失败但对账通过可绕过修改，真实存在；与业务状态分别表达一致。",
+      "2": "改进批准未通过后无 Human 意见产物，真实缺少必要输入。",
+      "3": "修订方案缺原 Schema/证据/风险规则，当前获批版本衔接未明，真实存在。"
+    },
+    "controls": "明确保留单工单全局、Human 高风险分支/批准职责、失败修改重批、对账全部对象无未解释偏差、风险关联与假设、报告结论对账和短句/排序建议。"
+  },
+  "trialPolicy": "使用相同最终生产规范同时冻结整轮 A/B；A task 恢复首次业务描述且逐字节相同，未向子 Agent 提供失败点、历史输出或隐藏评分。本轮两项首次运行均完成且通过；历史失败不删除、不合并成绩。"
+}

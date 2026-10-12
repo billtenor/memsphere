@@ -1,0 +1,11 @@
+{
+  "originalTenRulesPreserved": true,
+  "effectiveStrongRuleCount": 11,
+  "rootAssertsAbsent": true,
+  "chapters": [
+    "字段职责",
+    "语义去重",
+    "约束作用域",
+    "业务完整性"
+  ]
+}

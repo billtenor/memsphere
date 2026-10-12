@@ -1,0 +1,10 @@
+Created Project: writing-evaluation
+Project Root: /tmp/procedure-writing-quality/revision-3-clean/A/memsphere-home/projects/writing-evaluation
+Installed memsphere skill: /tmp/procedure-writing-quality/revision-3-clean/A/workspace/.agents/skills/memsphere/SKILL.md
+memsphere validation passed
+config: /tmp/procedure-writing-quality/revision-3-clean/A/memsphere-home/projects/writing-evaluation/config.json
+memoryRoot: /tmp/procedure-writing-quality/revision-3-clean/A/workspace/.memsphere/memory
+runsRoot: /tmp/procedure-writing-quality/revision-3-clean/A/memsphere-home/projects/writing-evaluation/runs
+Validation scope: current Project Store.
+ChangeSet: not created or updated.
+For unpublished Memory changes, run: memsphere memory change validate [change-id]

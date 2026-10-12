@@ -1,0 +1,127 @@
+{
+  "A": {
+    "status": "passed",
+    "points": [
+      {
+        "id": "A1",
+        "status": "passed",
+        "evidence": "动作和输入独立表达，无编码/字段清单或书写规范混入动作。"
+      },
+      {
+        "id": "A2",
+        "status": "passed",
+        "evidence": "证据 YAML 对象、方案 Markdown outline、最终报告 Markdown outline 都有对应机器契约。"
+      },
+      {
+        "id": "A3",
+        "status": "passed",
+        "evidence": "格式和必填结构仅由 Artifact/Schema 声明，业务证据引用及批准版本限制为独有语义。"
+      },
+      {
+        "id": "A4",
+        "status": "passed",
+        "evidence": "主流程全局只保留单工单边界；报告、风险字段和方案证据规则为局部。子流程自身保留独立运行所需边界。"
+      },
+      {
+        "id": "A5",
+        "status": "passed",
+        "evidence": "风险证据/假设位于风险字段，结论解释及空遗留依据位于报告对应字段。"
+      },
+      {
+        "id": "A6",
+        "status": "passed",
+        "evidence": "风险排序与短句分别为两个字段的 suggests，未升为强制门槛。"
+      },
+      {
+        "id": "A7",
+        "status": "passed",
+        "evidence": "证据补齐 while 中 Human 提供资料；高低风险 if 汇合；Human 当前版本批准 while。"
+      },
+      {
+        "id": "A8",
+        "status": "passed",
+        "evidence": "失败分支更新方案版本；下一轮先重新批准，再演练；当前验证通过才退出交付。"
+      },
+      {
+        "id": "A9",
+        "status": "passed",
+        "evidence": "真正 !call 调用独立验证 Procedure；返回是否通过是 boolean Schema 字段，偏差/证据契约与通过语义保留。"
+      },
+      {
+        "id": "A10",
+        "status": "passed",
+        "evidence": "两份 YAML 引用可解析并通过 change validate；最终报告 final:true，没有固定工单号或临时路径。"
+      }
+    ]
+  },
+  "B": {
+    "status": "passed",
+    "points": [
+      {
+        "id": "B1",
+        "status": "passed",
+        "review_issue": 5
+      },
+      {
+        "id": "B2",
+        "status": "passed",
+        "review_issue": 3
+      },
+      {
+        "id": "B3",
+        "status": "passed",
+        "review_issue": 5
+      },
+      {
+        "id": "B4",
+        "status": "passed",
+        "review_issue": 6
+      },
+      {
+        "id": "B5",
+        "status": "passed",
+        "review_issue": 6
+      },
+      {
+        "id": "B6",
+        "status": "passed",
+        "review_issue": 7
+      },
+      {
+        "id": "B7",
+        "status": "passed",
+        "review_issue": 4
+      },
+      {
+        "id": "B8",
+        "status": "passed",
+        "review_issue": 1
+      },
+      {
+        "id": "B9",
+        "status": "passed",
+        "review_issue": 3
+      },
+      {
+        "id": "B10",
+        "status": "passed",
+        "review_issue": 2
+      }
+    ],
+    "additional_valid_issues": [
+      8,
+      9,
+      10,
+      11,
+      12
+    ],
+    "correct_controls_preserved": true,
+    "false_positives": 0
+  },
+  "combined": "passed",
+  "limits": [
+    "只针对本轮冻结任务、候选规范与 gpt-6.1-sol medium 配置。",
+    "B 的隔离 Project 内审查记录 Run 因禁止提权停在 run report；实际 review.md 已完成，未把内部 Run 完成当作本次行为通过证据。"
+  ],
+  "baseline_inputs_unchanged": true
+}
