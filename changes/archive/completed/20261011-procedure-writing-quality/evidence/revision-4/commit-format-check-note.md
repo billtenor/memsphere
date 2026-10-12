@@ -1,0 +1,1 @@
+默认 git diff --cached --check 对原始 Agent Markdown 的双空格硬换行及末尾空行给出格式提示，公开 B task 也有末尾空行。为保留已冻结输入及原始输出字节，不修改这些证据。实现、规范和其余文档单独检查，允许 Markdown 末尾空行、排除原始 evidence 目录；无代码或 Memory 格式问题。此前未暂存检查没有覆盖 untracked 原始证据，此处记录最终暂存检查的实际范围。

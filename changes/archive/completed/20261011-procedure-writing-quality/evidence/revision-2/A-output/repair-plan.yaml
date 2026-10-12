@@ -1,0 +1,19 @@
+!schema
+syntax: memsphere-20260721-stable
+names: [repair-plan, 紧急数据修复方案]
+defines:
+  - 用于紧急数据修复方案初稿、审批修订和演练失败后的改进方案的共用契约。
+type: object
+format: { name: markdown, layout: outline }
+fields:
+  - !schema
+    name: 修复动作
+    asserts:
+      - 必须标识当前方案版本及对应的指定影响对象，版本应能唯一对应审批决定和演练记录。
+  - !schema
+    name: 风险解释
+    asserts:
+      - 每项风险必须关联本工单的证据；未确认的风险必须明确标为假设。
+    suggests:
+      - 风险按影响程度排序。
+  - 验证计划

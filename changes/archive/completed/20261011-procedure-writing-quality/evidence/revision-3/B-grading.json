@@ -1,0 +1,55 @@
+{
+  "result": "passed",
+  "score": "10/10",
+  "seededPointMapping": {
+    "B1": {
+      "passed": true,
+      "reviewIssue": 5
+    },
+    "B2": {
+      "passed": true,
+      "reviewIssue": 6
+    },
+    "B3": {
+      "passed": true,
+      "reviewIssue": 5
+    },
+    "B4": {
+      "passed": true,
+      "reviewIssue": 7
+    },
+    "B5": {
+      "passed": true,
+      "reviewIssue": 7
+    },
+    "B6": {
+      "passed": true,
+      "reviewIssue": 13
+    },
+    "B7": {
+      "passed": true,
+      "reviewIssue": 4
+    },
+    "B8": {
+      "passed": true,
+      "reviewIssue": 1
+    },
+    "B9": {
+      "passed": true,
+      "reviewIssue": 3
+    },
+    "B10": {
+      "passed": true,
+      "reviewIssue": 2
+    }
+  },
+  "falsePositiveCount": 0,
+  "additionalIssues": {
+    "8": "各版修订和改进产物确实缺失完整方案 Schema/证据引用与风险内容契约。",
+    "9": "演练执行失败但对账通过可能绕过修改；原样本无执行状态契约，仅对账未通过驱动失败分支。",
+    "10": "改进批准循环确实缺少 Human 意见输入 Action。",
+    "11": "修订与改进产物名称不同，当前批准版本及下一轮输入未明确。",
+    "12": "是否通过为简写字符串 Schema，不自动成为 boolean。"
+  },
+  "controls": "单工单全局边界、风险 Human 分支、审批重试、内部对账判据、报告结论独有语义、风险假设、局部短句及排序建议全部明确保留。问题13对摘要/结论措辞的澄清未要求新增字段或删除现有建议，不算误报。"
+}

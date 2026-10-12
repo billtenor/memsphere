@@ -1,0 +1,136 @@
+!procedure
+syntax: memsphere-20260721-stable
+names: [repair-release-candidate]
+defines: [围绕指定工单完成风险分支、方案批准、演练循环和交付。]
+asserts:
+  - 本次运行只处理指定工单，证据和决策不得混用其他工单。
+  - 最终报告的遗留问题为空时必须说明依据。
+  - 每个步骤都必须提供高风险缓解意见。
+  - 风险解释的每项风险必须关联证据。
+  - 所有步骤都必须列出证据引用。
+flow:
+  - !action
+    action: 收集并整理工单证据，使用 YAML 输出工单、影响对象和证据引用字段。
+    asserts:
+      - 证据产物必须使用 YAML。
+    artifact: !artifact
+      name: 工单证据
+      type: object
+      format: yaml
+      schema: !schema
+        type: object
+        fields: [工单, 影响对象, 证据引用]
+  - !if
+    condition: !action
+      action: 判断风险是否为高风险。
+      artifact: !artifact
+        name: 是否高风险
+        type: boolean
+    then:
+      - !action
+        action: 提供高风险缓解意见。
+        actor: human
+        artifact: !artifact
+          name: 缓解意见
+          format: markdown
+  - !action
+    action: 准备修复方案，风险解释必须标明未确认假设，建议按影响程度排序。
+    asserts:
+      - 方案必须包含修复动作、风险解释和验证计划。
+      - !ref
+        target: statements/repair-evidence-rules
+    suggests:
+      - 方案建议采用 Markdown 格式。
+    artifact: !artifact
+      name: 修复方案
+      type: object
+      format: {name: markdown, layout: outline}
+      schema: !schema
+        type: object
+        fields: [修复动作, 风险解释, 验证计划]
+  - !while
+    condition: !action
+      action: 判断 Human 是否尚未批准当前方案。
+      actor: human
+      artifact: !artifact
+        name: 是否需要重新批准
+        type: boolean
+    do:
+      - !action
+        action: 提供方案修改意见。
+        actor: human
+        artifact: !artifact
+          name: 方案修改意见
+          format: markdown
+      - !action
+        action: 根据意见修订方案。
+        artifact: !artifact
+          name: 已修订方案
+          format: markdown
+  - !while
+    condition: !action
+      action: 判断是否需要继续演练。
+      asserts:
+        - 首次返回 true；后续根据本轮验证结果判断，验证通过才返回 false。
+      artifact: !artifact
+        name: 是否继续演练
+        type: boolean
+    do:
+      - !action
+        action: 按已批准方案完成演练。
+        artifact: !artifact
+          name: 演练结果
+          type: object
+          format: yaml
+      - !action
+        action: 对照指定影响对象的账目核查本轮演练结果。
+        asserts:
+          - 只有全部影响对象完成对账且不存在未解释偏差才能标记通过。
+        artifact: !artifact
+          name: 验证结果
+          type: object
+          format: yaml
+          schema: !schema
+            type: object
+            fields: [偏差项, 证据, 是否通过]
+      - !if
+        condition: !action
+          action: 判断验证是否未通过。
+          artifact: !artifact
+            name: 是否需要改进
+            type: boolean
+        then:
+          - !action
+            action: 分析失败原因并提出改进方案。
+            artifact: !artifact
+              name: 原因与改进方案
+              format: markdown
+          - !while
+            condition: !action
+              action: 判断 Human 是否尚未批准改进方案。
+              actor: human
+              artifact: !artifact
+                name: 是否仍待改进批准
+                type: boolean
+            do:
+              - !action
+                action: 根据 Human 意见调整改进方案。
+                artifact: !artifact
+                  name: 调整后的改进方案
+                  format: markdown
+  - !action
+    action: 编写最终交付报告。
+    asserts:
+      - 报告必须包含结论，结论必须解释修复对账结果。
+      - !ref
+        target: statements/repair-evidence-rules
+    suggests:
+      - 结论优先使用简短句子。
+    artifact: !artifact
+      name: 交付报告
+      type: object
+      format: {name: markdown, layout: outline}
+      schema: !schema
+        type: object
+        fields: [结论, 证据引用, 遗留问题]
+      final: true

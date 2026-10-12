@@ -195,6 +195,8 @@ defines:
 - Statement 引用递归应用目标全部 sections 中同通道的规则，展示有效规则时保留 section 名称和层级；存储、编辑、diff 和普通 read 仍保留原始 `!ref`。
 - 不同类型还拥有自己的字段。编写或解释某种 Memory 前，读取对应的 Concept Memory 了解完整语义和字段规则。
 
+编写或评审 Procedure 前，必须完整读取 `memsphere-procedure-writing-rules`，应用四个字段的职责、语义去重、最小作用域规则与正反例。撰写先归属字段与作用域，再落笔和去重；评审检查字段越界、重复和局部要求误放全局；完整要求与示例以该 Statement 为准。
+
 Procedure 中每个 `!action` 的 `!artifact` 使用 `type -> format -> schema` 三层机器契约：
 
 ```yaml

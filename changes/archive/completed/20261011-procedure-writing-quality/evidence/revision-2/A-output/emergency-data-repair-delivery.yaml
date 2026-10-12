@@ -1,0 +1,184 @@
+!procedure
+syntax: memsphere-20260721-stable
+names: [emergency-data-repair-delivery, 紧急数据修复交付主流程]
+defines:
+  - 为指定工单组织证据补齐、风险判断、方案审批、演练验证及最终报告交付。
+asserts:
+  - 本次运行只处理指定工单；条件判断、分支、循环及子流程中的所有证据和决策均不得混用其他工单。
+goals:
+  - 交付基于已批准方案和通过验证的演练结果形成的交付报告。
+flow:
+  - !action
+    action: 整理指定工单的日志和对账证据。
+    artifact: !artifact
+      name: 证据整理结果
+      type: object
+      format: yaml
+      schema: !schema
+        fields:
+          - 工单
+          - !schema
+            name: 影响对象
+            type: array
+            item: !schema
+              type: string
+          - !schema
+            name: 证据引用
+            type: array
+            item: !schema
+              type: string
+  - !while
+    condition: !action
+      action: 判断现有证据是否不足以确定影响对象。
+      artifact: !artifact
+        name: 是否需要补充证据
+        type: boolean
+    do:
+      - !action
+        action: 根据现有证据向业务方列明缺失资料并请求补充。
+        artifact: !artifact
+          name: 缺失资料请求
+          format: markdown
+      - !action
+        action: 根据缺失资料请求提供业务方补充资料。
+        actor: human
+        artifact: !artifact
+          name: 补充资料
+          format: markdown
+      - !action
+        action: 将补充资料并入证据整理结果并更新影响对象。
+        artifact: !artifact
+          name: 证据整理结果
+          type: object
+          format: yaml
+          schema: !schema
+            fields:
+              - 工单
+              - !schema
+                name: 影响对象
+                type: array
+                item: !schema
+                  type: string
+              - !schema
+                name: 证据引用
+                type: array
+                item: !schema
+                  type: string
+  - !if
+    condition: !action
+      action: 根据证据整理结果判断修复是否为高风险。
+      artifact: !artifact
+        name: 是否高风险
+        type: boolean
+    then:
+      - !action
+        action: 为高风险修复提供风险缓解意见。
+        actor: human
+        artifact: !artifact
+          name: 风险缓解意见
+          format: markdown
+  - !action
+    action: 根据证据整理结果及适用的风险缓解意见生成修复方案。
+    asserts:
+      - 方案必须引用本工单的证据。
+    artifact: !artifact
+      name: 修复方案
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !ref
+        target: schemas/repair-plan
+  - !while
+    condition: !action
+      action: 根据本轮验证子流程返回的结果判断是否仍需演练。
+      asserts:
+        - 尚未演练时必须返回 true；之后只能依据最近一次调用返回的验证结果，是否通过为 false 时返回 true，为 true 时返回 false。
+      artifact: !artifact
+        name: 是否继续演练
+        type: boolean
+    do:
+      - !while
+        condition: !action
+          action: 审批当前版本的修复方案并判断是否尚未批准。
+          actor: human
+          asserts:
+            - 只有 Human 明确批准当前版本时才能返回 false；未批准或要求修改时返回 true，不得沿用旧版本批准。
+          artifact: !artifact
+            name: 当前方案是否尚未批准
+            type: boolean
+        do:
+          - !action
+            action: 针对未批准的当前方案提供修改意见。
+            actor: human
+            artifact: !artifact
+              name: 方案修改意见
+              format: markdown
+          - !action
+            action: 根据 Human 修改意见修订修复方案。
+            asserts:
+              - 方案必须引用本工单的证据。
+              - 每次修订必须生成新版本。
+            artifact: !artifact
+              name: 修复方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: !ref
+                target: schemas/repair-plan
+      - !action
+        action: 根据当前已批准版本的修复方案进行演练。
+        asserts:
+          - 只允许演练 Human 明确批准的当前方案版本。
+        artifact: !artifact
+          name: 演练记录
+          type: object
+          format: yaml
+          schema: !schema
+            fields: [工单, 方案版本, 演练结果]
+      - !call
+        target: repair-reconciliation-verification
+      - !if
+        condition: !action
+          action: 判断本轮验证子流程返回的验证结果是否未通过。
+          asserts:
+            - 必须使用紧邻前次调用返回的验证结果，是否通过为 false 时返回 true，为 true 时返回 false。
+          artifact: !artifact
+            name: 本轮是否验证失败
+            type: boolean
+        then:
+          - !action
+            action: 根据演练记录和验证结果分析失败原因。
+            artifact: !artifact
+              name: 失败原因分析
+              format: markdown
+          - !action
+            action: 根据失败原因分析改进修复方案。
+            asserts:
+              - 方案必须引用本工单的证据。
+              - 改进方案必须生成新版本，下一轮审批以此版本为当前方案。
+            artifact: !artifact
+              name: 修复方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: !ref
+                target: schemas/repair-plan
+  - !action
+    action: 根据已批准方案、演练记录及通过的验证结果生成交付报告。
+    asserts:
+      - 报告必须引用本工单的证据。
+    artifact: !artifact
+      name: 交付报告
+      type: object
+      format: { name: markdown, layout: outline }
+      final: true
+      schema: !schema
+        fields:
+          - !schema
+            name: 结论
+            asserts:
+              - 必须解释修复对账结果。
+            suggests:
+              - 使用简短句子。
+          - 证据引用
+          - !schema
+            name: 遗留问题
+            asserts:
+              - 若无遗留问题，必须说明判定为空的依据。

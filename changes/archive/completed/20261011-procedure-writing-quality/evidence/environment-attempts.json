@@ -1,0 +1,24 @@
+[
+  {
+    "case": "A",
+    "attempt": "/tmp/procedure-writing-quality/A/runs/agent-1791777489630",
+    "result": {
+      "code": 1,
+      "signal": null,
+      "completedAt": "2026-10-12T04:02:18.080Z"
+    },
+    "classification": "environment_failure",
+    "reason": "Lowercase host proxy settings were omitted; no authored/review artifact was produced."
+  },
+  {
+    "case": "B",
+    "attempt": "/tmp/procedure-writing-quality/B/runs/agent-1791777488571",
+    "result": {
+      "code": 1,
+      "signal": null,
+      "completedAt": "2026-10-12T04:02:17.077Z"
+    },
+    "classification": "environment_failure",
+    "reason": "Lowercase host proxy settings were omitted; no authored/review artifact was produced."
+  }
+]

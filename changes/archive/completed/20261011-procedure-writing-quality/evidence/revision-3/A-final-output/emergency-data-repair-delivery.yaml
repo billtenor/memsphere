@@ -1,0 +1,261 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - emergency-data-repair-delivery
+  - 紧急数据修复交付流程
+defines:
+  - 为单个指定工单组织证据补齐、风险判断、方案审批、演练对账与交付报告的可复用流程。
+asserts:
+  - 本次运行只处理指定工单；所有步骤、条件判断、分支和循环使用的证据与决策均属于该工单，不得混用其他工单。
+goals:
+  - 交付能够解释修复对账结果的交付报告。
+flow:
+  - !action
+    action: 整理指定工单的日志和对账证据。
+    artifact: !artifact
+      name: 工单证据整理结果
+      type: object
+      format: yaml
+      schema: emergency-data-repair-evidence
+  - !while
+    condition: !action
+      action: 检查最新证据整理结果是否仍不足以确定影响对象。
+      artifact: !artifact
+        name: 是否仍需补充证据
+        type: boolean
+    do:
+      - !action
+        action: 根据当前证据缺口向业务方询问缺失资料。
+        artifact: !artifact
+          name: 本轮补充资料请求
+          format: markdown
+      - !action
+        action: 根据本轮补充资料请求提供缺失资料。
+        actor: human
+        artifact: !artifact
+          name: 本轮补充资料
+          format: markdown
+      - !action
+        action: 将本轮补充资料与已收集的日志和对账证据合并整理。
+        artifact: !artifact
+          name: 工单证据整理结果
+          type: object
+          format: yaml
+          schema: emergency-data-repair-evidence
+  - !if
+    condition: !action
+      action: 根据足以确定影响对象的最新证据整理结果判断修复是否为高风险。
+      artifact: !artifact
+        name: 是否高风险
+        type: boolean
+    then:
+      - !action
+        action: 针对当前风险判断提供风险缓解意见。
+        actor: human
+        artifact: !artifact
+          name: 风险缓解意见
+          format: markdown
+    else:
+      - !action
+        action: 根据低风险判断和最新证据整理结果准备修复方案依据。
+        artifact: !artifact
+          name: 低风险方案准备结果
+          format: markdown
+  - !action
+    action: 根据最新证据整理结果、风险判断及已执行分支的产物生成修复方案。
+    artifact: !artifact
+      name: 当前修复方案
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: emergency-data-repair-plan
+  - !action
+    action: 审批当前版本的修复方案。
+    actor: human
+    asserts:
+      - 审批意见必须标识所审方案版本并明确是否批准；不得把旧版本批准或含糊反馈当作当前版本批准。
+    artifact: !artifact
+      name: 当前方案审批意见
+      format: markdown
+  - !while
+    condition: !action
+      action: 根据最新方案审批意见判断当前版本的修复方案是否仍未获 Human 明确批准。
+      artifact: !artifact
+        name: 当前方案是否仍未批准
+        type: boolean
+    do:
+      - !action
+        action: 针对未批准的当前方案提供修改意见。
+        actor: human
+        artifact: !artifact
+          name: 方案修改意见
+          format: markdown
+      - !action
+        action: 根据 Human 修改意见及最新证据修订当前修复方案。
+        artifact: !artifact
+          name: 当前修复方案
+          type: object
+          format: { name: markdown, layout: outline }
+          schema: emergency-data-repair-plan
+      - !action
+        action: 审批修订后的当前版本修复方案。
+        actor: human
+        asserts:
+          - 审批意见必须标识所审方案版本并明确是否批准；不得把旧版本批准或含糊反馈当作当前版本批准。
+        artifact: !artifact
+          name: 当前方案审批意见
+          format: markdown
+  - !while
+    condition: !action
+      action: 根据最近一轮演练执行结果和验证结果判断是否需要继续演练。
+      asserts:
+        - 尚无演练结果时返回 true；已有结果时，只有同一轮演练执行成功且验证通过才返回 false，否则返回 true；不得使用旧轮次成功结果替代本轮结果。
+      artifact: !artifact
+        name: 是否继续演练
+        type: boolean
+    do:
+      - !action
+        action: 按当前修复方案对指定影响对象执行本轮演练。
+        asserts:
+          - 只允许使用 Human 已明确批准的当前方案版本；修订后的方案必须重新获批才能演练。
+        artifact: !artifact
+          name: 本轮演练执行结果
+          type: object
+          format: yaml
+          schema: !schema
+            fields:
+              - 轮次
+              - 方案版本
+              - !schema
+                name: 执行成功
+                type: boolean
+              - 执行说明
+      - !action
+        action: 对指定影响对象逐项核对本轮演练结果与预期数据。
+        artifact: !artifact
+          name: 本轮对账验证结果
+          type: object
+          format: yaml
+          schema: !schema
+            fields:
+              - 轮次
+              - !schema
+                name: 对象核对结果
+                type: array
+                item: !schema
+                  type: object
+                  fields:
+                    - 影响对象
+                    - 预期数据
+                    - 演练结果
+                    - !schema
+                      name: 完成对账
+                      type: boolean
+                asserts:
+                  - 逐项覆盖最新证据整理结果确定的全部指定影响对象；执行失败造成无可核对结果时标记未完成，不能视为通过。
+              - !schema
+                name: 偏差项
+                type: array
+                item: !schema
+                  type: object
+                  fields:
+                    - 影响对象
+                    - 偏差描述
+                    - 解释
+                    - !schema
+                      name: 已解释
+                      type: boolean
+              - !schema
+                name: 证据
+                type: array
+                item: !schema
+                  type: string
+                asserts:
+                  - 必须支持本轮各对象核对结果及偏差解释，可追溯到对应材料。
+              - !schema
+                name: 是否通过
+                type: boolean
+                asserts:
+                  - 仅在指定影响对象全部完成本轮对账且不存在未解释偏差时为 true，否则为 false。
+      - !if
+        condition: !action
+          action: 根据本轮演练执行结果和对账验证结果判断是否需要分析与改进。
+          asserts:
+            - 本轮演练执行失败或验证未通过时返回 true；仅当两者均成功时返回 false。
+          artifact: !artifact
+            name: 本轮是否需要改进
+            type: boolean
+        then:
+          - !action
+            action: 根据本轮演练执行结果和验证结果分析失败原因并提出改进。
+            artifact: !artifact
+              name: 本轮原因分析与改进方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: !schema
+                fields: [原因分析, 改进方案]
+          - !action
+            action: 根据本轮原因分析与改进方案修订当前修复方案。
+            artifact: !artifact
+              name: 当前修复方案
+              type: object
+              format: { name: markdown, layout: outline }
+              schema: emergency-data-repair-plan
+          - !action
+            action: 审批改进后的当前版本修复方案。
+            actor: human
+            asserts:
+              - 审批意见必须标识所审方案版本并明确是否批准；不得把旧版本批准或含糊反馈当作当前版本批准。
+            artifact: !artifact
+              name: 当前方案审批意见
+              format: markdown
+          - !while
+            condition: !action
+              action: 根据最新方案审批意见判断改进后的当前方案是否仍未获 Human 明确批准。
+              artifact: !artifact
+                name: 改进方案是否仍未批准
+                type: boolean
+            do:
+              - !action
+                action: 针对未批准的改进方案提供修改意见。
+                actor: human
+                artifact: !artifact
+                  name: 方案修改意见
+                  format: markdown
+              - !action
+                action: 根据 Human 修改意见和本轮原因分析与改进方案修订当前修复方案。
+                artifact: !artifact
+                  name: 当前修复方案
+                  type: object
+                  format: { name: markdown, layout: outline }
+                  schema: emergency-data-repair-plan
+              - !action
+                action: 审批再次修订后的当前版本修复方案。
+                actor: human
+                asserts:
+                  - 审批意见必须标识所审方案版本并明确是否批准；不得把旧版本批准或含糊反馈当作当前版本批准。
+                artifact: !artifact
+                  name: 当前方案审批意见
+                  format: markdown
+  - !action
+    action: 根据最终通过的一轮演练执行结果、对账验证结果及修复方案生成交付报告。
+    artifact: !artifact
+      name: 交付报告
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: !schema
+        fields:
+          - !schema
+            name: 结论
+            asserts:
+              - 必须解释修复对账结果。
+            suggests:
+              - 使用简短句子。
+          - !schema
+            name: 证据引用
+            asserts:
+              - 必须引用本工单的证据，并能定位到对应材料。
+          - !schema
+            name: 遗留问题
+            asserts:
+              - 无遗留问题时必须说明判定依据，不能仅留空。
+      final: true

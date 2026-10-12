@@ -1,0 +1,55 @@
+{
+  "result": "passed",
+  "score": "10/10",
+  "dimensions": {
+    "A1": {
+      "passed": true,
+      "evidence": "所有 Action 均描述动作、对象和必要输入，没有编码、必填清单、建议或历史流水账。"
+    },
+    "A2": {
+      "passed": true,
+      "evidence": "证据 object/YAML；方案与报告 object/Markdown outline；验证 object/YAML，是否通过显式 boolean。字段内容要求位于对应 Schema。"
+    },
+    "A3": {
+      "passed": true,
+      "evidence": "没有 asserts/suggests 再要求格式、布局或必填字段；版本批准、输入关联、对象覆盖、证据支持等保留独有语义。"
+    },
+    "A4": {
+      "passed": true,
+      "evidence": "全局仅单工单边界；方案和报告证据引用在各自 Schema 字段约束，不扩散到审批/条件等步骤。"
+    },
+    "A5": {
+      "passed": true,
+      "evidence": "风险逐项证据与假设规则位于风险解释字段；报告结论对账与空遗留依据规则仅在对应报告字段。"
+    },
+    "A6": {
+      "passed": true,
+      "evidence": "风险排序与结论短句均为局部 suggests，未升级为强制。"
+    },
+    "A7": {
+      "passed": true,
+      "evidence": "补证循环 Human 提供；高低风险分支汇合；初始和改进方案审批、Human 意见、修订再批完整。"
+    },
+    "A8": {
+      "passed": true,
+      "evidence": "演练执行成功与对账通过分别有 boolean；任一失败进入分析/修改/重新批准，外层退出只接受同一轮两者成功。"
+    },
+    "A9": {
+      "passed": true,
+      "evidence": "仅一份业务 Procedure，无 call；内部验证逐对象对账、偏差/证据/是否通过契约正确，同一轮执行及验证结果驱动重试。"
+    },
+    "A10": {
+      "passed": true,
+      "evidence": "所有引用合法，最终报告 final:true；隔离 Project Store/ChangeSet 校验通过，没有试验目录或固定工单身份。"
+    }
+  },
+  "complexity": {
+    "procedureCount": 1,
+    "schemaCount": 2,
+    "whileCount": 4,
+    "ifCount": 2,
+    "callCount": 0
+  },
+  "baselineUnchanged": true,
+  "previousAttempt": "首次独立业务 task A8 失败，明确原业务失败要求后更换 Project 和 Agent，评分与生产规范不变；不得称为首次通过。"
+}

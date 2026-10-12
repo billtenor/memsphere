@@ -1,0 +1,4 @@
+
+> memsphere@0.1.5 typecheck
+> tsc -p tsconfig.json --noEmit && tsc -p tsconfig.modules.json --noEmit
+

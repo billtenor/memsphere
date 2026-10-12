@@ -1,0 +1,18 @@
+{
+  "entries": [
+    {
+      "evidenceFile": "A-output/emergency-data-repair-delivery.yaml",
+      "memoryPath": "procedures/emergency-data-repair-delivery.yaml",
+      "sha256": "bf8fac8411ee362ec36cd8ee8bb0e2cf492085eb6ef24fd75af3718a9ed24b28",
+      "originalSource": "/tmp/procedure-writing-quality/revision-4/A/workspace/.memsphere/memory/procedures/emergency-data-repair-delivery.yaml"
+    },
+    {
+      "evidenceFile": "A-output/emergency-data-repair-plan.yaml",
+      "memoryPath": "schemas/emergency-data-repair-plan.yaml",
+      "sha256": "afbec9ec7e61cadcbfea06aa2e32aca8100e0b21dfeb823eeb76f1efc2e8d153",
+      "originalSource": "/tmp/procedure-writing-quality/revision-4/A/workspace/.memsphere/memory/schemas/emergency-data-repair-plan.yaml"
+    }
+  ],
+  "validation": "Reconstruct four kind directories using only persisted A-output files; memsphere validate --memory-root succeeded.",
+  "allBytesMatchOriginalAgentOutput": true
+}

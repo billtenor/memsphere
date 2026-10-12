@@ -1,0 +1,262 @@
+TAP version 13
+# Subtest: rule resolver projects only the selected channel and preserves section hierarchy
+ok 1 - rule resolver projects only the selected channel and preserves section hierarchy
+  ---
+  duration_ms: 1.799394
+  type: 'test'
+  ...
+# Subtest: rule resolver keeps nested references in place and deduplicates diamond rules
+ok 2 - rule resolver keeps nested references in place and deduplicates diamond rules
+  ---
+  duration_ms: 0.458482
+  type: 'test'
+  ...
+# Subtest: rule resolver rejects empty projections, wrong kinds, and same-channel cycles
+ok 3 - rule resolver rejects empty projections, wrong kinds, and same-channel cycles
+  ---
+  duration_ms: 0.763563
+  type: 'test'
+  ...
+# Subtest: assert and suggest graphs do not traverse across channels
+ok 4 - assert and suggest graphs do not traverse across channels
+  ---
+  duration_ms: 0.36996
+  type: 'test'
+  ...
+# Subtest: name is a canonical single-value shorthand for names
+ok 5 - name is a canonical single-value shorthand for names
+  ---
+  duration_ms: 20.684
+  type: 'test'
+  ...
+# Subtest: top-level canonical names are strict while aliases and nested names stay descriptive
+ok 6 - top-level canonical names are strict while aliases and nested names stay descriptive
+  ---
+  duration_ms: 8.78388
+  type: 'test'
+  ...
+# Subtest: defines accepts only text while rule fields accept Statement refs
+ok 7 - defines accepts only text while rule fields accept Statement refs
+  ---
+  duration_ms: 3.035389
+  type: 'test'
+  ...
+# Subtest: Statement supports independent assertion and suggestion collections
+ok 8 - Statement supports independent assertion and suggestion collections
+  ---
+  duration_ms: 4.083994
+  type: 'test'
+  ...
+# Subtest: Schema supports independent assertion and suggestion collections
+ok 9 - Schema supports independent assertion and suggestion collections
+  ---
+  duration_ms: 2.682027
+  type: 'test'
+  ...
+# Subtest: Statement sections organize recursive and mixed rule nodes
+ok 10 - Statement sections organize recursive and mixed rule nodes
+  ---
+  duration_ms: 2.278263
+  type: 'test'
+  ...
+# Subtest: Statement sections reject empty, unnamed, and duplicate nodes with precise paths
+ok 11 - Statement sections reject empty, unnamed, and duplicate nodes with precise paths
+  ---
+  duration_ms: 5.713436
+  type: 'test'
+  ...
+# Subtest: Procedure supports optional global assertions
+ok 12 - Procedure supports optional global assertions
+  ---
+  duration_ms: 1.496435
+  type: 'test'
+  ...
+# Subtest: Action supports contracts and Artifact supports inline Schema and final metadata
+ok 13 - Action supports contracts and Artifact supports inline Schema and final metadata
+  ---
+  duration_ms: 5.619267
+  type: 'test'
+  ...
+# Subtest: recursive elseif uses a single nested If and keeps else on the root
+ok 14 - recursive elseif uses a single nested If and keeps else on the root
+  ---
+  duration_ms: 2.777421
+  type: 'test'
+  ...
+# Subtest: Artifact defaults omitted type to string while conditions still require boolean
+ok 15 - Artifact defaults omitted type to string while conditions still require boolean
+  ---
+  duration_ms: 2.257024
+  type: 'test'
+  ...
+# Subtest: rejects untagged Action
+ok 16 - rejects untagged Action
+  ---
+  duration_ms: 1.152307
+  type: 'test'
+  ...
+# Subtest: rejects untagged Artifact
+ok 17 - rejects untagged Artifact
+  ---
+  duration_ms: 1.068262
+  type: 'test'
+  ...
+# Subtest: rejects empty artifact format
+ok 18 - rejects empty artifact format
+  ---
+  duration_ms: 1.144988
+  type: 'test'
+  ...
+# Subtest: rejects elseif array
+ok 19 - rejects elseif array
+  ---
+  duration_ms: 2.097704
+  type: 'test'
+  ...
+# Subtest: rejects else on nested elseif
+ok 20 - rejects else on nested elseif
+  ---
+  duration_ms: 2.386966
+  type: 'test'
+  ...
+# Subtest: rejects non-boolean condition
+ok 21 - rejects non-boolean condition
+  ---
+  duration_ms: 1.365532
+  type: 'test'
+  ...
+# Subtest: rejects empty branch
+ok 22 - rejects empty branch
+  ---
+  duration_ms: 1.280469
+  type: 'test'
+  ...
+# Subtest: rejects scalar call and unregistered control tags at YAML parsing
+ok 23 - rejects scalar call and unregistered control tags at YAML parsing
+  ---
+  duration_ms: 2.207979
+  type: 'test'
+  ...
+# Subtest: requires names for top-level and field Schema
+ok 24 - requires names for top-level and field Schema
+  ---
+  duration_ms: 3.892692
+  type: 'test'
+  ...
+# Subtest: Schema supports optional type and format contracts
+ok 25 - Schema supports optional type and format contracts
+  ---
+  duration_ms: 4.596521
+  type: 'test'
+  ...
+# Subtest: Schema infers local types and inherits only compatible format layout
+ok 26 - Schema infers local types and inherits only compatible format layout
+  ---
+  duration_ms: 1.424364
+  type: 'test'
+  ...
+# Subtest: Schema outline fields support mapping Repeat groups and limits
+ok 27 - Schema outline fields support mapping Repeat groups and limits
+  ---
+  duration_ms: 1.851226
+  type: 'test'
+  ...
+# Subtest: Schema Repeat rejects invalid shape, limits, and nesting
+ok 28 - Schema Repeat rejects invalid shape, limits, and nesting
+  ---
+  duration_ms: 9.133318
+  type: 'test'
+  ...
+# Subtest: format is rejected on memory types without format implementations
+ok 29 - format is rejected on memory types without format implementations
+  ---
+  duration_ms: 0.650705
+  type: 'test'
+  ...
+# Subtest: table layout belongs to an array markdown Artifact
+ok 30 - table layout belongs to an array markdown Artifact
+  ---
+  duration_ms: 2.962239
+  type: 'test'
+  ...
+# Subtest: Schema preserves custom format targets for registered validators
+ok 31 - Schema preserves custom format targets for registered validators
+  ---
+  duration_ms: 0.714902
+  type: 'test'
+  ...
+# Subtest: Schema supports item and union items while rejecting legacy element_types
+ok 32 - Schema supports item and union items while rejecting legacy element_types
+  ---
+  duration_ms: 9.633293
+  type: 'test'
+  ...
+# Subtest: bundled memory contains a valid self-bootstrap chain and manifest
+ok 33 - bundled memory contains a valid self-bootstrap chain and manifest
+  ---
+  duration_ms: 438.770661
+  type: 'test'
+  ...
+# Subtest: bundled Market manifest exposes every complete source
+ok 34 - bundled Market manifest exposes every complete source
+  ---
+  duration_ms: 100.096038
+  type: 'test'
+  ...
+# Subtest: bundled branch-review applies general development and testing rules
+ok 35 - bundled branch-review applies general development and testing rules
+  ---
+  duration_ms: 97.67407
+  type: 'test'
+  ...
+# Subtest: official agile memories enforce conditional Memory ChangeSet delivery evidence
+ok 36 - official agile memories enforce conditional Memory ChangeSet delivery evidence
+  ---
+  duration_ms: 93.174282
+  type: 'test'
+  ...
+# Subtest: chapter one teaches one bounded first-use journey with Chinese user-facing terms
+ok 37 - chapter one teaches one bounded first-use journey with Chinese user-facing terms
+  ---
+  duration_ms: 1.040821
+  type: 'test'
+  ...
+# Subtest: framework Memory and Skill describe scoped Settings consistently
+ok 38 - framework Memory and Skill describe scoped Settings consistently
+  ---
+  duration_ms: 2.871859
+  type: 'test'
+  ...
+# Subtest: manifest rejects unsafe, duplicate, overlapping, and unknown values
+ok 39 - manifest rejects unsafe, duplicate, overlapping, and unknown values
+  ---
+  duration_ms: 1.704319
+  type: 'test'
+  ...
+# Subtest: legacy manifests remain readable but cannot authorize identity-based removal
+ok 40 - legacy manifests remain readable but cannot authorize identity-based removal
+  ---
+  duration_ms: 0.337366
+  type: 'test'
+  ...
+# Subtest: manifest requires install sources to be regular YAML files but allows removed sources to be absent
+ok 41 - manifest requires install sources to be regular YAML files but allows removed sources to be absent
+  ---
+  duration_ms: 5.961896
+  type: 'test'
+  ...
+# Subtest: manifest v4 requires every market dependency to be declared by System or Market install
+ok 42 - manifest v4 requires every market dependency to be declared by System or Market install
+  ---
+  duration_ms: 9.323153
+  type: 'test'
+  ...
+1..42
+# tests 42
+# suites 0
+# pass 42
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1084.644879

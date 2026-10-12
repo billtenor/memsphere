@@ -1,0 +1,115 @@
+!statement
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-procedure-writing-rules
+  - 流程记忆撰写规范
+defines:
+  - 指导流程记忆的撰写与评审，当前按字段职责、语义去重、约束作用域和业务完整性组织规范。
+sections:
+  - !statement
+    names: [字段职责]
+    defines:
+      - 区分 action、artifact、asserts、suggests 各自承载的信息。
+    asserts:
+      - action 只描述当前步骤要做什么，保留动作、执行对象和必要输入；产物字段清单、类型、格式、验收标准、书写建议和历史操作流水账不得混入 action。
+      - artifact 声明当前步骤产出什么；name 标识产物，type、format 和可选 schema 定义产物的类型、编码与结构，不在 artifact 中描述执行过程或自然语言质量要求。
+      - asserts 只补充 action 和 artifact/schema 尚未表达的强制语义规范、验收要求或必要执行约束；Schema 字段的专属内容规范应放在对应 Schema.asserts。
+      - suggests 只表达尚未声明的非强制质量或书写建议；不得复述动作或机器契约，也不得把已有强制要求换一种说法降为建议。
+    sections:
+      - !statement
+        names: [动作混写正反例]
+        defines:
+          - |-
+            反例把格式、结构、验收要求和建议都塞入动作：
+            ```yaml
+            - !action
+              action: 分析故障，输出 Markdown 报告，包含结论和证据，结论必须引用证据，摘要尽量简洁。
+              artifact: !artifact
+                name: 故障分析报告
+            ```
+            正例将每条信息放入负责它的字段：
+            ```yaml
+            - !action
+              action: 根据故障日志分析故障原因。
+              asserts:
+                - 结论必须引用报告中的证据，无法确认的原因必须标明为假设。
+              suggests:
+                - 结论优先使用简短句子。
+              artifact: !artifact
+                name: 故障分析报告
+                type: object
+                format: { name: markdown, layout: outline }
+                schema: !schema
+                  type: object
+                  fields: [结论, 证据]
+            ```
+        suggests:
+          - 拆分混合条目时可参照本例的信息归属，不照搬故障报告的业务内容。
+  - !statement
+    names: [语义去重]
+    defines:
+      - 按含义判断同一要求是否重复，并保留尚未表达的语义约束。
+    asserts:
+      - 同一要求只在负责它的字段中声明一次，按含义而非字面判断重复；比较范围包括当前 Action、Artifact、对应 Schema 及已经适用的全局规则和引用规则。共享对象名称或动作所需的产物指称不等于约束重复，不得因此删除必要动作或输入。
+      - artifact/schema 已经声明的类型、格式、布局、必填字段或元素结构，不得在 action、asserts 或 suggests 中再次要求；混合条目只有部分重复时，删除重复部分，保留尚未表达的语义约束。
+    sections:
+      - !statement
+        names: [机器契约重复正反例]
+        defines:
+          - |-
+            反例的格式和必填字段已经由 Artifact/Schema 声明，asserts/suggests 又重复表达：
+            ```yaml
+            - !action
+              action: 根据故障日志分析故障原因。
+              asserts:
+                - 报告必须是 Markdown，必须包含结论和证据，结论必须引用证据。
+              suggests:
+                - 建议采用 Markdown 格式。
+              artifact: !artifact
+                name: 故障分析报告
+                type: object
+                format: { name: markdown, layout: outline }
+                schema: !schema
+                  type: object
+                  fields: [结论, 证据]
+            ```
+            正例保留相同的 action 和 artifact，将混合 asserts 精简为下列条目，并删除重复的 suggests：
+            ```yaml
+            asserts:
+              - 结论必须引用报告中的证据。
+            ```
+            删除“必须是 Markdown”和“必须包含结论和证据”不会丢失要求；删除“结论必须引用证据”则会丢失机器契约未表达的语义规范。
+        suggests:
+          - 去重时可用“删除这条是否会丢失任何要求”检查语义重复；仅保留混合条目中尚未表达的部分。
+  - !statement
+    names: [约束作用域]
+    defines:
+      - 区分全局、步骤与字段要求，将约束放在最小适用范围。
+    asserts:
+      - 约束必须放在最小适用范围：步骤的执行或产物要求放在 Action，字段专属内容规范放在对应 Schema 字段；只有在整个 Procedure 及其调用链中持续生效的规则才能放在 Procedure.asserts。
+      - 写入全局规则前必须判断它对条件判断、各分支、循环和子流程是否适用；只在报告产出、某个分支或特定字段生效的要求不得提升为全局。贯穿执行的业务边界或禁令可以是全局规则，不要求每个步骤都主动执行相同动作。
+      - 多步骤共用规则不等于全局规则；只约束部分步骤时必须分别在适用位置声明或引用，不得扩大到其他步骤。Statement 规则的业务作用域由引用位置决定，不因规则写在 Statement 根部就成为流程全局规则。
+      - 全局规则不以条数多少判断好坏；缩小作用域和去重时必须保留真实全局边界、局部独有语义和合法非强制建议，不得为精简而删除或弱化要求。
+    sections:
+      - !statement
+        names: [作用域正反例]
+        defines:
+          - |-
+            反例将最终报告要求放在流程全局，使补充资料、条件判断和子流程也被要求包含报告结论：
+            ```yaml
+            asserts:
+              - 最终报告必须解释修复对账结果。
+            ```
+            正例在最终报告 Action 的 asserts 中声明这条语义要求。若只有方案和报告两个步骤需要引用工单证据，则只在这两个步骤引用对应 Statement，不提升为流程全局。
+
+            “本次运行只处理指定工单，所有证据和决策不得混用其他工单”是贯穿条件、分支、循环及子流程的业务边界，可以放在 Procedure.asserts；这是合理全局规则，不应因条目精简而删除。
+
+            若要求“风险解释字段必须将每项风险关联到证据”，将它放在风险解释字段的 Schema.asserts；不要求其他字段或整个流程承担该字段的内容规范。
+        suggests:
+          - 评审每条全局规则时，可分别问“它在整个流程及调用链中持续适用吗”和“移到具体步骤或字段是否会丢失要求”，再判断是否需要下沉；不要只数全局条目。
+  - !statement
+    names: [业务完整性]
+    defines:
+      - 对照业务要求检查流程的触发条件、处理路径和完成条件。
+    asserts:
+      - 撰写和评审时必须逐项核对每条业务要求的触发条件、必要输入、处理路径和完成条件。业务中分别描述的执行结果、验证结果或审批状态不得未经依据合并成一个判断；每个失败或未满足状态都必须能进入要求的处理路径，退出条件必须同时满足全部交付前提。此检查保留完整业务含义，不在多个字段重复声明同一要求。

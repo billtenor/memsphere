@@ -1,0 +1,11 @@
+changes/archive/completed/20261011-procedure-writing-quality/evidence/A-attempt-2/final-answer.md:8: trailing whitespace.
++变更级校验通过：`change-20261012-040522603z-48271dd1`。  
+changes/archive/completed/20261011-procedure-writing-quality/evidence/revision-3/A-failed-attempt-1/final-answer.md:8: trailing whitespace.
++ChangeSet：`change-20261012-052622536z-34901454`  
+changes/archive/completed/20261011-procedure-writing-quality/evidence/revision-3/A-superseded-attempt-1/final-answer.md:8: trailing whitespace.
++ChangeSet：`change-20261012-052410105z-4c626d53`  
+changes/archive/completed/20261011-procedure-writing-quality/evidence/revision-3/B-final-attempt-1/prompt.md:10: new blank line at EOF.
+changes/archive/completed/20261011-procedure-writing-quality/evidence/revision-3/B-final-attempt-1/task.md:8: new blank line at EOF.
+changes/archive/completed/20261011-procedure-writing-quality/evidence/revision-4/B-attempt-1/prompt.md:10: new blank line at EOF.
+changes/archive/completed/20261011-procedure-writing-quality/evidence/revision-4/B-attempt-1/task.md:8: new blank line at EOF.
+evals/procedure-writing-quality/cases/002-seeded-review/task.md:8: new blank line at EOF.
