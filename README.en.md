@@ -445,3 +445,19 @@ CI uses Node 22 LTS to run all automated tests on Linux, macOS and Windows, incl
 ## 9. License
 
 Memsphere is licensed under the Apache License 2.0. See [LICENSE](LICENSE) for details.
+
+
+### Upgrading Memsphere
+
+```bash
+# Update one Project's bundled System Memory and system models/registrations
+memsphere project upgrade my-project --output json
+# Retry an active dedicated upgrade in its original worktree
+memsphere project upgrade my-project --change <change-id> --output json
+# Update the selected Agent Skill (init --force equivalent)
+memsphere skill upgrade --global
+```
+
+There are three upgrade paths: Project runtime resources (`project upgrade`), Agent Skill (`skill upgrade`, with default/global/directory targets), and the CLI itself (npm or source checkout, according to its installation). The complete Agent assistance instructions are maintained in `src/skills/memsphere/SKILL.md`. CLI upgrades supply the resources that subsequent Skill and Project upgrades install; View restart and old-format migration are conditional steps.
+
+Managed System Memory changes are validated and published through a dedicated ChangeSet. Embedded upgrades use a separate branch/worktree based on `master`, create a dedicated System-only ChangeSet, and leave Git commit/push/merge to the authorized Agent/user workflow. Preparation success is `integrationStatus=pending`; make a separate System Memory commit, review and merge into `master` to complete the ChangeSet. Existing user diffs and collaborative ChangeSets are not reused. Non-master integration targets are currently unsupported. `project repair` and `project models initialize` retain their single-purpose behavior. Upgrading models does not migrate frozen Run history.

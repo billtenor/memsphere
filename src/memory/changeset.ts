@@ -134,7 +134,18 @@ export const memoryChangeSetSchema = z.object({
   failure: changeFailureSchema.optional(),
   targets: z.array(changeTargetSchema),
   origin: z.enum(["cli", "view"]).default("cli"),
-  intent: z.enum(["market_import", "app_install"]).optional(),
+  intent: z.enum(["market_import", "app_install", "system_upgrade"]).optional(),
+  system_upgrade: z.object({
+    source_digest: z.string().min(1),
+    instance_key: z.string().min(1),
+    branch: z.string().min(1).optional(),
+    integration_ref: z.literal("refs/heads/master").optional(),
+    targets: z.array(z.object({
+      reference: z.string().min(1), path: z.string().refine(isSafeMemoryPath),
+      operation: z.enum(["create", "update", "delete"]),
+      digest: z.string().optional()
+    }).strict()).min(1)
+  }).strict().optional(),
   app_install: z.object({ appId: z.string(), operationId: z.string(), packageDigest: z.string() }).strict().optional(),
   app_ownership: appOwnershipSchema.optional(),
   created_by: memoryChangeActorSchema.optional(),
@@ -142,6 +153,19 @@ export const memoryChangeSetSchema = z.object({
   comments: z.array(memoryChangeCommentSchema).default([]),
   claim: changeClaimSchema.optional()
 }).strict().superRefine((change, context) => {
+  if ((change.intent === "system_upgrade") !== Boolean(change.system_upgrade)) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["system_upgrade"], message: "system_upgrade intent and metadata must be paired" });
+  }
+  if (change.system_upgrade) {
+    if (change.store_type === "embedded" && (!change.system_upgrade.branch || !change.system_upgrade.integration_ref || !change.source_worktree)) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["system_upgrade"], message: "Embedded system upgrade requires branch, integration ref and source worktree" });
+    }
+    for (const target of change.system_upgrade.targets) {
+      if ((target.operation !== "delete") !== Boolean(target.digest)) {
+        context.addIssue({ code: z.ZodIssueCode.custom, path: ["system_upgrade", "targets"], message: "system upgrade content digest must match operation" });
+      }
+    }
+  }
   if (change.status !== "abandoned" && change.failure) {
     context.addIssue({
       code: z.ZodIssueCode.custom,
@@ -520,6 +544,199 @@ async function removeCachedMemoryChangePreview(entry: CachedMemoryChangePreview)
   await rm(entry.preview.memoryRoot, { recursive: true, force: true });
 }
 
+export type SystemUpgradeMemoryTarget = {
+  reference: string; path: string; operation: "create" | "update" | "delete"; content?: string;
+};
+
+/** Preflight before any model or Memory write. Branch preparation belongs to the Agent. */
+export async function assertSystemUpgradeWorkspace(context: ProjectContext, changeId?: string): Promise<void> {
+  const { primary: project, workspace } = context;
+  if (changeId) {
+    const change = await readChange(project, changeId);
+    assertSystemUpgradeOwner(change, context);
+    if (project.config.store.type === "embedded") await assertSystemUpgradeGitBase(context, change.base_revision, change.system_upgrade!.branch);
+    return;
+  }
+  const active = (await listProjectChanges(project)).find(change => change.status === "active"
+    && change.intent === "system_upgrade" && change.system_upgrade?.instance_key === workspace.instanceKey);
+  if (active) throw new Error(`Retry with project upgrade --change ${active.id}`);
+  if (project.config.store.type !== "embedded") return;
+  const master = await gitOutput(["rev-parse", "--verify", "refs/heads/master"], workspace.path).catch(() => undefined);
+  if (!master) throw new Error("System upgrade requires refs/heads/master; main and other integration branches are not supported");
+  await assertSystemUpgradeGitBase(context, master);
+  const dirty = await gitOutput(["status", "--porcelain", "--", project.config.store.memory_path], workspace.path);
+  if (dirty) throw new Error("Prepare a clean dedicated upgrade branch/worktree; existing Memory differences are protected");
+}
+
+async function assertSystemUpgradeGitBase(context: ProjectContext, base: string, expectedBranch?: string): Promise<string> {
+  if (context.primary.config.store.type === "embedded"
+    && resolve(context.workspace.path) === resolve(context.primary.config.store.repository_path)) {
+    throw new Error("System upgrade requires a separate linked worktree; preserve the original workspace");
+  }
+  const branch = await gitOutput(["symbolic-ref", "--quiet", "HEAD"], context.workspace.path).catch(() => undefined);
+  if (!branch || branch === "refs/heads/master") throw new Error("System upgrade requires a dedicated branch/worktree, not master or detached HEAD");
+  if (expectedBranch && branch !== expectedBranch) throw new Error("System upgrade belongs to another branch");
+  if (!await gitOutput(["rev-parse", "--verify", "refs/heads/master"], context.workspace.path).catch(() => undefined)) {
+    throw new Error("System upgrade integration ref refs/heads/master is missing");
+  }
+  if (await gitOutput(["rev-parse", "HEAD"], context.workspace.path) !== base) throw new Error("System upgrade Git base changed; prepare a fresh upgrade branch or finish integration");
+  return branch;
+}
+
+function assertSystemUpgradeOwner(change: MemoryChangeSet, context: ProjectContext): void {
+  if (change.intent !== "system_upgrade" || !change.system_upgrade) throw new Error("Expected a dedicated system_upgrade ChangeSet");
+  assertDraftOwner(change, context.primary.name, context.workspace.key);
+  if (change.system_upgrade.instance_key !== context.workspace.instanceKey) throw new Error("System upgrade belongs to another worktree");
+}
+
+function systemUpgradeFrozenTargets(targets: SystemUpgradeMemoryTarget[]): NonNullable<MemoryChangeSet["system_upgrade"]>["targets"] {
+  const seen = new Set<string>();
+  return targets.map(target => {
+    assertSafeCreatePath(target.reference, target.path);
+    if (seen.has(target.path)) throw new Error(`Duplicate system upgrade path: ${target.path}`);
+    seen.add(target.path);
+    if (target.operation !== "delete" && target.content === undefined) throw new Error(`Missing target content: ${target.path}`);
+    return { reference: target.reference, path: target.path, operation: target.operation,
+      ...(target.operation === "delete" ? {} : { digest: createHash("sha256").update(target.content!).digest("hex") }) };
+  }).sort((a, b) => a.path.localeCompare(b.path));
+}
+
+export async function createSystemUpgradeMemoryChange(input: {
+  context: ProjectContext; targets: SystemUpgradeMemoryTarget[]; sourceDigest: string;
+}): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
+  const { context, targets } = input;
+  const { primary: project, workspace } = context;
+  return withFileLock(memoryMutationLock(project), async () => {
+    if (!targets.length) throw new Error("Cannot create an empty system_upgrade ChangeSet");
+    const base = project.config.store.type === "managed" ? project.config.store.published_revision
+      : await gitOutput(["rev-parse", "HEAD"], workspace.path);
+    const branch = project.config.store.type === "embedded" ? await assertSystemUpgradeGitBase(context, base) : undefined;
+    const active = (await listProjectChanges(project)).find(change => change.status === "active" && change.intent === "system_upgrade"
+      && change.system_upgrade?.instance_key === workspace.instanceKey);
+    if (active) throw new Error(`Retry with project upgrade --change ${active.id}`);
+    const change = newChange(project, workspace.key, { baseRevision: base });
+    change.intent = "system_upgrade";
+    change.system_upgrade = { source_digest: input.sourceDigest, instance_key: workspace.instanceKey,
+      ...(branch ? { branch, integration_ref: "refs/heads/master" as const } : {}), targets: systemUpgradeFrozenTargets(targets) };
+    if (project.config.store.type === "embedded") change.source_worktree = {
+      instance_key: workspace.instanceKey, root: workspace.path, repository_root: project.config.store.repository_path,
+      memory_path: project.config.store.memory_path
+    };
+    const candidateRoot = project.config.store.type === "managed" ? workspaceCandidateRoot(workspace.path, change.id) : project.memoryRoot;
+    if (project.config.store.type === "managed") await mkdir(candidateRoot, { recursive: true });
+    for (const target of targets) {
+      const baseDigest = project.config.store.type === "embedded"
+        ? await gitOutput(["rev-parse", `${base}:${embeddedRepositoryPath(project.config.store.memory_path, target.path)}`], workspace.path).catch(() => undefined)
+        : await gitBlobDigest(project.memoryRoot, target.path).catch(() => undefined);
+      if ((target.operation === "create") !== !baseDigest) throw new Error(`System upgrade operation does not match baseline: ${target.path}`);
+      change.targets.push({ reference: target.reference, path: target.path, operation: target.operation,
+        added_revision: base, ...(baseDigest ? { base_digest: baseDigest } : {}) });
+      if (project.config.store.type === "managed" && target.operation !== "delete") {
+        await mkdir(dirname(join(candidateRoot, target.path)), { recursive: true });
+        await writeFile(join(candidateRoot, target.path), target.content!, "utf8");
+      }
+    }
+    change.targets.sort((a, b) => a.path.localeCompare(b.path));
+    try {
+      await writeChange(project, change);
+    } catch (error) {
+      // The ID has not been returned or shared. Remove a partially persisted new
+      // record so future discovery cannot be blocked by an incomplete directory.
+      try {
+        await rm(dirname(changePath(project, change.id)), { recursive: true, force: true });
+        if (project.config.store.type === "managed") await rm(dirname(candidateRoot), { recursive: true, force: true });
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `System upgrade record creation failed; cleanup required for ${change.id}`);
+      }
+      throw error;
+    }
+    return { change, candidateRoot };
+  });
+}
+
+export async function validateSystemUpgradeRetry(input: {
+  context: ProjectContext; changeId: string; targets: SystemUpgradeMemoryTarget[]; sourceDigest: string;
+}): Promise<MemoryChangeSet> {
+  return withFileLock(memoryMutationLock(input.context.primary), async () => {
+    const change = await readChange(input.context.primary, input.changeId);
+    assertSystemUpgradeOwner(change, input.context);
+    if (change.system_upgrade!.source_digest !== input.sourceDigest
+      || JSON.stringify(change.system_upgrade!.targets) !== JSON.stringify(systemUpgradeFrozenTargets(input.targets))) {
+      throw new Error("System upgrade source or authorized target range changed; start a new upgrade");
+    }
+    const validation = await validateSystemUpgradeLocked(input.context, change);
+    if (validation.issues.length) throw new Error("System upgrade validation failed");
+    return readChange(input.context.primary, change.id);
+  });
+}
+
+async function validateSystemUpgradeLocked(context: ProjectContext, change: MemoryChangeSet): Promise<MemoryChangeValidationResult> {
+  assertSystemUpgradeOwner(change, context);
+  const project = context.primary;
+  if (project.config.store.type === "embedded") await assertSystemUpgradeGitBase(context, change.base_revision, change.system_upgrade!.branch);
+  else {
+    await assertManagedHealthy(project);
+    if (project.config.store.published_revision !== change.base_revision) throw new Error("System upgrade baseline changed");
+  }
+  const candidate = project.config.store.type === "managed" ? workspaceCandidateRoot(context.workspace.path, change.id) : project.memoryRoot;
+  const frozen = change.system_upgrade!.targets;
+  await guardAppMemoryTargets(project, change.targets);
+  if (JSON.stringify(change.targets.map(t => ({ reference: t.reference, path: t.path, operation: t.operation })))
+    !== JSON.stringify(frozen.map(t => ({ reference: t.reference, path: t.path, operation: t.operation })))) {
+    throw new Error("System upgrade target identity or operation changed");
+  }
+  for (const target of frozen) {
+    const file = join(candidate, target.path);
+    if (target.operation === "delete") {
+      if (await exists(file)) throw new Error(`System upgrade deletion was reverted: ${target.path}`);
+    } else {
+      await assertRegularFileInside(candidate, target.path);
+      if (createHash("sha256").update(await readFile(file)).digest("hex") !== target.digest) {
+        throw new Error(`System upgrade target content does not match the frozen version: ${target.path}`);
+      }
+      const logical = parseLogicalMemoryReference(target.reference);
+      if (!logical) throw new Error(`Invalid system upgrade identity: ${target.reference}`);
+      const parsed = await readMemoryFile(logical.kind, file);
+      if (parsed.entity.names[0] !== logical.name) throw new Error(`System upgrade target identity changed: ${target.path}`);
+    }
+  }
+  if (project.config.store.type === "embedded") {
+    const memoryPath = project.config.store.memory_path;
+    const allowedPaths = new Set(frozen.map(target => embeddedRepositoryPath(memoryPath, target.path)));
+    const changedPaths = (await gitOutput(["diff", "--name-only", "-z", change.base_revision, "--", project.config.store.memory_path], context.workspace.path)).split("\0").filter(Boolean);
+    const untrackedPaths = (await gitOutput(["ls-files", "--others", "--exclude-standard", "-z", "--", project.config.store.memory_path], context.workspace.path)).split("\0").filter(Boolean);
+    if ([...changedPaths, ...untrackedPaths].some(path => !allowedPaths.has(path))) {
+      throw new Error("System upgrade Memory diff contains unauthorized targets");
+    }
+    const captured = await captureEmbeddedTargets(context.workspace.path, project.memoryRoot, project.config.store.memory_path, change.base_revision);
+    try {
+      if (JSON.stringify(captured.targets.map(t => ({ path: t.path, operation: t.operation }))) !== JSON.stringify(frozen.map(t => ({ path: t.path, operation: t.operation })))) {
+        throw new Error("System upgrade Memory diff contains missing or unauthorized targets");
+      }
+    } finally { await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true }); }
+  }
+  const snapshot = await snapshotSparseCandidate(candidate, change.targets);
+  try {
+    const issues = project.config.store.type === "embedded" ? await validateEmbeddedEffectiveMemory(change, snapshot)
+      : await validateEffectiveMemoryChange(project, change, snapshot, candidate);
+    const checkpoint = await persistValidatedCheckpoint(project, change, snapshot, change.base_revision, issues, project.memoryRoot, candidate);
+    return validationResult(change, project.memoryRoot, candidate, checkpoint, change.base_revision, issues);
+  } finally { await rm(resolve(snapshot, ".."), { recursive: true, force: true }); }
+}
+
+/** Managed publication is available only to the internal upgrade orchestration. */
+export async function publishSystemUpgradeMemoryChange(changeId: string, options: { context: ProjectContext; message?: string }): Promise<MemoryChangeSet> {
+  const context = options.context;
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    const change = await readChange(context.primary, changeId);
+    assertSystemUpgradeOwner(change, context);
+    assertManaged(context.primary);
+    const validation = await validateSystemUpgradeLocked(context, change);
+    if (validation.issues.length) throw new Error("System upgrade validation failed");
+    return publishLocked(context.primary, await readChange(context.primary, changeId), workspaceCandidateRoot(context.workspace.path, changeId), options.message);
+  });
+}
+
 export async function editMemories(input: {
   references: string[];
   changeId?: string;
@@ -539,6 +756,15 @@ export async function editMemories(input: {
     }
   }
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  return withFileLock(memoryMutationLock(context.primary), () => editMemoriesLocked(input, context));
+}
+
+/** Internal helper for callers that already hold this project's mutation lock. */
+async function editMemoriesLocked(
+  input: Parameters<typeof editMemories>[0],
+  context: ProjectContext
+): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
+  if (input.changeId) await readOrdinaryChange(context.primary, input.changeId);
   assertManaged(context.primary);
   const workspace = await resolveWorkspaceIdentity();
   const targets: Array<z.infer<typeof changeTargetSchema>> = [];
@@ -560,7 +786,7 @@ export async function editMemories(input: {
     targetReferencesByPath.set(target.path, target.reference);
   }
   const change = input.changeId
-    ? await readChange(context.primary, input.changeId)
+    ? await readOrdinaryChange(context.primary, input.changeId)
     : await createChange(context.primary, workspace.key);
   assertDraftOwner(change, context.primary.name, workspace.key);
   const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
@@ -724,64 +950,67 @@ export async function editMemoriesByIdentity(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   if (input.targets.length === 0) throw new Error("provide at least one Memory identity target");
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
-  const workspace = await resolveWorkspaceIdentity();
-  const revision = context.primary.config.store.published_revision;
-  const targets: Array<z.infer<typeof changeTargetSchema>> = [];
-  const seen = new Set<string>();
-  for (const target of input.targets) {
-    assertSafeCreatePath(target.reference, target.path);
-    if (seen.has(target.path)) throw new Error(`duplicate Memory identity path: ${target.path}`);
-    seen.add(target.path);
-    const source = join(context.primary.memoryRoot, target.path);
-    if (target.operation === "create") {
-      if (await exists(source)) throw new Error(`explicit create path already exists: ${target.path}`);
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    if (input.changeId) await readOrdinaryChange(context.primary, input.changeId);
+    assertManaged(context.primary);
+    const workspace = await resolveWorkspaceIdentity();
+    const revision = context.primary.config.store.published_revision;
+    const targets: Array<z.infer<typeof changeTargetSchema>> = [];
+    const seen = new Set<string>();
+    for (const target of input.targets) {
+      assertSafeCreatePath(target.reference, target.path);
+      if (seen.has(target.path)) throw new Error(`duplicate Memory identity path: ${target.path}`);
+      seen.add(target.path);
+      const source = join(context.primary.memoryRoot, target.path);
+      if (target.operation === "create") {
+        if (await exists(source)) throw new Error(`explicit create path already exists: ${target.path}`);
+        targets.push({
+          operation: "create",
+          reference: target.reference,
+          path: target.path,
+          added_revision: revision
+        });
+        continue;
+      }
+      if (!target.baseDigest) throw new Error(`update identity requires a base digest: ${target.reference}`);
+      if (!await exists(source)) throw new Error(`Memory identity path is missing: ${target.path}`);
+      const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
+      if (currentDigest !== target.baseDigest) {
+        throw new Error(`Memory identity changed before update: ${target.reference}`);
+      }
       targets.push({
-        operation: "create",
+        operation: "update",
         reference: target.reference,
         path: target.path,
+        base_digest: target.baseDigest,
         added_revision: revision
       });
-      continue;
     }
-    if (!target.baseDigest) throw new Error(`update identity requires a base digest: ${target.reference}`);
-    if (!await exists(source)) throw new Error(`Memory identity path is missing: ${target.path}`);
-    const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
-    if (currentDigest !== target.baseDigest) {
-      throw new Error(`Memory identity changed before update: ${target.reference}`);
-    }
-    targets.push({
-      operation: "update",
-      reference: target.reference,
-      path: target.path,
-      base_digest: target.baseDigest,
-      added_revision: revision
-    });
-  }
-  const change = input.changeId
-    ? await readChange(context.primary, input.changeId)
-    : await createChange(context.primary, workspace.key);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
-  input.onChangeCreated?.({ change, candidateRoot });
-  await mkdir(candidateRoot, { recursive: true });
-  for (const target of targets) {
-    const existingTarget = change.targets.find((current) => current.path === target.path);
-    if (existingTarget) {
-      if (existingTarget.reference !== target.reference) {
-        throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+    const change = input.changeId
+      ? await readOrdinaryChange(context.primary, input.changeId)
+      : await createChange(context.primary, workspace.key);
+    assertDraftOwner(change, context.primary.name, workspace.key);
+    const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+    input.onChangeCreated?.({ change, candidateRoot });
+    await mkdir(candidateRoot, { recursive: true });
+    for (const target of targets) {
+      const existingTarget = change.targets.find((current) => current.path === target.path);
+      if (existingTarget) {
+        if (existingTarget.reference !== target.reference) {
+          throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+        }
+        continue;
       }
-      continue;
+      change.targets.push(target);
+      const candidate = join(candidateRoot, target.path);
+      await mkdir(dirname(candidate), { recursive: true });
+      if (target.operation === "update") await cp(join(context.primary.memoryRoot, target.path), candidate);
+      else await writeFile(candidate, newMemoryTemplate(target.reference), "utf8");
     }
-    change.targets.push(target);
-    const candidate = join(candidateRoot, target.path);
-    await mkdir(dirname(candidate), { recursive: true });
-    if (target.operation === "update") await cp(join(context.primary.memoryRoot, target.path), candidate);
-    else await writeFile(candidate, newMemoryTemplate(target.reference), "utf8");
-  }
-  change.updated_at = new Date().toISOString();
-  await writeChange(context.primary, change);
-  return { change, candidateRoot };
+    change.updated_at = new Date().toISOString();
+    await writeChange(context.primary, change);
+    return { change, candidateRoot };
+  });
 }
 
 /** Internal-only deletion entrypoint for a caller that already verified historical path and canonical identity. */
@@ -792,55 +1021,58 @@ export async function deleteMemoriesByIdentity(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   if (input.targets.length === 0) throw new Error("provide at least one Memory identity target");
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
-  const workspace = await resolveWorkspaceIdentity();
-  const revision = context.primary.config.store.published_revision;
-  const targets: Array<z.infer<typeof changeTargetSchema>> = [];
-  const seen = new Set<string>();
-  for (const target of input.targets) {
-    assertSafeMemoryPath(target.path);
-    if (!target.reference.trim() || target.reference.includes("\0")) {
-      throw new Error(`invalid historical Memory identity: ${target.reference}`);
-    }
-    if (seen.has(target.path)) throw new Error(`duplicate historical Memory path: ${target.path}`);
-    seen.add(target.path);
-    const source = join(context.primary.memoryRoot, target.path);
-    if (!await exists(source)) throw new Error(`historical Memory path is missing: ${target.path}`);
-    const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
-    if (currentDigest !== target.baseDigest) {
-      throw new Error(`historical Memory identity changed before deletion: ${target.reference}`);
-    }
-    targets.push({
-      operation: "delete",
-      reference: target.reference,
-      path: target.path,
-      base_digest: target.baseDigest,
-      added_revision: revision
-    });
-  }
-  const change = input.changeId
-    ? await readChange(context.primary, input.changeId)
-    : await createChange(context.primary, workspace.key);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
-  input.onChangeCreated?.({ change, candidateRoot });
-  await mkdir(candidateRoot, { recursive: true });
-  for (const target of targets) {
-    const existingTarget = change.targets.find((current) => current.path === target.path);
-    if (existingTarget) {
-      if (existingTarget.reference !== target.reference) {
-        throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    if (input.changeId) await readOrdinaryChange(context.primary, input.changeId);
+    assertManaged(context.primary);
+    const workspace = await resolveWorkspaceIdentity();
+    const revision = context.primary.config.store.published_revision;
+    const targets: Array<z.infer<typeof changeTargetSchema>> = [];
+    const seen = new Set<string>();
+    for (const target of input.targets) {
+      assertSafeMemoryPath(target.path);
+      if (!target.reference.trim() || target.reference.includes("\0")) {
+        throw new Error(`invalid historical Memory identity: ${target.reference}`);
       }
-      continue;
+      if (seen.has(target.path)) throw new Error(`duplicate historical Memory path: ${target.path}`);
+      seen.add(target.path);
+      const source = join(context.primary.memoryRoot, target.path);
+      if (!await exists(source)) throw new Error(`historical Memory path is missing: ${target.path}`);
+      const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
+      if (currentDigest !== target.baseDigest) {
+        throw new Error(`historical Memory identity changed before deletion: ${target.reference}`);
+      }
+      targets.push({
+        operation: "delete",
+        reference: target.reference,
+        path: target.path,
+        base_digest: target.baseDigest,
+        added_revision: revision
+      });
     }
-    change.targets.push(target);
-    const candidate = join(candidateRoot, target.path);
-    await mkdir(dirname(candidate), { recursive: true });
-    await cp(join(context.primary.memoryRoot, target.path), candidate);
-  }
-  change.updated_at = new Date().toISOString();
-  await writeChange(context.primary, change);
-  return { change, candidateRoot };
+    const change = input.changeId
+      ? await readOrdinaryChange(context.primary, input.changeId)
+      : await createChange(context.primary, workspace.key);
+    assertDraftOwner(change, context.primary.name, workspace.key);
+    const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+    input.onChangeCreated?.({ change, candidateRoot });
+    await mkdir(candidateRoot, { recursive: true });
+    for (const target of targets) {
+      const existingTarget = change.targets.find((current) => current.path === target.path);
+      if (existingTarget) {
+        if (existingTarget.reference !== target.reference) {
+          throw new Error(`Memory path is already targeted by ChangeSet: ${target.path}`);
+        }
+        continue;
+      }
+      change.targets.push(target);
+      const candidate = join(candidateRoot, target.path);
+      await mkdir(dirname(candidate), { recursive: true });
+      await cp(join(context.primary.memoryRoot, target.path), candidate);
+    }
+    change.updated_at = new Date().toISOString();
+    await writeChange(context.primary, change);
+    return { change, candidateRoot };
+  });
 }
 
 export async function editEmbeddedMemories(references: string[]): Promise<EmbeddedMemoryEditResult> {
@@ -885,70 +1117,79 @@ export async function renameMemory(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   assertCanonicalMemoryName(input.newName);
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
-  const workspace = await resolveWorkspaceIdentity();
-  const change = input.changeId ? await readChange(context.primary, input.changeId) : await createChange(context.primary, workspace.key);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  const target = await resolveTarget(context.primary, input.reference, "rename");
-  if (change.targets.some((current) => current.path === target.path)) throw new Error(`Memory is already targeted by ChangeSet: ${input.reference}`);
-  change.targets.push(target);
-  const file = (await readAllMemoryFiles(context.primary.memoryRoot)).find((item) => (
-    relative(context.primary.memoryRoot, item.path).replaceAll("\\", "/") === target.path
-  ));
-  if (!file) throw new Error(`Memory was not found: ${input.reference}`);
-  const newName = input.newName;
-  file.entity.names = [...new Set([newName, ...file.entity.names])];
-  const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
-  const candidate = join(candidateRoot, target.path);
-  await mkdir(dirname(candidate), { recursive: true });
-  await writeFile(candidate, serializeMemoryYaml(file.entity), "utf8");
-  change.updated_at = new Date().toISOString();
-  await writeChange(context.primary, change);
-  return { change, candidateRoot };
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    assertManaged(context.primary);
+    const workspace = await resolveWorkspaceIdentity();
+    const change = input.changeId ? await readOrdinaryChange(context.primary, input.changeId) : await createChange(context.primary, workspace.key);
+    assertDraftOwner(change, context.primary.name, workspace.key);
+    const target = await resolveTarget(context.primary, input.reference, "rename");
+    if (change.targets.some((current) => current.path === target.path)) throw new Error(`Memory is already targeted by ChangeSet: ${input.reference}`);
+    change.targets.push(target);
+    const file = (await readAllMemoryFiles(context.primary.memoryRoot)).find((item) => (
+      relative(context.primary.memoryRoot, item.path).replaceAll("\\", "/") === target.path
+    ));
+    if (!file) throw new Error(`Memory was not found: ${input.reference}`);
+    const newName = input.newName;
+    file.entity.names = [...new Set([newName, ...file.entity.names])];
+    const candidateRoot = workspaceCandidateRoot(workspace.path, change.id);
+    const candidate = join(candidateRoot, target.path);
+    await mkdir(dirname(candidate), { recursive: true });
+    await writeFile(candidate, serializeMemoryYaml(file.entity), "utf8");
+    change.updated_at = new Date().toISOString();
+    await writeChange(context.primary, change);
+    return { change, candidateRoot };
+  });
 }
 
 export async function checkpointWorkspaceChanges(): Promise<number> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  if (context.primary.config.store.type !== "managed") return 0;
-  const workspace = await resolveWorkspaceIdentity();
-  const workspaceChanges = resolve(workspace.path, ".memsphere-work", "changes");
-  let entries;
-  try {
-    entries = await readdir(workspaceChanges, { withFileTypes: true });
-  } catch (error) {
-    if (isCode(error, "ENOENT")) return 0;
-    throw error;
-  }
-  let saved = 0;
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const change = await readChange(context.primary, entry.name).catch(() => undefined);
-    if (!change || change.status !== "active" || change.workspace_key !== workspace.key) continue;
-    const source = join(workspaceChanges, entry.name, "memory");
-    if (!await exists(source)) continue;
-    const recovery = recoveryRoot(context.primary, entry.name);
-    const temporary = `${recovery}.saving-${process.pid}`;
-    await rm(temporary, { recursive: true, force: true });
-    await cp(source, temporary, { recursive: true });
-    await rm(recovery, { recursive: true, force: true });
-    await rename(temporary, recovery);
-    saved += 1;
-  }
-  return saved;
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    const workspace = await resolveWorkspaceIdentity();
+    const upgrade = (await listProjectChanges(context.primary)).find(change => change.intent === "system_upgrade" && change.status === "active" && change.system_upgrade?.instance_key === workspace.instanceKey);
+    if (upgrade) assertOrdinaryChange(upgrade);
+    if (context.primary.config.store.type !== "managed") return 0;
+    const workspaceChanges = resolve(workspace.path, ".memsphere-work", "changes");
+    let entries;
+    try {
+      entries = await readdir(workspaceChanges, { withFileTypes: true });
+    } catch (error) {
+      if (isCode(error, "ENOENT")) return 0;
+      throw error;
+    }
+    let saved = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const change = await readChange(context.primary, entry.name).catch(() => undefined);
+      if (!change || change.status !== "active" || change.workspace_key !== workspace.key) continue;
+      assertOrdinaryChange(change);
+      const source = join(workspaceChanges, entry.name, "memory");
+      if (!await exists(source)) continue;
+      const recovery = recoveryRoot(context.primary, entry.name);
+      const temporary = `${recovery}.saving-${process.pid}`;
+      await rm(temporary, { recursive: true, force: true });
+      await cp(source, temporary, { recursive: true });
+      await rm(recovery, { recursive: true, force: true });
+      await rename(temporary, recovery);
+      saved += 1;
+    }
+    return saved;
+  });
 }
 
 export async function resumeMemoryChange(changeId: string): Promise<string> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
-  const workspace = await resolveWorkspaceIdentity();
-  const change = await readChange(context.primary, changeId);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  const recovery = recoveryRoot(context.primary, changeId);
-  if (!await exists(recovery)) throw new Error(`ChangeSet ${changeId} has no Validate recovery copy`);
-  const candidate = workspaceCandidateRoot(workspace.path, changeId);
-  await rm(candidate, { recursive: true, force: true });
-  await cp(recovery, candidate, { recursive: true });
-  return candidate;
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    assertManaged(context.primary);
+    const workspace = await resolveWorkspaceIdentity();
+    const change = await readOrdinaryChange(context.primary, changeId);
+    assertDraftOwner(change, context.primary.name, workspace.key);
+    const recovery = recoveryRoot(context.primary, changeId);
+    if (!await exists(recovery)) throw new Error(`ChangeSet ${changeId} has no Validate recovery copy`);
+    const candidate = workspaceCandidateRoot(workspace.path, changeId);
+    await rm(candidate, { recursive: true, force: true });
+    await cp(recovery, candidate, { recursive: true });
+    return candidate;
+  });
 }
 
 export async function publishMemoryChange(
@@ -960,7 +1201,7 @@ export async function publishMemoryChange(
   const workspace = initialContext.workspace;
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
     const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
-    const change = await readReconciledChange(context.primary, changeId);
+    const change = await readOrdinaryChange(context.primary, changeId);
     if (context.primary.config.store.type === "embedded") {
       if ((change.intent !== "market_import" && change.intent !== "app_install")) {
         throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
@@ -987,23 +1228,25 @@ export async function failMemoryChange(
   error: unknown
 ): Promise<MemoryChangeSet> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  assertManaged(context.primary);
-  const workspace = await resolveWorkspaceIdentity();
-  const change = await readChange(context.primary, changeId);
-  assertDraftOwner(change, context.primary.name, workspace.key);
-  const failed = memoryChangeSetSchema.parse({
-    ...change,
-    status: "abandoned",
-    claim: undefined,
-    failure: {
-      stage,
-      failed_at: new Date().toISOString(),
-      summary: safeFailureSummary(error)
-    },
-    updated_at: new Date().toISOString()
+  return withFileLock(memoryMutationLock(context.primary), async () => {
+    assertManaged(context.primary);
+    const workspace = await resolveWorkspaceIdentity();
+    const change = await readOrdinaryChange(context.primary, changeId);
+    assertDraftOwner(change, context.primary.name, workspace.key);
+    const failed = memoryChangeSetSchema.parse({
+      ...change,
+      status: "abandoned",
+      claim: undefined,
+      failure: {
+        stage,
+        failed_at: new Date().toISOString(),
+        summary: safeFailureSummary(error)
+      },
+      updated_at: new Date().toISOString()
+    });
+    await writeChange(context.primary, failed);
+    return failed;
   });
-  await writeChange(context.primary, failed);
-  return failed;
 }
 
 export async function validateMemoryChange(
@@ -1018,6 +1261,10 @@ export async function validateMemoryChange(
       await assertManagedHealthy(context.primary);
       const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
       const change = await readReconciledChange(context.primary, resolvedId);
+      if (change.intent === "system_upgrade") {
+        if (!changeId) throw new Error(`Use memsphere memory change validate ${change.id} for this system_upgrade candidate`);
+        return validateSystemUpgradeLocked(context, change);
+      }
       assertDraftOwner(change, context.primary.name, workspace.key);
       if (change.store_type !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
       const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
@@ -1064,7 +1311,8 @@ export async function validateMemoryChange(
     }
 
     if (changeId) {
-      const marketChange = await readReconciledChange(context.primary, changeId);
+      const marketChange = await readChange(context.primary, changeId);
+      if (marketChange.intent === "system_upgrade") return validateSystemUpgradeLocked(context, marketChange);
       if ((marketChange.intent === "market_import" || marketChange.intent === "app_install")) {
         if (marketChange.status !== "active") throw new Error(`ChangeSet ${marketChange.id} is already ${marketChange.status}`);
         if (marketChange.store_type !== "embedded") throw new Error(`ChangeSet ${marketChange.id} is not an Embedded ChangeSet`);
@@ -1400,7 +1648,11 @@ async function captureEmbeddedWorkingChange(
       await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
       const projectChanges = listed.changes;
       const completedChangeIds: string[] = [];
+      const upgrade = projectChanges.find((candidate) => candidate.intent === "system_upgrade" && candidate.status === "active" && candidate.system_upgrade?.instance_key === workspace.instanceKey);
+      if (upgrade) throw new Error(`Use memsphere memory change validate ${upgrade.id} for this system_upgrade worktree`);
       const matches = projectChanges.filter((candidate) => (
+        candidate.intent !== "system_upgrade"
+        &&
         candidate.status === "active"
         && candidate.store_type === "embedded"
         && candidate.workspace_key === workspace.key
@@ -1793,7 +2045,7 @@ export async function addMemoryChangeScope(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readReconciledChange(project, input.changeId);
+    const change = await readOrdinaryChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     if (change.claim) {
       throw new Error("cannot add Memory while the ChangeSet is claimed; finish the claim, add Memory, then claim again");
@@ -1887,7 +2139,7 @@ export async function createMemoryChangeComment(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readReconciledChange(project, input.changeId);
+    const change = await readOrdinaryChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const body = input.body.trim();
@@ -1936,7 +2188,7 @@ export async function updateMemoryChangeComment(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readReconciledChange(project, input.changeId);
+    const change = await readOrdinaryChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const comment = change.comments.find((item) => item.id === input.commentId);
@@ -1974,7 +2226,7 @@ export async function deleteMemoryChangeComment(input: {
       project: input.project,
       memoryScope: "canonical"
     })).primary;
-    const change = await readReconciledChange(project, input.changeId);
+    const change = await readOrdinaryChange(project, input.changeId);
     assertMutableChange(change, input.expectedUpdatedAt);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const index = change.comments.findIndex((item) => item.id === input.commentId);
@@ -1997,7 +2249,7 @@ export async function claimMemoryChange(input: {
   const workspace = await resolveWorkspaceIdentity();
   return withFileLock(memoryMutationLock(initial.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const change = await readReconciledChange(context.primary, input.changeId);
+    const change = await readOrdinaryChange(context.primary, input.changeId);
     if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
     if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
     if (change.claim && change.claim.instance_key !== workspace.instanceKey && !input.force) {
@@ -2056,7 +2308,7 @@ export async function finishMemoryChange(input: {
   const workspace = await resolveWorkspaceIdentity();
   return withFileLock(memoryMutationLock(initial.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const change = await readReconciledChange(context.primary, input.changeId);
+    const change = await readOrdinaryChange(context.primary, input.changeId);
     assertClaimOwner(change, context.primary.name, workspace);
     const ids = new Set(input.commentIds ?? []);
     if (ids.size > 0 && !input.reason) throw new Error("--reason is required when completing Comments");
@@ -2090,7 +2342,7 @@ export async function completeMemoryChange(changeId: string): Promise<MemoryChan
   const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   return withFileLock(memoryMutationLock(initial.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const change = await readReconciledChange(context.primary, changeId);
+    const change = await readOrdinaryChange(context.primary, changeId);
     if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
     if (change.targets.length > 0) throw new Error("only a ChangeSet without actual Memory differences can be completed explicitly");
     if (change.comments.some((comment) => comment.status !== "completed")) {
@@ -2368,7 +2620,7 @@ export async function syncMemory(
   return withFileLock(memoryMutationLock(initialContext.primary), async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
-    return syncMemoryLocked(context.primary, source);
+    return syncMemoryLocked(context.primary, source, context);
   }, { onWait: options.onLockWait });
 }
 
@@ -2390,7 +2642,8 @@ async function prepareSync(
 
 async function syncMemoryLocked(
   project: ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string } } },
-  source: PreparedSync
+  source: PreparedSync,
+  context: ProjectContext
 ): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
   await assertManagedHealthy(project);
   if (project.config.store.upstream !== source.upstream) throw new Error("Managed Project upstream changed during sync; retry the command");
@@ -2425,7 +2678,7 @@ async function syncMemoryLocked(
       if (!published) createPaths.set(reference, path);
       return reference;
     });
-    const result = await editMemories({ references, createPaths });
+    const result = await editMemoriesLocked({ references, createPaths }, context);
     for (const candidate of candidates) {
       const target = result.change.targets.find((item) => item.path === candidate.path);
       if (!target) throw new Error(`Sync ChangeSet target is missing: ${candidate.path}`);
@@ -2909,6 +3162,16 @@ async function readChange(project: ResolvedProject, id: string): Promise<MemoryC
   return change;
 }
 
+function assertOrdinaryChange(change: MemoryChangeSet): void {
+  if (change.intent === "system_upgrade") throw new Error(`ChangeSet ${change.id} is a dedicated system_upgrade; use project upgrade --change or explicit validate, abandon, archive`);
+}
+
+async function readOrdinaryChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
+  const change = await readChange(project, id);
+  assertOrdinaryChange(change);
+  return readReconciledChange(project, id);
+}
+
 async function readReconciledChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
   const change = await readChange(project, id);
   const reconciled = await reconcileEmbeddedChange(project, change);
@@ -2981,7 +3244,7 @@ async function reconcileEmbeddedChange(
   const masterRevision = await gitOutput(["rev-parse", "master"], source.repository_root).catch(() => undefined);
   const completed = Boolean(masterRevision && (
     await revisionMatchesCheckpoint(project, change, masterRevision)
-    || candidateRevision && await isAncestor(candidateRevision, masterRevision, source.repository_root)
+    || change.intent !== "system_upgrade" && candidateRevision && await isAncestor(candidateRevision, masterRevision, source.repository_root)
   ));
   const candidateChanged = candidateRevision !== change.candidate_revision;
   const statusChanged = completed;

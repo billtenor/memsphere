@@ -447,3 +447,19 @@ CI 统一使用 Node 22 LTS，在 Linux、macOS 和 Windows 上运行全部自�
 ## 9. 许可证
 
 Memsphere 使用 Apache License 2.0，详见 [LICENSE](LICENSE)。
+
+
+### Memsphere 升级
+
+```bash
+# Update one Project's bundled System Memory and system models/registrations
+memsphere project upgrade my-project --output json
+# Retry an active dedicated upgrade in its original worktree
+memsphere project upgrade my-project --change <change-id> --output json
+# Update the selected Agent Skill (init --force equivalent)
+memsphere skill upgrade --global
+```
+
+升级分为项目运行资源（project upgrade）、Agent Skill（skill upgrade，支持默认/global/directory 位置）和 CLI 本身（按实际 npm 或源码安装来源更新）。完整 Agent 协助指引集中在 `src/skills/memsphere/SKILL.md`；整体升级先更新 CLI 资源来源，再更新 Skill 和目标项目，按需要重启 View 或处理明确确认的旧格式迁移。
+
+Managed 系统记忆升级使用专用 ChangeSet 校验并发布。Embedded 在基于 master 的独立升级分支/worktree 运行，生成仅含 System 升级目标的专用 ChangeSet；命令不 commit/push/merge。integrationStatus=pending 表示升级差异已准备，Agent 按授权形成系统记忆单独 commit，审阅并合入 master 后 ChangeSet 才完成。原用户差异和协作记录不复用，其他集成分支本轮暂不支持。project repair 和 project models initialize 保留原单项用途；模型升级不迁移冻结 Run 历史。

@@ -37,6 +37,11 @@ export async function skillInitCommand(options: SkillOptions): Promise<void> {
   }
 }
 
+/** Update the selected Skill installation using the same contract as init --force. */
+export async function skillUpgradeCommand(options: Omit<SkillOptions, "force">): Promise<void> {
+  await skillInitCommand({ ...options, force: true });
+}
+
 async function readSkillMarkdown(skillName: string): Promise<string> {
   const candidates = [
     join(moduleDir, "../skills", skillName, "SKILL.md"),

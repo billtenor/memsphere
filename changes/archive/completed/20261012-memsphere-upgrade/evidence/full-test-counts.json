@@ -1,0 +1,11 @@
+{
+  "source": "full-tests.tap",
+  "method": "Sum each per-file TAP summary line matching ^# <counter> <integer>$",
+  "counts": {
+    "tests": 1204,
+    "pass": 1203,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 1
+  }
+}

@@ -1,0 +1,22 @@
+TAP version 13
+# Subtest: Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly
+ok 1 - Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly
+  ---
+  duration_ms: 5289.538073
+  type: 'test'
+  ...
+# Subtest: Embedded repair API restores updated and created targets when the afterApply callback fails
+ok 2 - Embedded repair API restores updated and created targets when the afterApply callback fails
+  ---
+  duration_ms: 1919.232648
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 7911.681596

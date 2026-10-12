@@ -3,7 +3,7 @@ import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { skillInitCommand } from "../src/commands/skill.js";
+import { skillInitCommand, skillUpgradeCommand } from "../src/commands/skill.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
 import { bundledSystemMemoryRoot } from "../src/reserved/store.js";
 
@@ -84,4 +84,24 @@ test("unified skill and reserved memories keep the same bootstrap contract", asy
     assert.doesNotMatch(skill, new RegExp(obsolete));
     assert.doesNotMatch(reserved, new RegExp(obsolete));
   }
+});
+
+
+test("skill upgrade replaces only the selected Skill and matches init --force", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-skill-upgrade-"));
+  try {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(join(dir, "other"));
+    await writeFile(join(dir, "other/SKILL.md"), "keep");
+    await skillInitCommand({ directory: dir });
+    const expected = await readFile(join(dir, "memsphere/SKILL.md"));
+    await writeFile(join(dir, "memsphere/SKILL.md"), "old");
+    await skillUpgradeCommand({ directory: dir });
+    assert.deepEqual(await readFile(join(dir, "memsphere/SKILL.md")), expected);
+    assert.equal(await readFile(join(dir, "other/SKILL.md"), "utf8"), "keep");
+    await assert.rejects(skillUpgradeCommand({ directory: dir, global: true }), /cannot be used together/);
+    const bad = join(dir, "file");
+    await writeFile(bad, "not a directory");
+    await assert.rejects(skillUpgradeCommand({ directory: bad }));
+  } finally { await rm(dir, { recursive: true, force: true }); }
 });

@@ -1,0 +1,1025 @@
+{
+  "platform": "linux",
+  "suite": "all",
+  "title": "All tests",
+  "seconds": 338.180422448,
+  "planned": [
+    "models-builtin-view-browser.test.ts",
+    "artifact-review-browser.test.ts",
+    "data-command.test.ts",
+    "memory-cli.test.ts",
+    "view-responsive.test.ts",
+    "app-install.test.ts",
+    "list-pagination-cli.test.ts",
+    "project-command.test.ts",
+    "model-command.test.ts",
+    "cli-output-format.test.ts",
+    "embedded-changeset.test.ts",
+    "agent-review.test.ts",
+    "view-package-browser.test.ts",
+    "market-changeset.test.ts",
+    "view-settings-browser.test.ts",
+    "models-view-slots-browser.test.ts",
+    "memory-changeset.test.ts",
+    "model-registration-browser.test.ts",
+    "view-host-composition.test.ts",
+    "project-models.test.ts",
+    "model-market-package.test.ts",
+    "builtin-memory-view.test.ts",
+    "data-filesystem-process.test.ts",
+    "view-host.test.ts",
+    "business-data-service.test.ts",
+    "view-project-switch.test.ts",
+    "default-content-style.test.ts",
+    "market-view.test.ts",
+    "memory-changeset-collaboration.test.ts",
+    "model-operation.test.ts",
+    "model-service.test.ts",
+    "artifact-review-view.test.ts",
+    "run-changeset.test.ts",
+    "view-settings.test.ts",
+    "system-model-creation.test.ts",
+    "run-start-cli.test.ts",
+    "model-market.test.ts",
+    "runner-delegated-review-cli.test.ts",
+    "data-interfaces.test.ts",
+    "builtin-run-view.test.ts",
+    "view-fault-isolation-browser.test.ts",
+    "run-store.test.ts",
+    "memory-sync.test.ts",
+    "model-registration.test.ts",
+    "settings-builtin-view-browser.test.ts",
+    "market-store.test.ts",
+    "system-models.test.ts",
+    "project-model-registration-cli.test.ts",
+    "memory-diff.test.ts",
+    "model-definition-component-browser.test.ts",
+    "model-upgrade.test.ts",
+    "project-upgrade.test.ts",
+    "run-model-artifact.test.ts",
+    "system-upgrade-changeset.test.ts",
+    "view-package-router-browser.test.ts",
+    "view-models.test.ts",
+    "run-model-storage.test.ts",
+    "config-management.test.ts",
+    "example-relocation.test.ts",
+    "run-abandonment-view.test.ts",
+    "project-resolver.test.ts",
+    "file-lock.test.ts",
+    "reserved-store.test.ts",
+    "schema-writing-view.test.ts",
+    "model-unavailable.test.ts",
+    "archive-run-data.test.ts",
+    "view-browser.test.ts",
+    "memory-syntax.test.ts",
+    "data-filesystem-json-valuestore.test.ts",
+    "artifact-review.test.ts",
+    "run-data-access.test.ts",
+    "data-filesystem-helpers.test.ts",
+    "run-rule-integration.test.ts",
+    "artifact-migration.test.ts",
+    "data-json-schema.test.ts",
+    "memory-command.test.ts",
+    "model-storage-paths.test.ts",
+    "project-memory-provider.test.ts",
+    "archive-store.test.ts",
+    "agent-activity.test.ts",
+    "run-command.test.ts",
+    "memory-store.test.ts",
+    "product-positioning.test.ts",
+    "run-output.test.ts",
+    "artifact-validation.test.ts",
+    "data-filesystem-datastore.test.ts",
+    "project-registry.test.ts",
+    "validate-command.test.ts",
+    "data-extensions.test.ts",
+    "data-manager.test.ts",
+    "reserved-models.test.ts",
+    "config.test.ts",
+    "skill-command.test.ts",
+    "memory-schema.test.ts",
+    "view-package-config.test.ts",
+    "artifact-format-fixtures.test.ts",
+    "data-filesystem-revisions.test.ts",
+    "prompt-renderer.test.ts",
+    "control-plane.test.ts",
+    "data-json-schema-metamodel.test.ts",
+    "file-memory-provider.test.ts",
+    "view-package-registry.test.ts",
+    "view-sdk.test.ts",
+    "memory-serializer.test.ts",
+    "model-asset-checkout.test.ts",
+    "model-validation.test.ts",
+    "view-package-example.test.ts",
+    "view-service.test.ts",
+    "ci-workflow.test.ts",
+    "schema-contract-migration.test.ts",
+    "cli-errors.test.ts",
+    "module-manifest.test.ts",
+    "view-global-style-contract.test.ts",
+    "json-path.test.ts",
+    "model-prototype-tree.test.ts",
+    "run-memory-backfill.test.ts",
+    "view-locales.test.ts",
+    "view-style-contract.test.ts",
+    "data-extension-registry.test.ts",
+    "data-json-serializer.test.ts",
+    "data-preparation.test.ts",
+    "data-raw.test.ts",
+    "persistence.test.ts",
+    "cli-presentation.test.ts",
+    "git.test.ts",
+    "memory-catalog.test.ts",
+    "memory-navigation.test.ts",
+    "settings-builtin-module.test.ts",
+    "test-plan.test.ts",
+    "view-theme-registry.test.ts",
+    "view-docs.test.ts",
+    "json-patch.test.ts",
+    "memory-references.test.ts",
+    "report-execution.test.ts",
+    "view-shell-layout.test.ts",
+    "archive-worker-guard.test.ts",
+    "data-filesystem-open.test.ts",
+    "data-plain-reflection.test.ts",
+    "pagination.test.ts",
+    "windows-prerequisites.test.ts",
+    "memory-rules.test.ts",
+    "model-browser-state.test.ts",
+    "model-schema-references.test.ts",
+    "package-release.test.ts",
+    "home.test.ts"
+  ],
+  "results": [
+    {
+      "file": "artifact-review-browser.test.ts",
+      "seconds": 33.983592304999995,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "models-builtin-view-browser.test.ts",
+      "seconds": 36.248523235,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-cli.test.ts",
+      "seconds": 31.954132949999998,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-command.test.ts",
+      "seconds": 34.626946483000005,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "app-install.test.ts",
+      "seconds": 27.94890628200001,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-responsive.test.ts",
+      "seconds": 30.28594264200001,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-command.test.ts",
+      "seconds": 22.603096164000004,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "list-pagination-cli.test.ts",
+      "seconds": 30.974293485,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-command.test.ts",
+      "seconds": 23.954475458999994,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "cli-output-format.test.ts",
+      "seconds": 19.659486737000012,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "embedded-changeset.test.ts",
+      "seconds": 12.252630581000005,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "agent-review.test.ts",
+      "seconds": 18.611360496999986,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-package-browser.test.ts",
+      "seconds": 11.665630728999997,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "market-changeset.test.ts",
+      "seconds": 10.063324425,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-settings-browser.test.ts",
+      "seconds": 11.79806429000001,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "models-view-slots-browser.test.ts",
+      "seconds": 10.263045639999996,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-changeset.test.ts",
+      "seconds": 8.735511002999992,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-registration-browser.test.ts",
+      "seconds": 7.668340796000004,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-host-composition.test.ts",
+      "seconds": 7.506899848000001,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-models.test.ts",
+      "seconds": 8.198522364999983,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-market-package.test.ts",
+      "seconds": 6.645455805000005,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-filesystem-process.test.ts",
+      "seconds": 7.116116198000003,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "builtin-memory-view.test.ts",
+      "seconds": 12.866557788999984,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-host.test.ts",
+      "seconds": 5.165465714999998,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "business-data-service.test.ts",
+      "seconds": 4.9234815539999985,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-project-switch.test.ts",
+      "seconds": 5.374585575999983,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "default-content-style.test.ts",
+      "seconds": 5.231021437000018,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "market-view.test.ts",
+      "seconds": 4.030371975999995,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-changeset-collaboration.test.ts",
+      "seconds": 3.8719984259999767,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-operation.test.ts",
+      "seconds": 4.57258649300001,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-service.test.ts",
+      "seconds": 3.37328284900001,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "artifact-review-view.test.ts",
+      "seconds": 3.4556608349999878,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-changeset.test.ts",
+      "seconds": 3.6402741460000105,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-settings.test.ts",
+      "seconds": 3.906112109999987,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "system-model-creation.test.ts",
+      "seconds": 3.2829422799999883,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-start-cli.test.ts",
+      "seconds": 2.626439477000007,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-market.test.ts",
+      "seconds": 2.8337486899999784,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "runner-delegated-review-cli.test.ts",
+      "seconds": 2.6135315930000216,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-interfaces.test.ts",
+      "seconds": 2.1748412119999996,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "builtin-run-view.test.ts",
+      "seconds": 2.585299930999987,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-fault-isolation-browser.test.ts",
+      "seconds": 2.195568396000017,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-store.test.ts",
+      "seconds": 2.2314693160000023,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-sync.test.ts",
+      "seconds": 1.8597699610000127,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-registration.test.ts",
+      "seconds": 1.8263180209999845,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "settings-builtin-view-browser.test.ts",
+      "seconds": 1.9744210040000034,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "market-store.test.ts",
+      "seconds": 1.669224698999984,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "system-models.test.ts",
+      "seconds": 1.8559900590000034,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-diff.test.ts",
+      "seconds": 0.26704837699999917,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-model-registration-cli.test.ts",
+      "seconds": 2.011556909000006,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-upgrade.test.ts",
+      "seconds": 2.414953957999998,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-definition-component-browser.test.ts",
+      "seconds": 12.330927752000019,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-model-artifact.test.ts",
+      "seconds": 22.965835783999996,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "system-upgrade-changeset.test.ts",
+      "seconds": 9.236148600000014,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-package-router-browser.test.ts",
+      "seconds": 11.35664043899998,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-models.test.ts",
+      "seconds": 1.185561698000005,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-model-storage.test.ts",
+      "seconds": 1.334489465999999,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "config-management.test.ts",
+      "seconds": 1.0992618800000056,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "example-relocation.test.ts",
+      "seconds": 1.3190442820000463,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-abandonment-view.test.ts",
+      "seconds": 1.0939779860000125,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-resolver.test.ts",
+      "seconds": 1.0798590319999493,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "file-lock.test.ts",
+      "seconds": 1.3063494579999824,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "reserved-store.test.ts",
+      "seconds": 1.095163349999988,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "schema-writing-view.test.ts",
+      "seconds": 1.0978320129999775,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-unavailable.test.ts",
+      "seconds": 0.9388172839999898,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "archive-run-data.test.ts",
+      "seconds": 0.7815013329999638,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-browser.test.ts",
+      "seconds": 0.9725444140000036,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-syntax.test.ts",
+      "seconds": 0.8050925329999882,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-upgrade.test.ts",
+      "seconds": 67.61022672499999,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-filesystem-json-valuestore.test.ts",
+      "seconds": 0.9917524180000182,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "artifact-review.test.ts",
+      "seconds": 0.6780486929999897,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-data-access.test.ts",
+      "seconds": 0.8784055439999793,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-filesystem-helpers.test.ts",
+      "seconds": 0.7968689359999844,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-rule-integration.test.ts",
+      "seconds": 0.7307456139999559,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "artifact-migration.test.ts",
+      "seconds": 0.7015752569999895,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-json-schema.test.ts",
+      "seconds": 0.511382975000015,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-command.test.ts",
+      "seconds": 0.7223536500000045,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-storage-paths.test.ts",
+      "seconds": 0.5575878540000413,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-memory-provider.test.ts",
+      "seconds": 0.6693785349999671,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "archive-store.test.ts",
+      "seconds": 0.6482924130000174,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "agent-activity.test.ts",
+      "seconds": 0.57859385200002,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-command.test.ts",
+      "seconds": 0.7547757459999993,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-store.test.ts",
+      "seconds": 0.5512448669999721,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "product-positioning.test.ts",
+      "seconds": 0.5083433460000087,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-output.test.ts",
+      "seconds": 0.6731365389999701,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "artifact-validation.test.ts",
+      "seconds": 0.4104676810000092,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-filesystem-datastore.test.ts",
+      "seconds": 0.4478837829999975,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "project-registry.test.ts",
+      "seconds": 0.45176178100000836,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "validate-command.test.ts",
+      "seconds": 0.478997939999972,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-extensions.test.ts",
+      "seconds": 0.4794068949999637,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-manager.test.ts",
+      "seconds": 0.43517201199999545,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "reserved-models.test.ts",
+      "seconds": 0.4641239089999581,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "config.test.ts",
+      "seconds": 0.4554107889999868,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "skill-command.test.ts",
+      "seconds": 0.47098299899999985,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-schema.test.ts",
+      "seconds": 0.4642809469999629,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-package-config.test.ts",
+      "seconds": 0.40903886499995135,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "artifact-format-fixtures.test.ts",
+      "seconds": 0.4278258960000239,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-filesystem-revisions.test.ts",
+      "seconds": 0.3456198399999994,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "prompt-renderer.test.ts",
+      "seconds": 0.3882117379999836,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "control-plane.test.ts",
+      "seconds": 0.37259142000001155,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-json-schema-metamodel.test.ts",
+      "seconds": 0.3970668220000225,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "file-memory-provider.test.ts",
+      "seconds": 0.38346201600000496,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-sdk.test.ts",
+      "seconds": 0.32197575799998596,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-package-registry.test.ts",
+      "seconds": 0.35240549199999077,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-asset-checkout.test.ts",
+      "seconds": 0.2918860050000367,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-serializer.test.ts",
+      "seconds": 0.37298824999999486,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-validation.test.ts",
+      "seconds": 0.3491332059999695,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-package-example.test.ts",
+      "seconds": 0.3476873339999584,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-service.test.ts",
+      "seconds": 0.3041445229999954,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "ci-workflow.test.ts",
+      "seconds": 0.4566084399999818,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "schema-contract-migration.test.ts",
+      "seconds": 0.3724625900000101,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "cli-errors.test.ts",
+      "seconds": 0.30793275800003905,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "module-manifest.test.ts",
+      "seconds": 0.29480627699999606,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-global-style-contract.test.ts",
+      "seconds": 0.3094375989999971,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "json-path.test.ts",
+      "seconds": 0.29766388800001004,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-prototype-tree.test.ts",
+      "seconds": 0.2648729239999666,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "run-memory-backfill.test.ts",
+      "seconds": 0.29101178800000344,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-locales.test.ts",
+      "seconds": 0.2818509399999748,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-style-contract.test.ts",
+      "seconds": 0.28268128600000636,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-extension-registry.test.ts",
+      "seconds": 0.27696223800000735,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-json-serializer.test.ts",
+      "seconds": 0.33682132599997566,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-preparation.test.ts",
+      "seconds": 0.2616679460000014,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-raw.test.ts",
+      "seconds": 0.2867759860000224,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "persistence.test.ts",
+      "seconds": 0.30055243799998427,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "git.test.ts",
+      "seconds": 0.2712241849999991,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "cli-presentation.test.ts",
+      "seconds": 0.3267135409999755,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-navigation.test.ts",
+      "seconds": 0.25009852200001476,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-catalog.test.ts",
+      "seconds": 0.29262296700000295,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "test-plan.test.ts",
+      "seconds": 0.2411207760000252,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "settings-builtin-module.test.ts",
+      "seconds": 0.2813118159999722,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-theme-registry.test.ts",
+      "seconds": 0.2463161680000485,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-docs.test.ts",
+      "seconds": 0.2699043529999908,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "json-patch.test.ts",
+      "seconds": 0.25575302100001135,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-references.test.ts",
+      "seconds": 0.25385953600000355,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "report-execution.test.ts",
+      "seconds": 0.25345178699999815,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "view-shell-layout.test.ts",
+      "seconds": 0.2955574759999872,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "archive-worker-guard.test.ts",
+      "seconds": 0.25110671899997394,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-filesystem-open.test.ts",
+      "seconds": 0.2758950889999978,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "data-plain-reflection.test.ts",
+      "seconds": 0.2907362350000185,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "pagination.test.ts",
+      "seconds": 0.25196864099998495,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "windows-prerequisites.test.ts",
+      "seconds": 0.2820031859999872,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "memory-rules.test.ts",
+      "seconds": 0.256357863000012,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-browser-state.test.ts",
+      "seconds": 0.2634177079999936,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "model-schema-references.test.ts",
+      "seconds": 0.24173830500000623,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "package-release.test.ts",
+      "seconds": 0.2647810230000177,
+      "exitCode": 0,
+      "signal": null
+    },
+    {
+      "file": "home.test.ts",
+      "seconds": 0.256102321000013,
+      "exitCode": 0,
+      "signal": null
+    }
+  ]
+}
