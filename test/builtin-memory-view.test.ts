@@ -258,21 +258,11 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(Math.abs(replacementLineBox.right - additionLineBox.right) < 1, true);
     assert.equal(await page.locator(".memory-inline-old, .memory-inline-new").filter({ hasText: "Last rule stays unchanged" }).count(), 0);
     const removedSuggestion = page.locator(".memory-inline-removed");
-    assert.match(await removedSuggestion.innerText(), /Deleted\s+Remove stale copy/);
+    assert.match(await removedSuggestion.innerText(), /Deleted[\s\S]*Remove stale copy/);
     assert.doesNotMatch(await removedSuggestion.innerText(), /Before\s+Remove stale copy/);
     await removedSuggestion.locator(".memory-inline-old").hover();
     const removedPlus = removedSuggestion.locator(".memory-inline-plus");
-    assert.equal(await removedPlus.count(), 1);
-    assert.equal(await removedPlus.isVisible(), true);
-    await removedPlus.click();
-    const removedEditor = page.locator(".memory-inline-comment-editor");
-    assert.equal(await removedEditor.count(), 1);
-    await removedEditor.locator("textarea").fill("Comment on locally deleted content");
-    await removedEditor.getByRole("button", { name: "Submit comment", exact: true }).click();
-    await removedEditor.waitFor({ state: "detached" });
-    assert.equal(submittedComments.at(-1)?.body, "Comment on locally deleted content");
-    assert.equal(submittedComments.at(-1)?.memoryReference, "statements/delivery");
-    assert.equal((submittedComments.at(-1)?.location as Record<string, unknown>)?.anchor, "statement.suggests[1]");
+    assert.equal(await removedPlus.count(), 0, "baseline-only content cannot target a candidate Comment");
     const viewbar = page.locator(".memory-change-viewbar");
     assert.match(await viewbar.innerText(), /Diff\s+Full content\s+base\s+1234567\s+candidate\s+abcdef1/);
     assert.equal(await viewbar.evaluate(node => node.getBoundingClientRect().top < (node.nextElementSibling?.getBoundingClientRect().top ?? 0)), true);
@@ -293,7 +283,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const expandComments = page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Expand comments", exact: true });
     await expandComments.waitFor();
     const collapsedMainWidth = await page.locator(".memory-change-main").evaluate(node => node.getBoundingClientRect().width);
-    assert.equal(collapsedMainWidth >= 900 && collapsedMainWidth <= 961, true);
+    assert.equal(collapsedMainWidth > 960, true);
     const collapsedGeometry = await page.locator(".memory-change-main").evaluate(node => {
       const main = node.getBoundingClientRect();
       const root = document.querySelector("#memsphere-view-root")!.getBoundingClientRect();
@@ -328,7 +318,8 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(Math.abs(await commentsRail.evaluate(node => node.getBoundingClientRect().top) - workspaceTop) < 1, true);
     const largeWorkspaceRight = await page.locator(".memory-change-workspace").evaluate(node => node.getBoundingClientRect().right);
     assert.equal(Math.abs(await commentsRail.evaluate(node => node.getBoundingClientRect().right) - largeWorkspaceRight) < 1, true);
-    assert.equal(await page.locator(".memory-change-main").evaluate(node => node.getBoundingClientRect().width <= 721), true);
+    assert.equal(await page.locator(".memory-change-main").evaluate(node => node.getBoundingClientRect().width) > 720, true);
+    assert.equal(await page.locator(".memory-change-main").evaluate(node => node.getBoundingClientRect().width) < collapsedMainWidth, true);
     await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     const changedDefinition = page.locator(".memory-inline-new").filter({ hasText: "After definition" });
     const diffBodyTypography = await changedDefinition.evaluate(node => {
@@ -432,17 +423,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const deletedLine = page.locator(".memory-inline-old").filter({ hasText: "Only base content" });
     await deletedLine.hover();
     const deletedPlus = deletedLine.locator(".memory-inline-plus");
-    assert.equal(await deletedPlus.count(), 1);
-    assert.equal(await deletedPlus.isVisible(), true);
-    await deletedPlus.click();
-    const deletedEditor = page.locator(".memory-inline-comment-editor");
-    assert.equal(await deletedEditor.count(), 1);
-    await deletedEditor.locator("textarea").fill("Comment on deleted content");
-    await deletedEditor.getByRole("button", { name: "Submit comment", exact: true }).click();
-    await deletedEditor.waitFor({ state: "detached" });
-    assert.equal(submittedComments.at(-1)?.body, "Comment on deleted content");
-    assert.equal(submittedComments.at(-1)?.memoryReference, "statements/deleted");
-    assert.equal((submittedComments.at(-1)?.location as Record<string, unknown>)?.anchor, "statement.defines[1]");
+    assert.equal(await deletedPlus.count(), 0, "a deleted Memory has no candidate comment target");
     await page.getByRole("radio", { name: "Full content", exact: true }).click();
     await page.locator("details.memory-collapsible-list").evaluateAll(nodes => nodes.forEach(node => { (node as HTMLDetailsElement).open = true; }));
     assert.match(await page.locator(".memory-deleted-candidate").innerText(), /Not present after deletion/);
@@ -622,7 +603,7 @@ for (const locale of ["en", "zh-CN"] as const) {
       await page.goto(`${origin}/projects/demo/changes/change-executors`, { waitUntil: "networkidle" });
       await page.locator(".memory-change-layout").getByRole("heading", { name: "Executor Flow", exact: true }).waitFor();
       assert.match(await page.locator('.memory-inline-new [data-anchor="procedure.flow[6].actor"]').textContent() ?? "", new RegExp(label));
-      assert.match(await page.locator('.memory-inline-old [data-anchor="procedure.flow[7].actor"]').textContent() ?? "", new RegExp(label));
+      assert.match(await page.locator('.memory-inline-old [data-baseline-anchor="procedure.flow[7].actor"]').textContent() ?? "", new RegExp(label));
       assert.equal(await page.locator(".memory-artifact-row .memory-flow-actor").count(), 0, "actor changes stay outside the Artifact contract");
       await page.getByRole("radio", { name: locale === "en" ? "Full content" : "完整内容", exact: true }).click();
       assert.equal(await page.locator(".memory-flow-actor").count(), humanPaths.length);
@@ -644,6 +625,59 @@ for (const locale of ["en", "zh-CN"] as const) {
     }
   });
 }
+
+test("ChangeSet keeps replaced branches, deleted rules and new loops in their parent, with fluid desktop width", async () => {
+  const [bundle, sdk, runtime] = await Promise.all([buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()]);
+  const instances: ViewHostBootInstance[] = [{ pluginPath: memoryBundlePath, routeBasePath: "/", module: { projectId: "demo", moduleId: "org.memsphere.memory", moduleVersion: "0.1.2", instanceId: "memory" } }];
+  const action = (name: string) => ({ tag: "!action", action: name, artifact: { name: `${name} result`, format: "markdown" } });
+  const base = { names: ["structure", "Structure"], asserts: ["Rule to remove", "Rule retained"], flow: [action("First unchanged"), { tag: "!if", condition: { ...action("Old human PR decision"), actor: "human" }, then: [action("Old PR branch")] }, { ...action("Tail unchanged"), artifact: { name: "Tail result", format: "markdown", final: true } }] };
+  const candidate = { names: base.names, asserts: ["Rule retained"], flow: [action("Inserted before first"), action("First unchanged"), action("Submit PR directly"), { tag: "!while", condition: { ...action("New CI condition"), asserts: ["New condition constraint"] }, do: [action("New repair body")] }, { ...action("Tail unchanged"), artifact: { name: "Tail result", format: "markdown" } }] };
+  const memory = { id: "procedures/structure", kind: "procedures", path: "procedures/structure.yaml", entity: candidate };
+  const server = createServer((request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (url.pathname === memoryBundlePath) return send(response, 200, "text/javascript", bundle);
+    if (url.pathname === viewSdkBundlePath) return send(response, 200, "text/javascript", sdk);
+    if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
+    if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
+    if (url.pathname === "/api/memories") return json(response, { memories: [] });
+    if (url.pathname === "/api/market/memories") return json(response, { count: 0, memories: [] });
+    if (url.pathname === "/api/changes") return json(response, { changes: [{ id: "change-structure", status: "active", memoryPaths: [memory.path] }] });
+    if (url.pathname === "/api/changes/change-structure") return json(response, { change: { id: "change-structure", status: "active", valid: true, memoryPaths: [memory.path] }, targetMemories: [{ reference: memory.id, operation: "update", memory, baseMemory: { ...memory, entity: base } }], comments: [] });
+    return send(response, 200, "text/html", renderViewHostHtml("en", instances));
+  });
+  const origin = await listen(server); const browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 2560, height: 1440 } });
+    await page.goto(`${origin}/projects/demo/changes/change-structure`, { waitUntil: "networkidle" });
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
+    const oldBranch = page.locator('.memory-inline-old [data-flow-node-path="procedure.flow[2]"]');
+    assert.match(await oldBranch.innerText(), /Old human PR decision[\s\S]*Old PR branch/);
+    const flowText = await page.locator('.memory-flow[data-diff-path="procedure.flow"]').innerText();
+    assert.equal(flowText.indexOf("Old human PR decision") < flowText.indexOf("Submit PR directly"), true, "the deleted branch stays in its old sequence slot before the replacement steps");
+    assert.equal(await page.locator(".memory-inline-old .memory-inline-plus").count(), 0);
+    assert.equal(await page.locator('.memory-inline-old [data-anchor]').count(), 0);
+    assert.equal(await page.locator('.memory-inline-old, .memory-inline-new').filter({ hasText: 'First unchanged' }).count(), 0);
+    const rules = page.locator('[data-diff-path="procedure.asserts"]');
+    assert.match(await rules.innerText(), /Deleted[\s\S]*Rule to remove[\s\S]*Rule retained/);
+    const loop = page.locator('.memory-inline-new [data-flow-node-path="procedure.flow[4]"]');
+    assert.match(await loop.innerText(), /New CI condition[\s\S]*New condition constraint[\s\S]*New repair body/);
+    assert.equal(await loop.locator('[data-anchor="procedure.flow[4].condition.action"]').count(), 1);
+    const finalBefore = page.locator('.memory-inline-old .memory-artifact-details').filter({ hasText: "final" });
+    assert.equal(await finalBefore.isVisible(), true);
+    const main = page.locator(".memory-change-main"); const wide = await main.evaluate(n => n.getBoundingClientRect().width);
+    assert.equal(wide > 960, true);
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    assert.equal(await main.evaluate(n => n.getBoundingClientRect().width) < wide, true);
+    for (const width of [1280, 500]) {
+      await page.setViewportSize({ width, height: 1000 });
+      assert.equal(await main.evaluate(n => n.scrollWidth <= n.clientWidth + 1), true, `diff stays inside the body at ${width}px`);
+    }
+    await page.getByRole("radio", { name: "Full content", exact: true }).click();
+    assert.equal(await page.locator(".memory-inline-old").count(), 0);
+    await page.getByRole("radio", { name: "Diff", exact: true }).click();
+    assert.equal(await oldBranch.count(), 1);
+  } finally { await browser.close(); await close(server); }
+});
 
 async function buildMemoryBundle(): Promise<string> {
   const result = await build({
