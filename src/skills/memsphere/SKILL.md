@@ -502,7 +502,7 @@ memsphere run abandon --run <Run ID> [--reason "<可选原因>"]
 
 #### View Package 自定义
 
-可信本地 View Package 可在“设置 → 界面与主题”添加绝对路径，并在同一页面选择主题与 Slot；这些配置保存在 Home 并统一应用到所有 Project，保存后使用 `memsphere view restart` 应用固定 composition snapshot。全局样式通过 `styles.global@1` 多选 Slot 组合，scoped CSS 随 Package 实例自动加载；历史 `view_composition.styles` 只保留解析兼容。Memory/Run 官方 renderer 自带低层叠优先级的系统默认内容视觉，无需配置扩展包；用户选择的全局样式可在不使用 `!important` 的情况下覆盖它，示例 View Package 则作为独立参考实现演进。Memory/Run/Models 的 page 与 detail/artifact/definition renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；高权限能力必须在安装记录中显式授予。
+可信本地 View Package 可在“设置 → 界面与主题”添加绝对路径，并在同一页面选择主题与 Slot；这些配置保存在 Home 并统一应用到所有 Project，保存后使用 `memsphere view restart` 应用固定 composition snapshot。官方 Memory、ChangeSet、Run 的 page.presentation 共用基础布局；公共样式可通过 `styles.global@1` 对 `[data-mem-page-layout]` 统一覆盖，`--mem-page-layout-inset` 统一留白及意见栏偏移。页面具体内容与画布排列由各自 page.presentation 负责，不新增 content.workspace Slot。全局样式通过 `styles.global@1` 多选 Slot 组合，scoped CSS 随 Package 实例自动加载；历史 `view_composition.styles` 只保留解析兼容。Memory/Run 官方 renderer 自带低层叠优先级的系统默认内容视觉，无需配置扩展包；用户选择的全局样式可在不使用 `!important` 的情况下覆盖它，示例 View Package 则作为独立参考实现演进。Memory/Run/Models 的 page 与 detail/artifact/definition renderer 可通过 portable cells 替换，失败时回退官方候选。Theme/Style 使用 light/dark 分层 Token 与实例 lifecycle；高权限能力必须在安装记录中显式授予。
 
 #### 人机协同
 

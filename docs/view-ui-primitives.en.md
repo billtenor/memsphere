@@ -321,3 +321,19 @@ container.append(ctx.ui.modelDefinition({ model, view: "source" }));
 ```
 
 Independent routes also need the `router.register` capability, a matching `main.view@1:route:<route-id>` Manifest contribution and a Mount registered through `slots.mainView`. The component does not register a page for you. See the runnable [model-definition example](../examples/view-packages/model-definition/README.md).
+
+## Shared official page layout
+
+Memory, ChangeSet and Run use one internal base layout within their existing page presentations. It adds no UI API, Slot or wrapper. For shared styling, declare a global CSS file in a View Package and select it in `styles.global@1` under Appearance & Themes. This override needs no `!important` and applies to all three official pages:
+
+```css
+[data-mem-page-layout] {
+  --mem-page-layout-inset: 24px;
+  background: var(--mem-view-color-canvas);
+}
+@media (max-width: 820px) {
+  [data-mem-page-layout] { --mem-page-layout-inset: 12px; }
+}
+```
+
+The variable is a feature style hook, not a Theme Token. Omit the optional style `namespace` or include this hook in the declared namespace when assigning it. The default consumes `layout.pagePadding` on desktop and `space.3` on narrow screens. The page presentation decides whether comments sit beside or below the body; a narrow detail container stacks them. To change content ordering or canvas arrangement for one module, select its existing `org.memsphere.memory.page.presentation@1:page` or `org.memsphere.run.page.presentation@1:page` cell.

@@ -452,3 +452,19 @@ container.append(ctx.ui.modelDefinition({ model, view: "source" }));
 ```
 
 独立路由还需在 Manifest 声明 `router.register` capability 和匹配的 `main.view@1:route:<route-id>` contribution，并通过 `slots.mainView` 注册 Mount；组件不替页面完成这些接线。可运行的独立业务示例见 [model-definition](../examples/view-packages/model-definition/README.md)。
+
+## 官方页面的共享布局
+
+Memory、ChangeSet 与 Run 在既有 page.presentation 中共用基础布局，不新增公共 UI 方法、Slot 或包装层。统一改样式时，在 View Package 声明 global CSS 并在“界面与主题”的 `styles.global@1` 中选择；以下覆盖无需 `!important`，同时作用于三个官方页面：
+
+```css
+[data-mem-page-layout] {
+  --mem-page-layout-inset: 24px;
+  background: var(--mem-view-color-canvas);
+}
+@media (max-width: 820px) {
+  [data-mem-page-layout] { --mem-page-layout-inset: 12px; }
+}
+```
+
+这个变量是功能样式入口，不是公共 Theme Token。定义它时可省略样式声明中可选的 `namespace`，或让声明的 namespace 包含这个入口。默认桌面消费 `layout.pagePadding`，窄屏消费 `space.3`。意见栏并排或堆叠由页面实现决定，详情容器较窄时改为堆叠。只改某个模块的内容顺序或画布排列时，选择既有 `org.memsphere.memory.page.presentation@1:page` 或 `org.memsphere.run.page.presentation@1:page`。
