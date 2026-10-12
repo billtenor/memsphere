@@ -163,7 +163,7 @@ Managed 省略 id 时当前 Workspace 必须恰有一个 active ChangeSet。Embe
 
 View 使用稳定 Shell 组合 Home、Memory、Run 和启用的用户 Module 视图。Home `/` 汇总待处理、继续工作与我的模块；Memory `/memories` 下分“当前项目”与“记忆市场”，Run `/tasks` 下分 running、done 与 abandoned。记忆市场只展示 npm 包内的官方精选 Memory，未导入内容不会进入 Catalog 或 Run。点击“导入”或“重新导入”只创建 `market_import` ChangeSet，不预先展示 diff；同一 Project 的后续导入继续追加到同一个 active ChangeSet，完成或废弃后才新建。用户进入 ChangeSet 查看合并后的候选并决定是否继续。active 的导入 ChangeSet 会让对应市场条目显示“导入中”，并可直接跳转到该 ChangeSet。导入后的实体就是普通用户 Memory，可以重命名和自由修改；它与包内内容独立演进，不保存来源或版本，也不自动更新。View 仅按当前 `<kind>/<canonical-name>` 关联两者，并按原始文件字节显示“未导入 / 导入中 / 已导入 · 无变更 / 已导入 · 有差异 / 名称冲突”。重命名后不再关联，市场条目改名等同旧条目下架、新条目新增。
 
-Memory 详情的“修改”经简单确认后总是创建一个新的持久、未绑定 ChangeSet；用户不能直接编辑 YAML，只能在 ChangeSet 中加入已有 Memory，并通过结构位置旁的 `+` 逐条提交 Comment。Comment 直接绑定 ChangeSet，状态为 pending、processing、completed，不存在独立 Memory Review、ChangeSet Review、Submit Review、Round 或 Vote。Human Actor 和稳定 Browser user UUID 只用于归因，不构成认证。ChangeSet 详情仅展示纳入范围的候选 Memory，不展示 diff 或完整 Store；active 可添加 Memory、提交 Comment 或确认废弃，completed、abandoned 只读。
+Memory 详情的“修改”经简单确认后总是创建一个新的持久、未绑定 ChangeSet；用户不能直接编辑 YAML，只能在 ChangeSet 中加入已有 Memory，并通过结构位置旁的 `+` 逐条提交 Comment。Comment 直接绑定 ChangeSet，状态为 pending、processing、completed，不存在独立 Memory Review、ChangeSet Review、Submit Review、Round 或 Vote。Human Actor 和稳定 Browser user UUID 只用于归因，不构成认证。ChangeSet 详情仅展示纳入范围的 Memory，默认展示基线与候选的结构差异，并可切换完整内容，不展示完整 Store。差异保留节点和规则的层级，变化的产物元数据直接可见；正文随可用窗口宽度伸展。active 可添加 Memory、对候选内容提交 Comment 或确认废弃；基线专属和删除内容只读，不提供候选评论入口，completed、abandoned 只读。
 
 View 对持久化记录按记录隔离故障：损坏 ChangeSet 在列表中标为 `unavailable`，详细错误只在用户选择后显示，不阻塞 Memory、记忆市场或其他有效 ChangeSet；记忆市场列表与导入只跳过明确的 ChangeSet 完整性损坏，文件 I/O、权限、Git reconcile 或写回等非完整性故障仍显式失败，避免绕过已有 active 市场 ChangeSet。单个 Run detail 损坏只在该 Run 详情区报错，Running 列表与其他 Run 仍保持可用。
 

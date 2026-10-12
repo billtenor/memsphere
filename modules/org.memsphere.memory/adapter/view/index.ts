@@ -27,6 +27,8 @@ import {
 } from "../../../shared/view/content-flow.js";
 import { defaultContentStyles } from "../../../shared/view/default-content-styles.js";
 
+import { memoryDiffPlan, type MemoryDiffEntry, type MemoryDiffPlan } from "./memory-diff.js";
+
 type JsonRecord = Record<string, unknown>;
 type MemorySummary = JsonRecord & {
   id: string;
@@ -120,7 +122,7 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "change.after": "修改后",
   "change.added": "新增",
   "change.deleted": "删除",
-  "change.fieldChanges": "{count} 处字段变化",
+  "change.fieldChanges": "{count} 处变化",
   "change.validationPassed": "校验通过",
   "change.reviewProgress": "已查看 {reviewed} / {total}",
   "change.markReviewedTitle": "看完这条 Memory 了吗？",
@@ -200,7 +202,7 @@ const englishFallbackMessages: Readonly<Record<string, string>> = Object.freeze(
   "change.addComment": "Add comment",
   "change.commentPlaceholder": "Describe what should change here…",
   "change.submitComment": "Submit comment", "change.cancelComment": "Cancel",
-  "change.fieldChanges": "{count} field changes",
+  "change.fieldChanges": "{count} changes",
   "change.validationPassed": "Validation passed", "change.reviewProgress": "Reviewed {reviewed} / {total}",
   "change.markReviewedTitle": "Finished reviewing this Memory?", "change.markReviewedHint": "Continue to the next unreviewed Memory after marking it.",
   "change.markReviewed": "Mark reviewed and continue", "change.reviewed": "Reviewed",
@@ -356,7 +358,7 @@ const memoryStyles = `
   .memory-inline-diff-pair>.memory-inline-comment-editor { margin-left:0; margin-right:0; }
   .memory-commentable.has-comment-draft .memory-inline-plus { display:none; }
   .memory-change-layout { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) minmax(220px,260px); gap:14px; align-items:start; }
-  .memory-change-main { width:100%; max-width:720px; min-width:0; margin-inline:auto; justify-self:stretch; }
+  .memory-change-main { width:100%; min-width:0; justify-self:stretch; }
   .memory-diff-toolbar { display:inline-grid; grid-template-columns:repeat(2,minmax(84px,1fr)); gap:3px; margin:2px 0 14px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
   .memory-change-viewbar { display:flex; min-width:0; align-items:center; justify-content:center; gap:14px; margin:0 0 12px; flex-wrap:wrap; }
   .memory-change-viewbar .memory-diff-toolbar { flex:0 0 auto; margin:0; }
@@ -381,6 +383,10 @@ const memoryStyles = `
   li.memory-inline-marker-old::marker { color:var(--mem-view-color-danger); }
   li.memory-inline-marker-new::marker { color:var(--mem-view-color-success); }
   .memory-inline-removed { margin:5px 0; }
+  .memory-module .memory-diff-view .memory-inline-diff-line .memory-artifact-details,.memory-module .memory-diff-view .memory-inline-diff-line .memory-review-details { position:static; display:inline-flex; visibility:visible; opacity:1; pointer-events:auto; transform:none; width:auto; max-width:100%; box-shadow:none; border:0; padding:0; background:transparent; }
+  .memory-inline-diff-line .memory-artifact-row { flex-wrap:wrap; }
+  .memory-module .memory-diff-view .memory-inline-diff-line :is(.memory-artifact-summary,.memory-artifact-details,.memory-review-summary,.memory-review-details,.memory-pill) { min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere; flex-wrap:wrap; }
+  @media(max-width:820px){.memory-module .memory-change-workspace .memory-flow-head>.memory-inline-diff-pair,.memory-module .memory-change-workspace .memory-flow-head>.memory-inline-diff-line{grid-column:2;max-width:100%;min-width:0}}
   .memory-diff-empty { padding:18px 14px; color:var(--muted); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); text-align:center; }
   .memory-deleted-candidate { display:grid; gap:4px; margin:0 0 14px; border:1px dashed var(--mem-view-color-danger); border-radius:var(--memory-page-radius-section); background:var(--mem-view-color-danger-soft); padding:14px; color:var(--mem-view-color-danger); }
   .memory-deleted-candidate strong { font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
@@ -393,7 +399,7 @@ const memoryStyles = `
   .memory-review-complete small { margin-top:3px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
   .memory-review-complete .mem-view-button { white-space:nowrap; }
   .memory-change-layout.comments-collapsed { display:block; }
-  .memory-change-layout.comments-collapsed .memory-change-main { max-width:960px; }
+  .memory-change-layout.comments-collapsed .memory-change-main { width:100%; }
   .memory-change-layout.comments-collapsed .memory-comments { display:none; }
   .memory-comments { position:sticky; top:calc(-1 * var(--memory-page-padding)); display:grid; grid-template-rows:auto minmax(140px,1fr) auto; height:calc(100vh - 100px); max-height:calc(100vh - 100px); margin:calc(-1 * var(--memory-page-padding)) 0 0; overflow:hidden; border-width:0 0 0 1px; border-radius:0; background:var(--mem-view-color-subtle); padding:0; box-shadow:none; }
   .memory-comments-header { display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding:13px 15px; }
@@ -2162,6 +2168,7 @@ function renderMemoryEntity(kind: string, entity: JsonRecord, t: (key: string) =
       : kind === "procedures"
         ? renderProcedure(entity, "procedure", t, comment, options)
         : renderGeneric(entity, "memory", t, comment, options);
+  content.dataset.diffPath = kind === "procedures" ? "procedure" : kind === "statements" ? "statement" : kind === "schemas" ? "schema" : "memory";
   appendDisclosureToggle(content, t);
   return content;
 }
@@ -2179,15 +2186,16 @@ function renderMemoryComparison(
       : candidate.kind === "schemas" ? "schema" : "memory";
   const beforeEntity = (base.entity ?? base) as JsonRecord;
   const afterEntity = (candidate.entity ?? candidate) as JsonRecord;
-  const changes = scalarDiffEntries(beforeEntity, afterEntity, root);
+  const plan = memoryDiffPlan(beforeEntity, afterEntity, root);
+  const changes = plan.changes;
   const wrap = el("div", "memory-diff-view");
   const summary = el("div", "memory-diff-summary");
   summary.append(el("strong", "", t("change.fieldChanges").replace("{count}", String(changes.length))));
   wrap.append(summary);
-  const before = renderMemoryEntity(candidate.kind, beforeEntity, t, comment, options);
+  const before = renderMemoryEntity(candidate.kind, beforeEntity, t, undefined, options);
   const after = renderMemoryEntity(candidate.kind, afterEntity, t, comment, options);
-  applyInlineMemoryDiff(before, after, changes, t("change.before"), t("change.after"), t("change.added"), t("change.deleted"));
   wrap.append(after);
+  applyInlineMemoryDiff(before, after, plan, t("change.before"), t("change.after"), t("change.added"), t("change.deleted"));
   return wrap;
 }
 
@@ -2207,71 +2215,83 @@ function renderWholeMemoryChange(
   const summary = el("div", "memory-diff-summary");
   summary.append(el("strong", "", t("change.fieldChanges").replace("{count}", String(changes.length))));
   wrap.append(summary);
-  const document = renderMemoryEntity(memory.kind, entity, t, comment, options);
-  applyWholeMemoryTone(document, changes, tone, tone === "old" ? t("change.deleted") : t("change.added"));
-  wrap.append(document);
+  const document = renderMemoryEntity(memory.kind, entity, t, tone === "old" ? undefined : comment, options);
+  wrap.append(diffLine(tone === "old" ? cleanDiffClone(document) : document, tone, tone === "old" ? t("change.deleted") : t("change.added")));
   return wrap;
 }
 
-function applyWholeMemoryTone(root: HTMLElement, changes: readonly ScalarDiffEntry[], tone: "old" | "new", label: string): void {
-  const nodes = anchoredNodes(root);
-  const groups = diffGroups(root);
-  const handledGroups = new Set<string>();
-  for (const change of changes) {
-    const path = tone === "old" ? change.beforePath : change.afterPath;
-    if (!path) continue;
-    const node = nodes.get(path);
-    if (!node || !root.contains(node)) continue;
-    const groupKey = node.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup;
-    if (groupKey) {
-      if (handledGroups.has(groupKey)) continue;
-      handledGroups.add(groupKey);
-      const group = groups.get(groupKey);
-      if (group && root.contains(group)) renderInlineSingle(group, tone, label);
-      continue;
-    }
-    renderInlineSingle(node, tone, label);
-  }
-}
-
-type ScalarDiffEntry = { beforePath?: string; afterPath?: string };
+type ScalarDiffEntry = MemoryDiffEntry;
 
 function applyInlineMemoryDiff(
-  before: HTMLElement,
-  after: HTMLElement,
-  changes: readonly ScalarDiffEntry[],
-  beforeLabel: string,
-  afterLabel: string,
-  addedLabel: string,
-  deletedLabel: string
+  before: HTMLElement, after: HTMLElement, plan: MemoryDiffPlan,
+  beforeLabel: string, afterLabel: string, addedLabel: string, deletedLabel: string
 ): void {
-  const beforeNodes = anchoredNodes(before);
-  const afterNodes = anchoredNodes(after);
-  const beforeGroups = diffGroups(before);
-  const afterGroups = diffGroups(after);
-  const handledGroups = new Set<string>();
-  for (const change of changes) {
-    const oldNode = change.beforePath ? beforeNodes.get(change.beforePath) : undefined;
-    const newNode = change.afterPath ? afterNodes.get(change.afterPath) : undefined;
-    const groupKey = oldNode?.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup
-      ?? newNode?.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup;
-    if (groupKey) {
-      if (handledGroups.has(groupKey)) continue;
-      handledGroups.add(groupKey);
-      const oldGroup = beforeGroups.get(groupKey);
-      const newGroup = afterGroups.get(groupKey);
-      if (oldGroup && newGroup) renderInlineReplacement(oldGroup, newGroup, beforeLabel, afterLabel);
-      else if (newGroup) renderInlineSingle(newGroup, "new", addedLabel);
-      else if (oldGroup) renderInlineRemoval(oldGroup, change.beforePath ?? groupKey, beforeNodes, afterNodes, after, deletedLabel);
-      continue;
+  const beforeNodes = anchoredNodes(before), afterNodes = anchoredNodes(after);
+  const beforeGroups = diffGroups(before), afterGroups = diffGroups(after);
+  const handled = new Set<HTMLElement>();
+  // An unmapped badge/title belongs to its structural node, never the document footer.
+  const nearest = (path: string | undefined, nodes: Map<string, HTMLElement>) => {
+    if (!path) return undefined;
+    let current = path;
+    while (current) {
+      if (nodes.has(current)) return nodes.get(current);
+      current = current.replace(/(?:\.[^.\[\]]+|\[\d+\])$/, "");
+      if (current === path) break;
+      path = current;
     }
-    if (oldNode && newNode) {
-      renderInlineReplacement(oldNode, newNode, beforeLabel, afterLabel);
-    } else if (newNode) {
-      renderInlineSingle(newNode, "new", addedLabel);
-    } else if (oldNode) {
-      renderInlineRemoval(oldNode, change.beforePath ?? "", beforeNodes, afterNodes, after, deletedLabel);
+    return undefined;
+  };
+  const operations: Array<{ oldNode?: HTMLElement; newNode?: HTMLElement; afterNextPath?: string }> = [];
+  for (const change of plan.changes) {
+    let oldNode = change.beforePath ? beforeNodes.get(change.beforePath) : undefined;
+    let newNode = change.afterPath ? afterNodes.get(change.afterPath) : undefined;
+    const oldGroupKey = oldNode?.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup;
+    const newGroupKey = newNode?.closest<HTMLElement>("[data-diff-group]")?.dataset.diffGroup;
+    // Paths shifted by list edits must use their own side's group identity.
+    if (!change.whole && (oldGroupKey || newGroupKey)) {
+      oldNode = oldGroupKey ? beforeGroups.get(oldGroupKey) : undefined;
+      newNode = newGroupKey ? afterGroups.get(newGroupKey) : undefined;
+      if (!oldNode && newGroupKey) {
+        const left = [...plan.matches].find(([, right]) => right === newGroupKey)?.[0];
+        if (left) oldNode = beforeGroups.get(left);
+      }
+      if (!newNode && oldGroupKey) {
+        const right = plan.matches.get(oldGroupKey);
+        if (right) newNode = afterGroups.get(right);
+      }
+      // Scalar removals inside an existing Artifact still compare the entire row.
+      if (!newNode && oldGroupKey && change.beforePath) {
+        const parent = oldGroupKey;
+        const right = plan.matches.get(parent);
+        if (right) newNode = afterGroups.get(right);
+      }
     }
+    if (!oldNode && !newNode) {
+      oldNode = nearest(change.beforePath, beforeNodes);
+      newNode = nearest(change.afterPath, afterNodes);
+      if (oldNode && !newNode) newNode = afterNodes.get(plan.matches.get(oldNode.dataset.diffPath ?? "") ?? "");
+      if (newNode && !oldNode) {
+        const left = [...plan.matches].find(([, right]) => right === newNode!.dataset.diffPath)?.[0];
+        if (left) oldNode = beforeNodes.get(left);
+      }
+    }
+    operations.push({ oldNode, newNode, afterNextPath: change.afterNextPath });
+  }
+  // Resolve/promote every operation before moving DOM, so an outer node includes
+  // its complete original content even when another field changed earlier.
+  operations.sort((a, b) => {
+    if ((a.oldNode && b.oldNode && a.oldNode !== b.oldNode && a.oldNode.contains(b.oldNode)) || (a.newNode && b.newNode && a.newNode !== b.newNode && a.newNode.contains(b.newNode))) return -1;
+    if ((a.oldNode && b.oldNode && a.oldNode !== b.oldNode && b.oldNode.contains(a.oldNode)) || (a.newNode && b.newNode && a.newNode !== b.newNode && b.newNode.contains(a.newNode))) return 1;
+    return 0;
+  });
+  for (const { oldNode, newNode, afterNextPath } of operations) {
+    if ([...handled].some(node => (oldNode && node.contains(oldNode)) || (newNode && node.contains(newNode)))) continue;
+    if (newNode && !after.contains(newNode)) continue;
+    if (oldNode) handled.add(oldNode);
+    if (newNode) handled.add(newNode);
+    if (oldNode && newNode) renderInlineReplacement(oldNode, newNode, beforeLabel, afterLabel);
+    else if (newNode) renderInlineSingle(newNode, "new", addedLabel);
+    else if (oldNode) renderInlineRemoval(oldNode, beforeNodes, afterNodes, plan.matches, after, deletedLabel, afterNextPath);
   }
 }
 
@@ -2286,8 +2306,8 @@ function diffGroups(root: HTMLElement): Map<string, HTMLElement> {
 
 function anchoredNodes(root: HTMLElement): Map<string, HTMLElement> {
   const nodes = new Map<string, HTMLElement>();
-  for (const node of root.querySelectorAll<HTMLElement>("[data-anchor]")) {
-    const path = node.dataset.anchor ?? "";
+  for (const node of [root, ...root.querySelectorAll<HTMLElement>("[data-anchor], [data-diff-path]")]) {
+    const path = node.dataset.diffPath ?? node.dataset.anchor ?? "";
     if (path && !nodes.has(path)) nodes.set(path, node);
   }
   return nodes;
@@ -2321,44 +2341,65 @@ function renderInlineSingle(node: HTMLElement, tone: "old" | "new", label: strin
   marker.replaceWith(diffLine(node, tone, label));
 }
 
-function renderInlineRemoval(oldSource: HTMLElement, path: string, beforeNodes: ReadonlyMap<string, HTMLElement>, afterNodes: ReadonlyMap<string, HTMLElement>, after: HTMLElement, label: string): void {
-  const beforePaths = [...beforeNodes.keys()];
-  const position = beforePaths.indexOf(path);
-  const followingPath = beforePaths.slice(position + 1).find(candidatePath => afterNodes.has(candidatePath));
-  const nearbyPath = followingPath ?? beforePaths.slice(0, Math.max(0, position)).reverse().find(candidatePath => afterNodes.has(candidatePath));
-  const nearby = nearbyPath ? afterNodes.get(nearbyPath) : undefined;
-  const oldList = oldSource.closest<HTMLElement>("ul.text-list");
-  const oldPanel = oldList?.parentElement;
-  const oldNode = textListItem(oldSource) ?? oldSource;
-  if (oldList && oldPanel) {
-    const block = el("section", `${oldPanel.className} memory-inline-removed`.trim());
-    const title = oldPanel.querySelector<HTMLElement>(":scope > .memory-block-title, :scope > .memory-collapsible-summary > .memory-block-title")?.cloneNode(true);
-    const list = document.createElement("ul"); list.className = "text-list";
-    const item = oldNode.tagName === "LI" ? oldNode : document.createElement("li");
-    if (item !== oldNode) item.append(oldNode);
-    decorateListDiff(item, "old", label);
-    list.append(item);
-    if (title) block.append(title);
-    block.append(list);
-    const nearbyBlock = nearby?.closest<HTMLElement>(".memory-list-block, .action-contracts, section");
-    if (nearbyBlock && followingPath) nearbyBlock.before(block);
-    else if (nearbyBlock) nearbyBlock.after(block);
-    else after.append(block);
-    return;
+function renderInlineRemoval(oldSource: HTMLElement, beforeNodes: ReadonlyMap<string, HTMLElement>, afterNodes: ReadonlyMap<string, HTMLElement>, matches: ReadonlyMap<string, string>, after: HTMLElement, label: string, afterNextPath?: string): void {
+  const source = textListItem(oldSource) ?? oldSource;
+  // Locate the smallest surviving parent, then its matched following sibling.
+  let parent: HTMLElement | null = source.parentElement;
+  let container: HTMLElement | undefined;
+  while (parent) {
+    const path = parent.dataset.diffPath;
+    const mapped = path ? matches.get(path) : undefined;
+    const candidate = mapped ? afterNodes.get(mapped) : undefined;
+    if (candidate && after.contains(candidate)) { container = candidate; break; }
+    parent = parent.parentElement;
   }
-  const pair = diffPair("memory-inline-removed");
-  pair.append(diffLine(oldNode, "old", label));
-  if (nearby?.parentElement) nearby.before(pair);
-  else after.append(pair);
+  if (!container) container = after;
+  if (container.matches(".memory-section")) container = container.querySelector<HTMLElement>(":scope > .memory-section-body") ?? container;
+  if (source.tagName === "LI" && container.matches("details")) container = container.querySelector<HTMLElement>("ul.text-list") ?? container;
+  const directChild = (node: HTMLElement): HTMLElement | undefined => {
+    let child = node;
+    while (child.parentElement && child.parentElement !== container) child = child.parentElement;
+    return child.parentElement === container ? child : undefined;
+  };
+  const paths = [...beforeNodes];
+  const firstIndex = paths.findIndex(([, node]) => node === oldSource || node === source);
+  const nextNode = afterNextPath ? afterNodes.get(afterNextPath) : undefined;
+  let following = nextNode ? directChild(nextNode) : undefined;
+  for (const [path, node] of paths.slice(firstIndex + 1)) {
+    if (following) break;
+    if (source.contains(node)) continue;
+    if (parent && !parent.contains(node)) break;
+    const mapped = matches.get(path), peer = mapped ? afterNodes.get(mapped) : undefined;
+    if (peer && after.contains(peer)) { following = directChild(peer); if (following) break; }
+  }
+  let preceding: HTMLElement | undefined;
+  if (!following) for (const [path, node] of paths.slice(0, firstIndex).reverse()) {
+    if (parent && !parent.contains(node)) break;
+    const mapped = matches.get(path), peer = mapped ? afterNodes.get(mapped) : undefined;
+    const existing = peer && after.contains(peer) ? peer : after.contains(node) ? node : undefined;
+    if (existing) { preceding = directChild(existing); if (preceding) break; }
+  }
+  const baseline = cleanDiffClone(source);
+  let removed: HTMLElement;
+  if (baseline.tagName === "LI" && container.matches("ul")) {
+    decorateListDiff(baseline, "old", label); removed = baseline;
+  } else {
+    removed = diffPair("memory-inline-removed"); removed.append(diffLine(baseline, "old", label));
+  }
+  removed.classList.add("memory-inline-removed");
+  if (following) following.before(removed); else if (preceding) preceding.after(removed); else container.append(removed);
 }
 
+/** The baseline renderer has no comment callbacks; retain its disclosure handlers. */
 function cleanDiffClone(source: HTMLElement): HTMLElement {
-  const clone = source.cloneNode(true) as HTMLElement;
-  clone.removeAttribute("data-anchor");
-  clone.querySelectorAll("[data-anchor]").forEach(node => node.removeAttribute("data-anchor"));
-  clone.querySelectorAll("button").forEach(node => node.remove());
-  clone.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
-  return clone;
+  for (const node of [source, ...source.querySelectorAll<HTMLElement>("[data-anchor]")]) {
+    if (node.dataset.anchor) node.dataset.baselineAnchor = node.dataset.anchor;
+    node.removeAttribute("data-anchor");
+  }
+  source.querySelectorAll(".memory-inline-plus").forEach(node => node.remove());
+  source.removeAttribute("id");
+  source.querySelectorAll("[id]").forEach(node => node.removeAttribute("id"));
+  return source;
 }
 
 function textListItem(node: HTMLElement): HTMLLIElement | undefined {
@@ -2371,6 +2412,7 @@ function diffPair(className = ""): HTMLDivElement {
 }
 
 function diffLine(node: HTMLElement, tone: "old" | "new", label: string): HTMLDivElement {
+  if (node.matches("details")) node.querySelectorAll("li").forEach(item => item.classList.add(`memory-inline-marker-${tone}`));
   const item = el("div", `memory-inline-diff-line memory-inline-${tone}`);
   const line = el("div", "memory-inline-diff-list-row");
   const content = el("div", "memory-inline-diff-content");
@@ -2385,68 +2427,6 @@ function decorateListDiff(node: HTMLElement, tone: "old" | "new", label: string)
   const line = diffLine(node, tone, label);
   node.classList.add("memory-inline-diff-item", `memory-inline-marker-${tone}`);
   node.append(line);
-}
-
-function scalarDiffEntries(before: unknown, after: unknown, path: string): ScalarDiffEntry[] {
-  if (Array.isArray(before) && Array.isArray(after)) {
-    if (before.every(isPrimitive) && after.every(isPrimitive)) return primitiveArrayDiff(before, after, path);
-    const result: ScalarDiffEntry[] = [];
-    const length = Math.max(before.length, after.length);
-    for (let index = 0; index < length; index += 1) {
-      const itemPath = `${path}[${index + 1}]`;
-      if (index >= before.length) result.push(...collectScalarDiffs(after[index], itemPath, "after"));
-      else if (index >= after.length) result.push(...collectScalarDiffs(before[index], itemPath, "before"));
-      else result.push(...scalarDiffEntries(before[index], after[index], itemPath));
-    }
-    return result;
-  }
-  if (isRecord(before) && isRecord(after)) {
-    const result: ScalarDiffEntry[] = [];
-    const ignored = new Set(["tag", "syntax", "effectiveRules"]);
-    for (const key of new Set([...Object.keys(before), ...Object.keys(after)])) {
-      if (ignored.has(key)) continue;
-      const childPath = `${path}.${key}`;
-      const inBefore = Object.prototype.hasOwnProperty.call(before, key);
-      const inAfter = Object.prototype.hasOwnProperty.call(after, key);
-      if (!inBefore) result.push(...collectScalarDiffs(after[key], childPath, "after"));
-      else if (!inAfter) result.push(...collectScalarDiffs(before[key], childPath, "before"));
-      else result.push(...scalarDiffEntries(before[key], after[key], childPath));
-    }
-    return result;
-  }
-  if (scalar(before) === scalar(after)) return [];
-  return [{ beforePath: path, afterPath: path }];
-}
-
-function primitiveArrayDiff(before: unknown[], after: unknown[], path: string): ScalarDiffEntry[] {
-  const rows = before.length + 1;
-  const columns = after.length + 1;
-  const table = Array.from({ length: rows }, () => Array<number>(columns).fill(0));
-  for (let left = before.length - 1; left >= 0; left -= 1) for (let right = after.length - 1; right >= 0; right -= 1) {
-    table[left]![right] = scalar(before[left]) === scalar(after[right])
-      ? 1 + table[left + 1]![right + 1]!
-      : Math.max(table[left + 1]![right]!, table[left]![right + 1]!);
-  }
-  const matches: Array<[number, number]> = [];
-  let left = 0; let right = 0;
-  while (left < before.length && right < after.length) {
-    if (scalar(before[left]) === scalar(after[right])) { matches.push([left, right]); left += 1; right += 1; }
-    else if (table[left + 1]![right]! >= table[left]![right + 1]!) left += 1;
-    else right += 1;
-  }
-  const result: ScalarDiffEntry[] = [];
-  let beforeStart = 0; let afterStart = 0;
-  for (const [beforeMatch, afterMatch] of [...matches, [before.length, after.length] as [number, number]]) {
-    const removed = Array.from({ length: beforeMatch - beforeStart }, (_, index) => beforeStart + index);
-    const added = Array.from({ length: afterMatch - afterStart }, (_, index) => afterStart + index);
-    const paired = Math.min(removed.length, added.length);
-    for (let index = 0; index < paired; index += 1) result.push({ beforePath: `${path}[${removed[index]! + 1}]`, afterPath: `${path}[${added[index]! + 1}]` });
-    for (const index of removed.slice(paired)) result.push({ beforePath: `${path}[${index + 1}]` });
-    for (const index of added.slice(paired)) result.push({ afterPath: `${path}[${index + 1}]` });
-    beforeStart = beforeMatch + 1;
-    afterStart = afterMatch + 1;
-  }
-  return result;
 }
 
 function collectScalarDiffs(value: unknown, path: string, side: "before" | "after"): ScalarDiffEntry[] {
@@ -2471,8 +2451,9 @@ function renderSchema(node: JsonRecord, depth: number, fallback: string, path: s
   for (const key of ["defines", "asserts", "suggests"] as const) appendStringList(body, key, array(node[key]), path, comment, t, options.ui);
   const fields = array(node.fields);
   if (fields.length) {
-    body.append(blockTitle(t("fields")));
+    const fieldBlock = el("div", "memory-structure-block"); fieldBlock.dataset.diffPath = `${path}.fields`;
     const children = el("div", "memory-child-stack");
+    fieldBlock.append(blockTitle(t("fields")), children);
     fields.forEach((field, index) => {
       const fieldPath = `${path}.fields[${index + 1}]`;
       if (typeof field === "string") children.append(renderSimpleSchemaField(field, fieldPath, t, comment));
@@ -2480,17 +2461,18 @@ function renderSchema(node: JsonRecord, depth: number, fallback: string, path: s
       else if (field && typeof field === "object" && (field as JsonRecord).tag === "!repeat") children.append(renderSchemaRepeat(field as JsonRecord, depth + 1, fieldPath, t, comment, options));
       else if (field && typeof field === "object") children.append(renderSchema(field as JsonRecord, depth + 1, t("schemas"), fieldPath, t, comment, options, openThroughDepth));
     });
-    body.append(children);
+    body.append(fieldBlock);
   }
   if (node.item && typeof node.item === "object") {
     body.append(blockTitle(t("item")), isReference(node.item) ? renderMemoryReference(node.item, options, t) : renderSchema(node.item as JsonRecord, depth + 1, t("item"), `${path}.item`, t, comment, options, openThroughDepth));
   }
   const items = array(node.items);
   if (items.length) {
-    body.append(blockTitle(t("items")));
+    const itemsBlock = el("div", "memory-structure-block"); itemsBlock.dataset.diffPath = `${path}.items`;
     const children = el("div", "memory-child-stack");
+    itemsBlock.append(blockTitle(t("items")), children);
     items.forEach((item, index) => { if (item && typeof item === "object") children.append(isReference(item) ? renderMemoryReference(item, options, t) : renderSchema(item, depth + 1, `${t("item")} ${index + 1}`, `${path}.items[${index + 1}]`, t, comment, options, openThroughDepth)); });
-    body.append(children);
+    body.append(itemsBlock);
   }
   return section;
 }
@@ -2500,7 +2482,7 @@ function renderSchemaRepeat(node: JsonRecord, depth: number, path: string, t: (k
   const badges = ["!repeat", `${t("min")}: ${String(limit.min ?? 0)}`, `${t("max")}: ${String(limit.max ?? t("unbounded"))}`];
   const section = nodeSection(t("repeat"), path, node, comment, badges, depth < 2);
   const body = sectionBody(section);
-  const children = el("div", "memory-child-stack");
+  const children = el("div", "memory-child-stack"); children.dataset.diffPath = `${path}.body`;
   array(node.body).forEach((field, index) => {
     const fieldPath = `${path}.body[${index + 1}]`;
     if (typeof field === "string") children.append(renderSimpleSchemaField(field, fieldPath, t, comment));
@@ -2530,6 +2512,7 @@ function renderStatement(node: JsonRecord, depth: number, fallback: string, path
   const sections = array(node.sections);
   if (sections.length) {
     const { block, body: sectionsBody } = collapsibleList(t("sections"), sections.length, "memory-sections-block", options.ui);
+    block.dataset.diffPath = `${path}.sections`;
     const children = el("div", "memory-child-stack");
     sections.forEach((child, index) => { if (child && typeof child === "object") children.append(renderStatement(child as JsonRecord, depth + 1, t("statements"), `${path}.sections[${index + 1}]`, t, comment, options)); });
     sectionsBody.append(children);
@@ -2539,7 +2522,7 @@ function renderStatement(node: JsonRecord, depth: number, fallback: string, path
 }
 
 function renderProcedure(node: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): HTMLElement {
-  const document = el("div", "memory-document mem-content-document");
+  const document = el("div", "memory-document mem-content-document"); document.dataset.diffPath = path;
   appendStringList(document, "names", array(node.names), path, comment, t, options.ui);
   for (const key of ["defines", "goals"] as const) appendStringList(document, key, array(node[key]), path, comment, t, options.ui);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, t, comment, options);
@@ -2547,7 +2530,16 @@ function renderProcedure(node: JsonRecord, path: string, t: (key: string) => str
   if (steps.length) {
     const flowTitle = blockTitle(t("flow")); flowTitle.classList.add("mem-content-flow-title"); document.append(flowTitle);
     const models = steps.map((step, index) => normalizeMemoryFlowNode(step, `${path}.flow[${index + 1}]`));
-    document.append(renderContentFlow(models, memoryFlowHooks(t, comment, options)));
+    const flow = renderContentFlow(models, memoryFlowHooks(t, comment, options));
+    flow.dataset.diffPath = `${path}.flow`;
+    for (const item of flow.querySelectorAll<HTMLElement>("[data-flow-node-path]")) {
+      item.dataset.diffPath = item.dataset.flowNodePath;
+      for (const branch of item.querySelectorAll<HTMLElement>(":scope > [data-flow-branch]")) {
+        const children = branch.querySelector<HTMLElement>(":scope > .memory-flow-children");
+        if (children) children.dataset.diffPath = `${item.dataset.flowNodePath}.${branch.dataset.flowBranch}`;
+      }
+    }
+    document.append(flow);
   }
   return document;
 }
@@ -2574,13 +2566,15 @@ function normalizeMemoryFlowNode(value: unknown, path: string): ContentFlowNode<
   };
 }
 
+function flowContentPath(node: ContentFlowNode<JsonRecord>): string { return `${node.path}${node.content === node.source ? "" : ".condition"}`; }
+
 function memoryFlowHooks(t: (key: string) => string, comment?: CommentCallback, options: RenderOptions = {}): ContentFlowHooks<JsonRecord> {
   return {
     ui: options.ui,
     labels: { step: t("step"), if: t("if"), while: t("while"), call: t("call"), else: t("else") },
-    renderAction: node => commentable(el("span", "memory-flow-action mem-content-flow-action", node.action), `${node.path}.action`, node.action, comment),
+    renderAction: node => commentable(el("span", "memory-flow-action mem-content-flow-action", node.action), `${flowContentPath(node)}.action`, node.action, comment),
     renderCallTarget: node => renderMemoryReference({ tag: "!ref", target: node.target ?? "" }, options, t),
-    renderMeta: node => renderArtifactMeta(node.content, node.path, t, comment),
+    renderMeta: node => renderArtifactMeta(node.content, flowContentPath(node), t, comment),
     decorateHead: (head, node) => {
       if (node.kind === "call") commentable(head, node.path, node.source, comment);
       else if (node.content.actor === "human") {
@@ -2597,12 +2591,12 @@ function memoryFlowHooks(t: (key: string) => string, comment?: CommentCallback, 
     },
     renderBody: node => {
       const holder = el("div");
-      for (const key of ["asserts", "suggests"] as const) appendRuleList(holder, key, array(node.content[key]), node.content.effectiveRules as JsonRecord | undefined, node.path, t, comment, options, "action-contracts");
+      for (const key of ["asserts", "suggests"] as const) appendRuleList(holder, key, array(node.content[key]), node.content.effectiveRules as JsonRecord | undefined, flowContentPath(node), t, comment, options, "action-contracts");
       const artifact = artifactContract(node.content);
       if (artifact.schema && typeof artifact.schema === "object") {
         if (isReference(artifact.schema)) holder.append(renderMemoryReference(artifact.schema, options, t));
         else {
-          const schema = renderSchema(artifact.schema as JsonRecord, 1, t("inlineSchema"), `${node.path}.artifact.schema`, t, comment, options, 2);
+          const schema = renderSchema(artifact.schema as JsonRecord, 1, t("inlineSchema"), `${flowContentPath(node)}.artifact.schema`, t, comment, options, 2);
           schema.classList.remove("open");
           schema.classList.add("memory-artifact-schema");
           holder.append(schema);
@@ -2615,7 +2609,7 @@ function memoryFlowHooks(t: (key: string) => string, comment?: CommentCallback, 
 
 function renderArtifactMeta(step: JsonRecord, path: string, t: (key: string) => string, comment?: CommentCallback): HTMLElement {
   const row = el("div", "memory-artifact-row mem-content-artifact-contract");
-  row.dataset.diffGroup = `${path}.artifact`;
+  row.dataset.diffGroup = `${path}.artifact`; row.dataset.diffPath = `${path}.artifact`;
   const artifact = artifactContract(step);
   const name = String(artifact.name ?? "");
   const artifactSummary = el("span", "memory-artifact-summary mem-content-artifact-summary");
@@ -2671,7 +2665,7 @@ function renderGeneric(node: JsonRecord, path: string, t: (key: string) => strin
 
 type CommentCallback = (target: string, snapshot: string, location: unknown) => void;
 function nodeSection(title: string, path: string, snapshot: unknown, comment?: CommentCallback, badges: string[] = [], open = true): HTMLElement {
-  const section = el("section", `memory-section memory-node memory-commentable${open ? " open" : ""}`); section.dataset.anchor = path;
+  const section = el("section", `memory-section memory-node memory-commentable${open ? " open" : ""}`); section.dataset.anchor = path; section.dataset.diffPath = path;
   const header = button("", "memory-section-header", () => { section.classList.toggle("open"); section.dispatchEvent(new CustomEvent("memory-disclosure-change", { bubbles: true })); });
   header.append(el("span", "memory-chevron", "›"), el("span", "memory-node-title", title));
   const badgeWrap = el("span", "node-badges"); badges.filter(Boolean).forEach(value => badgeWrap.append(el("span", "memory-pill", value))); header.append(badgeWrap);
@@ -2759,11 +2753,12 @@ function appendRuleList(
 ): void {
   if (!values.length) return;
   const { block: panel, body } = collapsibleList(translatedKey(key, t), values.length, `memory-list-block ${className}`.trim(), options.ui);
+  panel.dataset.diffPath = `${path}.${key}`;
   const list = createContentList();
   const effective = array(effectiveRules?.[key]);
   values.forEach((value, index) => {
     const item = document.createElement("li");
-    const targetPath = `${path}.${key}[${index + 1}]`;
+    const targetPath = `${path}.${key}[${index + 1}]`; item.dataset.diffPath = targetPath;
     if (isReference(value)) {
       const target = String(value.target ?? "");
       const projection = effective.find(entry => entry && typeof entry === "object" && String(entry.reference ?? entry.target ?? "") === target) as JsonRecord | undefined;
@@ -2840,9 +2835,10 @@ function appendEffectiveRules(parent: HTMLElement, node: JsonRecord, channel: "a
 function appendStringList(parent: HTMLElement, key: string, values: unknown[], path: string, comment?: CommentCallback, t: (key: string) => string = value => value, ui?: ViewUi): void {
   if (!values.length) return;
   const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block", ui);
+  block.dataset.diffPath = `${path}.${key}`;
   const list = createContentList();
   values.forEach((value, index) => {
-    const li = document.createElement("li");
+    const li = document.createElement("li"); li.dataset.diffPath = `${path}.${key}[${index + 1}]`;
     const body = el("span", "commentable-body", scalar(value));
     li.append(commentable(body, `${path}.${key}[${index + 1}]`, value, comment));
     list.append(li);
