@@ -69,6 +69,9 @@ Memory 详情画布、Procedure 流程、字段列表，以及 Run 画布、流�
 
 官方实现以 priority `1000` 注册。较小 priority 的用户候选可以 shadow；设置表为每个 single/keyed Slot 选择一个候选，为 list Slot 选择多个候选。显式设置后，未选 contribution 在注册阶段被安全忽略；失败候选标为 abdicated 并自动回退。
 
+
+Memory 的 page.presentation 同时负责普通记忆与 ChangeSet 详情，Run 的 page.presentation 负责 Run 详情；各自组织详情区内的内容和画布排列，列表与头部仍有独立 Shell Slot。官方实现复用一套内部基础布局，不增加 Slot。`styles.global@1` 可通过 `[data-mem-page-layout]` 一次覆盖三个页面的公共样式，`--mem-page-layout-inset` 控制留白和意见栏偏移。既有内容组件仍只负责内部内容；第三方整页展示可以自行组织布局。
+
 ## 当前实现状态
 
 当前 SDK 与 ViewHost 已接线本 Catalog 的全部 14 个根 Slot。Core 通过 Host 内置 Plugin 提供 Home、账户等 Shell 内容；内置 Module 通过同一公开 Slot Tree 贡献主导航、二级导航、对象列表、按需右侧栏、Header、Page、搜索 Provider 与 Home 聚合项。Shell 使用可拖动且持久化的二级导航栏和内容列表栏；Run 普通页面不轮询，Artifact Review 由 Run Module 注册到 `overlay`，Host 负责背景 Route、遮罩、焦点、关闭、清理与局部故障边界。

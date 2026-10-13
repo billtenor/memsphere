@@ -286,6 +286,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     assert.equal(collapsedMainWidth > 960, true);
     const collapsedGeometry = await page.locator(".memory-change-main").evaluate(node => {
       const main = node.getBoundingClientRect();
+      const workspace = node.closest(".memory-change-workspace")!.getBoundingClientRect();
       const root = document.querySelector("#memsphere-view-root")!.getBoundingClientRect();
       const toolbar = node.querySelector(".memory-change-viewbar")!.getBoundingClientRect();
       const children = [...node.querySelector(".memory-change-viewbar")!.children].map(child => child.getBoundingClientRect());
@@ -297,6 +298,8 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
         return Math.abs((box.left + box.right) / 2 - (label.left + label.right) / 2);
       });
       return {
+        leftGutter: main.left - workspace.left,
+        rightGutter: workspace.right - main.right,
         mainCenterDelta: Math.abs((main.left + main.right) / 2 - (root.left + root.right) / 2),
         toolbarCenterDelta: Math.abs((groupLeft + groupRight) / 2 - (toolbar.left + toolbar.right) / 2),
         segmentTextDeltas,
@@ -305,6 +308,8 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
       };
     });
     assert.equal(collapsedGeometry.mainCenterDelta < 14, true);
+    assert.equal(collapsedGeometry.rightGutter > 0, true, "collapsed comments retain a right gutter");
+    assert.equal(Math.abs(collapsedGeometry.leftGutter - collapsedGeometry.rightGutter) < 1, true, "collapsed content has symmetric gutters");
     assert.equal(collapsedGeometry.toolbarCenterDelta < 2, true);
     assert.equal(collapsedGeometry.segmentTextDeltas.every(delta => delta < 2), true);
     assert.equal(collapsedGeometry.overflowsRoot, false);

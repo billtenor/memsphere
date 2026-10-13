@@ -25,6 +25,7 @@ import {
   type ContentFlowHooks,
   type ContentFlowNode
 } from "../../../shared/view/content-flow.js";
+import { createPageLayout, pageLayoutStyles } from "../../../shared/view/page-layout.js";
 import { defaultContentStyles } from "../../../shared/view/default-content-styles.js";
 
 import { memoryDiffPlan, type MemoryDiffEntry, type MemoryDiffPlan } from "./memory-diff.js";
@@ -234,7 +235,6 @@ const memoryStyles = `
     --memory-page-space-line:8px;
     --memory-page-space-section:16px;
     --memory-page-space-card:16px;
-    --memory-page-padding:24px;
     --memory-page-card-padding:20px;
     --memory-page-radius-card:12px;
     --memory-page-radius-section:8px;
@@ -269,8 +269,7 @@ const memoryStyles = `
   .memory-options { margin-top:16px; padding-top:12px; border-top:1px solid var(--line); }
   .memory-change-wrap > .memory-options { margin-top:0; padding-top:0; border-top:0; }
   .memory-option { display:flex; align-items:center; gap:8px; color:var(--muted); }
-  .memory-workspace { min-width:0; max-width:972px; margin:0 auto; padding:var(--memory-page-padding) var(--memory-page-padding) 48px; font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
-  .memory-workspace.memory-change-workspace { max-width:none; margin:0; padding-right:0; }
+  .memory-workspace { font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-toolbar { align-items:flex-start; justify-content:flex-start; margin:0 0 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface); padding:19px 20px; box-shadow:0 1px 2px rgba(20,47,42,.025); }
   .memory-toolbar-icon { display:grid; width:46px; height:46px; flex:0 0 auto; place-items:center; border-radius:13px; background:var(--accent-soft); }
   .memory-toolbar-icon img { width:26px; height:26px; filter:invert(37%) sepia(18%) saturate(1485%) hue-rotate(123deg) brightness(89%) contrast(86%); }
@@ -285,7 +284,7 @@ const memoryStyles = `
   .memory-panel>h3 { margin:0 0 var(--memory-page-space-section); font-size:var(--memory-page-text-card-title); line-height:var(--memory-page-line-compact); }
   .memory-panel p,.memory-panel li { font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-meta { display:flex; flex-wrap:wrap; gap:6px; margin:8px 0 12px; }
-  .memory-pill { display:inline-flex; border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--muted); padding:2px 8px; font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
+  .memory-pill { display:inline-flex; min-width:0; max-width:100%; overflow-wrap:anywhere; border:1px solid var(--line); border-radius:999px; background:var(--soft); color:var(--muted); padding:2px 8px; font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
   .memory-flow-actor { display:inline-flex; flex:none; align-items:center; gap:5px; padding-top:2px; white-space:nowrap; }
   .memory-flow-meta { display:flex; align-items:baseline; flex-wrap:wrap; gap:12px; min-width:0; margin-left:auto; }
   .memory-flow-meta .memory-artifact-row { margin-left:0; }
@@ -359,7 +358,7 @@ const memoryStyles = `
   .memory-commentable.has-comment-draft .memory-inline-plus { display:none; }
   .memory-change-layout { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) minmax(220px,260px); gap:14px; align-items:start; }
   .memory-change-main { width:100%; min-width:0; justify-self:stretch; }
-  .memory-diff-toolbar { display:inline-grid; grid-template-columns:repeat(2,minmax(84px,1fr)); gap:3px; margin:2px 0 14px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
+  .memory-diff-toolbar { display:inline-grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin:2px 0 14px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
   .memory-change-viewbar { display:flex; min-width:0; align-items:center; justify-content:center; gap:14px; margin:0 0 12px; flex-wrap:wrap; }
   .memory-change-viewbar .memory-diff-toolbar { flex:0 0 auto; margin:0; }
   .memory-change-revisions { display:flex; min-width:0; align-items:center; justify-content:center; gap:9px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
@@ -401,7 +400,7 @@ const memoryStyles = `
   .memory-change-layout.comments-collapsed { display:block; }
   .memory-change-layout.comments-collapsed .memory-change-main { width:100%; }
   .memory-change-layout.comments-collapsed .memory-comments { display:none; }
-  .memory-comments { position:sticky; top:calc(-1 * var(--memory-page-padding)); display:grid; grid-template-rows:auto minmax(140px,1fr) auto; height:calc(100vh - 100px); max-height:calc(100vh - 100px); margin:calc(-1 * var(--memory-page-padding)) 0 0; overflow:hidden; border-width:0 0 0 1px; border-radius:0; background:var(--mem-view-color-subtle); padding:0; box-shadow:none; }
+  .memory-comments { position:sticky; top:calc(-1 * var(--mem-page-layout-inset)); display:grid; grid-template-rows:auto minmax(140px,1fr) auto; height:calc(100vh - 100px); max-height:calc(100vh - 100px); margin:calc(-1 * var(--mem-page-layout-inset)) 0 0; overflow:hidden; border-width:0 0 0 1px; border-radius:0; background:var(--mem-view-color-subtle); padding:0; box-shadow:none; }
   .memory-comments-header { display:flex; min-height:54px; align-items:center; justify-content:space-between; gap:10px; border-bottom:1px solid var(--line); padding:13px 15px; }
   .memory-comments-title { display:flex; align-items:center; gap:8px; }
   .memory-comments-title h3 { margin:0; font-size:var(--memory-page-text-section-title); line-height:var(--memory-page-line-compact); }
@@ -420,7 +419,18 @@ const memoryStyles = `
   .memory-comment-target:hover { color:var(--accent); text-decoration:underline; text-underline-offset:2px; }
   .memory-comment-body { margin:8px 0 0; color:var(--text); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-comment-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:9px; padding-top:8px; border-top:1px solid var(--mem-view-color-border); }
-  @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-workspace,.memory-workspace.memory-change-workspace{padding:16px 14px 36px}.memory-change-layout{display:block}.memory-change-main{width:auto}.memory-change-viewbar{align-items:flex-start;flex-direction:column}.memory-comments{position:static;top:auto;height:auto;max-height:none;margin:14px 0 0;border:1px solid var(--line);border-radius:var(--memory-page-radius-section)}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
+  @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-change-layout{display:block}.memory-change-main{width:auto}.memory-change-viewbar{align-items:flex-start;flex-direction:column}.memory-comments{position:static;top:auto;height:auto;max-height:none;margin:14px 0 0;border:1px solid var(--line);border-radius:var(--memory-page-radius-section)}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
+  @container mem-page-layout (max-width:560px) {
+    .memory-change-layout { display:block; }
+    .memory-panel { padding:12px; }
+    .memory-change-viewbar .memory-diff-toolbar { flex:0 1 auto; }
+    .memory-review-complete { flex-direction:column; align-items:stretch; }
+    .memory-review-complete .mem-view-button { white-space:normal; }
+    .memory-collapsible-list>summary { min-width:0; flex-wrap:wrap; }
+
+    .memory-change-viewbar { align-items:flex-start; flex-direction:column; }
+    .memory-comments { position:static; top:auto; height:auto; max-height:none; margin:14px 0 0; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); }
+  }
 `;
 
 export default defineViewPlugin<MemoryConfig>({
@@ -825,7 +835,7 @@ function createMemoryPageMounts(
     async mount({ element, portal: mountPortal }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
-      style.textContent = memoryStyles + contentFlowStyles + defaultContentStyles;
+      style.textContent = memoryStyles + contentFlowStyles + defaultContentStyles + pageLayoutStyles;
       element.append(style);
       element.classList.add("memory-surface", `memory-${surface}-surface`);
       await ensure(context.route);
@@ -1664,7 +1674,7 @@ class MemoryApplication {
 
   private renderWorkspace(): HTMLElement {
     const route = parseLocation(this.#location);
-    const main = el("main", `memory-workspace${route.kind === "change" ? " memory-change-workspace" : ""}`);
+    const main = createPageLayout(`memory-workspace${route.kind === "change" ? " memory-change-workspace" : ""}`);
     if (route.kind === "market") main.append(this.renderMarketDetail());
     else if (route.kind === "change" || this.#location.query.section === "changes") main.append(this.renderChangeDetail());
     else main.append(this.renderMemoryDetail());
@@ -1749,6 +1759,7 @@ class MemoryApplication {
     }
     if (array(change.issues).length) workspace.append(renderIssues(array(change.issues), this.t("change.validationDiagnostics")));
     const layout = el("div", `memory-change-layout${this.#commentsCollapsed ? " comments-collapsed" : ""}`);
+    if (!this.#commentsCollapsed) layout.dataset.memPageLayoutEdge = "";
     const main = el("div", "memory-change-main");
     const selected = this.#memories.find(memory => memory.id === this.#selectedId);
     if (selected) {
@@ -2109,7 +2120,7 @@ class MemoryApplication {
     this.#onListChange();
     if (this.#detailRoot) { this.render(); return; }
     this.#root.querySelector(".memory-module")?.remove();
-    const app = el("section", "memory-module memory-workspace");
+    const app = createPageLayout("memory-module memory-workspace");
     const panel = errorWorkspace(this.t("fatal.title"), errorMessage(error)); panel.append(this.#ui.button({ label: text(this.t("common.retry")), run: retry })); app.append(panel); this.#root.append(app);
   }
 
