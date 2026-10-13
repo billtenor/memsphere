@@ -393,12 +393,13 @@ function findPlanDescriptor(
 }
 
 export async function applyEmbeddedSystemMemoryRepair(
-  prepared: EmbeddedSystemMemoryRepairPreparation
+  prepared: EmbeddedSystemMemoryRepairPreparation,
+  options: { afterApply?: () => Promise<void> } = {}
 ): Promise<SystemMemoryRepairResult> {
   try {
     return await withSelectedProject(prepared.project, async () => {
       const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-      return withProjectLock(context.home, prepared.project, () => applySelectedEmbeddedSystemMemoryRepair(context, prepared));
+      return withProjectLock(context.home, prepared.project, () => applySelectedEmbeddedSystemMemoryRepair(context, prepared, options));
     });
   } catch (error) {
     await rm(prepared.stagingRoot, { recursive: true, force: true }).catch(() => undefined);
@@ -408,7 +409,8 @@ export async function applyEmbeddedSystemMemoryRepair(
 
 async function applySelectedEmbeddedSystemMemoryRepair(
   context: Awaited<ReturnType<typeof resolveProjectContext>>,
-  prepared: EmbeddedSystemMemoryRepairPreparation
+  prepared: EmbeddedSystemMemoryRepairPreparation,
+  options: { afterApply?: () => Promise<void> } = {}
 ): Promise<SystemMemoryRepairResult> {
   try {
     if (context.primary.config.store.type !== "embedded") {
@@ -434,6 +436,9 @@ async function applySelectedEmbeddedSystemMemoryRepair(
         const issue = validation.issues[0]!;
         throw new Error(`Embedded System Memory repair post-write validation failed: ${issue.path}: ${issue.message}`);
       }
+      // Record persistence belongs to the same rollback boundary as the file writes.
+      // A failure must leave either an auditable upgrade record or the original tree.
+      await options.afterApply?.();
     } catch (error) {
       const rollbackErrors: unknown[] = [];
       for (const target of applied.reverse()) {
@@ -1130,4 +1135,23 @@ export async function projectModelsInitializeCommand(nameInput?: string, options
   });
   if (options.output === "json") console.log(JSON.stringify(result, null, 2));
   else console.log(`Model registrations initialized: ${JSON.stringify(result)}`);
+}
+
+/** Return only bundled System Memory differences, without writing a candidate. */
+export async function readSystemMemoryUpgradeTargets(projectName?: string) {
+  return withSelectedProject(projectName, async () => {
+    const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+    if (context.primary.config.store.type === "managed") await assertManagedProjectHealthy(context.primary);
+    const plan = await buildSystemMemoryReconcilePlan({
+      project: context.primary.name, sourceRoot: bundledReservedMemoryRoot(), memoryRoot: context.primary.memoryRoot,
+      currentDescriptors: context.primary.config.store.type === "managed"
+        ? await listPublishedMemoryIdentities(context.primary.memoryRoot, context.primary.config.store.published_revision)
+        : await listWorkingMemoryIdentities(context.primary.memoryRoot)
+    });
+    const targets: Array<{ reference: string; path: string; operation: "create" | "update" | "delete"; content?: string }> = [];
+    for (const descriptor of plan.creates) targets.push({ reference: descriptor.reference, path: descriptor.path, operation: "create", content: await readFile(descriptor.sourcePath, "utf8") });
+    for (const descriptor of plan.updates) targets.push({ reference: descriptor.reference, path: descriptor.targetPath, operation: "update", content: await readFile(descriptor.sourcePath, "utf8") });
+    for (const descriptor of plan.deletes) targets.push({ reference: memoryReference(descriptor), path: descriptor.id, operation: "delete" });
+    return { targets, created: plan.creates.length, updated: plan.updates.length, deleted: plan.deletes.length };
+  });
 }

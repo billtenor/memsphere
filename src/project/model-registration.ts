@@ -11,6 +11,7 @@ import { DefaultDataManager } from "../data/management/data-manager.js";
 import { DefaultDataExtensionRegistry } from "../data/management/extension-registry.js";
 import { atomicWriteJson } from "../persistence.js";
 import { commitModelOperation, optionalFileBytes, recoverModelOperation, withProjectModelWrite, type ModelFileChange } from "./model-operation.js";
+import type { ModelRuntime } from "../data/api/model-runtime.js";
 import { checkModelDefinition } from "./model-validation.js";
 import { discoverModelIds, assertModelPath } from "./model-storage-paths.js";
 import { RAW_MODEL } from "../data/extensions/raw/index.js";
@@ -375,8 +376,23 @@ export type ModelInitializationOptions = {
   afterSystemInstall?: () => Promise<void>;
   afterRegistrations?: () => Promise<void>;
 };
+export type ModelInitializationResult = {
+  created: number; retained: number; diagnostics: RegistrationDiagnostic[]; config: ModelRegistrationConfig;
+  system: { status: "installed" | "unchanged"; created: number; retained: number };
+};
+export type ModelUpgradeResult = Omit<ModelInitializationResult, "system"> & {
+  changed: boolean; updated: number;
+  system: { status: "installed" | "upgraded" | "unchanged"; created: number; updated: number; retained: number };
+};
 /** Caller owns Project settings lock (or an unpublished Project staging root). */
 export async function initializeProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions = {}) {
+  return await planProjectModelRegistrations(context, input, options, false) as ModelInitializationResult;
+}
+/** Caller owns the Project settings lock, just as for initialize. Never changes business values. */
+export async function upgradeProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions = {}) {
+  return await planProjectModelRegistrations(context, input, options, true) as ModelUpgradeResult;
+}
+async function planProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions, upgrading: boolean) {
   await recoverModelOperation(input.root);
   const paths = await validateModelStoragePaths(input);
   const root = paths.registrationDirectory;
@@ -387,7 +403,11 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
   const jsonBytes = (value: unknown) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
   const put = async (path: string, after: Buffer) => {
     const before = await optionalFileBytes(path);
-    if (!before?.equals(after)) changes.push({ path, before, after });
+    if (!before?.equals(after)) {
+      const prior = changes.findIndex(change => change.path === path);
+      if (prior >= 0) changes[prior] = { path, before, after };
+      else changes.push({ path, before, after });
+    }
   };
   const publicationPath = join(root, "published-imports.json");
   const publicationBytes = await optionalFileBytes(publicationPath);
@@ -421,14 +441,54 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
   const bundled = readBundledSystemModels();
   const installed = await pathExists(systemRoot);
   let systemCreated = 0;
+  const systemUpdated = new Set<string>();
+  const candidateRuntimes = new Map<string, ModelRuntime>();
+  const allowedDefinitions = new Set<string>();
+  if (upgrading) {
+    const { appDataComposition, appProjectFromRoot } = await import("../app/composition.js");
+    const apps = await appDataComposition(await appProjectFromRoot(input.root, input.memoryRoot), input.enableApp);
+    for (const model of bundled) if (apps.models.has(model.registration.modelRef))
+      throw new TypeError(`System model identity conflict: ${model.registration.modelRef}`);
+  }
   for (const model of bundled) {
-    await checkModelDefinition(context, { modelRef: model.registration.modelRef, ...model });
+    const checked = await checkModelDefinition(context, { modelRef: model.registration.modelRef, ...model });
+    candidateRuntimes.set(model.registration.modelRef, checked.runtime!);
     const raw = model.metaModel === RAW_MODEL;
     const definitionPath = join(systemRoot, "definitions", raw ? "raw" : "json-schema/draft-07", model.registration.modelRef);
+    allowedDefinitions.add(definitionPath);
     const saved = await optionalFileBytes(definitionPath);
     const existing = records.find(record => record.registration.modelRef === model.registration.modelRef);
     if (existing && existing.origin !== "system") throw new TypeError(`System model identity conflict: ${model.registration.modelRef}`);
-    if (installed) {
+    if (upgrading) {
+      if (existing && (existing.registration.storage !== "store" || existing.registration.store_id !== model.registration.store_id))
+        throw new TypeError(`Installed system model binding conflicts: ${model.registration.modelRef}`);
+      if (saved) {
+        // A damaged old resource is not a license to overwrite it. Definition-only validation
+        // permits a legitimate former Runtime feature to be removed by the current bundle.
+        const source = saved.toString("utf8");
+        const definition = JSON.parse(source.replace(/^\uFEFF/, ""));
+        await checkModelDefinition(context, { modelRef: model.registration.modelRef, metaModel: model.metaModel, source, definition }, "definition");
+      }
+      if (!saved?.equals(Buffer.from(model.source))) {
+        await put(definitionPath, Buffer.from(model.source));
+        if (saved && existing) systemUpdated.add(model.registration.modelRef);
+      }
+      if (existing) {
+        const envelope = JSON.parse((await readFile(existing.path)).toString("utf8")) as { revision: number; value: ModelRegistration };
+        if (!isDeepStrictEqual(envelope.value, model.registration)) {
+          if (envelope.revision === Number.MAX_SAFE_INTEGER) throw new TypeError(`Revision overflow: ${existing.path}`);
+          await put(existing.path, jsonBytes({ ...envelope, revision: envelope.revision + 1, updatedAt: Date.now(), value: model.registration }));
+          existing.registration = structuredClone(model.registration);
+          if (saved) systemUpdated.add(model.registration.modelRef);
+        }
+      } else {
+        const id = randomUUID();
+        const path = join(systemRoot, "registrations", `${id}.json`);
+        await put(path, jsonBytes({ id, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: model.registration }));
+        records.push({ id, path, registration: structuredClone(model.registration), origin: "system" });
+      }
+      if (!existing || !saved) systemCreated++;
+    } else if (installed) {
       if (!existing || !saved) throw new TypeError(`Installed system model is missing: ${model.registration.modelRef}`);
       const definition = JSON.parse(saved.toString("utf8").replace(/^\uFEFF/, ""));
       const upgradeIdentityFields = (value: unknown): void => {
@@ -450,7 +510,10 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
       systemCreated++;
     }
   }
-  if (records.filter(record => record.origin === "system").length !== (installed ? bundled.length : 0)) throw new TypeError("Unexpected system model registrations");
+  if (records.filter(record => record.origin === "system").length !== (upgrading || installed ? bundled.length : 0)) throw new TypeError("Unexpected system model registrations");
+  if (upgrading) for (const [filename] of await treeBytes(join(systemRoot, "definitions"))) {
+    if (!allowedDefinitions.has(join(systemRoot, "definitions", filename))) throw new TypeError(`Unexpected system model definition: ${filename}`);
+  }
   const systemEnd = changes.length;
   let created = 0, retained = 0;
   for (const [directory, origin, storeId] of [[paths.modelsDirectory, "project", "models/json-schema/draft-07"], [join(root, "imported-definitions"), "market", IMPORTED_MODEL_DEFINITIONS_STORE]] as const) {
@@ -474,7 +537,9 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
         if (seed && createHash("sha256").update(JSON.stringify(definition)).digest("hex") === seed.hash) Object.assign(registration, structuredClone(seed.registration));
         validateModelRegistration(registration);
         const recordId = randomUUID();
-        await put(join(root, "project", `${recordId}.json`), jsonBytes({ id: recordId, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: registration }));
+        const path = join(root, "project", `${recordId}.json`);
+        await put(path, jsonBytes({ id: recordId, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: registration }));
+        if (upgrading) records.push({ id: recordId, path, registration, origin });
         created++;
       }
     }
@@ -497,8 +562,9 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
     }
     if (!isDeepStrictEqual(next, options.config.value)) await put(options.config.path, jsonBytes(next));
   }
+  if (upgrading) await validateUpgradeCandidate(context, input, options, records, changes, candidateRuntimes);
   let systemHookCalled = false;
-  await commitModelOperation(input.root, "initialize", changes, {
+  await commitModelOperation(input.root, upgrading ? "upgrade" : "initialize", changes, {
     afterPending: async () => { if (systemEnd === 0) { await options.afterSystemInstall?.(); systemHookCalled = true; } },
     afterFile: async index => {
       if (index + 1 === systemEnd && !systemHookCalled) { await options.afterSystemInstall?.(); systemHookCalled = true; }
@@ -506,6 +572,103 @@ export async function initializeProjectModelRegistrations(context: Context, inpu
     }
   });
   if (!changes.length) { await options.afterSystemInstall?.(); await options.afterRegistrations?.(); }
-  return { created, retained, diagnostics: [], config,
+  if (upgrading) {
+    const { createProjectModelHost } = await import("./models.js");
+    const host = await createProjectModelHost(context, input);
+    if (host.diagnostics.length) throw new TypeError(`Upgraded model registrations invalid: ${host.diagnostics.map(item => item.message).join(", ")}`);
+    for (const model of bundled) await host.definition(model.registration.modelRef);
+  }
+  if (!upgrading) return { created, retained, diagnostics: [], config,
     system: { status: installed ? "unchanged" as const : "installed" as const, created: systemCreated, retained: installed ? bundled.length : 0 } };
+  return { created, retained, diagnostics: [], config, changed: changes.length > 0,
+    updated: changes.filter(change => change.before !== undefined).length,
+    system: { status: !installed ? "installed" as const : systemCreated || systemUpdated.size ? "upgraded" as const : "unchanged" as const,
+      created: systemCreated, updated: systemUpdated.size, retained: bundled.length - systemCreated - systemUpdated.size } };
+}
+
+/** Validate the planned view before publishing any model or registration bytes. */
+async function validateUpgradeCandidate(context: Context, input: ProjectModelInput, options: ModelInitializationOptions,
+  records: Array<{ id: string; registration: ModelRegistration; origin: ModelOrigin; path: string }>,
+  changes: ModelFileChange[], runtimes: Map<string, ModelRuntime>) {
+  const candidateBytes = async (path: string) => changes.find(change => change.path === path)?.after ?? await optionalFileBytes(path);
+  const registrationRuntime = runtimes.get(MODEL_REGISTRATION_MODEL)!;
+  for (const record of records) {
+    const bytes = await candidateBytes(record.path);
+    if (!bytes) throw new TypeError(`Missing model registration: ${record.id}`);
+    const envelope = JSON.parse(bytes.toString("utf8"));
+    assertRecord(envelope, record.id);
+    registrationRuntime.reflect(envelope.value);
+    validateModelRegistration(envelope.value);
+  }
+  const paths = await validateModelStoragePaths(input);
+  const runtimeFor = async (ref: string): Promise<ModelRuntime> => {
+    const system = runtimes.get(ref);
+    if (system) return system;
+    const registration = records.find(record => record.registration.modelRef === ref);
+    if (!registration || registration.origin === "system") throw new TypeError(`Store model binding not found: ${ref}`);
+    const directory = registration.origin === "market" ? join(paths.registrationDirectory, "imported-definitions") : paths.modelsDirectory;
+    const expectedStore = registration.origin === "market" ? IMPORTED_MODEL_DEFINITIONS_STORE : "models/json-schema/draft-07";
+    if (registration.registration.storage !== "store" || registration.registration.store_id !== expectedStore)
+      throw new TypeError(`Model binding conflict: ${ref}`);
+    await assertModelPath(directory, ref, registration.origin === "project" ? paths.excludedDirectories : []);
+    const source = (await readFile(join(directory, ref))).toString("utf8");
+    const checked = await checkModelDefinition(context, { modelRef: ref, source, definition: JSON.parse(source.replace(/^\uFEFF/, "")) });
+    return checked.runtime!;
+  };
+  // Bindings may carry the supported old IDs, but data is always checked without rewriting.
+  const config = options.config?.value ?? (await optionalFileBytes(join(input.root, "config.json")))?.toString("utf8");
+  const project = typeof config === "string" ? JSON.parse(config) as Record<string, unknown> : config;
+  if (project?.dataStores !== undefined) {
+    const { businessStoreBindingSchema, projectConfigSchema } = await import("./model.js");
+    const { validateBusinessBindings } = await import("./business-stores.js");
+    const candidate = structuredClone(project);
+    if (!candidate.dataStores || typeof candidate.dataStores !== "object" || Array.isArray(candidate.dataStores)) throw new TypeError("Invalid business Store bindings");
+    for (const [id, value] of Object.entries(candidate.dataStores)) {
+      if (!value || typeof value !== "object") throw new TypeError(`Invalid business Store binding: ${id}`);
+      const binding = value as { model: string };
+      binding.model = MODEL_ID_UPGRADES[binding.model] ?? (binding.model.endsWith(".json") ? binding.model : `${binding.model}.json`);
+      businessStoreBindingSchema.parse(binding);
+    }
+    const validated = projectConfigSchema.parse(candidate);
+    const directories = await validateBusinessBindings(input.root, validated);
+    const { FilesystemDataStoreFactory } = await import("../data/extensions/filesystem-datastore/index.js");
+    const { assertJsonDescriptor } = await import("../data/extensions/json-serializer/index.js");
+    for (const [id, binding] of Object.entries(validated.dataStores ?? {})) {
+      const runtime = await runtimeFor(binding.model);
+      if (binding.kind === "value") assertJsonDescriptor(runtime.descriptor.root);
+      const directory = directories.get(id)!;
+      if (!await pathExists(directory)) continue;
+      const config = new Config({ ...binding.config, directory });
+      const store = binding.kind === "value"
+        ? await new FilesystemJsonValueStoreFactory().openExisting(context, id, runtime, config)
+        : await new FilesystemDataStoreFactory().openExisting(context, id, binding.model, config);
+      let cursor: string | undefined;
+      do {
+        const page = await store.list(context, { limit: 1000, ...(cursor ? { cursor } : {}) });
+        cursor = page.nextCursor;
+        for (const item of page.items) {
+          const saved = await store.get(context, item.id);
+          if (!saved) throw new TypeError(`Store record disappeared during upgrade: ${id}/${item.id}`);
+          if ("data" in saved) {
+            const bytes = await readAll(context, saved.data.payload.content);
+            if (saved.data.model !== binding.model) throw new TypeError(`Store model binding mismatch: ${id}/${item.id}`);
+            // A DataStore preserves opaque Payloads, even for a JSON-schema model.
+            // Only raw models promise Runtime reflection of these bytes.
+            if (runtime.descriptor.root.kind === "scalar" && runtime.descriptor.root.scalar === "bytes") runtime.reflect(bytes);
+          }
+          // ValueStore.get already checks envelope and deserializes with the candidate runtime.
+        }
+      } while (cursor !== undefined);
+    }
+  }
+  // Current built-in Run models are byte-valued raw contracts. Reading all stored bytes
+  // proves they remain usable without interpreting, migrating, or rewriting frozen text.
+  const changedRaw = readBundledSystemModels().filter(model => model.metaModel === RAW_MODEL
+    && changes.some(change => change.path === join(paths.registrationDirectory, "system/definitions/raw", model.registration.modelRef)));
+  if (changedRaw.length) for (const directory of ["runs", "archives"]) {
+    for (const [, bytes] of await treeBytes(join(input.root, directory))) {
+      context.signal?.throwIfAborted();
+      for (const model of changedRaw) runtimes.get(model.registration.modelRef)!.reflect(bytes);
+    }
+  }
 }

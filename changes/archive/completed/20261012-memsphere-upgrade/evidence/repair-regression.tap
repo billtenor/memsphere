@@ -1,0 +1,237 @@
+TAP version 13
+# Created Project: primary
+# Project Root: /tmp/memsphere-project-command-QMZgiI/home/projects/primary
+# Created Project: career
+# Project Root: /tmp/memsphere-project-command-QMZgiI/home/projects/career
+# Mounted read-only Project: career
+# Unmounted Project: career
+# Unbound current Workspace.
+# Bound Workspace to Primary Project: career
+# Unbound current Workspace.
+# Subtest: Project lifecycle keeps creation separate from Workspace binding
+ok 1 - Project lifecycle keeps creation separate from Workspace binding
+  ---
+  duration_ms: 1815.732518
+  type: 'test'
+  ...
+# Project: existing
+# Store: Managed
+# System Memory changes: 1 create, 3 update, 0 delete
+# Revision: 125263f61b70bd87cde4a730523b9c60cebfd388
+# Project: existing
+# Store: Managed
+# System Memory changes: 0 create, 0 update, 0 delete
+# Revision: 125263f61b70bd87cde4a730523b9c60cebfd388
+# Subtest: Managed Project System Memory repair validates and publishes automatically
+ok 2 - Managed Project System Memory repair validates and publishes automatically
+  ---
+  duration_ms: 3387.103935
+  type: 'test'
+  ...
+# Subtest: Managed System Memory repair updates canonical identity at its current storage path
+ok 3 - Managed System Memory repair updates canonical identity at its current storage path
+  ---
+  duration_ms: 859.922363
+  type: 'test'
+  ...
+# Mounted read-only Project: mounted
+# Subtest: System Memory repair honors explicit, global, Primary, and Mounted selection boundaries
+ok 4 - System Memory repair honors explicit, global, Primary, and Mounted selection boundaries
+  ---
+  duration_ms: 2604.900942
+  type: 'test'
+  ...
+# Subtest: System Memory repair freezes validation and publish failures without changing the formal Store
+ok 5 - System Memory repair freezes validation and publish failures without changing the formal Store
+  ---
+  duration_ms: 1559.741544
+  type: 'test'
+  ...
+# Created Project: embedded
+# Project Root: /tmp/memsphere-project-embedded-CHeDUk/home/projects/embedded
+# Subtest: Embedded Project reuses the current repository without nested Git
+ok 6 - Embedded Project reuses the current repository without nested Git
+  ---
+  duration_ms: 749.68485
+  type: 'test'
+  ...
+# Subtest: Embedded Project creation rolls back registration when System Memory bootstrap conflicts
+ok 7 - Embedded Project creation rolls back registration when System Memory bootstrap conflicts
+  ---
+  duration_ms: 372.88173
+  type: 'test'
+  ...
+# Created Project: embedded-repair
+# Project Root: /tmp/memsphere-project-embedded-repair-KeVKQl/home/projects/embedded-repair
+# Project: embedded-repair
+# Store: Embedded
+# System Memory changes: 1 create, 1 update, 0 delete
+# Worktree: /tmp/memsphere-project-embedded-repair-KeVKQl/workspace
+# Validation: passed
+# Project: embedded-repair
+# Store: Embedded
+# System Memory changes: 0 create, 0 update, 0 delete
+# Worktree: /tmp/memsphere-project-embedded-repair-KeVKQl/workspace
+# Validation: passed
+# Subtest: Embedded System Memory repair creates and updates without deleting unlisted Memory
+ok 8 - Embedded System Memory repair creates and updates without deleting unlisted Memory
+  ---
+  duration_ms: 1307.573748
+  type: 'test'
+  ...
+# Created Project: embedded-cas
+# Project Root: /tmp/memsphere-project-embedded-repair-cas-oHg44n/home/projects/embedded-cas
+# Subtest: Embedded System Memory repair rejects dirty targets and stale preparations
+ok 9 - Embedded System Memory repair rejects dirty targets and stale preparations
+  ---
+  duration_ms: 1998.40945
+  type: 'test'
+  ...
+# Created Project: embedded-pathspec
+# Project Root: /tmp/memsphere-project-embedded-repair-pathspec-3A5YbN/home/projects/embedded-pathspec
+# Subtest: Embedded System Memory repair treats dirty target paths as literal Git pathspecs
+ok 10 - Embedded System Memory repair treats dirty target paths as literal Git pathspecs
+  ---
+  duration_ms: 957.544044
+  type: 'test'
+  ...
+# Created Project: embedded-ignored
+# Project Root: /tmp/memsphere-project-embedded-repair-ignored-rpv7Ot/home/projects/embedded-ignored
+# Subtest: Embedded System Memory repair rejects ignored targets
+ok 11 - Embedded System Memory repair rejects ignored targets
+  ---
+  duration_ms: 803.896118
+  type: 'test'
+  ...
+# Created Project: embedded-validation
+# Project Root: /tmp/memsphere-project-embedded-repair-validation-3ZgMqk/home/projects/embedded-validation
+# Subtest: Embedded System Memory repair validates the complete candidate before writing
+ok 12 - Embedded System Memory repair validates the complete candidate before writing
+  ---
+  duration_ms: 928.03555
+  type: 'test'
+  ...
+# Created Project: embedded-symlink
+# Project Root: /tmp/memsphere-project-embedded-repair-symlink-QuZn0Y/home/projects/embedded-symlink
+# Subtest: Embedded System Memory repair never stages through a symbolic-link kind directory
+ok 13 - Embedded System Memory repair never stages through a symbolic-link kind directory
+  ---
+  duration_ms: 851.080931
+  type: 'test'
+  ...
+# Created Project: embedded-noop-validation
+# Project Root: /tmp/memsphere-project-embedded-repair-noop-validation-Vfj8Gz/home/projects/embedded-noop-validation
+# Subtest: Embedded System Memory repair validates a no-op Store before reporting success
+ok 14 - Embedded System Memory repair validates a no-op Store before reporting success
+  ---
+  duration_ms: 888.459192
+  type: 'test'
+  ...
+# Created Project: embedded-conflict
+# Project Root: /tmp/memsphere-project-embedded-repair-conflict-ZqUTCF/home/projects/embedded-conflict
+# Subtest: Embedded System Memory repair rejects install path identity reuse before writing
+ok 15 - Embedded System Memory repair rejects install path identity reuse before writing
+  ---
+  duration_ms: 858.207464
+  type: 'test'
+  ...
+# Created Project: linked-embedded
+# Project Root: /tmp/memsphere-project-linked-embedded-RQmdUg/home/projects/linked-embedded
+# Subtest: Embedded Project created from a linked worktree records the main worktree
+ok 16 - Embedded Project created from a linked worktree records the main worktree
+  ---
+  duration_ms: 557.28168
+  type: 'test'
+  ...
+# Cloned Project: cloned
+# Project Root: /tmp/memsphere-project-clone-TNkbh2/home/projects/cloned
+# Subtest: Project clone accepts a valid non-empty Memory repository and rejects an empty one
+ok 17 - Project clone accepts a valid non-empty Memory repository and rejects an empty one
+  ---
+  duration_ms: 73.38439
+  type: 'test'
+  ...
+# Pruned missing Projects: 1
+# Subtest: prune removes only missing registrations and bindings
+ok 18 - prune removes only missing registrations and bindings
+  ---
+  duration_ms: 16.418869
+  type: 'test'
+  ...
+# Created Project: shared
+# Project Root: /tmp/memsphere-project-concurrent-gVSFdM/home/projects/shared
+# Subtest: concurrent creation of one Project preserves the winning Project Root
+ok 19 - concurrent creation of one Project preserves the winning Project Root
+  ---
+  duration_ms: 659.680144
+  type: 'test'
+  ...
+# Subtest: bundled memory contains a valid self-bootstrap chain and manifest
+ok 20 - bundled memory contains a valid self-bootstrap chain and manifest
+  ---
+  duration_ms: 424.645843
+  type: 'test'
+  ...
+# Subtest: bundled Market manifest exposes every complete source
+ok 21 - bundled Market manifest exposes every complete source
+  ---
+  duration_ms: 103.040082
+  type: 'test'
+  ...
+# Subtest: bundled branch-review applies general development and testing rules
+ok 22 - bundled branch-review applies general development and testing rules
+  ---
+  duration_ms: 89.789396
+  type: 'test'
+  ...
+# Subtest: official agile memories enforce conditional Memory ChangeSet delivery evidence
+ok 23 - official agile memories enforce conditional Memory ChangeSet delivery evidence
+  ---
+  duration_ms: 95.784641
+  type: 'test'
+  ...
+# Subtest: chapter one teaches one bounded first-use journey with Chinese user-facing terms
+ok 24 - chapter one teaches one bounded first-use journey with Chinese user-facing terms
+  ---
+  duration_ms: 1.052279
+  type: 'test'
+  ...
+# Subtest: framework Memory and Skill describe scoped Settings consistently
+ok 25 - framework Memory and Skill describe scoped Settings consistently
+  ---
+  duration_ms: 2.14538
+  type: 'test'
+  ...
+# Subtest: manifest rejects unsafe, duplicate, overlapping, and unknown values
+ok 26 - manifest rejects unsafe, duplicate, overlapping, and unknown values
+  ---
+  duration_ms: 1.570754
+  type: 'test'
+  ...
+# Subtest: legacy manifests remain readable but cannot authorize identity-based removal
+ok 27 - legacy manifests remain readable but cannot authorize identity-based removal
+  ---
+  duration_ms: 0.266216
+  type: 'test'
+  ...
+# Subtest: manifest requires install sources to be regular YAML files but allows removed sources to be absent
+ok 28 - manifest requires install sources to be regular YAML files but allows removed sources to be absent
+  ---
+  duration_ms: 4.56768
+  type: 'test'
+  ...
+# Subtest: manifest v4 requires every market dependency to be declared by System or Market install
+ok 29 - manifest v4 requires every market dependency to be declared by System or Market install
+  ---
+  duration_ms: 7.160652
+  type: 'test'
+  ...
+1..29
+# tests 29
+# suites 0
+# pass 29
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 22932.106972

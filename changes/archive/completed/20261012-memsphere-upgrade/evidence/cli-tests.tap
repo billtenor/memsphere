@@ -1,0 +1,76 @@
+TAP version 13
+# Subtest: project upgrade CLI upgrades both Managed resources through dedicated publication and repeats without writes
+ok 1 - project upgrade CLI upgrades both Managed resources through dedicated publication and repeats without writes
+  ---
+  duration_ms: 6100.995223
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI checks both phases when only Memory or only models need updating
+ok 2 - project upgrade CLI checks both phases when only Memory or only models need updating
+  ---
+  duration_ms: 6936.727861
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI updates only system registration issuance metadata and preserves envelope identity
+ok 3 - project upgrade CLI updates only system registration issuance metadata and preserves envelope identity
+  ---
+  duration_ms: 4848.905862
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI reports failed models, preserves Memory and succeeds after repair
+ok 4 - project upgrade CLI reports failed models, preserves Memory and succeeds after repair
+  ---
+  duration_ms: 5029.419015
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI preserves a failed Memory publication after models succeeded and retries the dedicated ID
+ok 5 - project upgrade CLI preserves a failed Memory publication after models succeeded and retries the dedicated ID
+  ---
+  duration_ms: 5033.631593
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI selects explicit name over global project over Primary and routes JSON errors
+ok 6 - project upgrade CLI selects explicit name over global project over Primary and routes JSON errors
+  ---
+  duration_ms: 10466.271038
+  type: 'test'
+  ...
+# Subtest: Embedded upgrade CLI isolates original user differences and creates a retryable dedicated ChangeSet
+ok 7 - Embedded upgrade CLI isolates original user differences and creates a retryable dedicated ChangeSet
+  ---
+  duration_ms: 10611.172204
+  type: 'test'
+  ...
+# Subtest: Embedded upgrade CLI refuses main-only, master, detached and dirty Memory before model writes
+ok 8 - Embedded upgrade CLI refuses main-only, master, detached and dirty Memory before model writes
+  ---
+  duration_ms: 7535.217705
+  type: 'test'
+  ...
+# Subtest: skill upgrade CLI refreshes only default, global and directory Memsphere targets
+ok 9 - skill upgrade CLI refreshes only default, global and directory Memsphere targets
+  ---
+  duration_ms: 2793.17833
+  type: 'test'
+  ...
+# Subtest: Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly
+ok 10 - Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly
+  ---
+  duration_ms: 5312.100806
+  type: 'test'
+  ...
+# Subtest: Embedded repair API restores updated and created targets when the afterApply callback fails
+ok 11 - Embedded repair API restores updated and created targets when the afterApply callback fails
+  ---
+  duration_ms: 1795.177853
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 67071.948221

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { projectUpgradeCommand } from "./commands/project-upgrade.js";
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
 import { registerAppCommands } from "./commands/app.js";
@@ -73,7 +74,7 @@ import {
   runStatusCommand,
   runTryRunCommand
 } from "./commands/run.js";
-import { skillInitCommand } from "./commands/skill.js";
+import { skillInitCommand, skillUpgradeCommand } from "./commands/skill.js";
 import { validateCommand } from "./commands/validate.js";
 import { runArtifactReviewAgentWorker } from "./acp/review-worker.js";
 import {
@@ -143,6 +144,13 @@ project.command("show")
   .argument("[name]", "Project name; defaults to the current Primary")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectShowCommand);
+
+project.command("upgrade")
+  .description("Upgrade System Memory and system models/registrations for one Project.")
+  .argument("[name]", "Project name; defaults to --project or the current Primary")
+  .option("--change <id>", "retry the dedicated system upgrade ChangeSet in its worktree")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectUpgradeCommand);
 
 project.command("repair")
   .description("Restore or update bundled System Memory in a Managed or Embedded Project.")
@@ -321,6 +329,12 @@ skill
   .option("--directory <path>", "skills directory")
   .option("--force", "overwrite the existing skill")
   .action(skillInitCommand);
+
+skill.command("upgrade")
+  .description("Update the selected memsphere Skill installation (equivalent to init --force).")
+  .option("--global", "install into ~/.agents/skills")
+  .option("--directory <path>", "skills directory")
+  .action(skillUpgradeCommand);
 
 const run = program
   .command("run")

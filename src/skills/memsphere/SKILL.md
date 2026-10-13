@@ -151,6 +151,34 @@ memsphere memory read memsphere-schema
 
 Embedded Project 的配置使用 Git 主 worktree 绝对 `repository_path` 和仓库相对 `memory_path`。View 固定读取主 worktree；普通 CLI 根据当前命令所在 worktree 重映射 Memory Root，并拒绝其他仓库。使用 `memsphere memory edit <reference>` 时，Managed Project 编辑 CLI 返回的 ChangeSet Candidate；Embedded Project 编辑 CLI 返回的当前 worktree YAML 路径。当前分支缺少 Memory Root 时不得回退读取主 worktree。
 
+## Memsphere 如何升级
+
+用户要求“用 Memsphere 帮我升级”时，先从已有上下文确定升级范围、CLI 安装来源、Skill 位置与目标 Project；只询问缺失的关键选择，不把单个 Project 请求扩大到全部项目。
+
+| 升级类别 | 入口与范围 |
+|---|---|
+| 项目运行资源 | `memsphere project upgrade [project-name]`，一次更新系统记忆及系统模型/登记，目标是当前 CLI 随包资源。 |
+| Agent Skill | `memsphere skill upgrade`，等价于相同位置参数的 `skill init --force`；支持 `--global` 和 `--directory <path>`，两者互斥。`init` 仍用于首次安装。 |
+| CLI 程序 | 按实际安装来源更新：npm 安装升级相应 npm 包；源码链接同步其实际仓库并重新构建。不能对源码链接机械执行 npm 更新，或在脏仓库中强行 reset/覆盖。 |
+
+先确认实际执行的 `memsphere` 路径、`memsphere --version` 和安装范围。已确认是 npm 全局安装时使用 `npm install -g memsphere@latest`；项目依赖安装按该项目包管理方式更新 `memsphere` 依赖。源码链接到仓库时，在真实源码仓库按其约定同步已发布分支并执行 `npm run build`，保留工作区改动；不要只更新另一个不在 PATH 上的副本。更新后重新核对 CLI 路径/版本和帮助，再执行 Skill/项目命令。
+
+整体升级先更新 CLI 及其随包资源，再升级选定 Skill 和目标项目，最后根据版本与正在运行的进程决定是否需要 `memsphere view restart`。旧格式迁移遵守本 Skill 的明确确认和 Managed/Embedded 边界，不是每次升级必做的步骤。市场导入 Memory 和模型独立演进，不随系统升级被覆盖，需要时显式重新导入。
+
+项目目标优先级为显式名称、全局 `--project`、当前 Primary；无法确定目标时明确询问，不猜测。`project upgrade` 检查两类资源，保留用户 Memory、普通模型原文、业务数据与登记 UUID；已安装系统模型定义及其发行登记元数据也会更新。`project repair` 仍只处理系统记忆，`project models initialize` 仍是初始化和已支持身份转换入口，不能把这两个单项命令的成功当作完整升级结果。
+
+Managed 项目实际 Memory 更新使用专用受控 ChangeSet，完整校验后发布；无变化不创建空记录或 Revision。Embedded 项目按以下方式协助：
+
+1. 准备目标仓库的独立升级分支和 linked worktree，基线固定为 `refs/heads/master`。保留原工作区与未提交内容，不在原工作区 stash/reset 或混入已有施工。无 master 的仓库当前不支持这条升级路径，说明限制，不擅自创建/改名集成分支。独立 worktree 的 Primary 未绑定时使用显式项目名。
+2. 在升级 worktree 执行 `memsphere project upgrade <project-name> --output json`。命令不创建 Git commit 或合入；系统记忆有差异时生成专用 ChangeSet，只包含本次升级目标，即使与原工作区同 HEAD 也不复用原用户记录。模型/登记仍是 Project 共享状态，不因 worktree 而分支隔离。
+3. 查看返回的 ChangeSet ID、校验状态、View 入口和各阶段结果。失败后说明已完成/未完成部分，修正后在原升级 worktree 使用 `memsphere project upgrade <project-name> --change <id>` 重试；不要用 claim/添加 scope/手动 complete 等通用操作处理专用升级记录。仅希望重新校验时使用显式 `memsphere memory change validate <id>`。升级目标回退旧版或加入无关 Memory 必须失败。
+4. 展示差异与校验结果，按已授权范围仅 stage 专用 ChangeSet 的系统记忆路径；确认 index 无其他内容，形成一个单独 Git commit，记录 ChangeSet ID、分支、worktree 与 commit SHA。无变化不做空 commit。合入导致冲突时说明冲突与处理选择，按用户决定修正，再验证最终 Memory，不能复用失效的旧校验结果。
+5. 按项目约定和已有授权提交 PR 或交给用户审阅、合入 master。未授权的最终合入由用户决定；已授权动作不重复确认。专用 ChangeSet 在 commit/push/创建 PR 后仍为 active，合入 master 且升级目标内容匹配后才 completed。
+
+区分执行结果：Embedded `integrationStatus=pending` 表示差异已准备、校验且模型阶段成功，不表示主分支已更新；单独提交后为 committed，合入后才 integrated。Managed 则通过受控发布完成。最终逐类报告 CLI、Skill、项目资源的实际完成情况，不把部分完成宣称为整体完成。
+
+升级不会改写冻结 Run/Review 历史。正在运行的 Run 若因模型/Store fingerprint 变化而拒绝继续，应说明需要恢复原目标或重新发起 Run；不能声称升级会自动迁移旧 Run。
+
 ## Memsphere 如何校验尚未发布的 Memory
 
 Managed Project 先用 `memsphere memory edit` 创建稀疏候选；Embedded Project 直接修改当前 Git worktree 中的 Memory。两者统一执行：

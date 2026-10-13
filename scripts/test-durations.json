@@ -137,7 +137,8 @@
     "view-style-contract.test.ts": 0.4,
     "view-theme-registry.test.ts": 0.38,
     "windows-prerequisites.test.ts": 0.34,
-    "test-plan.test.ts": 0.38
+    "test-plan.test.ts": 0.38,
+    "project-upgrade.test.ts": 73.29
   },
   "darwin": {
     "agent-activity.test.ts": 0.9,
@@ -277,7 +278,8 @@
     "view-style-contract.test.ts": 0.26,
     "view-theme-registry.test.ts": 0.37,
     "windows-prerequisites.test.ts": 0.59,
-    "test-plan.test.ts": 0.33
+    "test-plan.test.ts": 0.33,
+    "project-upgrade.test.ts": 77.99
   },
   "win32": {
     "agent-activity.test.ts": 1.09,
@@ -417,6 +419,7 @@
     "view-style-contract.test.ts": 0.43,
     "view-theme-registry.test.ts": 0.47,
     "windows-prerequisites.test.ts": 0.37,
-    "test-plan.test.ts": 0.45
+    "test-plan.test.ts": 0.45,
+    "project-upgrade.test.ts": 206.75
   }
 }

@@ -1,0 +1,90 @@
+{
+  "fullRegression": {
+    "command": "npm test -- --results=changes/active/20261012-memsphere-upgrade/evidence/full-test-results.json",
+    "exitCode": 0,
+    "files": 145,
+    "tests": 1204,
+    "passed": 1203,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 1,
+    "skipReason": "existing Windows-only platform case",
+    "seconds": 338.18
+  },
+  "memory": {
+    "changeId": "change-20261012-134215362z-d42aa792",
+    "status": "active",
+    "valid": true,
+    "baseRevision": "a4de8045e8aa566feeb2e61efe9a9c875717599f",
+    "digest": "20c05b7e67d38842973a207b599be1abcdf9b042b293ac0158a61462995e9d87",
+    "view": "http://0.0.0.0:30000/projects/memsphere/changes/change-20261012-134215362z-d42aa792"
+  },
+  "resolvedFailures": [
+    {
+      "kind": "environment",
+      "reason": "sandbox spawnSync EPERM",
+      "resolution": "temporary-project CLI tests ran outside sandbox"
+    },
+    {
+      "kind": "verification orchestration",
+      "reason": "initial targeted CLI overlapped prebuild rm dist",
+      "resolution": "rerun against stable build; final full regression passed"
+    },
+    {
+      "kind": "invocation",
+      "reason": "--results path was unsupported",
+      "resolution": "corrected to --results=path; discarded that invocation"
+    },
+    {
+      "kind": "implementation",
+      "reason": "sync already held mutation lock and new public edit attempted to reacquire",
+      "resolution": "private locked helper; sync and entry isolation regression passed"
+    },
+    {
+      "kind": "implementation",
+      "reason": "planned new ordinary registration missing from candidate records for bound model",
+      "resolution": "include planned record; upgrade success/idempotence/data preservation regression passed"
+    },
+    {
+      "kind": "implementation",
+      "reason": "Embedded files applied before dedicated record creation failure could leave unowned diff",
+      "resolution": "record creation callback runs inside existing apply rollback boundary; record failure restores baseline, partial new metadata is cleaned; CLI and cross-platform callback regressions pass"
+    }
+  ],
+  "commands": [
+    {
+      "command": "npm run typecheck",
+      "exitCode": 0,
+      "evidence": "typecheck.txt"
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "evidence": "build.txt"
+    },
+    {
+      "command": "node --import tsx --test --test-concurrency=1 test/project-upgrade.test.ts",
+      "exitCode": 0,
+      "tests": 11,
+      "passed": 11,
+      "evidence": "cli-tests.tap"
+    },
+    {
+      "command": "node dist/cli.js validate",
+      "exitCode": 0
+    },
+    {
+      "command": "node dist/cli.js memory change validate change-20261012-134215362z-d42aa792",
+      "exitCode": 0
+    },
+    {
+      "command": "python3 skill-creator/scripts/quick_validate.py src/skills/memsphere",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0
+    }
+  ],
+  "worktree": "/data00/home/liuyanjun.lyj/.codex/worktrees/81f1/vibe-mem"
+}
