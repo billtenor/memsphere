@@ -902,6 +902,7 @@ class MemoryApplication {
   readonly #onListChange: () => void;
   readonly #renderDetail: (input: unknown) => HTMLElement;
   #memories: MemorySummary[] = [];
+  #referenceMemories: MemorySummary[] = [];
   #changes: ChangeSummary[] = [];
   #market: JsonRecord[] = [];
   #marketCount = 0;
@@ -1001,7 +1002,8 @@ class MemoryApplication {
     this.#currentProject = projectFromLocation(location) || this.#currentProject;
     this.#selectedMarket = location.query.item ?? this.#selectedMarket;
     const route = parseLocation(location);
-    if (!this.#memories.length || previousProject !== this.#currentProject || previousRoute.kind === "change" || route.kind === "change" || route.changeId) {
+    if (previousProject !== this.#currentProject) this.#memoryDetailCache.clear();
+    if (!this.#memories.length || previousProject !== this.#currentProject || previousRoute.kind === "change" || route.kind === "change" || previousRoute.changeId || route.changeId) {
       await this.load();
       return;
     }
@@ -1058,6 +1060,7 @@ class MemoryApplication {
       ]);
       if (generation !== this.#generation) return;
       this.#memories = array(memoryPayload.memories) as MemorySummary[];
+      this.#referenceMemories = this.#memories;
       if (route.kind === "memory-detail") {
         this.#selectedId = this.#memories.find(memory => memoryReference(memory) === `${route.memoryKind}/${route.memoryName}`)?.id ?? this.#selectedId;
       }
@@ -1080,6 +1083,9 @@ class MemoryApplication {
       } else if (route.kind === "change") {
         try {
           this.#changeDetail = await this.request<JsonRecord>(`/api/changes/${encodeURIComponent(route.changeId)}`);
+          if (Array.isArray(this.#changeDetail.referenceMemories)) {
+            this.#referenceMemories = this.#changeDetail.referenceMemories as MemorySummary[];
+          }
           this.#actorKinds = asStringRecord(this.#changeDetail.actorKinds);
           const targets = array(this.#changeDetail.targetMemories).map(item => {
             const target = item as JsonRecord;
@@ -1141,7 +1147,7 @@ class MemoryApplication {
       }
       if (generation === this.#generation) {
         this.#memoryDetail = (payload.memory ?? payload) as MemorySummary;
-        this.#memoryDetailCache.set(id, this.#memoryDetail);
+        if (!changeId) this.#memoryDetailCache.set(id, this.#memoryDetail);
         this.rememberRecentMemory(id);
       }
     } catch (error) {
@@ -2102,12 +2108,14 @@ class MemoryApplication {
   private renderOptions(): RenderOptions {
     return {
       ui: this.#ui,
-      knownReferences: new Set(this.#memories.map(memoryReference)),
+      knownReferences: new Set(this.#referenceMemories.map(memoryReference)),
       openReference: target => {
-        const memory = this.#memories.find(candidate => memoryReference(candidate) === target || candidate.names?.[0] === target);
+        const memory = this.#referenceMemories.find(candidate => memoryReference(candidate) === target || candidate.names?.[0] === target);
         if (!memory) return;
         const [kind, ...name] = memory.id.split("/");
-        const query = this.#location.query.section ? { section: this.#location.query.section } : {};
+        const changeId = parseLocation(this.#location).changeId;
+        const query = changeId ? { change: changeId }
+          : this.#location.query.section ? { section: this.#location.query.section } : {};
         void this.navigate(this.#routes.projectMemoryDetail.to({ projectId: projectFromLocation(this.#location) || this.#currentProject || "memsphere", kind, name: name.join("/") }, { query }));
       }
     };

@@ -1,0 +1,567 @@
+
+> memsphere@0.1.5 pretest
+> npm run build
+
+
+> memsphere@0.1.5 build
+> node -e "require('node:fs').rmSync('dist',{recursive:true,force:true})" && tsc -p tsconfig.json && tsc -p tsconfig.modules.json --noEmit && node scripts/check-reserved-models.mjs && node --import tsx scripts/build-view-assets.mjs && node scripts/build-example-view-package.mjs --check && node -e "const fs=require('node:fs'); fs.chmodSync('dist/cli.js',0o755); fs.cpSync('src/skills','dist/skills',{recursive:true}); fs.cpSync('src/prompts/templates','dist/prompts/templates',{recursive:true})" && node scripts/build-example-app.mjs
+
+Reserved models validated: 5 system models, 1 market packages.
+
+> memsphere@0.1.5 test
+> node scripts/run-tests.mjs
+
+Running 146/146 files, suite All tests, concurrency 2
+# Starting: project-upgrade.test.ts
+# Starting: models-builtin-view-browser.test.ts
+
+# File: models-builtin-view-browser.test.ts (35.67s)
+TAP version 13
+# Subtest: model structure omits generated reading hints while preserving authored descriptions, actual rules and full source
+ok 1 - model structure omits generated reading hints while preserving authored descriptions, actual rules and full source
+  ---
+  duration_ms: 2388.484793
+  type: 'test'
+  ...
+# Subtest: referenced fields show actual types and expandable target structure without altering source
+ok 2 - referenced fields show actual types and expandable target structure without altering source
+  ---
+  duration_ms: 1093.703863
+  type: 'test'
+  ...
+# Subtest: a forbidden cross-model reference shows the unavailable screen and preserves its source
+ok 3 - a forbidden cross-model reference shows the unavailable screen and preserves its source
+  ---
+  duration_ms: 1471.628639
+  type: 'test'
+  ...
+# Subtest: recursive references expand on demand but bulk expansion stays finite and collapse retains identity
+ok 4 - recursive references expand on demand but bulk expansion stays finite and collapse retains identity
+  ---
+  duration_ms: 994.365811
+  type: 'test'
+  ...
+# Subtest: model tree exposes array-element fields and local required flags with keyboard expansion
+ok 5 - model tree exposes array-element fields and local required flags with keyboard expansion
+  ---
+  duration_ms: 885.825123
+  type: 'test'
+  ...
+# Subtest: tree bulk actions are right-aligned text buttons without instructions and retain keyboard operation
+ok 6 - tree bulk actions are right-aligned text buttons without instructions and retain keyboard operation
+  ---
+  duration_ms: 1335.760797
+  type: 'test'
+  ...
+# Subtest: expanded fields align their labels at each depth and distinguish array structure from fields
+ok 7 - expanded fields align their labels at each depth and distinguish array structure from fields
+  ---
+  duration_ms: 982.60292
+  type: 'test'
+  ...
+# Subtest: object roots omit their container while array roots distinguish the model from its element structure
+ok 8 - object roots omit their container while array roots distinguish the model from its element structure
+  ---
+  duration_ms: 2119.462152
+  type: 'test'
+  ...
+# Subtest: model source remains complete without a copy action or an intervening action row
+ok 9 - model source remains complete without a copy action or an intervening action row
+  ---
+  duration_ms: 830.918966
+  type: 'test'
+  ...
+# Subtest: model prototype keeps source viewing without a copy action or its empty header
+ok 10 - model prototype keeps source viewing without a copy action or its empty header
+  ---
+  duration_ms: 602.310094
+  type: 'test'
+  ...
+# Subtest: an unsupported format reports an unavailable model while supported structure keeps an empty format column
+ok 11 - an unsupported format reports an unavailable model while supported structure keeps an empty format column
+  ---
+  duration_ms: 1413.800551
+  type: 'test'
+  ...
+# Subtest: dynamic fields align with named fields and expand their values with local required flags
+ok 12 - dynamic fields align with named fields and expand their values with local required flags
+  ---
+  duration_ms: 929.047647
+  type: 'test'
+  ...
+# Subtest: dictionary roots and boolean value schemas describe permitted dynamic keys without fabricating fields
+ok 13 - dictionary roots and boolean value schemas describe permitted dynamic keys without fabricating fields
+  ---
+  duration_ms: 1344.913993
+  type: 'test'
+  ...
+# Subtest: rules stay separate from author descriptions and optional fields remain unmarked
+ok 14 - rules stay separate from author descriptions and optional fields remain unmarked
+  ---
+  duration_ms: 820.031934
+  type: 'test'
+  ...
+# Subtest: enum types and candidate values remain visible with their authored descriptions
+ok 15 - enum types and candidate values remain visible with their authored descriptions
+  ---
+  duration_ms: 1532.941322
+  type: 'test'
+  ...
+# Subtest: model list filtering keeps a model without description readable and shows unmatched state
+ok 16 - model list filtering keeps a model without description readable and shows unmatched state
+  ---
+  duration_ms: 914.368278
+  type: 'test'
+  ...
+# Subtest: a corrupt model remains selectable without preventing other definitions from opening
+ok 17 - a corrupt model remains selectable without preventing other definitions from opening
+  ---
+  duration_ms: 1002.904459
+  type: 'test'
+  ...
+# Subtest: unsupported union roots remain listed as unavailable and cannot open a normal definition
+ok 18 - unsupported union roots remain listed as unavailable and cannot open a normal definition
+  ---
+  duration_ms: 866.94643
+  type: 'test'
+  ...
+# Subtest: built-in raw models show whole-content semantics without pretending to declare object fields
+ok 19 - built-in raw models show whole-content semantics without pretending to declare object fields
+  ---
+  duration_ms: 742.652872
+  type: 'test'
+  ...
+# Subtest: model deep links preserve the selected Project and reload the correct definition
+ok 20 - model deep links preserve the selected Project and reload the correct definition
+  ---
+  duration_ms: 1677.277179
+  type: 'test'
+  ...
+# Subtest: leaving models removes its page marker and returning remounts a usable model view
+ok 21 - leaving models removes its page marker and returning remounts a usable model view
+  ---
+  duration_ms: 1295.318076
+  type: 'test'
+  ...
+# Subtest: narrow model pages keep horizontal scrolling inside the field table
+ok 22 - narrow model pages keep horizontal scrolling inside the field table
+  ---
+  duration_ms: 747.845683
+  type: 'test'
+  ...
+# Subtest: a late model definition response cannot replace the newer selected model
+ok 23 - a late model definition response cannot replace the newer selected model
+  ---
+  duration_ms: 991.01078
+  type: 'test'
+  ...
+# Subtest: saved Home language applies to the actual model browser and model storage settings
+ok 24 - saved Home language applies to the actual model browser and model storage settings
+  ---
+  duration_ms: 3797.924787
+  type: 'test'
+  ...
+# Subtest: Project model settings discard restores the saved directory without writing configuration
+ok 25 - Project model settings discard restores the saved directory without writing configuration
+  ---
+  duration_ms: 587.03152
+  type: 'test'
+  ...
+# Subtest: Project model settings reject an empty directory before save confirmation
+ok 26 - Project model settings reject an empty directory before save confirmation
+  ---
+  duration_ms: 604.757154
+  type: 'test'
+  ...
+# Subtest: confirmed model directory save switches the next refresh without migration or changes to other scopes
+ok 27 - confirmed model directory save switches the next refresh without migration or changes to other scopes
+  ---
+  duration_ms: 1527.401571
+  type: 'test'
+  ...
+# Subtest: model information is the default tab and orders identity, standard, tags and storage fields
+ok 28 - model information is the default tab and orders identity, standard, tags and storage fields
+  ---
+  duration_ms: 1142.143742
+  type: 'test'
+  ...
+1..28
+# tests 28
+# suites 0
+# pass 28
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 35637.491286
+# Starting: artifact-review-browser.test.ts
+
+# File: project-upgrade.test.ts (67.10s)
+TAP version 13
+# Subtest: project upgrade CLI upgrades both Managed resources through dedicated publication and repeats without writes
+ok 1 - project upgrade CLI upgrades both Managed resources through dedicated publication and repeats without writes
+  ---
+  duration_ms: 6194.257043
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI checks both phases when only Memory or only models need updating
+ok 2 - project upgrade CLI checks both phases when only Memory or only models need updating
+  ---
+  duration_ms: 6638.345049
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI updates only system registration issuance metadata and preserves envelope identity
+ok 3 - project upgrade CLI updates only system registration issuance metadata and preserves envelope identity
+  ---
+  duration_ms: 5267.087788
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI reports failed models, preserves Memory and succeeds after repair
+ok 4 - project upgrade CLI reports failed models, preserves Memory and succeeds after repair
+  ---
+  duration_ms: 4879.418662
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI preserves a failed Memory publication after models succeeded and retries the dedicated ID
+ok 5 - project upgrade CLI preserves a failed Memory publication after models succeeded and retries the dedicated ID
+  ---
+  duration_ms: 4963.320442
+  type: 'test'
+  ...
+# Subtest: project upgrade CLI selects explicit name over global project over Primary and routes JSON errors
+ok 6 - project upgrade CLI selects explicit name over global project over Primary and routes JSON errors
+  ---
+  duration_ms: 10358.468174
+  type: 'test'
+  ...
+# Subtest: Embedded upgrade CLI isolates original user differences and creates a retryable dedicated ChangeSet
+ok 7 - Embedded upgrade CLI isolates original user differences and creates a retryable dedicated ChangeSet
+  ---
+  duration_ms: 10804.862458
+  type: 'test'
+  ...
+# Subtest: Embedded upgrade CLI refuses main-only, master, detached and dirty Memory before model writes
+ok 8 - Embedded upgrade CLI refuses main-only, master, detached and dirty Memory before model writes
+  ---
+  duration_ms: 7285.949326
+  type: 'test'
+  ...
+# Subtest: skill upgrade CLI refreshes only default, global and directory Memsphere targets
+ok 9 - skill upgrade CLI refreshes only default, global and directory Memsphere targets
+  ---
+  duration_ms: 2793.370504
+  type: 'test'
+  ...
+# Subtest: Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly
+ok 10 - Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly
+  ---
+  duration_ms: 5386.348742
+  type: 'test'
+  ...
+# Subtest: Embedded repair API restores updated and created targets when the afterApply callback fails
+ok 11 - Embedded repair API restores updated and created targets when the afterApply callback fails
+  ---
+  duration_ms: 1891.262145
+  type: 'test'
+  ...
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 67069.582906
+# Starting: data-command.test.ts
+
+# File: artifact-review-browser.test.ts (34.08s)
+TAP version 13
+# Subtest: Human Artifact Review keeps each participant's draft private
+ok 1 - Human Artifact Review keeps each participant's draft private
+  ---
+  duration_ms: 2556.542097
+  type: 'test'
+  ...
+# Subtest: Human Artifact Review saves its local vote against the latest submit revision
+ok 2 - Human Artifact Review saves its local vote against the latest submit revision
+  ---
+  duration_ms: 836.536983
+  type: 'test'
+  ...
+# Subtest: submitted Human Artifact Review renders an immutable result
+ok 3 - submitted Human Artifact Review renders an immutable result
+  ---
+  duration_ms: 790.155182
+  type: 'test'
+  ...
+# Subtest: Human Artifact Review completes once after a revised second round
+ok 4 - Human Artifact Review completes once after a revised second round
+  ---
+  duration_ms: 2212.62217
+  type: 'test'
+  ...
+# Subtest: failed Artifact Review draft saves retain input and retry exactly once
+ok 5 - failed Artifact Review draft saves retain input and retry exactly once
+  ---
+  duration_ms: 889.792463
+  type: 'test'
+  ...
+# Subtest: Artifact Review submit absorbs repeated draft revision conflicts
+ok 6 - Artifact Review submit absorbs repeated draft revision conflicts
+  ---
+  duration_ms: 776.355463
+  type: 'test'
+  ...
+# Subtest: Artifact Review persists and restores the panel split
+ok 7 - Artifact Review persists and restores the panel split
+  ---
+  duration_ms: 1005.517098
+  type: 'test'
+  ...
+# Subtest: Artifact Review makes historical rounds read-only
+ok 8 - Artifact Review makes historical rounds read-only
+  ---
+  duration_ms: 676.052942
+  type: 'test'
+  ...
+# Subtest: Artifact Review keeps a selected historical round without background polling
+ok 9 - Artifact Review keeps a selected historical round without background polling
+  ---
+  duration_ms: 4790.475123
+  type: 'test'
+  ...
+# Subtest: Artifact Review locates an anchored historical comment in its artifact
+ok 10 - Artifact Review locates an anchored historical comment in its artifact
+  ---
+  duration_ms: 626.972949
+  type: 'test'
+  ...
+# Subtest: material selection displays the earlier artifact review and preserves the current draft
+ok 11 - material selection displays the earlier artifact review and preserves the current draft
+  ---
+  duration_ms: 998.006901
+  type: 'test'
+  ...
+# Subtest: frozen material uses its accepted review despite later reviews of the same step
+ok 12 - frozen material uses its accepted review despite later reviews of the same step
+  ---
+  duration_ms: 63.130876
+  type: 'test'
+  ...
+# Subtest: frozen material with ambiguous accepted reviews exposes no review record
+ok 13 - frozen material with ambiguous accepted reviews exposes no review record
+  ---
+  duration_ms: 53.527434
+  type: 'test'
+  ...
+# Subtest: preceding material review records contain submitted opinions without private drafts
+ok 14 - preceding material review records contain submitted opinions without private drafts
+  ---
+  duration_ms: 50.864764
+  type: 'test'
+  ...
+# Subtest: Artifact Review normalizes invalid Round and Material URLs and syncs material selection
+ok 15 - Artifact Review normalizes invalid Round and Material URLs and syncs material selection
+  ---
+  duration_ms: 612.716907
+  type: 'test'
+  ...
+# Subtest: completed Artifact Review isolates dialog scrolling without mutating Host page state
+ok 16 - completed Artifact Review isolates dialog scrolling without mutating Host page state
+  ---
+  duration_ms: 905.659819
+  type: 'test'
+  ...
+# Subtest: Artifact Review uses desktop panes and mobile tabs without horizontal overflow
+ok 17 - Artifact Review uses desktop panes and mobile tabs without horizontal overflow
+  ---
+  duration_ms: 585.079925
+  type: 'test'
+  ...
+# Subtest: Artifact Review without a Human Assignment keeps the public workspace visible
+ok 18 - Artifact Review without a Human Assignment keeps the public workspace visible
+  ---
+  duration_ms: 796.571529
+  type: 'test'
+  ...
+# Subtest: Agent Activity expands in the participant row without disrupting Human review
+ok 19 - Agent Activity expands in the participant row without disrupting Human review
+  ---
+  duration_ms: 13779.17387
+  type: 'test'
+  ...
+1..19
+# tests 19
+# suites 0
+# pass 19
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 34044.342434
+# Starting: memory-cli.test.ts
+
+# File: memory-cli.test.ts (30.60s)
+TAP version 13
+# Subtest: memory change validate checks the effective Store without expanding a sparse candidate
+ok 1 - memory change validate checks the effective Store without expanding a sparse candidate
+  ---
+  duration_ms: 7952.417575
+  type: 'test'
+  ...
+# Subtest: memory edit uses the current Embedded worktree without a ChangeSet
+ok 2 - memory edit uses the current Embedded worktree without a ChangeSet
+  ---
+  duration_ms: 1740.976683
+  type: 'test'
+  ...
+# Subtest: validate distinguishes Project Store checks from stateless Memory root checks
+ok 3 - validate distinguishes Project Store checks from stateless Memory root checks
+  ---
+  duration_ms: 2644.107754
+  type: 'test'
+  ...
+# Subtest: validate suggests syntax migration only for outdated Memory YAML
+ok 4 - validate suggests syntax migration only for outdated Memory YAML
+  ---
+  duration_ms: 2305.437477
+  type: 'test'
+  ...
+# Subtest: memory CLI lists and reads from a nested scope without exposing file paths
+ok 5 - memory CLI lists and reads from a nested scope without exposing file paths
+  ---
+  duration_ms: 2952.068521
+  type: 'test'
+  ...
+# Subtest: validate checks Memory references by target kind and dependency cycles
+ok 6 - validate checks Memory references by target kind and dependency cycles
+  ---
+  duration_ms: 2540.236419
+  type: 'test'
+  ...
+# Subtest: memory CLI reads recursive Statement sections without flattening them
+ok 7 - memory CLI reads recursive Statement sections without flattening them
+  ---
+  duration_ms: 591.844525
+  type: 'test'
+  ...
+# Subtest: memory CLI lists and reads internal nodes across Memory kinds
+ok 8 - memory CLI lists and reads internal nodes across Memory kinds
+  ---
+  duration_ms: 5807.302233
+  type: 'test'
+  ...
+# Subtest: memory CLI reports ambiguity and other failures only on stderr
+ok 9 - memory CLI reports ambiguity and other failures only on stderr
+  ---
+  duration_ms: 2196.463048
+  type: 'test'
+  ...
+# Subtest: memory CLI rejects malformed stores, uninitialized scopes, and the removed top-level list
+ok 10 - memory CLI rejects malformed stores, uninitialized scopes, and the removed top-level list
+  ---
+  duration_ms: 1570.898668
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 30561.830088
+# Starting: view-responsive.test.ts
+
+# File: data-command.test.ts (34.74s)
+TAP version 13
+# Subtest: data CLI creates from stdin, reads/updates/edits complete values and returns explicit identities
+ok 1 - data CLI creates from stdin, reads/updates/edits complete values and returns explicit identities
+  ---
+  duration_ms: 3336.795596
+  type: 'test'
+  ...
+# Subtest: CLI reports parsing, input, missing/conflict and capability failures as one JSON error
+ok 2 - CLI reports parsing, input, missing/conflict and capability failures as one JSON error
+  ---
+  duration_ms: 3514.889982
+  type: 'test'
+  ...
+# Subtest: CLI Store configuration paths are relative to selected Project and remove permits explicit re-registration
+ok 3 - CLI Store configuration paths are relative to selected Project and remove permits explicit re-registration
+  ---
+  duration_ms: 2933.486398
+  type: 'test'
+  ...
+# Subtest: CLI uses external absolute directories for both Store kinds and retains records across re-registration
+ok 4 - CLI uses external absolute directories for both Store kinds and retains records across re-registration
+  ---
+  duration_ms: 7965.343652
+  type: 'test'
+  ...
+# Subtest: CLI list/read/validate and dry-run produce no Project filesystem writes
+ok 5 - CLI list/read/validate and dry-run produce no Project filesystem writes
+  ---
+  duration_ms: 3338.219513
+  type: 'test'
+  ...
+# Subtest: CLI opaque Payload export writes exact bytes and keeps raw stdout free of receipts
+ok 6 - CLI opaque Payload export writes exact bytes and keeps raw stdout free of receipts
+  ---
+  duration_ms: 2375.921516
+  type: 'test'
+  ...
+# Subtest: CLI and direct Factory conditional writes use the same cross-process record lock
+ok 7 - CLI and direct Factory conditional writes use the same cross-process record lock
+  ---
+  duration_ms: 1298.258337
+  type: 'test'
+  ...
+# Subtest: two CLI edits that capture the same revision commit exactly one complete patch
+ok 8 - two CLI edits that capture the same revision commit exactly one complete patch
+  ---
+  duration_ms: 1361.427926
+  type: 'test'
+  ...
+# Subtest: Store read reports raw Runtime Payload capability without claiming JSON value decoding
+ok 9 - Store read reports raw Runtime Payload capability without claiming JSON value decoding
+  ---
+  duration_ms: 711.139264
+  type: 'test'
+  ...
+# Subtest: Store discovery does not advertise an incompatible existing raw ValueStore as available
+ok 10 - Store discovery does not advertise an incompatible existing raw ValueStore as available
+  ---
+  duration_ms: 1318.620588
+  type: 'test'
+  ...
+# Subtest: Store discovery keeps missing and Runtime-unsupported models unavailable without opening data directories
+ok 11 - Store discovery keeps missing and Runtime-unsupported models unavailable without opening data directories
+  ---
+  duration_ms: 1859.817081
+  type: 'test'
+  ...
+# Subtest: Factory delete followed by CLI recreation cannot reuse a stale client revision
+ok 12 - Factory delete followed by CLI recreation cannot reuse a stale client revision
+  ---
+  duration_ms: 1447.356443
+  type: 'test'
+  ...
+# Subtest: data upsert CLI creates then replaces a whole value and dry-run leaves data unchanged
+ok 13 - data upsert CLI creates then replaces a whole value and dry-run leaves data unchanged
+  ---
+  duration_ms: 2713.214218
+  type: 'test'
+  ...
+1..13
+# tests 13
+# suites 0
+# pass 13
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 34710.416102
+# Starting: app-install.test.ts

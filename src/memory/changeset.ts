@@ -217,6 +217,7 @@ export type MemoryChangeReviewSnapshot = MemoryChangePreview & {
 };
 
 export type MemoryChangeDetailSnapshot = MemoryChangePreview & {
+  baseMemoryRoot: string;
   files: Array<{
     reference: string;
     label: string;
@@ -469,7 +470,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         const changed = Number(right.operation !== "unchanged") - Number(left.operation !== "unchanged");
         return changed || left.label.localeCompare(right.label);
       });
-      return await input.use({ change, memoryRoot: previewRoot, files });
+      return await input.use({ change, memoryRoot: previewRoot, baseMemoryRoot: baseRoot, files });
     } finally {
       await rm(baseRoot, { recursive: true, force: true });
       await rm(previewRoot, { recursive: true, force: true });

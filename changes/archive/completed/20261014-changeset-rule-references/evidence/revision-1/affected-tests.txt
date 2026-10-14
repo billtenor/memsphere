@@ -1,0 +1,190 @@
+TAP version 13
+# Subtest: Managed ChangeSet publishes atomically and enforces target CAS
+ok 1 - Managed ChangeSet publishes atomically and enforces target CAS
+  ---
+  duration_ms: 7775.826601
+  type: 'test'
+  ...
+# Subtest: ChangeSet metadata rejects path traversal
+ok 2 - ChangeSet metadata rejects path traversal
+  ---
+  duration_ms: 0.712615
+  type: 'test'
+  ...
+# Subtest: ChangeSet metadata accepts only the active lifecycle vocabulary
+ok 3 - ChangeSet metadata accepts only the active lifecycle vocabulary
+  ---
+  duration_ms: 0.521227
+  type: 'test'
+  ...
+# Subtest: ChangeSet metadata requires store_type while allowing Managed source worktrees
+ok 4 - ChangeSet metadata requires store_type while allowing Managed source worktrees
+  ---
+  duration_ms: 0.3672
+  type: 'test'
+  ...
+# Subtest: ChangeSet reads reject store mismatches and lists do not hide corrupt records
+ok 5 - ChangeSet reads reject store mismatches and lists do not hide corrupt records
+  ---
+  duration_ms: 46.055313
+  type: 'test'
+  ...
+# Subtest: View reflows task content and keeps horizontal scrolling local on compact screens
+ok 6 - View reflows task content and keeps horizontal scrolling local on compact screens
+  ---
+  duration_ms: 3184.002762
+  type: 'test'
+  ...
+# Subtest: Shell panel widths support pointer drag, reload persistence, keyboard adjustment, and reset
+ok 7 - Shell panel widths support pointer drag, reload persistence, keyboard adjustment, and reset
+  ---
+  duration_ms: 1350.932556
+  type: 'test'
+  ...
+# Subtest: builtin Memory, ChangeSet, and Settings stay within desktop and mobile viewports
+ok 8 - builtin Memory, ChangeSet, and Settings stay within desktop and mobile viewports
+  ---
+  duration_ms: 1935.088213
+  type: 'test'
+  ...
+# Subtest: Run effective rule references and sections collapse and survive rerenders
+ok 9 - Run effective rule references and sections collapse and survive rerenders
+  ---
+  duration_ms: 775.116787
+  type: 'test'
+  ...
+# Subtest: Run titles fall back to the Procedure name for historical Runs
+ok 10 - Run titles fall back to the Procedure name for historical Runs
+  ---
+  duration_ms: 397.443648
+  type: 'test'
+  ...
+# Subtest: Run status list refreshes only when the user asks
+ok 11 - Run status list refreshes only when the user asks
+  ---
+  duration_ms: 4978.661179
+  type: 'test'
+  ...
+# Subtest: Run status switching does not load a detail until the user selects one
+ok 12 - Run status switching does not load a detail until the user selects one
+  ---
+  duration_ms: 727.750347
+  type: 'test'
+  ...
+# Subtest: Run detail refresh is manual
+ok 13 - Run detail refresh is manual
+  ---
+  duration_ms: 4845.552962
+  type: 'test'
+  ...
+# Subtest: missing Run detail is reported as not found
+ok 14 - missing Run detail is reported as not found
+  ---
+  duration_ms: 10.309438
+  type: 'test'
+  ...
+# Subtest: archiving the selected Run returns to the current status list
+ok 15 - archiving the selected Run returns to the current status list
+  ---
+  duration_ms: 668.109916
+  type: 'test'
+  ...
+# Subtest: Memory nav only shows the Project Catalog and can hide installed system memory
+ok 16 - Memory nav only shows the Project Catalog and can hide installed system memory
+  ---
+  duration_ms: 880.067346
+  type: 'test'
+  ...
+# Subtest: Memory navigation uses aliases while the detail header exposes the canonical reference
+ok 17 - Memory navigation uses aliases while the detail header exposes the canonical reference
+  ---
+  duration_ms: 998.036817
+  type: 'test'
+  ...
+# Subtest: Memory API identifies installed system memory independently of its file path
+ok 18 - Memory API identifies installed system memory independently of its file path
+  ---
+  duration_ms: 21.342209
+  type: 'test'
+  ...
+# Subtest: Memory detail keeps rule references raw unless effective expansion is requested
+ok 19 - Memory detail keeps rule references raw unless effective expansion is requested
+  ---
+  duration_ms: 26.953803
+  type: 'test'
+  ...
+# Subtest: default Chinese Memory detail renders Schema labels without fixed English UI copy
+ok 20 - default Chinese Memory detail renders Schema labels without fixed English UI copy
+  ---
+  duration_ms: 667.701682
+  type: 'test'
+  ...
+# Subtest: published Statement references expand in place without ChangeSet comment controls
+ok 21 - published Statement references expand in place without ChangeSet comment controls
+  ---
+  duration_ms: 1327.299091
+  type: 'test'
+  ...
+# Subtest: published Procedure Action references do not expose ChangeSet comment controls
+ok 22 - published Procedure Action references do not expose ChangeSet comment controls
+  ---
+  duration_ms: 582.297133
+  type: 'test'
+  ...
+# Subtest: ChangeSet Action references expand and open unchanged Statements from the candidate snapshot
+ok 23 - ChangeSet Action references expand and open unchanged Statements from the candidate snapshot
+  ---
+  duration_ms: 1890.910611
+  type: 'test'
+  ...
+# Subtest: ChangeSet unresolved rule references keep the candidate reviewable
+ok 24 - ChangeSet unresolved rule references keep the candidate reviewable
+  ---
+  duration_ms: 809.14628
+  type: 'test'
+  ...
+# Subtest: ChangeSet valid references remain expandable beside a missing reference in the same field
+ok 25 - ChangeSet valid references remain expandable beside a missing reference in the same field
+  ---
+  duration_ms: 974.295267
+  type: 'test'
+  ...
+# Subtest: ChangeSet compares each version's Statement rules and opens the candidate version
+ok 26 - ChangeSet compares each version's Statement rules and opens the candidate version
+  ---
+  duration_ms: 2091.80756
+  type: 'test'
+  ...
+# Subtest: retired Memory Review API and page routes return 404
+ok 27 - retired Memory Review API and page routes return 404
+  ---
+  duration_ms: 11.785599
+  type: 'test'
+  ...
+# Subtest: multiple Human identities require and persist a Project-local ChangeSet selection
+ok 28 - multiple Human identities require and persist a Project-local ChangeSet selection
+  ---
+  duration_ms: 2262.998743
+  type: 'test'
+  ...
+# Subtest: Run pages do not expose the retired Task Review entry or inline comments
+ok 29 - Run pages do not expose the retired Task Review entry or inline comments
+  ---
+  duration_ms: 646.539123
+  type: 'test'
+  ...
+# Subtest: View deep links restore Memory, Run, and browser history
+ok 30 - View deep links restore Memory, Run, and browser history
+  ---
+  duration_ms: 3147.460176
+  type: 'test'
+  ...
+1..30
+# tests 30
+# suites 0
+# pass 30
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 36260.388836

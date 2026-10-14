@@ -63,7 +63,7 @@ import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDef
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
-import { resolveRuleParts, type RuleLookup } from "../memory/rules.js";
+import { resolveRuleParts, RuleResolutionError, type RuleLookup } from "../memory/rules.js";
 import { toEffectiveRuleDisplayTree, toEffectiveRuleDisplayValue } from "../memory/serializer.js";
 import {
   abandonMemoryChange,
@@ -1136,30 +1136,40 @@ async function handleRequest(
         valid: change.checkpoint?.valid,
         issues: change.checkpoint?.issues
     };
-    const targetMemories = await withMemoryChangeDetailSnapshot({
+    const { targetMemories, referenceMemories } = await withMemoryChangeDetailSnapshot({
       home: config.homeRoot,
       project: config.project.name,
       memoryScope: "canonical",
       changeId,
-      use: async ({ files }) => Promise.all(files.map(async (file) => {
-        const memory = file.candidatePath
-          ? memoryPayloadFromSource(file.label, await readFile(file.candidatePath, "utf8"))
-          : undefined;
-        const baseMemory = file.basePath
-          ? memoryPayloadFromSource(file.label, await readFile(file.basePath, "utf8"))
-          : undefined;
-        return {
-          reference: file.reference,
-          operation: file.operation,
-          ...(memory ? { memory } : {}),
-          ...(baseMemory ? { baseMemory } : {})
-        };
-      }))
+      use: async ({ files, memoryRoot, baseMemoryRoot }) => {
+        // Detail roots are disposable; never retain their indexes in the server cache.
+        const references = await loadMemorySummaryPayloadFromRoot(config, undefined, memoryRoot, source);
+        const candidateLookup = createStatementRuleLookup(memoryRoot);
+        const baseLookup = createStatementRuleLookup(baseMemoryRoot);
+        const targetMemories = await Promise.all(files.map(async (file) => {
+          const memory = file.candidatePath
+            ? memoryPayloadFromSource(file.label, await readFile(file.candidatePath, "utf8"))
+            : undefined;
+          const baseMemory = file.basePath
+            ? memoryPayloadFromSource(file.label, await readFile(file.basePath, "utf8"))
+            : undefined;
+          if (memory?.entity) await attachEffectiveRuleTrees(memoryRoot, memory.entity, true, candidateLookup);
+          if (baseMemory?.entity) await attachEffectiveRuleTrees(baseMemoryRoot, baseMemory.entity, true, baseLookup);
+          return {
+            reference: file.reference,
+            operation: file.operation,
+            ...(memory ? { memory } : {}),
+            ...(baseMemory ? { baseMemory } : {})
+          };
+        }));
+        return { targetMemories, referenceMemories: references.memories };
+      }
     });
     sendJson(response, 200, {
       change: await memoryChangeSummary(change),
       targets: change.targets,
       targetMemories,
+      referenceMemories,
       comments: change.comments,
       actorNames: Object.fromEntries(
         Object.entries(config.controlPlane?.actors ?? {}).map(([actorId, actor]) => [actorId, actor.name])
@@ -1745,7 +1755,7 @@ async function buildMemoryFileIndex(memoryRoot: string): Promise<Map<string, { k
 
 async function loadMemoryPayload(config: MemsphereConfig, viewCache: ViewMemoryCache, changeId?: string): Promise<MemoryPayload> {
   return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
-    loadMemoryPayloadFromRoot(config, viewCache, memoryRoot, source)
+    loadMemoryPayloadFromRoot(config, changeId ? undefined : viewCache, memoryRoot, source)
   );
 }
 
@@ -1863,6 +1873,17 @@ async function withMemoryPayloadRoot<T>(
 ): Promise<T> {
   if (changeId) {
     if (!config.project?.name) throw new Error("No Project is currently selected");
+    const change = await readMemoryChange({ home: config.homeRoot, project: config.project.name, memoryScope: "canonical", changeId });
+    if (!change.checkpoint) {
+      // A newly opened View ChangeSet already has a complete baseline candidate.
+      return withMemoryChangeDetailSnapshot({
+        home: config.homeRoot, project: config.project.name, memoryScope: "canonical", changeId,
+        use: async ({ change, memoryRoot }) => use(memoryRoot, {
+          mode: "changeset", changeId: change.id, storeType: change.store_type,
+          baseRevision: change.base_revision, updatedAt: change.updated_at
+        })
+      });
+    }
     return viewCache.previews.use({
       home: config.homeRoot,
       project: config.project.name,
@@ -1884,7 +1905,7 @@ async function withMemoryPayloadRoot<T>(
 
 async function loadMemoryPayloadFromRoot(
   config: MemsphereConfig,
-  viewCache: ViewMemoryCache,
+  viewCache: ViewMemoryCache | undefined,
   memoryRoot: string,
   source: MemoryPayload["source"]
 ): Promise<MemoryPayload> {
@@ -1904,7 +1925,7 @@ async function loadMemoryPayloadFromRoot(
     }
   }
 
-  viewCache.replaceIndex(memoryRoot, fileIndex);
+  viewCache?.replaceIndex(memoryRoot, fileIndex);
   return {
     memoryRoot: config.memoryRoot,
     actorNames,
@@ -1918,13 +1939,13 @@ async function loadMemoryPayloadFromRoot(
 
 async function loadMemorySummaryPayload(config: MemsphereConfig, viewCache: ViewMemoryCache, changeId?: string): Promise<MemoryPayload> {
   return withMemoryPayloadRoot(config, viewCache, changeId, (memoryRoot, source) =>
-    loadMemorySummaryPayloadFromRoot(config, viewCache, memoryRoot, source)
+    loadMemorySummaryPayloadFromRoot(config, changeId ? undefined : viewCache, memoryRoot, source)
   );
 }
 
 async function loadMemorySummaryPayloadFromRoot(
   config: MemsphereConfig,
-  viewCache: ViewMemoryCache,
+  viewCache: ViewMemoryCache | undefined,
   memoryRoot: string,
   source: MemoryPayload["source"]
 ): Promise<MemoryPayload> {
@@ -1964,7 +1985,7 @@ async function loadMemorySummaryPayloadFromRoot(
       });
     }
   }
-  viewCache.replaceIndex(memoryRoot, fileIndex);
+  viewCache?.replaceIndex(memoryRoot, fileIndex);
   return {
     memoryRoot: config.memoryRoot,
     actorNames: Object.fromEntries(
@@ -1987,7 +2008,9 @@ async function loadMemoryDetailPayload(
   effective = false
 ): Promise<MemoryPayload["memories"][number] | undefined> {
   return withMemoryPayloadRoot(config, viewCache, changeId, async (memoryRoot) => {
-    const file = await viewCache.find(memoryRoot, `${kind}/${name}`);
+    const file = changeId
+      ? (await buildMemoryFileIndex(memoryRoot)).get(`${kind}/${name}`)
+      : await viewCache.find(memoryRoot, `${kind}/${name}`);
     if (!file) return undefined;
     const memory = await loadMemoryListItem(memoryRoot, kind, file.path, await systemMemoryReferences());
     if (effective && memory.entity) await attachEffectiveRuleTrees(memoryRoot, memory.entity);
@@ -1995,20 +2018,32 @@ async function loadMemoryDetailPayload(
   });
 }
 
-async function attachEffectiveRuleTrees(memoryRoot: string, entity: unknown): Promise<void> {
-  const statements = new Map<string, Awaited<ReturnType<typeof readMemoryFile>>["entity"]>();
-  const lookup: RuleLookup = async (target) => {
-    if (!statements.size) {
-      for (const path of await listMemoryFiles(memoryRoot, "statements")) {
-        const statement = await readMemoryFile("statements", path);
-        const canonicalName = statement.entity.names[0];
-        if (canonicalName) statements.set(`statements/${canonicalName}`, statement.entity);
-      }
+function createStatementRuleLookup(memoryRoot: string): RuleLookup {
+  let index: ReturnType<typeof buildMemoryFileIndex> | undefined;
+  const statements = new Map<string, ReturnType<RuleLookup>>();
+  return (target) => {
+    let pending = statements.get(target);
+    if (!pending) {
+      pending = (async () => {
+        index ??= buildMemoryFileIndex(memoryRoot);
+        const file = (await index).get(target);
+        if (!file || file.kind !== "statements") throw new Error(`Statement not found: ${target}`);
+        const statement = (await readMemoryFile("statements", file.path)).entity;
+        if (statement.tag !== "!statement") throw new Error(`Statement not found: ${target}`);
+        return statement;
+      })();
+      statements.set(target, pending);
     }
-    const statement = statements.get(target);
-    if (!statement || statement.tag !== "!statement") throw new Error(`Statement not found: ${target}`);
-    return statement;
+    return pending;
   };
+}
+
+async function attachEffectiveRuleTrees(
+  memoryRoot: string,
+  entity: unknown,
+  tolerateUnresolved = false,
+  lookup: RuleLookup = createStatementRuleLookup(memoryRoot)
+): Promise<void> {
 
   const visit = async (value: unknown): Promise<void> => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
@@ -2024,7 +2059,22 @@ async function attachEffectiveRuleTrees(memoryRoot: string, entity: unknown): Pr
     for (const channel of ["asserts", "suggests"] as const) {
       const parts = node[channel];
       if (!Array.isArray(parts) || !parts.some(isMemoryReferenceValue)) continue;
-      Object.assign(effectiveRules, toEffectiveRuleDisplayTree(await resolveRuleParts(channel, parts, lookup)));
+      try {
+        Object.assign(effectiveRules, toEffectiveRuleDisplayTree(await resolveRuleParts(channel, parts, lookup)));
+      } catch (error) {
+        if (!tolerateUnresolved || !(error instanceof RuleResolutionError)) throw error;
+        // Keep invalid declarations raw, while valid siblings still expand.
+        const resolvableParts: typeof parts = [];
+        for (const part of parts) {
+          try {
+            if (typeof part !== "string") await resolveRuleParts(channel, [part], lookup);
+            resolvableParts.push(part);
+          } catch (partError) {
+            if (!(partError instanceof RuleResolutionError)) throw partError;
+          }
+        }
+        Object.assign(effectiveRules, toEffectiveRuleDisplayTree(await resolveRuleParts(channel, resolvableParts, lookup)));
+      }
     }
     if (Object.keys(effectiveRules).length) node.effectiveRules = effectiveRules;
   };
