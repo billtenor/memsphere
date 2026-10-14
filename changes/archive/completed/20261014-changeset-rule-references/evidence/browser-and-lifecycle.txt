@@ -1,0 +1,58 @@
+TAP version 13
+After 12 detail requests: retained disposable preview paths = 0
+### Browser `changeset-run-check` opened with pid 658062.
+### Ran Playwright code
+```js
+await page.goto('http://127.0.0.1:18495/projects/responsive/changes/change-20261014-091205452z-f4f6ff40');
+```
+### Page
+- Page URL: http://127.0.0.1:18495/projects/responsive/changes/change-20261014-091205452z-f4f6ff40
+- Page Title: memsphere
+### Snapshot
+- [Snapshot](.playwright-cli/page-2026-10-14T09-12-10-124Z.yml)
+
+### Result
+{"expanded":true,"collapsed":true,"navigated":true,"url":"http://127.0.0.1:18495/projects/responsive/memories/statements/shared-rules?change=change-20261014-091205452z-f4f6ff40"}
+### Ran Playwright code
+```js
+await (async page => {
+        await page.getByRole('button', { name: '展开全部', exact: true }).click();
+        const reference = page.locator('.rule-reference', { hasText: 'statements/shared-rules' }).first();
+        const link = reference.locator('.memory-ref-link');
+        if ((await link.getAttribute('class')).includes('missing')) throw new Error('valid reference marked missing');
+        await reference.locator('.rule-reference-toggle').click();
+        await reference.locator('.effective-rule-inline').waitFor();
+        if (!(await reference.innerText()).includes('Cite supporting evidence')) throw new Error('rules not expanded');
+        await page.screenshot({path:'/data00/home/liuyanjun.lyj/.codex/worktrees/5922/vibe-mem/changes/active/20261014-changeset-rule-references/evidence/changeset-reference-expanded.png',fullPage:true});
+        await reference.locator('.rule-reference-toggle').click();
+        if (!(await reference.locator('.effective-rule-inline').isHidden())) throw new Error('rules not collapsed');
+        await link.click();
+        await page.waitForURL('**/statements/shared-rules?change=*');
+        await page.locator('[data-view-slot="header.title"] p', { hasText: 'statements/shared-rules' }).waitFor();
+        await page.getByRole('button', { name: '展开全部', exact: true }).click();
+        await page.getByText('The shared assertion applies.', { exact: true }).waitFor();
+        return {expanded:true,collapsed:true,navigated:true,url:page.url()};
+      })(page);
+```
+### Page
+- Page URL: http://127.0.0.1:18495/projects/responsive/memories/statements/shared-rules?change=change-20261014-091205452z-f4f6ff40
+- Page Title: memsphere
+
+Browser 'changeset-run-check' closed
+
+
+# Subtest: snapshot lifecycle and playwright-cli interaction
+ok 1 - snapshot lifecycle and playwright-cli interaction
+  ---
+  duration_ms: 10492.945111
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 10743.212916

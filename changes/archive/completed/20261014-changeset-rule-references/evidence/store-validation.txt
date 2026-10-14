@@ -1,0 +1,7 @@
+memsphere validation passed
+config: /data00/home/liuyanjun.lyj/.local/share/memsphere/projects/memsphere/config.json
+memoryRoot: /data00/home/liuyanjun.lyj/.codex/worktrees/5922/vibe-mem/.memsphere/memory
+runsRoot: /data00/home/liuyanjun.lyj/.local/share/memsphere/projects/memsphere/runs
+Validation scope: current Project Store.
+ChangeSet: not created or updated.
+For unpublished Memory changes, run: memsphere memory change validate [change-id]

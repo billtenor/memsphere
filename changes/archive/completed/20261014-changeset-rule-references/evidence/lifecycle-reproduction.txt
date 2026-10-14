@@ -1,0 +1,17 @@
+TAP version 13
+After 12 detail requests: retained disposable preview paths = 0
+# Subtest: disposable ChangeSet detail roots are not retained
+ok 1 - disposable ChangeSet detail roots are not retained
+  ---
+  duration_ms: 2917.473454
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3129.028031

@@ -1,7 +1,7 @@
 import { browserScope, type TestBrowser } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import { once } from "node:events";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -10,6 +10,8 @@ import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
 import { parseControlPlaneConfig } from "../src/control-plane.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
+import { runGit } from "../src/git.js";
+import { editMemories, validateMemoryChange } from "../src/memory/changeset.js";
 import type { RunState } from "../src/run/store.js";
 
 const runId = "run-responsive-view";
@@ -17,8 +19,8 @@ const legacyRunId = "run-responsive-legacy";
 const runName = `本次Run名称-${"x".repeat(120)}`;
 
 async function withResponsiveView(
-  fn: (browser: TestBrowser, url: string) => Promise<void>,
-  options: { includeBrokenMemory?: boolean; extraMemoryCount?: number } = {}
+  fn: (browser: TestBrowser, url: string, fixture: { dir: string; homeRoot: string; memoryRoot: string }) => Promise<void>,
+  options: { includeBrokenMemory?: boolean; extraMemoryCount?: number; initializeGit?: boolean } = {}
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-responsive-view-"));
   const homeRoot = join(dir, "home");
@@ -256,6 +258,15 @@ async function withResponsiveView(
     events: []
   })}\n`);
 
+  if (options.initializeGit) {
+    await runGit(["init", "-b", "master"], { cwd: memoryRoot });
+    await runGit(["add", "."], { cwd: memoryRoot });
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.test", "-c", "commit.gpgsign=false", "commit", "-m", "Memory fixture"], { cwd: memoryRoot });
+    await runGit(["tag", "responsive-revision"], { cwd: memoryRoot });
+    const configuration = JSON.parse(await readFile(join(dir, "config.json"), "utf8"));
+    configuration.store.published_revision = (await runGit(["rev-parse", "HEAD"], { cwd: memoryRoot })).stdout;
+    await writeFile(join(dir, "config.json"), JSON.stringify(configuration));
+  }
   const config: MemsphereConfig = {
     configPath: join(dir, "config.json"),
     scopeRoot: dir,
@@ -286,12 +297,39 @@ async function withResponsiveView(
   const browser = await browserScope();
 
   try {
-    await fn(browser, `http://127.0.0.1:${address.port}`);
+    await fn(browser, `http://127.0.0.1:${address.port}`, { dir, homeRoot, memoryRoot });
   } finally {
     await browser.close();
     await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
     // Windows may briefly retain file handles after the server/browser close.
     await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
+}
+
+async function candidateProcedureChange(
+  fixture: { dir: string; homeRoot: string; memoryRoot: string },
+  mutate: (candidateRoot: string) => Promise<void>,
+  includeStatement = false
+): Promise<string> {
+  const workspace = join(fixture.dir, "workspace");
+  await mkdir(workspace);
+  await runGit(["init", "-b", "master"], { cwd: workspace });
+  const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT };
+  try {
+    process.chdir(workspace);
+    process.env.MEMSPHERE_HOME = fixture.homeRoot;
+    process.env.MEMSPHERE_PROJECT = "responsive";
+    const edited = await editMemories({ references: ["procedures/reviewable-procedure", ...(includeStatement ? ["statements/shared-rules"] : [])] });
+    await mutate(edited.candidateRoot);
+    // Invalid candidates are still checkpointed and must remain reviewable.
+    await validateMemoryChange(edited.change.id);
+    return edited.change.id;
+  } finally {
+    process.chdir(previous.cwd);
+    if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
+    else process.env.MEMSPHERE_HOME = previous.home;
+    if (previous.project === undefined) delete process.env.MEMSPHERE_PROJECT;
+    else process.env.MEMSPHERE_PROJECT = previous.project;
   }
 }
 
@@ -929,6 +967,190 @@ test("published Procedure Action references do not expose ChangeSet comment cont
       await page.close();
     }
   });
+});
+
+test("ChangeSet Action references expand and open unchanged Statements from the candidate snapshot", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const created = await fetch(`${url}/api/projects/responsive/changes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memoryReference: "procedures/reviewable-procedure", operator: { kind: "human", id: "alice" } })
+    });
+    const createdText = await created.text();
+    assert.equal(created.status, 201, createdText);
+    const changeId = (JSON.parse(createdText) as { change: { id: string } }).change.id;
+    const detailResponse = await fetch(`${url}/api/projects/responsive/changes/${changeId}`);
+    assert.equal(detailResponse.status, 200, await detailResponse.clone().text());
+    const detail = await detailResponse.json() as {
+      targetMemories: Array<{ reference: string; memory: { entity: unknown }; baseMemory: { entity: unknown } }>;
+      referenceMemories: Array<{ id: string }>;
+    };
+    assert.equal(detail.targetMemories.some(memory => memory.reference === "statements/shared-rules"), false);
+    assert.equal(detail.referenceMemories.some(memory => memory.id === "statements/shared-rules"), true);
+    assert.match(JSON.stringify(detail.targetMemories[0]?.memory.entity), /The shared assertion applies/);
+    assert.match(JSON.stringify(detail.targetMemories[0]?.baseMemory.entity), /Cite supporting evidence/);
+    const page = await browser.newPage({ viewport: { width: 1200, height: 900 } });
+    page.setDefaultTimeout(10_000);
+    try {
+      await page.goto(`${url}/projects/responsive/changes/${changeId}?section=changes`);
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
+      const link = reference.getByRole("button", { name: "statements/shared-rules", exact: true });
+      assert.doesNotMatch(await link.getAttribute("class") ?? "", /missing/);
+      const toggle = reference.locator(".rule-reference-toggle");
+      assert.equal(await toggle.textContent(), "2 条生效规则");
+      await toggle.click();
+      const body = reference.locator(".effective-rule-inline");
+      await body.waitFor();
+      assert.match(await body.textContent() ?? "", /The shared assertion applies/);
+      assert.match(await body.textContent() ?? "", /Evidence-specific context/);
+      await toggle.click();
+      assert.equal(await body.isHidden(), true);
+      await link.click();
+      await page.waitForURL(`${url}/projects/responsive/memories/statements/shared-rules?change=${changeId}`);
+      await page.locator('[data-view-slot="header.title"] p', { hasText: "statements/shared-rules" }).waitFor();
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      await page.getByText("The shared assertion applies.", { exact: true }).waitFor();
+      assert.equal(await page.locator(".memory-error").count(), 0, await page.locator("body").innerText());
+    } finally {
+      await page.close();
+    }
+  }, { includeBrokenMemory: false, initializeGit: true });
+});
+
+test("ChangeSet unresolved rule references keep the candidate reviewable", async () => {
+  await withResponsiveView(async (browser, url) => {
+    const created = await fetch(`${url}/api/projects/responsive/changes`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ memoryReference: "statements/referencing-alias", operator: { kind: "human", id: "alice" } })
+    });
+    const createdText = await created.text();
+    assert.equal(created.status, 201, createdText);
+    const changeId = (JSON.parse(createdText) as { change: { id: string } }).change.id;
+    const page = await browser.newPage();
+    page.setDefaultTimeout(10_000);
+    try {
+      await page.goto(`${url}/projects/responsive/changes/${changeId}`);
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules-alias" }).first();
+      assert.match(await reference.locator(".memory-ref-link").getAttribute("class") ?? "", /missing/);
+      assert.equal(await reference.locator(".rule-reference-toggle").count(), 0);
+      assert.equal(await page.locator(".memory-error").count(), 0);
+    } finally {
+      await page.close();
+    }
+  }, { includeBrokenMemory: false, initializeGit: true });
+});
+
+test("ChangeSet valid references remain expandable beside a missing reference in the same field", async () => {
+  await withResponsiveView(async (browser, url, fixture) => {
+    const changeId = await candidateProcedureChange(fixture, async root => {
+      const path = join(root, "procedures/reviewable-procedure.yaml");
+      await writeFile(path, (await readFile(path, "utf8")).replace("    artifact:", "      - !ref\n        target: statements/missing-rules\n    artifact:"));
+    });
+    const response = await fetch(`${url}/api/projects/responsive/changes/${changeId}`);
+    assert.equal(response.status, 200, await response.clone().text());
+    const payload = await response.json() as { targetMemories: Array<{ memory: { entity: { flow: Array<{ effectiveRules: { asserts: unknown[] } }> } } }> };
+    assert.deepEqual(payload.targetMemories[0]?.memory.entity.flow[0]?.effectiveRules.asserts, [
+      "Action field comments must be available.",
+      { reference: "statements/shared-rules", asserts: ["The shared assertion applies."], sections: [{ name: "Evidence", defines: ["Evidence-specific context."], asserts: ["Cite supporting evidence."] }] }
+    ]);
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${url}/projects/responsive/changes/${changeId}`);
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      const valid = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
+      await valid.locator(".rule-reference-toggle").click();
+      await valid.locator(".effective-rule-inline").waitFor();
+      assert.match(await valid.innerText(), /The shared assertion applies/);
+      const invalid = page.locator(".rule-reference", { hasText: "statements/missing-rules" }).first();
+      assert.match(await invalid.locator(".memory-ref-link").getAttribute("class") ?? "", /missing/);
+      assert.equal(await invalid.locator(".rule-reference-toggle").count(), 0);
+    } finally { await page.close(); }
+  }, { includeBrokenMemory: false, initializeGit: true });
+});
+
+test("ChangeSet compares each version's Statement rules and opens the candidate version", async () => {
+  await withResponsiveView(async (browser, url, fixture) => {
+    const changeId = await candidateProcedureChange(fixture, async root => {
+      const statementPath = join(root, "statements/shared-rules.yaml");
+      await writeFile(statementPath, (await readFile(statementPath, "utf8")).replace("  - The shared assertion applies.", "  - Candidate assertion.\n  - Candidate extra assertion."));
+      const procedurePath = join(root, "procedures/reviewable-procedure.yaml");
+      await writeFile(procedurePath, (await readFile(procedurePath, "utf8")).replace("Inspect an action field.", "Inspect the candidate action field."));
+    }, true);
+    for (let request = 0; request < 3; request += 1) {
+      const response = await fetch(`${url}/api/projects/responsive/changes/${changeId}`);
+      assert.equal(response.status, 200, await response.clone().text());
+      type ProjectedProcedure = { entity: { flow: Array<{ effectiveRules: { asserts: unknown[] } }> } };
+      const payload = await response.json() as { targetMemories: Array<{ reference: string; memory: ProjectedProcedure; baseMemory: ProjectedProcedure }> };
+      const procedure = payload.targetMemories.find(memory => memory.reference === "procedures/reviewable-procedure")!;
+      const section = { name: "Evidence", defines: ["Evidence-specific context."], asserts: ["Cite supporting evidence."] };
+      assert.deepEqual(procedure.baseMemory.entity.flow[0]?.effectiveRules.asserts, ["Action field comments must be available.", { reference: "statements/shared-rules", asserts: ["The shared assertion applies."], sections: [section] }]);
+      assert.deepEqual(procedure.memory.entity.flow[0]?.effectiveRules.asserts, ["Action field comments must be available.", { reference: "statements/shared-rules", asserts: ["Candidate assertion.", "Candidate extra assertion."], sections: [section] }]);
+    }
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${url}/projects/responsive/changes/${changeId}`);
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      const reference = page.locator(".rule-reference", { hasText: "statements/shared-rules" }).first();
+      assert.equal(await reference.locator(".rule-reference-toggle").textContent(), "3 条生效规则");
+      await reference.locator(".rule-reference-toggle").click();
+      const body = reference.locator(".effective-rule-inline");
+      await body.waitFor();
+      assert.match(await body.innerText(), /Candidate extra assertion/);
+      assert.doesNotMatch(await body.innerText(), /The shared assertion applies/);
+      await reference.locator(".memory-ref-link").click();
+      await page.waitForURL(`${url}/projects/responsive/memories/statements/shared-rules?change=${changeId}`);
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      await page.getByText("Candidate extra assertion.", { exact: true }).waitFor();
+    } finally { await page.close(); }
+  }, { includeBrokenMemory: false, initializeGit: true });
+});
+
+test("leaving and reentering a ChangeSet keeps formal and candidate Memory sources separate", async () => {
+  await withResponsiveView(async (browser, url, fixture) => {
+    const changeId = await candidateProcedureChange(fixture, async root => {
+      const path = join(root, "statements/shared-rules.yaml");
+      await writeFile(path, (await readFile(path, "utf8"))
+        .replace("The shared assertion applies.", "Candidate-only assertion.")
+        .replace("names: [ shared-rules, shared-rules-alias, Shared rules ]", "names: [ shared-rules, Candidate-only title ]"));
+    }, true);
+    const page = await browser.newPage();
+    const formalPath = `/projects/responsive/memories/statements/shared-rules`;
+    const navigate = async (path: string) => {
+      await page.evaluate(path => {
+        history.pushState({}, "", path);
+        dispatchEvent(new PopStateEvent("popstate"));
+      }, path);
+      await page.waitForURL(`${url}${path}`);
+      await page.locator('[data-view-slot="header.title"] p', { hasText: "statements/shared-rules" }).waitFor();
+      await page.locator(".memory-title").filter(path.includes("?change=")
+        ? { hasText: "Candidate-only title" }
+        : { hasNotText: "Candidate-only title" }).waitFor();
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+    };
+    try {
+      await page.goto(`${url}${formalPath}`);
+      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      await page.getByText("The shared assertion applies.", { exact: true }).waitFor();
+      await navigate(`${formalPath}?change=${changeId}`);
+      await page.getByText("Candidate-only assertion.", { exact: true }).waitFor();
+      await page.locator(".memory-title", { hasText: "Candidate-only title" }).waitFor();
+      const formalReload = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/memories") && new URL(response.url()).search === "?representation=summary" && response.ok());
+      await navigate(formalPath);
+      await formalReload;
+      await page.getByText("The shared assertion applies.", { exact: true }).waitFor();
+      assert.equal(await page.getByText("Candidate-only assertion.", { exact: true }).count(), 0);
+      assert.equal(await page.locator(".mem-view-list-item-heading strong", { hasText: "Candidate-only title" }).count(), 0);
+      assert.equal(await page.locator(".memory-change-context").count(), 0);
+      await navigate(`${formalPath}?change=${changeId}`);
+      await page.getByText("Candidate-only assertion.", { exact: true }).waitFor();
+      assert.equal(await page.getByText("The shared assertion applies.", { exact: true }).count(), 0);
+      await navigate(formalPath);
+      await page.getByText("The shared assertion applies.", { exact: true }).waitFor();
+    } finally { await page.close(); }
+  }, { includeBrokenMemory: false, initializeGit: true });
 });
 
 test("retired Memory Review API and page routes return 404", async () => {

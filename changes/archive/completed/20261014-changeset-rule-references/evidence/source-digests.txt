@@ -1,0 +1,4 @@
+fbd3a189c6c8f7050fe1d6a2ef33a79c229114f65a20e627cc39693c50a5b863  src/commands/view.ts
+8fb4f1c682ed31de6c1664834d0d46dd5f9308e9cc03d953eae12ebc53a7a361  src/memory/changeset.ts
+68ce43d8909ed097d123ef0bc25e5c11ad1f9db5073ffe84858bce7e62901dba  modules/org.memsphere.memory/adapter/view/index.ts
+ce367dbd6ab3d7a46ee341bce8582f9e813cc9dbeecd6c55b4410d211c9cc97c  test/view-responsive.test.ts
