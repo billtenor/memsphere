@@ -1,6 +1,6 @@
 ---
 id: 20261019-trim-ci-tests
-status: accepting
+completed_at: 2026-10-19
 type: improvement
 created: 2026-10-19
 run_id: run-20261019-081003z-36eab35a
@@ -85,3 +85,9 @@ run_id: run-20261019-081003z-36eab35a
 第二轮a5f1679所有测试、full和安全检查均通过，但default预算317.4秒超过285秒；8个测试/打包job合计1485秒，相比同类历史2849秒减少47.9%。Windows core两个CLI重型文件实测218/227秒，仍有重复Node编译开销。本机8次CLI启动对照：禁用缓存509–631ms，启用后热启动418–513ms。测试job增加Node 22原生NODE_COMPILE_CACHE，目录仅runner.temp内本job复用，不共享测试数据或MEMSPHERE_HOME；不改变测试/构建数量或阈值。该优化最终以新head远端CI验证。
 
 第三轮f700dcb：手动full抢占runner导致default部分排队约90秒，已取消该full并决定后续串行验证default/full；macOS实际测试亦达到job时限，不能只归因排队。Node缓存限于Windows，macOS平台并发3→4，保持既有上限。default复用原有Windows安装包job运行app-install/project-command两份重型平台文件（直接runner、并发2、不额外build），core36→34、升级6保持，安装包原smoke全部保留；full矩阵仍原样，追加两文件步骤明确不适用full以免重复。所有平台保护仍各42文件，233执行、8构建和285秒阈值保持。路由自检及移入两份完整回归0失败。33b542f曾因job级runner上下文不支持而未触发full，后续f700dcb已改为GITHUB_ENV步骤，不将未触发视为通过。
+
+## 实现验收与需求归档
+
+本轮Human、研发/测试/架构Agent、产品Agent及Runner全部正式通过。集成master后149文件全量1227通过、2平台跳过、0失败；类型检查、构建与Store校验通过。修复真实CI关键路径后，f77d44d的default工作流39247282874全部成功，预算276.5秒（285秒阈值未变），Security成功。既有full 39244967042三平台完整回归成功；最终归档提交的最新head仍须重新完成default/full，精确SHA与最终适用检查结果以本Run的PR与CI最终交付报告及PR #108为准，不复用旧head成功。
+
+需求实现、测试与验收已完成，按交付规范移除active状态并归档；最终远端检查跟进和Human审核/合入仍按冻结Run后续步骤执行。无本轮Memory差异，不创建空ChangeSet。
