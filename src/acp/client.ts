@@ -147,12 +147,20 @@ export async function runAgentReviewAcpSession(input: {
     return { ...result, stderr };
   } catch (error) {
     const timeoutError = timeoutReason(startupTimeout, idleTimeout, maxRuntimeTimeout);
+    const exitCode = process.exitCode;
+    startupTimeout.dispose();
+    idleTimeout?.dispose();
+    maxRuntimeTimeout?.dispose();
+    // RPC stdout and diagnostic stderr are separate pipes. Drain stderr during
+    // shutdown before constructing the error, even when stdout arrived first.
+    terminate();
+    await drainAgentStderr(process.stderr);
     if (timeoutError) {
       throw new Error(withAgentStderr(timeoutError.message, stderr), { cause: error });
     }
     if (error instanceof Error && error.message.startsWith("agent_process_spawn:")) throw error;
-    if (process.exitCode !== null && process.exitCode !== 0) {
-      throw new Error(withAgentStderr(`agent_process_exit: exited ${process.exitCode}`, stderr), { cause: error });
+    if (exitCode !== null && exitCode !== 0) {
+      throw new Error(withAgentStderr(`agent_process_exit: exited ${exitCode}`, stderr), { cause: error });
     }
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(withAgentStderr(message, stderr), { cause: error });
@@ -176,6 +184,20 @@ async function assertAbsoluteLaunchCommand(command: string): Promise<void> {
     if (await access(candidate).then(() => true, () => false)) return;
   }
   throw new Error(`agent_process_spawn: executable not found: ${command}`);
+}
+
+async function drainAgentStderr(stderr: Readable): Promise<void> {
+  if (stderr.closed) return;
+  await new Promise<void>((resolveDrain) => {
+    const finish = () => {
+      clearTimeout(timer);
+      stderr.off("close", finish);
+      resolveDrain();
+    };
+    // Bound cleanup if a Provider descendant keeps the diagnostic pipe open.
+    const timer = setTimeout(finish, 1_000);
+    stderr.once("close", finish);
+  });
 }
 
 function withAgentStderr(message: string, stderr: string): string {

@@ -85,3 +85,6 @@ Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别�
 
 
 运行39216561657的Linux浏览器任务在安装阶段失败：ubuntu-latest已分配Ubuntu 26.04，当前Playwright明确报错不支持chromium on ubuntu26.04-x64。Linux CI固定至受支持的Ubuntu 24.04，覆盖检查同步验证四个Linux套件仍完整运行；不跳过浏览器测试，不改变依赖或测试断言。
+
+
+运行39216851789发现既有ACP stderr断言竞态：RPC错误由stdout先到达时，客户端立即构造异常，可能遗漏另一管道已输出的诊断。失败清理现先终止Provider并等待stderr关闭后再构造错误；等待最多1秒，避免子孙进程保留管道时挂起。原stderr断言和超时测试保持不变，启动/空闲/总时长限制不放宽。
