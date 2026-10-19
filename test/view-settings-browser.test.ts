@@ -488,7 +488,9 @@ async function withActorSettingsBrowser(fn: (page: Page, config: MemsphereConfig
   } finally {
     await browser.close();
     await new Promise<void>(resolve => server.close(() => resolve()));
-    await rm(dir, { recursive: true, force: true });
+    // Windows can briefly retain directory entries after the browser and server close.
+    // Retry only transient filesystem cleanup errors, with a bounded backoff.
+    await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 }
 
