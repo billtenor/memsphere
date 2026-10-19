@@ -27,7 +27,8 @@ jobs:
           - { os: ubuntu-latest, suite: cli, title: "CLI & Packaging", workers: 3, browser: false }
           - { os: ubuntu-latest, suite: memory-and-projects, title: "Projects & Memory", workers: 2, browser: true }
           - { os: ubuntu-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
-          - { os: macos-latest, suite: browser, title: "Browser UI", workers: 3, browser: true }
+          - { os: macos-latest, suite: model-ui, title: "Models & Settings UI", workers: 3, browser: true }
+          - { os: macos-latest, suite: review-ui, title: "Review & Shell UI", workers: 3, browser: true }
           - { os: macos-latest, suite: cli, title: "CLI & Packaging", workers: 4, browser: false }
           - { os: macos-latest, suite: core, title: "Projects, Memory & Runtime", workers: 4, browser: true }
           - { os: windows-latest, suite: model-ui, title: "Models & Settings UI", workers: 2, browser: true }
