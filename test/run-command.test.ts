@@ -781,8 +781,7 @@ test("run current-step output does not expose effective runner permissions", () 
       human: {
         kind: "human",
         name: "Reviewer",
-        permissions: ["artifact.read"],
-        system_prompt: "Review carefully."
+        permissions: ["artifact.read"]
       }
     }
   }));

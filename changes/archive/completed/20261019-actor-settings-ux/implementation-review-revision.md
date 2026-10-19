@@ -1,0 +1,1 @@
+接受第一轮三位 Reviewer 对冻结材料不同步的意见。旧候选提交后修正了合法点号 Actor ID 的路径解析，并新增浏览器回归；本轮将完整最终实现摘要及验证报告直接纳入自包含候选，明确 73/73、146 文件全量成功、1224 passed、0 failed、1 Windows 平台 skip，以及原始日志和实现文件哈希。旧 flow[4]/flow[5] 保留历史状态，本轮候选明确取代其过时最终结论，不改写历史。重新校验 Store/Memory，最终 ChangeSet ID 和 digest 一致。代码、测试、Memory 本轮未再修改；Windows/macOS 仍必须由后续适用 PR CI 验证。

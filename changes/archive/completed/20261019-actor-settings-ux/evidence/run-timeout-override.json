@@ -1,0 +1,92 @@
+{
+  "runId": "run-20261019-033517z-efbcea22",
+  "changedAt": "2026-10-19T09:28:38.508Z",
+  "authorization": "用户明确要求：把当前 Run 里 Reviewer 的空闲超时都改成 5 分钟，再重试 Reviewer，继续评审流程。",
+  "actors": [
+    {
+      "id": "traex1",
+      "before": 120000,
+      "after": 300000
+    },
+    {
+      "id": "traex2",
+      "before": 120000,
+      "after": 300000
+    },
+    {
+      "id": "traex3",
+      "before": 120000,
+      "after": 300000
+    },
+    {
+      "id": "traex4",
+      "before": 120000,
+      "after": 300000
+    }
+  ],
+  "previousRevision": "sha256:2a4728216ef7cad8ac17f7e711fe168974c02b74d04edc8e5d19e48204521750",
+  "newRevision": "sha256:043d8a4383c7492e5cbaf3a2135793c21f1635ba35a570435727c01e2e69d8d6",
+  "backup": "/tmp/run-20261019-033517z-efbcea22.before-idle-5m-1792402118533.json",
+  "backupSha256": "aa182885c5e2373298d4d97af6af9de408ace83bf5894d35f4c0daef609bb89a",
+  "unchanged": "Project/Home configuration, actor bindings, permissions, models, previous Review rounds, submitted votes, and existing Attempts",
+  "launchVerification": {
+    "traex1": 300000,
+    "traex2": 300000,
+    "traex3": 300000,
+    "traex4": 300000
+  },
+  "retryResults": [
+    {
+      "actorId": "traex2",
+      "actorName": "研发",
+      "attemptId": "attempt-20261019-092853z-226ebe0e",
+      "sequence": 3,
+      "provider": "traex",
+      "status": "failed",
+      "failure": {
+        "stage": "timeout",
+        "code": "agent_idle_timeout",
+        "message": "agent_idle_timeout: no ACP activity for 300000ms",
+        "category": "environment"
+      },
+      "startedAt": "2026-10-19T09:28:56.158Z",
+      "completedAt": "2026-10-19T09:34:01.673Z",
+      "sessionId": "01a1537e-1fc2-7420-879c-16a690460125"
+    },
+    {
+      "actorId": "traex3",
+      "actorName": "测试",
+      "attemptId": "attempt-20261019-092900z-04d66334",
+      "sequence": 3,
+      "provider": "traex",
+      "status": "failed",
+      "failure": {
+        "stage": "timeout",
+        "code": "agent_idle_timeout",
+        "message": "agent_idle_timeout: no ACP activity for 300000ms",
+        "category": "environment"
+      },
+      "startedAt": "2026-10-19T09:29:03.979Z",
+      "completedAt": "2026-10-19T09:34:09.644Z",
+      "sessionId": "01a1537e-3e3e-78a2-8e41-a9ccef114fa1"
+    },
+    {
+      "actorId": "traex4",
+      "actorName": "架构师",
+      "attemptId": "attempt-20261019-092909z-7b5c3342",
+      "sequence": 3,
+      "provider": "traex",
+      "status": "failed",
+      "failure": {
+        "stage": "timeout",
+        "code": "agent_idle_timeout",
+        "message": "agent_idle_timeout: no ACP activity for 300000ms",
+        "category": "environment"
+      },
+      "startedAt": "2026-10-19T09:29:12.153Z",
+      "completedAt": "2026-10-19T09:34:17.555Z",
+      "sessionId": "01a1537e-5e24-7942-b17a-c38416f47fb3"
+    }
+  ],
+  "reviewOutcome": "unresolved, 0/3 submitted; all third attempts timed out with no ACP activity for 300000ms"
+}

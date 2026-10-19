@@ -549,3 +549,45 @@ test("model market cleanup protects authorization and revision before removing u
     assert.equal((await definition.json()).source, supported.models[0]!.source);
   });
 });
+
+test("Project Settings saves unnamed Actors and exposes ID for ACP Provider references", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin, configPath }) => {
+    const payload = await (await fetch(`${origin}/api/projects/demo/settings/project`)).json() as any;
+    payload.config.control_plane.actors = {
+      person: { kind: "human", permissions: [] },
+      bot: { kind: "agent", name: " \t ", permissions: [], agent: { provider: "codex" } }
+    };
+    const saved = await fetch(`${origin}/api/projects/demo/settings/project`, {
+      method: "PUT", headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ expectedRevision: payload.diskRevision, config: payload.config })
+    });
+    assert.equal(saved.status, 200, await saved.text());
+    const disk = JSON.parse(await readFile(configPath, "utf8"));
+    assert.equal(Object.hasOwn(disk.control_plane.actors.person, "name"), false);
+    const reloaded = await (await fetch(`${origin}/api/projects/demo/settings/project`)).json() as any;
+    assert.equal(Object.hasOwn(reloaded.config.control_plane.actors.person, "name"), false);
+    const global = await (await fetch(`${origin}/api/settings/global`)).json() as any;
+    assert.deepEqual(global.providerReferences.codex, [{ projectName: "demo", actorId: "bot", actorName: "bot" }]);
+  });
+});
+
+test("Project Settings rejects Human prompt fields before saving and preserves disk content", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin, configPath }) => {
+    const before = await readFile(configPath, "utf8");
+    const payload = await (await fetch(`${origin}/api/projects/demo/settings/project`)).json() as any;
+    for (const system_prompt of ["Do something", "", "  "]) {
+      payload.config.control_plane.actors = { person: { kind: "human", permissions: [], system_prompt } };
+      for (const [method, suffix] of [["POST", "/validate"], ["PUT", ""]]) {
+        const response = await fetch(`${origin}/api/projects/demo/settings/project${suffix}`, {
+          method, headers: { "content-type": "application/json", origin },
+          body: JSON.stringify({ expectedRevision: payload.diskRevision, config: payload.config })
+        });
+        const body = await response.text();
+        assert.match(body, /system_prompt/);
+        if (method === "PUT") assert.equal(response.ok, false, body);
+        else assert.equal(JSON.parse(body).valid, false, body);
+        assert.equal(await readFile(configPath, "utf8"), before);
+      }
+    }
+  });
+});

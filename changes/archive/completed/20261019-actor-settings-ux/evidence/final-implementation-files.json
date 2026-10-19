@@ -1,0 +1,62 @@
+{
+  "base": "fb5f64d2aded3d3d912d6612df8e903fe575e56b",
+  "files": [
+    {
+      "path": ".memsphere/memory/concepts/memsphere-actor.yaml",
+      "sha256": "c2124c008400c20bb61d86c90075a560ee56a52c6cf3601e1ee09cddc28fdea2"
+    },
+    {
+      "path": ".memsphere/memory/concepts/memsphere-framework.yaml",
+      "sha256": "ba6a0e14d39743c3fcbb2127815ad64a846efd56f8e778b89002f4f94c2d6b70"
+    },
+    {
+      "path": "modules/org.memsphere.settings/adapter/view/settings-view.ts",
+      "sha256": "bb6c41fd2a9c8aca340e919cdff56f49b6e5931c286ca09253999b89efef0493"
+    },
+    {
+      "path": "reserved-memory/system-memory/concepts/memsphere-actor.yaml",
+      "sha256": "c2124c008400c20bb61d86c90075a560ee56a52c6cf3601e1ee09cddc28fdea2"
+    },
+    {
+      "path": "reserved-memory/system-memory/concepts/memsphere-framework.yaml",
+      "sha256": "ba6a0e14d39743c3fcbb2127815ad64a846efd56f8e778b89002f4f94c2d6b70"
+    },
+    {
+      "path": "src/commands/view.ts",
+      "sha256": "531c8b8201f8b87e9ec9602f9b48a32d684f81f37674b16de2948d09c172f70c"
+    },
+    {
+      "path": "src/control-plane/schema.ts",
+      "sha256": "49dbd87af579724425fbc3a0c4bb9d60f640c5968a6f6b47a25ddd35f81b637f"
+    },
+    {
+      "path": "src/skills/memsphere/SKILL.md",
+      "sha256": "7ac1cb4a1fa30f06119c9070c8853fd8605710c19594002e1cdb7c724c2541de"
+    },
+    {
+      "path": "src/view/locales/en.ts",
+      "sha256": "dd81e7d4d06d588d18757adf740108c463e934d7e576811617b916df6cae9e7d"
+    },
+    {
+      "path": "src/view/locales/zh-CN.ts",
+      "sha256": "c212fdc77492c2bddbe662624bd27a4ff59af56815c9dfede3863f0c5818b344"
+    },
+    {
+      "path": "test/control-plane.test.ts",
+      "sha256": "fd489503123a803e02fd9d2ff8fa247b37500e06204a00efb84c106296772100"
+    },
+    {
+      "path": "test/run-command.test.ts",
+      "sha256": "9a3f99e86d0c425e104faea315bc9593a3bd509fdca59b51ad330b274436985f"
+    },
+    {
+      "path": "test/view-settings-browser.test.ts",
+      "sha256": "4d0d77501a1ec295d1bed2eecf6773a2cd3058062b8ef4e600b8b01a41bcf5e4"
+    },
+    {
+      "path": "test/view-settings.test.ts",
+      "sha256": "8e72fc1b34c71a689011e3fc1eaa8c18c901bb6be02a860241739a8d9247a648"
+    }
+  ],
+  "diffSha256": "a772fd30e900acf3873eb1f5b83f96551ed820041f4c6817237fce96e3a99ad3"
+}

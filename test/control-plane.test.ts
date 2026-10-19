@@ -254,3 +254,66 @@ test("Slot bindings and Actor permissions produce default-deny authorization and
   assert.equal(guidance.allowed, false);
   assert.match(guidance.lines.join("\n"), /缺少|需要 decision\.decide/);
 });
+
+for (const name of [undefined, "", " \t\n"]) {
+  test(`Actors without a display name use their ID in snapshots and Review assignments (${JSON.stringify(name)})`, async () => {
+    const config = parseControlPlaneConfig({
+      runner: { permissions: ["decision.decide"] },
+      actors: {
+        person: { kind: "human", name, permissions: ["artifact.read", "decision.assess"] },
+        reviewer: { kind: "agent", name, permissions: ["artifact.read", "decision.assess"], agent: {} }
+      }
+    });
+    const snapshot = createControlPlaneSnapshot(config);
+    const controlPlane = resolveArtifactControlPlane({
+      snapshot,
+      slotBindings: { "fixture::reviewer": { actorIds: ["person", "reviewer"], source: "run:fixture" } },
+      artifactScope: "fixture#flow[1]",
+      policyId: "artifact_acceptance.unanimous"
+    });
+    const { createArtifactReviewAssignments } = await import("../src/artifact-review.js");
+    const result = createArtifactReviewAssignments({ snapshot, controlPlane, now: "2026-10-19T00:00:00.000Z" });
+    assert.deepEqual(result.assignments.map(actor => [actor.actorId, actor.actorName]), [["person", "person"], ["reviewer", "reviewer"]]);
+    assert.equal(snapshot.actors.person.name, "person");
+    assert.equal(snapshot.actors.reviewer.name, "reviewer");
+  });
+}
+
+test("Actors retain existing name trimming and reject non-string names", () => {
+  for (const kind of ["human", "agent"]) {
+    const actor = { kind, permissions: [], ...(kind === "agent" ? { agent: {} } : {}) };
+    const parse = (name: unknown) => parseControlPlaneConfig({ runner: { permissions: [] }, actors: { actor: { ...actor, name } } });
+    assert.equal(parse("  My name  ").actors.actor.name, "My name");
+    for (const name of [null, 123, {}, []]) assert.throws(() => parse(name), /Expected string/);
+  }
+});
+
+for (const prompt of ["Do something", "", "   "]) {
+  test(`Human Actor config prohibits the system_prompt field (${JSON.stringify(prompt)})`, async () => {
+    const { projectControlPlaneConfigSchema } = await import("../src/control-plane/schema.js");
+    const raw = { runner: { permissions: [] }, actors: { person: { kind: "human", permissions: [], system_prompt: prompt } } };
+    assert.throws(() => parseControlPlaneConfig(raw), /Unrecognized key.*system_prompt/);
+    assert.equal(projectControlPlaneConfigSchema.safeParse(raw).success, false);
+  });
+}
+
+test("Human Actors need no system prompt while Agent prompts retain their existing rules", () => {
+  const raw = { runner: { permissions: [] }, actors: { person: { kind: "human", permissions: [] } } };
+  assert.equal(Object.hasOwn(parseControlPlaneConfig(raw).actors.person, "systemPrompt"), false);
+  const parseAgent = (prompt: Record<string, string>) => parseControlPlaneConfig({
+    runner: { permissions: [] },
+    actors: { bot: { kind: "agent", permissions: [], agent: {}, ...prompt } }
+  });
+  assert.equal(parseAgent({}).actors.bot.systemPrompt, undefined);
+  assert.equal(parseAgent({ system_prompt: "Review carefully" }).actors.bot.systemPrompt, "Review carefully");
+  for (const prompt of ["", "  "]) assert.throws(() => parseAgent({ system_prompt: prompt }), /must not be blank/);
+});
+
+test("Frozen historical snapshots retain their Human prompt without rewriting history", async () => {
+  const { controlPlaneSnapshotSchema } = await import("../src/control-plane/schema.js");
+  const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
+  snapshot.actors.human.systemPrompt = "Historical prompt";
+  const before = JSON.stringify(snapshot);
+  assert.equal(controlPlaneSnapshotSchema.parse(snapshot).actors.human.systemPrompt, "Historical prompt");
+  assert.equal(JSON.stringify(snapshot), before);
+});

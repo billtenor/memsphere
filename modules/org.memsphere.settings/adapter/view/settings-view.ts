@@ -506,14 +506,14 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     const basic = runner ? "" : `<div class="settings-grid settings-compact-grid settings-participant-basic">
       ${inputField(`actor.${id}.id`, "ID", id, { commit: true })}
       ${selectField(`actor.${id}.kind`, this.t("settings.type", "类型"), actor.kind ?? "human", [["human", this.t("settings.human", "Human")], ["agent", this.t("settings.agent", "Agent")]])}
-      ${inputField(`actor.${id}.name`, this.t("settings.name", "名称"), actor.name ?? "")}
-      ${textAreaField(`actor.${id}.system_prompt`, this.t("settings.systemPrompt", "系统提示词"), actor.system_prompt ?? "")}
+      ${inputField(`actor.${id}.name`, this.t("settings.name", "名称"), actor.name ?? "", { placeholder: this.t("settings.optionalActorName", "选填，未填时显示 ID") })}
+      ${actor.kind === "agent" ? textAreaField(`actor.${id}.system_prompt`, this.t("settings.systemPrompt", "系统提示词"), actor.system_prompt ?? "") : ""}
     </div>`;
     const runtime = !runner && actor.kind === "agent" ? `<div><h4>${escapeHtml(this.t("settings.agentRuntime", "Agent 运行"))}</h4><div class="settings-grid settings-compact-grid">
       ${selectField(`actor.${id}.provider`, this.t("settings.providers", "ACP 提供方"), actor.agent?.provider ?? "traex", this.providerEntries().map(entry => [entry.id, `${entry.id} · ${entry.definition.name} · ${this.providerStatus(entry.id)}`]))}
       ${inputField(`actor.${id}.model`, this.t("settings.model", "模型"), actor.agent?.model ?? "")}
     </div></div>` : "";
-    return `<details class="settings-participant" data-participant="${escapeAttr(id)}"${open ? " open" : ""}><summary class="settings-participant-summary"><div><strong>${escapeHtml(runner ? this.t("runner", "执行者") : actor.name || id)}</strong> ${pill(runner ? "runner" : actor.kind)}<div class="settings-participant-summary-meta">${escapeHtml(this.t("settings.permissionCount", `${count} 项权限`, { count }))}</div></div></summary><div class="settings-participant-body"><div class="settings-participant-actions"><button class="btn danger" data-remove-participant="${escapeAttr(id)}"${runner ? " disabled" : ""}>${escapeHtml(this.t("common.delete", "删除"))}</button></div>${basic}<h4>${escapeHtml(this.t("settings.permissions", "权限"))}</h4><div class="settings-permissions">${permissions}</div>${runtime}</div></details>`;
+    return `<details class="settings-participant" data-participant="${escapeAttr(id)}"${open ? " open" : ""}><summary class="settings-participant-summary"><div><strong>${escapeHtml(runner ? this.t("runner", "执行者") : actor.name?.trim() ? actor.name : id)}</strong> ${pill(runner ? "runner" : actor.kind)}<div class="settings-participant-summary-meta">${escapeHtml(this.t("settings.permissionCount", `${count} 项权限`, { count }))}</div></div></summary><div class="settings-participant-body"><div class="settings-participant-actions"><button class="btn danger" data-remove-participant="${escapeAttr(id)}"${runner ? " disabled" : ""}>${escapeHtml(this.t("common.delete", "删除"))}</button></div>${basic}<h4>${escapeHtml(this.t("settings.permissions", "权限"))}</h4><div class="settings-permissions">${permissions}</div>${runtime}</div></details>`;
   }
 
   providersHtml(scope: ScopeState): string {
@@ -733,6 +733,11 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     if (structural) this.render();
     else {
       this.refreshStatus(scopeName);
+      if (path.startsWith("actor.") && path.endsWith(".name")) {
+        const id = path.slice("actor.".length, -".name".length);
+        const summary = this.detailRoot().querySelector<HTMLElement>(`[data-participant="${CSS.escape(id)}"] summary strong`);
+        if (summary) summary.textContent = value.trim() ? value : id;
+      }
       if (path.startsWith("provider.")) {
         const id = path.split(".")[1]!;
         const preview = this.detailRoot().querySelector<HTMLElement>(`[data-provider-id="${CSS.escape(id)}"] .settings-provider-preview`);
@@ -763,7 +768,9 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   updateActorField(path: string, value: string): void {
-    const [, id, key] = path.split(".");
+    const separator = path.lastIndexOf(".");
+    const id = path.slice("actor.".length, separator);
+    const key = path.slice(separator + 1);
     const actors = this.state.draft!.control_plane.actors as JsonObject;
     const actor = actors[id];
     if (key === "id") {
@@ -777,8 +784,8 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     } else if (key === "kind") {
       actor.kind = value;
       if (value === "agent") actor.agent ??= { provider: "traex" };
-      else delete actor.agent;
-    } else if (key === "name") actor.name = value;
+      else { delete actor.agent; delete actor.system_prompt; }
+    } else if (key === "name") setOptional(actor, "name", value);
     else if (key === "system_prompt") setOptional(actor, "system_prompt", value);
     else if (key === "provider") { actor.agent ??= {}; actor.agent.provider = value; }
     else if (key === "model") { actor.agent ??= {}; setOptional(actor.agent, "model", value); }
@@ -811,7 +818,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     let index = Object.keys(actors).length + 1;
     while (actors[`actor${index}`]) index += 1;
     const id = `actor${index}`;
-    actors[id] = { kind: "human", name: this.t("settings.newParticipant", "新参与者"), permissions: [] };
+    actors[id] = { kind: "human", permissions: [] };
     this.#expandedParticipants.add(id);
     this.render();
   }
@@ -1065,7 +1072,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   providerReferences(id: string): string[] {
-    return (this.#scopes.global.data?.providerReferences?.[id] ?? []).map((reference: JsonObject) => `${reference.projectName} / ${reference.actorName || reference.actorId}`);
+    return (this.#scopes.global.data?.providerReferences?.[id] ?? []).map((reference: JsonObject) => `${reference.projectName} / ${reference.actorName?.trim() ? reference.actorName : reference.actorId}`);
   }
 
   providerStatus(id: string): string {
@@ -1139,9 +1146,9 @@ function destinationFromPath(pathname: string): { scope: ScopeName; module: stri
   return sections[name] ?? sections.general;
 }
 
-function inputField(path: string, label: string, value: string, options: { type?: string; disabled?: boolean; min?: string; max?: string; commit?: boolean } = {}): string {
+function inputField(path: string, label: string, value: string, options: { type?: string; disabled?: boolean; min?: string; max?: string; commit?: boolean; placeholder?: string } = {}): string {
   const id = `settings-input-${safeId(path)}`;
-  return `<div class="settings-field"><label for="${id}">${escapeHtml(label)}</label><input id="${id}" class="settings-input" data-field="${escapeAttr(path)}"${options.commit ? ' data-commit="true"' : ""} type="${options.type ?? "text"}" value="${escapeAttr(value)}"${options.disabled ? " disabled" : ""}${options.min ? ` min="${options.min}"` : ""}${options.max ? ` max="${options.max}"` : ""}></div>`;
+  return `<div class="settings-field"><label for="${id}">${escapeHtml(label)}</label><input id="${id}" class="settings-input" data-field="${escapeAttr(path)}"${options.commit ? ' data-commit="true"' : ""} type="${options.type ?? "text"}" value="${escapeAttr(value)}"${options.placeholder ? ` placeholder="${escapeAttr(options.placeholder)}"` : ""}${options.disabled ? " disabled" : ""}${options.min ? ` min="${options.min}"` : ""}${options.max ? ` max="${options.max}"` : ""}></div>`;
 }
 
 function textAreaField(path: string, label: string, value: string): string {
