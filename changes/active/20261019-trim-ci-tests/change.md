@@ -64,10 +64,16 @@ run_id: run-20261019-081003z-36eab35a
 
 ## 验收结果
 
-实现已完成，等待正式成果评审。npm test：148文件全部通过，1211通过、2平台跳过、0失败，361.08秒；pretest构建通过。独立typecheck、memsphere validate及diff检查通过。路由计数444→232、完整构建18→8、布局60→18；4条重复/实现绑定用例合并，教程安全检查保留。远端default/full CI将在评审后提交PR时实跑，尚未声称最终交付完成。
+实现及成果评审已通过：Human与研发/测试/架构Agent均approve，产品交付评审亦通过。npm test：148文件全部通过，1211通过、2平台跳过、0失败，361.08秒；pretest构建通过。独立typecheck、memsphere validate及diff检查通过。路由计数444→232、完整构建18→8、布局60→18；4条重复/实现绑定用例合并，教程安全检查保留。远端default/full CI将在评审后提交PR时实跑，尚未声称最终交付完成。
 
 
 
 ## 实施细化
 
 第二版方案所有角色通过后，将project-command完整纳入平台保护（39项），精确列出18个几何tuple。采用既有实测权重估算：39项Windows平台集3个文件进程约246秒，加准备会逼近预算；采用4个文件进程（既有CI已使用的并发上限）缩短关键路径。矩阵、8次构建门槛、平台保护及五分钟阈值不变，实际效果以CI为准。
+
+## 最新master集成与后续验证
+
+已将origin/master d1cdc51集成，无冲突。master新增disclosure-state.test.ts，保留文件数148→149；新文件自动进入Linux和full，默认文件执行233（149+42+39+3），相对原444次减少47.5%，相对当前同文件全集447次减少47.9%；完整构建仍8次。集成后完整回归、typecheck和Store校验已重新启动，结果待收集，远端default/full仍待实跑。继承master的产品与Memory改动不属于本需求差异；相对origin/master本轮仍无Memory差异。
+
+成果评审意见已纳入后续交付：审计持久文件test-audit.json；master集成复验；GitHub master规则集Protect master（19767795）已只读核查，无required_status_checks精确旧名称绑定。
