@@ -4,13 +4,14 @@ names:
   - memsphere-agile-requirement-development
   - 敏捷需求开发流程
 defines:
-  - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证、验收、PR 提交和全部适用 CI 通过。
+  - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证、验收、PR 提交、全部适用 CI 通过、human 合入确认及本地开发分支清理。
 asserts:
   - 当前迭代范围变化时，必须先更新需求契约并取得 human 确认。
 goals:
   - 确认当前迭代的范围、交付物和验收标准。
   - 按仓库规范完成实现和验证。
   - 通过提需方验收后，自主提交当前迭代 commit 和 GitHub PR，并跟进和修复直到最新提交的全部适用 CI 通过。
+  - 等待 human 合入并确认结果无问题，清理本轮本地开发分支后结束运行。
 flow:
   - !action
     action: 调查需求、相关实现和仓库规范，形成当前迭代需求契约。
@@ -155,10 +156,32 @@ flow:
     action: 汇总 PR 和 CI 最终结果，将全部适用 CI 已通过的 PR 交付给 human 审核并由 human 操作合入。
     actor: agent
     asserts:
-      - 最终审核、确认和合入由 human 完成；agent 不得自行合入或启用自动合入，交付通过 CI 且待审核的 PR 后即可完成本流程。
+      - 最终审核和合入由 human 完成；agent 不得自行合入或启用自动合入，交付待审核 PR 后继续等待 human 的合入及结果确认。
       - 报告必须记录 PR URL、最终远端 head SHA、全部适用检查的名称、成功状态和结果链接，以及修复摘要与残留问题；提交报告前再次确认 head 未变化且检查仍全部通过。
       - 本轮存在 Memory 差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口。
     artifact: !artifact
       name: PR 与 CI 最终交付报告
+      format: markdown
+
+  - !action
+    action: 审核并合入 PR，确认合入后结果没有问题。
+    actor: human
+    asserts:
+      - 必须取得 human 对本轮 PR 已合入且结果无问题的明确确认；CI 通过、交付 PR、仅通知合入或未回复均不能替代该确认，agent 不得代填。
+      - 确认尚未给出或仍有问题时不得推进本地分支清理；先处理问题并重新取得确认。
+    artifact: !artifact
+      name: Human 合入与结果确认
+      format: markdown
+
+  - !action
+    action: 根据 human 的合入确认清理本轮本地开发分支，并汇总流程收尾结果。
+    actor: agent
+    asserts:
+      - 删除前核对 PR 实际为 merged、合入提交已进入目标分支，并确认本轮开发分支的改动已完整纳入；支持 merge、squash 和 rebase 合入，不得仅凭原 head 的祖先关系判断。
+      - 仅清理本轮本地开发分支；不得删除目标分支、其他任务分支或远端分支。存在未提交内容、未合入改动或其他 worktree 占用时先解决阻碍，不得强制丢弃内容或删除工作树。
+      - 分支在当前工作树检出时，先在干净状态下切换到已合入的目标提交或其他安全位置；已不存在时核对并记录，无需重新创建。
+      - 最终报告必须记录 PR URL、human 确认依据、合入提交、原本地分支名及删除后的核验结果；只有确认本轮本地开发分支已不存在，才能上报最终产物并结束 Run。
+    artifact: !artifact
+      name: 合入确认与本地分支清理结果
       format: markdown
       final: true
