@@ -887,6 +887,7 @@ flow:
         name: "Decider",
         permissions: ["artifact.read", "decision.decide"]
       },
+      bob: { kind: "human", name: "Second Decider", permissions: ["artifact.read", "decision.decide"] },
       "reviewer-agent": {
         kind: "agent",
         name: "Advisor",
@@ -922,7 +923,8 @@ flow:
           name: "Decider",
           permissions: ["artifact.read", "decision.decide"]
         },
-        "reviewer-agent": {
+        bob: { kind: "human", name: "Second Decider", permissions: ["artifact.read", "decision.decide"] },
+      "reviewer-agent": {
           kind: "agent",
           name: "Advisor",
           permissions: ["artifact.read", "decision.assess"],
@@ -940,7 +942,7 @@ flow:
     reviewConfiguration: reviewConfiguration({
       procedure: "agent-activity-browser",
       flowIndexes: [4],
-      slots: { Decider: ["alice"], Advisor: ["reviewer-agent"] }
+      slots: { Decider: ["alice", "bob"], Advisor: ["reviewer-agent"] }
     })
   });
   await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Current requirement\n\nKeep Activity visible.\n" } });
@@ -1012,8 +1014,9 @@ flow:
     await page.goto(`http://127.0.0.1:${address.port}`);
     await page.getByRole("button", { name: "运行", exact: true }).click();
     await page.locator(".mem-view-list-item").first().click();
-    await page.getByRole("button", { name: /^产物评审 1\/2$/ }).click();
+    await page.getByRole("button", { name: /^产物评审 1\/3$/ }).click();
     const modal = page.locator("#artifact-review-modal");
+    await selectIdentity(page, modal.getByRole("combobox", { name: "评审身份" }), "alice");
     let materialChooser = modal.getByRole("combobox", { name: "选择评审材料" });
     await materialChooser.selectOption({ label: "前序产物 · current requirement" });
     await modal.getByText("Keep Activity visible.", { exact: true }).waitFor();
@@ -1118,10 +1121,126 @@ flow:
     assert.equal(await log.getAttribute("data-stability-marker"), "preserved");
     assert.equal(await log.evaluate((element) => element.scrollTop), settledScrollTop);
 
+    // Every operation below rebuilds the review surface; await the replacement,
+    // then query the new participant row instead of accidentally checking old DOM.
+    const assertActivityOpen = async () => {
+      await agentRow.getByRole("button", { name: "收起详情", exact: true }).waitFor();
+      await agentRow.getByText("Reviewing implementation evidence.", { exact: true }).waitFor();
+    };
+    const beforeComment = await modal.elementHandle();
+    await composer.fill("Human preserves expanded Activity");
+    await clickAndWaitForDraftSave(page, modal.getByRole("button", { name: "添加意见", exact: true }));
+    await page.waitForFunction(old => !old?.isConnected, beforeComment);
+    await modal.locator(".comment-card").filter({ hasText: "Human preserves expanded Activity" }).waitFor();
+    await assertActivityOpen();
+
+    await modal.locator(".inline-plus").first().click();
+    const inlineActivityComment = modal.locator(".inline-comment-editor").first();
+    await inlineActivityComment.getByPlaceholder("这里应该如何修改？").fill("Inline opinion preserves expanded Activity");
+    const beforeInlineComment = await modal.elementHandle();
+    await clickAndWaitForDraftSave(page, inlineActivityComment.getByRole("button", { name: "添加意见", exact: true }));
+    await page.waitForFunction(old => !old?.isConnected, beforeInlineComment);
+    await modal.locator(".comment-card").filter({ hasText: "Inline opinion preserves expanded Activity" }).waitFor();
+    await assertActivityOpen();
+
+    const beforeVote = await modal.elementHandle();
+    await clickVote(modal.getByRole("radio", { name: "通过", exact: true }));
+    await page.waitForFunction(old => !old?.isConnected, beforeVote);
+    assert.equal(await modal.getByRole("radio", { name: "通过", exact: true }).getAttribute("aria-checked"), "true");
+    await assertActivityOpen();
+
+    // Frozen contract is a distinct material, even when it shows the same round.
+    await modal.getByRole("combobox", { name: "选择评审材料" }).selectOption("contract");
+    await modal.getByText(/Produce an Artifact with visible Agent activity\./).waitFor();
+    const contractAgent = modal.locator(".artifact-review-row").filter({ hasText: "Advisor" }).first();
+    assert.equal(await contractAgent.locator('.artifact-review-activity-toggle[aria-expanded="true"]').count(), 0);
+    await modal.getByRole("combobox", { name: "选择评审材料" }).selectOption("candidate");
+    await modal.getByText("Review this implementation.", { exact: true }).waitFor();
+    await assertActivityOpen();
+
+    // Collapsed Activity must also survive a comment save and a full refresh.
+    await agentRow.getByRole("button", { name: "收起详情", exact: true }).click();
+    const beforeCollapsedComment = await modal.elementHandle();
+    await composer.fill("Human preserves collapsed Activity");
+    await clickAndWaitForDraftSave(page, modal.getByRole("button", { name: "添加意见", exact: true }));
+    await page.waitForFunction(old => !old?.isConnected, beforeCollapsedComment);
+    await modal.locator(".comment-card").filter({ hasText: "Human preserves collapsed Activity" }).waitFor();
+    assert.equal(await agentRow.getByRole("button", { name: "查看详情", exact: true }).getAttribute("aria-expanded"), "false");
+    assert.equal(await agentRow.locator(".artifact-review-activity").count(), 0);
+
+    // Delay the real Activity response, then close before it arrives. A late
+    // response must not resurrect the collapsed panel or replace another row.
+    let releaseActivity!: () => void;
+    const activityGate = new Promise<void>(resolve => { releaseActivity = resolve; });
+    const activityStarted = page.waitForRequest(request => request.url().includes("/activity?") && request.method() === "GET");
+    const delayedActivity = async (route: import("playwright").Route) => {
+      const response = await route.fetch();
+      await activityGate;
+      await route.fulfill({ response });
+    };
+    await page.route("**/attempts/*/activity?*", delayedActivity);
+    await agentRow.getByRole("button", { name: "查看详情", exact: true }).click();
+    await activityStarted;
+    await agentRow.getByRole("button", { name: "收起详情", exact: true }).click();
+    const lateActivity = page.waitForResponse(response => response.url().includes("/activity?") && response.request().method() === "GET");
+    releaseActivity();
+    assert.equal((await lateActivity).status(), 200);
+    await page.unroute("**/attempts/*/activity?*", delayedActivity);
+    await waitForAnimationFrames(page, 2);
+    assert.equal(await agentRow.locator(".artifact-review-activity").count(), 0, "late Activity response must not reopen a collapsed row");
+    assert.equal(await agentRow.getByRole("button", { name: "查看详情", exact: true }).getAttribute("aria-expanded"), "false");
+    await agentRow.getByRole("button", { name: "查看详情", exact: true }).click();
+    await assertActivityOpen();
+    const beforeSubmit = await modal.elementHandle();
+    await submitThroughConfirmation(page);
+    await page.waitForFunction(old => !old?.isConnected, beforeSubmit);
+    await assertActivityOpen();
+    const submittedReview = currentArtifactReview(await readRun(runsRoot, started.id));
+    assert.equal(submittedReview?.rounds[0].assignments.find(a => a.actorId === "alice")?.status, "submitted");
+
+    // A real identity switch fetches and rebuilds the whole dialog after an external decision.
+    assert(submittedReview);
+    const bobDraft = await updateArtifactReviewDraft({ runsRoot, reviewId: review.id, roundId: round.id, actorId: "bob", expectedRevision: submittedReview.rounds[0].revision, draft: { vote: "approve", comments: [] } });
+    await submitArtifactReviewAssignment({ runsRoot, reviewId: review.id, roundId: round.id, actorId: "bob", expectedRevision: bobDraft.round.revision });
+    await submitArtifactReviewRunnerVote({ runsRoot, reviewId: review.id, roundId: round.id, vote: "request_changes", comment: "Request a second round to verify isolated Activity state." });
+    const beforeExternalRefresh = await modal.elementHandle();
+    const refreshed = page.waitForResponse(response => response.request().method() === "GET" && response.url().includes(`/artifact-reviews/${review.id}/rounds/${round.id}`));
+    await selectIdentity(page, modal.getByRole("combobox", { name: "评审身份" }), "bob");
+    assert.equal((await refreshed).status(), 200);
+    await page.waitForFunction(old => !old?.isConnected, beforeExternalRefresh);
+    await modal.locator("#artifact-review-scope-panel").getByText("需修改", { exact: true }).waitFor();
+    await selectIdentity(page, modal.getByRole("combobox", { name: "评审身份" }), "alice");
+    await assertActivityOpen();
+    assert.equal(new URL(page.url()).searchParams.get("round"), round.id);
+    assert.equal(new URL(page.url()).searchParams.has("material"), false);
+
     await page.setViewportSize({ width: 720, height: 900 });
     await modal.locator(".artifact-review-mobile-tabs").getByRole("tab", { name: "评审", exact: true }).click();
     await agentRow.getByText("Late activity must not steal scroll position.", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), true);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    // Give a revised round its own genuine Agent execution. It must not inherit
+    // the expanded execution details of the previous round for the same Actor.
+    const revisedRun = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Revised Activity candidate\n\nReview this revision.\n" }, revisionSummary: "Address the runner's revision request." });
+    const revisedReview = currentArtifactReview(revisedRun);
+    assert(revisedReview);
+    assert.equal(revisedReview.rounds.length, 2);
+    const revisedRound = revisedReview.rounds.find(candidate => candidate.id === revisedReview.currentRoundId);
+    const revisedAgent = revisedRound?.assignments.find(assignment => assignment.actorId === "reviewer-agent");
+    assert(revisedRound && revisedAgent);
+    await runArtifactReviewAgentWorker({ config: configPath, review: review.id, round: revisedRound.id, assignment: artifactReviewAssignmentId(revisedAgent), nodeExecutable: process.execPath, cliEntrypoint: browserFakeCli, providerResolver: () => provider });
+    await selectIdentity(page, modal.getByRole("combobox", { name: "评审身份" }), "bob");
+    const roundChooser = modal.getByRole("combobox", { name: "轮次", exact: true });
+    await roundChooser.selectOption(revisedRound.id);
+    await modal.getByText("Review this revision.", { exact: true }).waitFor();
+    assert.equal(await agentRow.getByRole("button", { name: "查看详情", exact: true }).getAttribute("aria-expanded"), "false");
+    assert.equal(await agentRow.locator(".artifact-review-activity").count(), 0);
+    await roundChooser.selectOption(round.id);
+    await modal.getByText("Review this implementation.", { exact: true }).waitFor();
+    await assertActivityOpen();
+    await roundChooser.selectOption(revisedRound.id);
+    await modal.getByText("Review this revision.", { exact: true }).waitFor();
+    assert.equal(await agentRow.getByRole("button", { name: "查看详情", exact: true }).getAttribute("aria-expanded"), "false");
     const identity = modal.getByRole("combobox", { name: "评审身份" });
     await identity.click();
     assert.equal(await modal.getByRole("option", { name: /Activity Agent/ }).count(), 0);

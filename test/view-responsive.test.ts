@@ -545,6 +545,8 @@ test("Run effective rule references and sections collapse and survive rerenders"
       assert.equal(await referenceHeading.getAttribute("aria-expanded"), "false");
       assert.equal(await referenceBody.isHidden(), true);
 
+      const beforeRefresh = await page.locator(".run-detail-content").elementHandle();
+      assert.equal(await page.locator("details.run-collapsible:not([open])").count(), 0);
       const refreshCompleted = page.waitForResponse(response => (
         new URL(response.url()).pathname === `/api/projects/responsive/runs/${runId}` && response.ok()
       ));
@@ -553,7 +555,9 @@ test("Run effective rule references and sections collapse and survive rerenders"
       await page.waitForFunction(() => document.querySelector('.view-shell-action[aria-busy="true"]') === null);
       const rerenderedReference = page.locator(".run-procedure-asserts .effective-reference").first();
       const rerenderedHeading = rerenderedReference.locator(":scope > .section-header");
-      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      await page.waitForFunction(old => !old?.isConnected, beforeRefresh);
+      await page.getByRole("button", { name: "收起全部", exact: true }).waitFor();
+      assert.equal(await page.locator("details.run-collapsible:not([open])").count(), 0, "refresh preserves every expanded native Run disclosure");
       await rerenderedHeading.waitFor();
       assert.equal(await rerenderedHeading.getAttribute("aria-expanded"), "false");
       assert.equal(await rerenderedReference.locator(":scope > .section-body").isHidden(), true);
@@ -1118,6 +1122,7 @@ test("leaving and reentering a ChangeSet keeps formal and candidate Memory sourc
     }, true);
     const page = await browser.newPage();
     const formalPath = `/projects/responsive/memories/statements/shared-rules`;
+    const expandedPaths = new Set([formalPath]);
     const navigate = async (path: string) => {
       await page.evaluate(path => {
         history.pushState({}, "", path);
@@ -1128,7 +1133,13 @@ test("leaving and reentering a ChangeSet keeps formal and candidate Memory sourc
       await page.locator(".memory-title").filter(path.includes("?change=")
         ? { hasText: "Candidate-only title" }
         : { hasNotText: "Candidate-only title" }).waitFor();
-      await page.getByRole("button", { name: "展开全部", exact: true }).click();
+      if (!expandedPaths.has(path)) {
+        await page.getByRole("button", { name: "展开全部", exact: true }).click();
+        expandedPaths.add(path);
+      }
+      await page.getByRole("button", { name: "收起全部", exact: true }).waitFor();
+      assert.equal(await page.locator(".memory-disclosure-root details:not([open])").count(), 0, "returning to a Memory preserves its expanded native disclosures");
+      assert.equal(await page.locator(".memory-disclosure-root .memory-section:not(.open)").count(), 0, "returning to a Memory preserves its expanded sections");
     };
     try {
       await page.goto(`${url}${formalPath}`);
