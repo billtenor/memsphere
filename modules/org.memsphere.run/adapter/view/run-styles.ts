@@ -1,4 +1,8 @@
 export const runDetailStyles = `
+  .run-module .run-flow-actor{display:inline-flex;align-items:baseline;gap:5px;white-space:nowrap}
+  .run-module .run-flow-meta{display:flex;align-items:baseline;flex-wrap:wrap;gap:12px;min-width:0;margin-left:auto}
+  .run-module .run-flow-meta .mem-content-artifact-contract{margin-left:0}
+  @media(max-width:820px){.run-module .run-flow-meta{grid-column:2;margin-left:0}}
   .run-module .mem-content-document .mem-content-flow-label.run-current-step-marker{background:var(--accent);color:var(--surface);white-space:nowrap}
   .run-module .run-detail-content{position:relative;padding-top:30px}.run-module .run-disclosure-toggle-all{position:absolute;top:0;right:0;border:0;border-radius:5px;background:transparent;color:var(--muted);padding:4px 7px;font-size:11px}.run-module .run-disclosure-toggle-all:hover{background:var(--soft);color:var(--text)}.run-module .run-disclosure-toggle-all:focus-visible{outline:2px solid var(--mem-view-color-focus-ring);outline-offset:1px}
   .run-module details.run-collapsible>summary{cursor:pointer;list-style:none}.run-module details.run-collapsible>summary::-webkit-details-marker{display:none}.run-module .run-disclosure-summary{position:relative}.run-module .run-disclosure-summary:before{content:"›";display:inline-block;flex:none;margin-right:5px;color:var(--muted);font-size:15px;line-height:1;transition:transform .12s ease}.run-module details.run-collapsible[open]>.run-disclosure-summary:before{transform:rotate(90deg)}.run-module .run-disclosure-summary:focus-visible{outline:2px solid var(--mem-view-color-focus-ring);outline-offset:2px}.run-module .run-disclosure-body{min-width:0;margin-top:9px}
