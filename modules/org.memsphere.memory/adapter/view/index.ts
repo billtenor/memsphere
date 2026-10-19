@@ -27,6 +27,7 @@ import {
 } from "../../../shared/view/content-flow.js";
 import { createPageLayout, pageLayoutStyles } from "../../../shared/view/page-layout.js";
 import { defaultContentStyles } from "../../../shared/view/default-content-styles.js";
+import { DisclosureState, nativeDisclosure, classDisclosure, type DisclosureBinding } from "../../../shared/view/disclosure-state.js";
 
 import { memoryDiffPlan, type MemoryDiffEntry, type MemoryDiffPlan } from "./memory-diff.js";
 
@@ -923,6 +924,9 @@ class MemoryApplication {
   #generation = 0;
   #fatalError: unknown = null;
   readonly #expandedRelated = new Set<string>();
+  readonly #disclosures = new DisclosureState();
+  readonly #disclosureShapes = new Map<string, { signature: string; version: number }>();
+  #nextDisclosureShape = 0;
 
   constructor(root: HTMLElement, portal: HTMLElement, controller: AbortController, config: Readonly<MemoryConfig>, routes: MemoryRoutes, location: Readonly<RouteLocation>, navigate: (target: RouteTarget) => Promise<void>, ui: ViewUi, publishHeaderActions: (actions: readonly PublishedHeaderAction[]) => void, onListChange: () => void = () => undefined, renderDetail: (input: unknown) => HTMLElement = input => (input as { defaultRender: () => HTMLElement }).defaultRender()) {
     this.#root = root;
@@ -1168,6 +1172,7 @@ class MemoryApplication {
   }
 
   private render(): void {
+    this.#disclosures.capture();
     this.syncHeaderActions();
     this.#onListChange();
     if (this.#detailRoot) {
@@ -1684,6 +1689,45 @@ class MemoryApplication {
     if (route.kind === "market") main.append(this.renderMarketDetail());
     else if (route.kind === "change" || this.#location.query.section === "changes") main.append(this.renderChangeDetail());
     else main.append(this.renderMemoryDetail());
+    const candidates: { binding: DisclosureBinding; identity: string; position: string }[] = [];
+    const identityFor = memoryDisclosureIdentity();
+    for (const node of main.querySelectorAll<HTMLElement>("[data-disclosure-key]")) {
+      const side = node.closest(".memory-inline-old, [data-baseline-anchor]") ? "baseline" : "candidate";
+      const { key, identity } = identityFor(node, side);
+      let binding: DisclosureBinding | undefined;
+      if (node instanceof HTMLDetailsElement) binding = nativeDisclosure(node, key);
+      else if (node.matches(".memory-section")) binding = classDisclosure(node, key);
+      else if (node.matches(".rule-reference")) {
+        const body = node.querySelector<HTMLElement>(":scope > .effective-rule-inline");
+        const toggle = node.querySelector<HTMLElement>(":scope > .rule-reference-summary > .rule-reference-toggle");
+        if (body && toggle) binding = { key, read: () => !body.hidden, write: expanded => {
+          body.hidden = !expanded;
+          toggle.setAttribute("aria-expanded", String(expanded));
+        }};
+      }
+      if (binding) candidates.push({ binding, identity, position: JSON.stringify([side, node.dataset.disclosureKey]) });
+    }
+    const scope = JSON.stringify([
+      projectFromLocation(this.#location) || this.#currentProject || this.#config.projectApiBase || "",
+      route.kind, route.changeId,
+      route.kind === "change" ? this.#selectedId : this.#memoryDetail?.id || this.#selectedMarket,
+      route.changeId ? this.#changeContentMode : "published"
+    ]);
+    const signature = JSON.stringify(candidates.map(({ position }) => position));
+    let shape = this.#disclosureShapes.get(scope);
+    if (!shape || shape.signature !== signature) {
+      shape = { signature, version: ++this.#nextDisclosureShape };
+      this.#disclosureShapes.set(scope, shape);
+    }
+    const counts = new Map<string, number>();
+    for (const { identity } of candidates) counts.set(identity, (counts.get(identity) ?? 0) + 1);
+    const bindings = candidates.map(({ binding, identity, position }) => counts.get(identity) === 1 ? binding : {
+      ...binding,
+      // Positions identify identical siblings only while the content is unchanged.
+      key: JSON.stringify(["same-content", shape.version, identity, position])
+    });
+    this.#disclosures.restore(scope, bindings);
+    for (const root of main.querySelectorAll(".memory-disclosure-root")) root.dispatchEvent(new Event("memory-disclosure-change"));
     return main;
   }
 
@@ -2139,6 +2183,57 @@ class MemoryApplication {
   }
 }
 
+function memoryDisclosureIdentity(): (node: HTMLElement, side: string) => { key: string; identity: string } {
+  const metadata = new WeakMap<HTMLElement, { semantic: unknown; parent: unknown }>();
+  const read = (element: HTMLElement) => {
+    const cached = metadata.get(element);
+    if (cached) return cached;
+    const encoded = element.dataset.disclosureKey;
+    let semantic: unknown = encoded;
+    let parent: unknown = encoded;
+    try {
+      const parts: unknown = JSON.parse(encoded ?? "null");
+      if (Array.isArray(parts) && typeof parts[0] === "string") {
+        const path = parts[0].replace(/\[\d+\]/g, "[*]");
+        if (["statement", "schema", "memory", "procedure"].includes(parts[0])) {
+          semantic = [path];
+          parent = undefined;
+        } else if (element.matches(".memory-section")) {
+          const snapshot = parts[1];
+          const value = snapshot && typeof snapshot === "object" && !Array.isArray(snapshot) ? snapshot as JsonRecord : undefined;
+          const name = value && (Array.isArray(value.names) && value.names.length ? value.names[0] : value.name);
+          const identity = value?.id ? ["id", value.id] : name ? ["name", name] : ["anonymous", snapshot];
+          semantic = [path, value?.tag, identity];
+          parent = semantic;
+        } else if (element.matches(".rule-reference")) {
+          semantic = [path, parts[1]];
+          parent = semantic;
+        } else if (element instanceof HTMLDetailsElement) {
+          // A list container survives edits to its entries; its ancestors identify its owner.
+          semantic = [path];
+          parent = semantic;
+        } else {
+          semantic = [path, ...parts.slice(1)];
+          parent = semantic;
+        }
+      }
+    } catch { /* Unknown renderer markers retain their exact identity. */ }
+    const result = { semantic, parent };
+    metadata.set(element, result);
+    return result;
+  };
+  return (node, side) => {
+    const ancestors: unknown[] = [];
+    for (let parent = node.parentElement?.closest<HTMLElement>(".memory-section[data-disclosure-key]"); parent;
+      parent = parent.parentElement?.closest<HTMLElement>(".memory-section[data-disclosure-key]")) {
+      const identity = read(parent).parent;
+      if (identity !== undefined) ancestors.push(identity);
+    }
+    const identity = JSON.stringify([side, ancestors, read(node).semantic]);
+    return { key: identity, identity };
+  };
+}
+
 function text(value: string): TextRef { return { text: value }; }
 function message(config: Readonly<MemoryConfig>, key: string): string {
   const configured: unknown = config.messages?.[key];
@@ -2532,6 +2627,7 @@ function renderStatement(node: JsonRecord, depth: number, fallback: string, path
   if (sections.length) {
     const { block, body: sectionsBody } = collapsibleList(t("sections"), sections.length, "memory-sections-block", options.ui);
     block.dataset.diffPath = `${path}.sections`;
+    block.dataset.disclosureKey = JSON.stringify([`${path}.sections`, sections]);
     const children = el("div", "memory-child-stack");
     sections.forEach((child, index) => { if (child && typeof child === "object") children.append(renderStatement(child as JsonRecord, depth + 1, t("statements"), `${path}.sections[${index + 1}]`, t, comment, options)); });
     sectionsBody.append(children);
@@ -2685,6 +2781,7 @@ function renderGeneric(node: JsonRecord, path: string, t: (key: string) => strin
 type CommentCallback = (target: string, snapshot: string, location: unknown) => void;
 function nodeSection(title: string, path: string, snapshot: unknown, comment?: CommentCallback, badges: string[] = [], open = true): HTMLElement {
   const section = el("section", `memory-section memory-node memory-commentable${open ? " open" : ""}`); section.dataset.anchor = path; section.dataset.diffPath = path;
+  section.dataset.disclosureKey = JSON.stringify([path, snapshot]);
   const header = button("", "memory-section-header", () => { section.classList.toggle("open"); section.dispatchEvent(new CustomEvent("memory-disclosure-change", { bubbles: true })); });
   header.append(el("span", "memory-chevron", "›"), el("span", "memory-node-title", title));
   const badgeWrap = el("span", "node-badges"); badges.filter(Boolean).forEach(value => badgeWrap.append(el("span", "memory-pill", value))); header.append(badgeWrap);
@@ -2773,6 +2870,7 @@ function appendRuleList(
   if (!values.length) return;
   const { block: panel, body } = collapsibleList(translatedKey(key, t), values.length, `memory-list-block ${className}`.trim(), options.ui);
   panel.dataset.diffPath = `${path}.${key}`;
+  panel.dataset.disclosureKey = JSON.stringify([`${path}.${key}`, values, effectiveRules?.[key]]);
   const list = createContentList();
   const effective = array(effectiveRules?.[key]);
   values.forEach((value, index) => {
@@ -2781,7 +2879,7 @@ function appendRuleList(
     if (isReference(value)) {
       const target = String(value.target ?? "");
       const projection = effective.find(entry => entry && typeof entry === "object" && String(entry.reference ?? entry.target ?? "") === target) as JsonRecord | undefined;
-      const reference = renderRuleReference(value, projection, key, t, options);
+      const reference = renderRuleReference(value, projection, key, t, options, targetPath);
       const body = el("div", "commentable-body"); body.dataset.commentSnapshot = target; body.append(reference);
       item.append(commentable(body, targetPath, target, comment));
     } else {
@@ -2794,8 +2892,9 @@ function appendRuleList(
   parent.append(panel);
 }
 
-function renderRuleReference(ref: JsonRecord, effective: JsonRecord | undefined, channel: "asserts" | "suggests", t: (key: string) => string, options: RenderOptions): HTMLElement {
+function renderRuleReference(ref: JsonRecord, effective: JsonRecord | undefined, channel: "asserts" | "suggests", t: (key: string) => string, options: RenderOptions, path: string): HTMLElement {
   const wrap = el("div", "rule-reference");
+  wrap.dataset.disclosureKey = JSON.stringify([path, ref, effective]);
   const summary = el("div", "rule-reference-summary");
   summary.append(renderMemoryReference(ref, options, t));
   if (effective) {
@@ -2855,6 +2954,7 @@ function appendStringList(parent: HTMLElement, key: string, values: unknown[], p
   if (!values.length) return;
   const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block", ui);
   block.dataset.diffPath = `${path}.${key}`;
+  block.dataset.disclosureKey = JSON.stringify([`${path}.${key}`, values]);
   const list = createContentList();
   values.forEach((value, index) => {
     const li = document.createElement("li"); li.dataset.diffPath = `${path}.${key}[${index + 1}]`;

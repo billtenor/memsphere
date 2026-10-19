@@ -684,6 +684,331 @@ test("ChangeSet keeps replaced branches, deleted rules and new loops in their pa
   } finally { await browser.close(); await close(server); }
 });
 
+test("ChangeSet comment saves preserve mixed disclosure choices", async () => {
+  const fixture = await disclosureFixture();
+  const browser = await browserScope();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/changes/disclosure-change`, { waitUntil: "networkidle" });
+    const defines = page.locator('details[data-diff-path="statement.defines"]');
+    await defines.locator(":scope > summary").click();
+    await defines.locator(".memory-inline-new").hover();
+    await defines.locator(".memory-inline-new .memory-inline-plus").first().click();
+    const editor = page.locator(".memory-inline-comment-editor");
+    await editor.locator("textarea").fill("First located review comment");
+    if (!(await defines.evaluate(node => (node as HTMLDetailsElement).open))) await defines.locator(":scope > summary").click();
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await sections.locator(":scope > summary").click();
+    const firstSection = page.locator('.memory-section[data-diff-path="statement.sections[1]"]');
+    await firstSection.locator(":scope > .memory-section-header").click();
+    const assertMixed = async () => {
+      assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+      assert.equal(await sections.evaluate(node => (node as HTMLDetailsElement).open), true);
+      assert.equal(await firstSection.evaluate(node => node.classList.contains("open")), false);
+      assert.equal(await page.locator('details[data-diff-path="statement.asserts"]').evaluate(node => (node as HTMLDetailsElement).open), false);
+    };
+    const saved = page.waitForResponse(response => response.url().endsWith("/comments") && response.request().method() === "POST");
+    await editor.getByRole("button", { name: "Submit comment", exact: true }).click();
+    assert.equal((await saved).status(), 200);
+    await page.locator(".memory-comment-body").getByText("First located review comment", { exact: true }).waitFor();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true, "saving a comment must retain the expanded definitions list");
+    await assertMixed();
+    await defines.locator(".memory-inline-new").hover();
+    await defines.locator(".memory-inline-new .memory-inline-plus").click();
+    await editor.locator("textarea").fill("Second located review comment");
+    await editor.getByRole("button", { name: "Submit comment", exact: true }).click();
+    await page.getByText("Second located review comment", { exact: true }).waitFor();
+    assert.equal(fixture.comments.length, 2);
+    await assertMixed();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    const firstComment = page.locator(".memory-comment").filter({ hasText: "First located review comment" });
+    await firstComment.getByRole("button", { name: "编辑", exact: true }).click();
+    await firstComment.locator("textarea").fill("Edited located review comment");
+    await firstComment.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByText("Edited located review comment", { exact: true }).waitFor();
+    assert.equal(fixture.comments[0]?.body, "Edited located review comment");
+    await assertMixed();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    await page.locator(".memory-comment").filter({ hasText: "Edited located review comment" }).getByRole("button", { name: "删除", exact: true }).click();
+    await page.getByText("Edited located review comment", { exact: true }).waitFor({ state: "detached" });
+    assert.equal(fixture.comments.length, 1);
+    assert.equal(await page.getByText("Second located review comment", { exact: true }).count(), 1);
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    await assertMixed();
+    const overall = await page.request.post(`${fixture.origin}/api/changes/disclosure-change/comments`, { data: { operator: fixture.comments[0]!.operator, memoryReference: fixture.memory.id, path: fixture.memory.path, body: "Overall review through the supported comment API" } });
+    assert.equal(overall.status(), 200);
+    await refreshDisclosureView(page, "Refresh ChangeSet");
+    await page.getByText("Overall review through the supported comment API", { exact: true }).waitFor();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    await assertMixed();
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("ChangeSet disclosure modes, bulk choices and inserted sections remain isolated", async () => {
+  const fixture = await disclosureFixture(); const browser = await browserScope();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/changes/disclosure-change`, { waitUntil: "networkidle" });
+    const defines = page.locator('details[data-diff-path="statement.defines"]');
+    await defines.locator(":scope > summary").click();
+    await page.getByRole("radio", { name: "Full content", exact: true }).click();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), false, "candidate mode starts with its own defaults");
+    await page.getByRole("button", { name: "Expand all", exact: true }).click();
+    const expandedComment = await page.request.post(`${fixture.origin}/api/changes/disclosure-change/comments`, { data: { operator: { kind: "browser", id: "bulk-reviewer" }, memoryReference: fixture.memory.id, path: fixture.memory.path, body: "Candidate comment after expanding all" } });
+    assert.equal(expandedComment.status(), 200);
+    await refreshDisclosureView(page, "Refresh ChangeSet");
+    await page.getByText("Candidate comment after expanding all", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Collapse all", exact: true }).waitFor();
+    assert.equal(await page.locator("details.memory-collapsible-list:not([open])").count(), 0);
+    await page.getByRole("button", { name: "Collapse all", exact: true }).click();
+    const overall = await page.request.post(`${fixture.origin}/api/changes/disclosure-change/comments`, { data: { operator: fixture.comments[0]!.operator, memoryReference: fixture.memory.id, path: fixture.memory.path, body: "Candidate overall comment after collapsing all" } });
+    assert.equal(overall.status(), 200);
+    await refreshDisclosureView(page, "Refresh ChangeSet");
+    await page.getByText("Candidate overall comment after collapsing all", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Expand all", exact: true }).waitFor();
+    assert.equal(await page.locator("details.memory-collapsible-list[open]").count(), 0);
+    assert.equal(await page.locator(".memory-section .memory-section.open").count(), 0);
+    await page.getByRole("radio", { name: "Diff", exact: true }).click();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true, "candidate collapse-all does not overwrite diff choices");
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await sections.locator(":scope > summary").click();
+    const firstSection = page.locator('.memory-section[data-diff-path="statement.sections[1]"]');
+    await firstSection.locator(":scope > .memory-section-header").click();
+    assert.equal(await firstSection.evaluate(node => node.classList.contains("open")), false);
+    fixture.memory.entity.sections.unshift({ names: ["inserted", "Inserted section"], defines: ["New nested definition"] });
+    const response = page.waitForResponse(response => response.url().endsWith("/api/changes/disclosure-change"));
+    await refreshDisclosureView(page, "Refresh ChangeSet");
+    await response;
+    await page.locator('.memory-section[data-diff-path="statement.sections[1]"] .memory-node-title').getByText("Inserted section", { exact: true }).waitFor({ state: "attached" });
+    assert.equal(await firstSection.evaluate(node => node.classList.contains("open")), true, "a new section must not inherit the removed positional key's collapsed state");
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Memory detail keeps choices across in-page refresh and isolates another Memory", async () => {
+  const fixture = await disclosureFixture(); const browser = await browserScope();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/memories/statements/disclosure`, { waitUntil: "networkidle" });
+    const defines = page.locator('details[data-diff-path="statement.defines"]');
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await defines.locator(":scope > summary").click();
+    await sections.locator(":scope > summary").click();
+    const firstSection = page.locator('.memory-section[data-diff-path="statement.sections[1]"]');
+    await firstSection.locator(":scope > .memory-section-header").click();
+    const refreshed = page.waitForResponse(response => response.url().includes("/api/memories/statements/disclosure?"));
+    await refreshDisclosureView(page, "Refresh list");
+    await refreshed;
+    await page.getByRole("heading", { name: "Disclosure Memory", exact: true, level: 1 }).waitFor();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    assert.equal(await sections.evaluate(node => (node as HTMLDetailsElement).open), true);
+    assert.equal(await firstSection.evaluate(node => node.classList.contains("open")), false);
+    assert.equal(await page.locator('details[data-diff-path="statement.asserts"]').evaluate(node => (node as HTMLDetailsElement).open), false);
+    await page.locator(".mem-view-list-item").filter({ hasText: "Other Memory" }).click();
+    await page.getByRole("heading", { name: "Other Memory", exact: true, level: 1 }).waitFor();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), false);
+    assert.equal(await sections.evaluate(node => (node as HTMLDetailsElement).open), false);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Memory does not give an inserted identical section the previous positional disclosure choices", async () => {
+  const fixture = await disclosureFixture(); const browser = await browserScope();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/memories/statements/disclosure`, { waitUntil: "networkidle" });
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await sections.locator(":scope > summary").click();
+    const first = page.locator('.memory-section[data-diff-path="statement.sections[1]"]');
+    const firstDefines = first.locator('details[data-diff-path="statement.sections[1].defines"]');
+    await firstDefines.locator(":scope > summary").click();
+    await first.locator(":scope > .memory-section-header").click();
+    fixture.memory.entity.sections.unshift(structuredClone(fixture.memory.entity.sections[0]!));
+    await refreshDisclosureView(page, "Refresh list");
+    assert.equal(await sections.evaluate(node => (node as HTMLDetailsElement).open), true, "the existing sections container stays expanded after insertion");
+    assert.equal(await first.evaluate(node => node.classList.contains("open")), true, "the newly inserted identical section starts expanded by default");
+    assert.equal(await firstDefines.evaluate(node => (node as HTMLDetailsElement).open), false, "the inserted section's list must not inherit the previous positional node's expansion");
+    const second = page.locator('.memory-section[data-diff-path="statement.sections[2]"]');
+    assert.equal(await second.evaluate(node => node.classList.contains("open")), true, "neither indistinguishable section borrows the previous collapsed choice after insertion");
+    assert.equal(await second.locator('details[data-diff-path="statement.sections[2].defines"]').evaluate(node => (node as HTMLDetailsElement).open), false);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Memory keeps independent choices for identical sections when the document structure stays unchanged", async () => {
+  const fixture = await disclosureFixture(); const browser = await browserScope();
+  fixture.memory.entity.sections[1] = structuredClone(fixture.memory.entity.sections[0]!);
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/memories/statements/disclosure`, { waitUntil: "networkidle" });
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await sections.locator(":scope > summary").click();
+    const first = page.locator('.memory-section[data-diff-path="statement.sections[1]"]');
+    const second = page.locator('.memory-section[data-diff-path="statement.sections[2]"]');
+    const firstDefines = first.locator('details[data-diff-path="statement.sections[1].defines"]');
+    const secondDefines = second.locator('details[data-diff-path="statement.sections[2].defines"]');
+    await firstDefines.locator(":scope > summary").click();
+    await first.locator(":scope > .memory-section-header").click();
+    await refreshDisclosureView(page, "Refresh list");
+    assert.equal(await sections.evaluate(node => (node as HTMLDetailsElement).open), true);
+    assert.equal(await first.evaluate(node => node.classList.contains("open")), false);
+    assert.equal(await second.evaluate(node => node.classList.contains("open")), true);
+    assert.equal(await firstDefines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    assert.equal(await secondDefines.evaluate(node => (node as HTMLDetailsElement).open), false);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Memory distinguishes equal lists belonging to differently named sections across an unrelated structure change", async () => {
+  const fixture = await disclosureFixture(); const browser = await browserScope();
+  fixture.memory.entity.sections[1]!.defines = [...fixture.memory.entity.sections[0]!.defines];
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/memories/statements/disclosure`, { waitUntil: "networkidle" });
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await sections.locator(":scope > summary").click();
+    const firstDefines = page.locator('details[data-diff-path="statement.sections[1].defines"]');
+    const secondDefines = page.locator('details[data-diff-path="statement.sections[2].defines"]');
+    await firstDefines.locator(":scope > summary").click();
+    fixture.memory.entity.asserts.push("An unrelated added root rule");
+    await refreshDisclosureView(page, "Refresh list");
+    assert.equal(await firstDefines.evaluate(node => (node as HTMLDetailsElement).open), true, "equal values under distinct semantic parents remain unambiguous");
+    assert.equal(await secondDefines.evaluate(node => (node as HTMLDetailsElement).open), false);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Memory gives a renamed parent section's unchanged list its default disclosure state", async () => {
+  const fixture = await disclosureFixture(); const browser = await browserScope();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/memories/statements/disclosure`, { waitUntil: "networkidle" });
+    const sections = page.locator('details[data-diff-path="statement.sections"]');
+    await sections.locator(":scope > summary").click();
+    const first = page.locator('.memory-section[data-diff-path="statement.sections[1]"]');
+    const defines = first.locator('details[data-diff-path="statement.sections[1].defines"]');
+    await defines.locator(":scope > summary").click();
+    fixture.memory.entity.sections[0]!.names = ["different-parent", "Different parent section"];
+    await refreshDisclosureView(page, "Refresh list");
+    assert.equal(await sections.evaluate(node => (node as HTMLDetailsElement).open), true, "the existing sections container stays expanded after parent replacement");
+    await first.getByText("Different parent section", { exact: true }).waitFor();
+    assert.equal(await first.evaluate(node => node.classList.contains("open")), true, "the new parent follows its default expansion");
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), false, "an unchanged list under a new parent must not inherit the previous parent's reading choice");
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+for (const surface of ["Memory", "Diff", "Full content"] as const) {
+  test(`${surface} stable semantic identity preserves a moved section and its child choices`, async () => {
+    const fixture = await disclosureFixture(true); const browser = await browserScope();
+    try {
+      const page = await browser.newPage();
+      const view = await openStableDisclosureScenario(page, fixture, surface);
+      fixture.memory.entity.sections.unshift({ names: ["inserted", "Inserted section"], defines: ["New definition"] });
+      await refreshDisclosureView(page, surface === "Memory" ? "Refresh list" : "Refresh ChangeSet");
+      await view.assertBaseline();
+      const inserted = page.locator('.memory-section[data-anchor="statement.sections[1]"]');
+      const moved = page.locator('.memory-section[data-anchor="statement.sections[2]"]');
+      assert.deepEqual({
+        sectionsOpen: await view.sections.evaluate(node => (node as HTMLDetailsElement).open),
+        insertedOpen: await inserted.evaluate(node => node.classList.contains("open")),
+        insertedListOpen: await inserted.locator('details[data-diff-path="statement.sections[1].defines"]').evaluate(node => (node as HTMLDetailsElement).open),
+        movedOpen: await moved.evaluate(node => node.classList.contains("open")),
+        movedListOpen: await moved.locator('details[data-diff-path="statement.sections[2].defines"]').evaluate(node => (node as HTMLDetailsElement).open),
+      }, { sectionsOpen: true, insertedOpen: true, insertedListOpen: false, movedOpen: false, movedListOpen: true }, "unique named nodes retain choices after moving while new nodes use defaults");
+    } finally { await browser.close(); await close(fixture.server); }
+  });
+
+  test(`${surface} stable semantic identity preserves a named parent when its contents grow and shrink`, async () => {
+    const fixture = await disclosureFixture(true); const browser = await browserScope();
+    try {
+      const page = await browser.newPage();
+      const view = await openStableDisclosureScenario(page, fixture, surface);
+      for (const operation of ["add", "remove"] as const) {
+        if (operation === "add") fixture.memory.entity.sections[0]!.defines.push("Additional child content");
+        else fixture.memory.entity.sections[0]!.defines.pop();
+        await refreshDisclosureView(page, surface === "Memory" ? "Refresh list" : "Refresh ChangeSet");
+        await view.assertBaseline();
+        assert.deepEqual({
+          sectionsOpen: await view.sections.evaluate(node => (node as HTMLDetailsElement).open),
+          parentOpen: await view.first.evaluate(node => node.classList.contains("open")),
+          listOpen: await view.firstDefines.evaluate(node => (node as HTMLDetailsElement).open),
+        }, { sectionsOpen: true, parentOpen: false, listOpen: true }, `${operation} child content keeps the stable parent and list reading choices`);
+      }
+    } finally { await browser.close(); await close(fixture.server); }
+  });
+}
+
+async function openStableDisclosureScenario(
+  page: import("playwright").Page,
+  fixture: Awaited<ReturnType<typeof disclosureFixture>>,
+  surface: "Memory" | "Diff" | "Full content"
+) {
+  await page.goto(`${fixture.origin}/projects/demo/${surface === "Memory" ? "memories/statements/disclosure" : "changes/disclosure-change"}`, { waitUntil: "networkidle" });
+  if (surface === "Full content") await page.getByRole("radio", { name: "Full content", exact: true }).click();
+  const sections = page.locator('details[data-diff-path="statement.sections"]').filter({ has: page.locator('.memory-section[data-anchor="statement.sections[1]"]') });
+  await sections.locator(":scope > summary").click();
+  const first = page.locator('.memory-section[data-anchor="statement.sections[1]"]');
+  const firstDefines = first.locator('details[data-diff-path="statement.sections[1].defines"]');
+  await firstDefines.locator(":scope > summary").click();
+  await first.locator(":scope > .memory-section-header").click();
+  const baseline = page.locator('.memory-section[data-baseline-anchor="statement.sections[3]"]');
+  if (surface === "Diff") {
+    await baseline.locator('details[data-diff-path="statement.sections[3].defines"] > summary').click();
+    await baseline.locator(":scope > .memory-section-header").click();
+  }
+  const assertBaseline = async () => {
+    if (surface !== "Diff") return;
+    assert.deepEqual({
+      open: await baseline.evaluate(node => node.classList.contains("open")),
+      listOpen: await baseline.locator('details[data-diff-path="statement.sections[3].defines"]').evaluate(node => (node as HTMLDetailsElement).open),
+    }, { open: false, listOpen: true }, "candidate changes do not reset the frozen baseline's reading choices");
+  };
+  return { sections, first, firstDefines, assertBaseline };
+}
+
+async function refreshDisclosureView(page: import("playwright").Page, label: string): Promise<void> {
+  const previous = await page.locator(".memory-detail-module").elementHandle();
+  assert(previous);
+  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.waitForFunction(node => !node.isConnected, previous);
+  await page.locator(".memory-detail-module").waitFor();
+}
+
+async function disclosureFixture(freezeBaseline = false) {
+  const [bundle, sdk, runtime] = await Promise.all([buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()]);
+  const instances: ViewHostBootInstance[] = [{ pluginPath: memoryBundlePath, routeBasePath: "/", module: { projectId: "demo", moduleId: "org.memsphere.memory", moduleVersion: "0.1.2", instanceId: "memory" } }];
+  const entity = { names: ["disclosure", "Disclosure Memory"], defines: ["A definition to review"], asserts: ["A rule to keep closed"], sections: [{ names: ["first", "First section"], defines: ["First nested definition"] }, { names: ["second", "Second section"], defines: ["Second nested definition"] }] };
+  const memory = { id: "statements/disclosure", kind: "statements", path: "statements/disclosure.yaml", names: entity.names, entity };
+  const baseEntity = structuredClone(entity);
+  baseEntity.defines = ["Previous definition"];
+  if (freezeBaseline) baseEntity.sections.push({ names: ["baseline-only", "Baseline-only section"], defines: ["Frozen baseline definition"] });
+  const other = { ...memory, id: "statements/other", path: "statements/other.yaml", names: ["other", "Other Memory"], entity: { ...entity, names: ["other", "Other Memory"] } };
+  const comments: Record<string, unknown>[] = [];
+  let commentSequence = 0;
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (url.pathname === memoryBundlePath) return send(response, 200, "text/javascript", bundle);
+    if (url.pathname === viewSdkBundlePath) return send(response, 200, "text/javascript", sdk);
+    if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
+    if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
+    if (url.pathname === "/api/market/memories") return json(response, { memories: [] });
+    if (url.pathname === "/api/memories") return json(response, { memories: [memory, other] });
+    if (url.pathname === "/api/memories/statements/disclosure") return json(response, { memory });
+    if (url.pathname === "/api/memories/statements/other") return json(response, { memory: other });
+    if (url.pathname === "/api/changes") return json(response, { changes: [{ id: "disclosure-change", status: "active", memoryPaths: [memory.path] }] });
+    if (url.pathname === "/api/changes/disclosure-change/comments" && request.method === "POST") {
+      let raw = ""; for await (const chunk of request) raw += chunk;
+      const input = JSON.parse(raw) as Record<string, unknown>;
+      const comment = { ...input, id: `comment-${++commentSequence}`, status: "pending" };
+      comments.push(comment); return json(response, { comment });
+    }
+    if (url.pathname.startsWith("/api/changes/disclosure-change/comments/")) {
+      const index = comments.findIndex(comment => comment.id === url.pathname.split("/").at(-1));
+      if (request.method === "DELETE") { comments.splice(index, 1); return json(response, { deleted: true }); }
+      if (request.method === "PATCH") { let raw = ""; for await (const chunk of request) raw += chunk; Object.assign(comments[index]!, JSON.parse(raw)); return json(response, { comment: comments[index] }); }
+    }
+    if (url.pathname === "/api/changes/disclosure-change") return json(response, { change: { id: "disclosure-change", status: "active", valid: true, memoryPaths: [memory.path] }, targetMemories: [{ reference: memory.id, operation: "update", baseMemory: { ...memory, entity: freezeBaseline ? baseEntity : { ...entity, defines: ["Previous definition"] } }, memory }], comments });
+    return send(response, 200, "text/html", renderViewHostHtml("en", instances));
+  });
+  const origin = await listen(server);
+  return { origin, server, comments, memory };
+}
+
 async function buildMemoryBundle(): Promise<string> {
   const result = await build({
     entryPoints: [fileURLToPath(new URL("../modules/org.memsphere.memory/adapter/view/index.ts", import.meta.url))],
