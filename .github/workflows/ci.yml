@@ -47,6 +47,7 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
+      NODE_COMPILE_CACHE: ${{ runner.temp }}/memsphere-node-compile-cache
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
