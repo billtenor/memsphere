@@ -36,6 +36,7 @@ jobs:
           - { os: windows-latest, suite: memory-cli, title: "Memory & Project CLI", workers: 2, browser: false }
           - { os: windows-latest, suite: app-cli, title: "App, Model & Data CLI", workers: 2, browser: false }
           - { os: windows-latest, suite: project-core, title: "Project Lifecycle", workers: 3, browser: false }
+          - { os: windows-latest, suite: project-upgrade, title: "Project Upgrades", workers: 3, browser: false }
           - { os: windows-latest, suite: memory-core, title: "Memory Stores & Changes", workers: 2, browser: true }
           - { os: windows-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
     env:

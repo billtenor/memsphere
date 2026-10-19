@@ -6,12 +6,13 @@ export const testSuites = {
   "memory-cli": { title: "Memory & Project CLI", categories: ["memory-cli"] },
   "app-cli": { title: "App, Model & Data CLI", categories: ["app-cli"] },
   "project-core": { title: "Project Lifecycle", categories: ["project-core"] },
+  "project-upgrade": { title: "Project Upgrades", categories: ["project-upgrade"] },
   "memory-core": { title: "Memory Stores & Changes", categories: ["memory-core"] },
   "runtime-core": { title: "Run, Data & SDK", categories: ["runtime-core"] },
   browser: { title: "Browser UI", categories: ["model-ui", "review-ui"] },
   cli: { title: "CLI & Packaging", categories: ["memory-cli", "app-cli"] },
-  "memory-and-projects": { title: "Projects & Memory", categories: ["project-core", "memory-core"] },
-  core: { title: "Projects, Memory & Runtime", categories: ["project-core", "memory-core", "runtime-core"] }
+  "memory-and-projects": { title: "Projects & Memory", categories: ["project-core", "project-upgrade", "memory-core"] },
+  core: { title: "Projects, Memory & Runtime", categories: ["project-core", "project-upgrade", "memory-core", "runtime-core"] }
 };
 
 /** Categories describe the primary contract; integration tests remain whole. */
@@ -21,6 +22,7 @@ export function testCategory(file, source) {
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
     return /model|settings/.test(name) ? "model-ui" : "review-ui";
   }
+  if (name.startsWith("project-upgrade")) return "project-upgrade";
   if (/^(app-install|data-command|model-command|model-market-package|system-model-creation)/.test(name)) return "app-cli";
   if (/cli|windows-prerequisites/.test(name)) return "memory-cli";
   if (/^(project|config|home|git|file-lock)/.test(name)) return "project-core";

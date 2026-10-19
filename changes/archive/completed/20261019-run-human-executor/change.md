@@ -69,3 +69,8 @@ Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别�
 复用现有 model-ui/review-ui 分类，将 macOS Browser UI 拆为 Models & Settings UI、Review & Shell UI 两个并行任务，每任务三个文件级进程。所有测试用例、断言、平台覆盖及五分钟门禁均保留。既有跨平台覆盖测试验证每个平台的测试文件无缺失、无重复，浏览器安装条件与套件一致。本轮只调整 CI 分工及此记录，不修改已验收的运行时行为。
 
 最终检查结果以 PR #104 最新 head 的检查记录为准，不再为补写 CI 状态制造额外文档提交。
+
+
+后续运行39213333539中，拆分后的macOS UI任务分别为1分49秒和1分55秒，全部测试仍通过。Windows Project Lifecycle 本轮因同一runner中多个重型测试竞争资源，完整任务波动到4分56秒；耗时产物显示project-command单文件227.96秒、Managed升级186.42秒、Embedded升级130.60秒。
+
+进一步将Windows升级测试分配给独立的Project Upgrades任务，与Project Lifecycle分开运行，保留各任务三个文件进程。新增project-upgrade内部测试分类，并在Linux/macOS使用的聚合套件中保留该分类；跨平台全量覆盖检查及专门的归属回归测试共同保证没有遗漏或重复测试。五分钟总预算及全部原测试仍保留。最终状态继续以PR最新提交检查为准。

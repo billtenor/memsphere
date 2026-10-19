@@ -21,3 +21,15 @@ test("Scheduling orders expensive files first within their category without chan
   assert.deepEqual(selectTests([...files].reverse(), sources, durations, "memory-cli"), selectTests(files, sources, durations, "memory-cli"));
   assert.throws(() => selectTests(files, sources, durations, "unknown"), /Unknown test suite/);
 });
+
+test("New project upgrade tests enter their CI suite and remain in aggregate project runs", () => {
+  const upgrade = "project-upgrade-extra.test.ts";
+  const lifecycle = "project-command.test.ts";
+  const files = [upgrade, lifecycle];
+  const sources = Object.fromEntries(files.map(file => [file, ""]));
+  assert.deepEqual(selectTests(files, sources, {}, "project-upgrade"), [upgrade]);
+  assert.deepEqual(selectTests(files, sources, {}, "project-core"), [lifecycle]);
+  for (const suite of ["core", "memory-and-projects"]) {
+    assert.deepEqual(selectTests(files, sources, {}, suite).sort(), [...files].sort());
+  }
+});
