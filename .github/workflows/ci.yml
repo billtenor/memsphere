@@ -54,6 +54,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Reuse Node compilation within this job
+        if: runner.os == 'Windows'
         shell: bash
         run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - run: npm ci
@@ -87,6 +88,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - name: Pack and install
         shell: pwsh
         run: |
@@ -127,6 +131,19 @@ jobs:
           ./.ci-install/node_modules/.bin/memsphere --help
           cd ".ci windows project"
           ../.ci-install/node_modules/.bin/memsphere view status
+
+      - name: Native platform contracts
+        if: needs.plan.outputs.profile == 'default'
+        env:
+          CI_TEST_RESULTS: ci-results/windows-latest-package-platform.json
+        run: node scripts/run-tests.mjs --suite=package-platform --test-concurrency=2
+      - name: Preserve native contract timings
+        if: always() && needs.plan.outputs.profile == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-windows-latest-package-platform
+          path: ci-results
+          if-no-files-found: error
 
   budget:
     name: CI five-minute budget

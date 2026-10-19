@@ -83,3 +83,5 @@ run_id: run-20261019-081003z-36eab35a
 同一head 3ab922a的full工作流39244076890全部成功；default 39244056829仅Windows platform作业触及300秒时限，预算因此失败，未重跑掩盖。集成后本地npm test：149文件0失败，381.97秒，typecheck/Store通过。基于full文件实测，保持两个Windows作业及原42文件并集，将system-upgrade-changeset、run-model-artifact、memory-changeset移到升级组，形成platform-core36文件和platform-upgrades6文件，均4个文件进程。两组累计文件耗时约581/572秒，覆盖、233次文件执行、8次构建和285秒预算不变。调整后将以新head重新运行default/full；最终结果见PR和Run最终报告。
 
 第二轮a5f1679所有测试、full和安全检查均通过，但default预算317.4秒超过285秒；8个测试/打包job合计1485秒，相比同类历史2849秒减少47.9%。Windows core两个CLI重型文件实测218/227秒，仍有重复Node编译开销。本机8次CLI启动对照：禁用缓存509–631ms，启用后热启动418–513ms。测试job增加Node 22原生NODE_COMPILE_CACHE，目录仅runner.temp内本job复用，不共享测试数据或MEMSPHERE_HOME；不改变测试/构建数量或阈值。该优化最终以新head远端CI验证。
+
+第三轮f700dcb：手动full抢占runner导致default部分排队约90秒，已取消该full并决定后续串行验证default/full；macOS实际测试亦达到job时限，不能只归因排队。Node缓存限于Windows，macOS平台并发3→4，保持既有上限。default复用原有Windows安装包job运行app-install/project-command两份重型平台文件（直接runner、并发2、不额外build），core36→34、升级6保持，安装包原smoke全部保留；full矩阵仍原样，追加两文件步骤明确不适用full以免重复。所有平台保护仍各42文件，233执行、8构建和285秒阈值保持。路由自检及移入两份完整回归0失败。33b542f曾因job级runner上下文不支持而未触发full，后续f700dcb已改为GITHUB_ENV步骤，不将未触发视为通过。

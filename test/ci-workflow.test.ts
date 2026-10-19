@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
 import { ciProfile, createCiPlan } from "../scripts/ci-plan.mjs";
-import { platformTests, selectTests, testSuites } from "../scripts/test-plan.mjs";
+import { packagePlatformTests, platformTests, selectTests, testSuites } from "../scripts/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = (await readdir("test")).filter(file => file.endsWith(".test.ts"));
@@ -15,6 +15,7 @@ test("PR runs every retained test on Linux and every declared native risk on mac
   let executions = 0;
   for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
     const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite));
+    if (os === "windows-latest") assigned.push(...packagePlatformTests);
     executions += assigned.length;
     assert.equal(new Set(assigned).size, assigned.length, `${os}: no duplicate files`);
     if (os === "ubuntu-24.04") assert.deepEqual([...assigned].sort(), [...files].sort());
@@ -25,6 +26,9 @@ test("PR runs every retained test on Linux and every declared native risk on mac
       assert(assigned.length < files.length, `${os}: avoid a second complete copy`);
     }
   }
+  const packaged = workflow.jobs["windows-package-smoke"].steps.find(step => step.name === "Native platform contracts");
+  assert.equal(packaged.if, "needs.plan.outputs.profile == 'default'");
+  assert.match(packaged.run, /node scripts\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
   assert(executions <= 266, "at least 40% fewer file executions than the 444-file baseline");
   assert(platformTests.includes("project-command.test.ts"), "repair CAS, literal Git paths, symlink rejection and rollback remain platform checks");
   assert(platformTests.includes("project-resolver.test.ts"));

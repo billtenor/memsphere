@@ -44,12 +44,16 @@ export const platformTests = [
   "windows-prerequisites.test.ts"
 ];
 
-// Balance the two existing Windows jobs using full-run file timings.
+// Reuse the existing packaged-CLI job for these heavy native integration contracts.
+export const packagePlatformTests = ["app-install.test.ts", "project-command.test.ts"];
+
+// Balance the two existing Windows test jobs using full-run file timings.
 const platformUpgradeTests = [
   "system-upgrade-changeset.test.ts", "run-model-artifact.test.ts", "memory-changeset.test.ts"
 ];
 
 export const testSuites = {
+  "package-platform": { title: "Packaged Job Platform Contracts", categories: [] },
   "platform-core": { title: "Platform Core Contracts", categories: [] },
   "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
   platform: { title: "Platform Contracts", categories: [] },
@@ -88,8 +92,9 @@ export function selectTests(files, sources, durations, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
+    if (suite === "package-platform") return packagePlatformTests.includes(basename(file));
     if (suite === "platform-core") {
-      return platformTests.includes(basename(file)) && !platformUpgradeTests.includes(basename(file));
+      return platformTests.includes(basename(file)) && !platformUpgradeTests.includes(basename(file)) && !packagePlatformTests.includes(basename(file));
     }
     if (suite === "platform-upgrades") {
       return platformUpgradeTests.includes(basename(file)) || testCategory(file, sources[file]) === "project-upgrade";

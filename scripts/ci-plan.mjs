@@ -14,7 +14,7 @@ const linux = [
   ["ubuntu-24.04", "memory-and-projects", 2], ["ubuntu-24.04", "runtime-core", 2]
 ];
 const defaultRows = [...linux,
-  ["macos-latest", "platform-and-upgrades", 3],
+  ["macos-latest", "platform-and-upgrades", 4],
   ["windows-latest", "platform-core", 4], ["windows-latest", "platform-upgrades", 4]
 ];
 const fullRows = [...linux,

@@ -4,7 +4,7 @@
 
 测试按用户可观察契约和真实运行边界选择。删除、合并或下沉必须说明重复保护及覆盖代价；不得为隐藏失败而删断言、跳过测试或放宽验收。保留教程安全规则、数据发布/回滚、权限、并发与原生文件/进程保护。
 
-`npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。测试job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
+`npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。Windows测试/打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
 
 ## 默认 PR / master push
 
@@ -13,11 +13,11 @@
 | 平台 | 套件 | 文件并发 |
 |---|---|---|
 | Linux | Browser UI / CLI & Packaging / Projects & Memory / Run, Data & SDK | 3 / 3 / 2 / 2 |
-| macOS | Platform & Upgrade Contracts | 3 |
+| macOS | Platform & Upgrade Contracts | 4 |
 | Windows | Platform Core Contracts / Platform Publication & Upgrades | 4 / 4 |
-| Windows | 真实npm安装包、Run/View及四种Shell冒烟 | 独立job |
+| Windows | 真实npm安装包、Run/View及四种Shell冒烟，default另运行app-install/project-command | 独立job |
 
-Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更重型用例放入升级组，与其余平台保护在既有两个job内均衡分配。首轮full实测Windows两组所含文件累计耗时约581/572秒，分组并发4；不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。39项平台清单位于 `scripts/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
+Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更用例放入升级组，其余34项平台保护由core组执行；app-install/project-command两份重型集成用例复用原有安装包job的空闲时间（并发2），直接调用测试runner，不再触发pretest重建。full仍由原有矩阵覆盖这两份用例，安装包job仅在default追加它们。不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。39项平台清单位于 `scripts/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
 
 默认CI与Security的整条workflow目标均为300秒（含排队）。原 `scripts/ci-budget.mjs` 保持285秒检查线，为清理预留15秒；测试/打包job仍5分钟超时。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
 
@@ -81,4 +81,4 @@ full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包
 
 历史run39218044291：148文件×3OS=444次文件执行；17测试行+1打包job=18次完整构建；这18个job的completedAt-startedAt合计2849秒（47.48分钟），非CPU或账单时间，未含作业排队。预算计时244.1秒含排队，仅作历史对照。
 
-集成最新master新增用例后，当前149个保留文件，默认执行233次（149+42+36+6），相对原444次基线减少47.5%；完整构建8次，减少55.6%。另有不构建的profile计划和结果汇总job，不能把它们漏记成“整个workflow只有8个job”。full成本单列，不能混算成PR节省。最终耗时以当前head实际CI为准，记录事件/profile、SHA和环境波动。
+集成最新master新增用例后，当前149个保留文件，默认执行233次（149+42+34+6+2），相对原444次基线减少47.5%；完整构建8次，减少55.6%。另有不构建的profile计划和结果汇总job，不能把它们漏记成“整个workflow只有8个job”。full成本单列，不能混算成PR节省。最终耗时以当前head实际CI为准，记录事件/profile、SHA和环境波动。
