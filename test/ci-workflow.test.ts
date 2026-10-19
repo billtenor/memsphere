@@ -58,17 +58,19 @@ test("Full CI retains complete exactly-once coverage on all platforms, including
 
 test("CI separates full and default cancellation, trigger and result policies", async () => {
   assert.equal(ciProfile("pull_request", "full"), "default");
-  assert.equal(ciProfile("push", "full"), "default");
-  assert.equal(ciProfile("schedule"), "full");
+  assert.equal(ciProfile("push"), "full");
   assert.equal(ciProfile("workflow_dispatch", "full"), "full");
   assert.equal(ciProfile("workflow_dispatch", "default"), "default");
   assert.throws(() => ciProfile("workflow_dispatch", "unknown"), /Unknown CI profile/);
-  const full = "github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')";
-  assert.equal(workflow.concurrency.group, "ci-${{ github.workflow }}-${{ (" + full + ") && 'full' || 'default' }}-${{ github.event.pull_request.number || github.ref }}");
-  assert.equal(workflow.concurrency["cancel-in-progress"], "${{ !(" + full + ") }}");
+  const full = "github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')";
+  assert.equal(workflow["run-name"], "${{ inputs.full_health_bootstrap && 'Full health bootstrap' || ((" + full + ") && 'CI (full)' || 'CI (default)') }}");
+  assert.equal(workflow.concurrency.group, "ci-${{ github.workflow }}-${{ inputs.full_health_bootstrap && 'bootstrap' || ((" + full + ") && 'full' || 'default') }}-${{ (" + full + ") && github.run_id || (github.event.pull_request.number || github.ref) }}");
+  assert.equal(workflow.concurrency["cancel-in-progress"], "${{ !inputs.full_health_bootstrap && github.event_name != 'push' && !(github.event_name == 'workflow_dispatch' && inputs.profile == 'full') }}");
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.profile.options, ["default", "full"]);
   assert.equal(workflow.on.workflow_dispatch.inputs.profile.default, "full");
-  assert.deepEqual(workflow.on.schedule, [{ cron: "30 2 * * *" }]);
+  assert.equal(workflow.on.schedule, undefined);
+  assert.deepEqual(workflow.on.push.branches, ["master"]);
+  assert.equal(workflow.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
   assert.equal(workflow.jobs.test.strategy.matrix, "${{ fromJSON(needs.plan.outputs.matrix) }}");
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").run, 'node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"');
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").env.CI_PROFILE, "${{ inputs.profile || 'default' }}");

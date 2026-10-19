@@ -1,4 +1,5 @@
 name: CI
+run-name: ${{ inputs.full_health_bootstrap && 'Full health bootstrap' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
 
 on:
   pull_request:
@@ -11,19 +12,25 @@ on:
         type: choice
         options: [default, full]
         default: full
-  schedule:
-    - cron: "30 2 * * *"
+      full_health_bootstrap:
+        description: Owner only, first-install status publisher (no builds)
+        type: boolean
+        default: false
+      reviewed_sha:
+        description: Exact architect-reviewed SHA required for first install
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'full' || 'default' }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ !(github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) }}
+  group: ci-${{ github.workflow }}-${{ inputs.full_health_bootstrap && 'bootstrap' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'full' || 'default') }}-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && github.run_id || (github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !inputs.full_health_bootstrap && github.event_name != 'push' && !(github.event_name == 'workflow_dispatch' && inputs.profile == 'full') }}
 
 jobs:
   plan:
+    if: ${{ !inputs.full_health_bootstrap }}
     name: Select CI profile
     runs-on: ubuntu-24.04
     timeout-minutes: 1
@@ -176,3 +183,26 @@ jobs:
         run: |
           test "$TEST_RESULT" = success
           test "$PACKAGE_RESULT" = success
+
+  full-health-bootstrap:
+    name: First-install full health publisher
+    if: github.event_name == 'workflow_dispatch' && inputs.full_health_bootstrap && github.actor == github.repository_owner && inputs.reviewed_sha == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: node scripts/full-health.mjs --bootstrap --publish

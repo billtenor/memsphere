@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { platformTests, selectTests, testSuites } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
-  if (event === "schedule") return "full";
+  if (event === "push") return "full";
   if (event !== "workflow_dispatch") return "default";
   if (!["default", "full"].includes(input)) throw new Error(`Unknown CI profile: ${input}`);
   return input;

@@ -6,7 +6,7 @@
 
 `npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。Windows测试/打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
 
-## 默认 PR / master push
+## 默认 PR
 
 统一Node22，Linux固定Ubuntu24.04（当前Playwright不支持Ubuntu26.04）。默认矩阵由 `scripts/ci-plan.mjs` 生成：
 
@@ -21,9 +21,9 @@ Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集
 
 默认CI与Security的整条workflow目标均为300秒（含排队）。原 `scripts/ci-budget.mjs` 保持285秒检查线，为清理预留15秒；测试/打包job仍5分钟超时。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
 
-## 每日 / 发布前完整检查
+## 合入 master / 发布前完整检查
 
-每天UTC02:30自动对默认分支运行full。GitHub Actions的CI工作流支持手动选择ref和profile（default/full，手动默认full）：
+每次合入master（push master）自动运行full，不再配置每日schedule。GitHub Actions的CI工作流支持手动选择ref和profile（default/full，手动默认full）：
 
 ```bash
 gh workflow run ci.yml --ref <branch-or-tag> -f profile=full
@@ -35,7 +35,7 @@ gh run watch <run-id> --exit-status
 
 full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包。每个OS对所有保留文件恰好执行一次；各行原有2–4文件进程数不变，单job10分钟有界超时。它验证跨平台质量，不适用PR五分钟反馈预算；该预算作业明确不适用，而不是伪报为成功。`Full cross-platform regression`必须等全部测试/打包成功才成功。
 
-并发组包含default/full和PR号或ref。default继续取消同目标旧default运行；full不取消已运行的full，并与default互不取消，防止master push消掉每日回归。失败保持Actions失败状态，由相关模块维护者负责修复；本需求执行期间由Runner负责跟进。每日检查会延迟暴露未进入PR平台集的OS特有故障，这是降低逐PR重复成本的明确代价。full触发自身失败也必须处理。
+default按PR号或ref分组，继续取消同目标旧default运行。full按run ID独立分组且不取消，保证连续master push不会挤掉旧pending full，与default互不取消。bootstrap独立，不能提供full证明。合入后full会暴露未进入PR平台集的OS组合故障，失败阻拦后续PR，修复PR可手动验证其自身full再解锁。无合入时不主动检测依赖或runner变化，仍可手动触发full。full触发自身失败也必须处理。
 
 ## 平台风险与降频边界
 
@@ -53,7 +53,7 @@ full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包
 | ACP进程、Shell、命令提示 | agent-review、run-output、run-rule-integration、run-model-artifact、windows-prerequisites、cli-errors |
 | 服务、归档、配置 | view-service、archive-store、config-management |
 
-其余Schema/语法组合、CLI消息与选项组合、View大部分浏览器场景逐PR在Linux运行，macOS/Windows全组合每日或发布前运行。保留文件内部有部分纯逻辑断言，本轮不为进一步减少毫秒级开销继续拆分。
+其余Schema/语法组合、CLI消息与选项组合、View大部分浏览器场景逐PR在Linux运行，macOS/Windows全组合合入master后或发布前运行。保留文件内部有部分纯逻辑断言，本轮不为进一步减少毫秒级开销继续拆分。
 
 ## 本轮删减审计
 
@@ -81,4 +81,44 @@ full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包
 
 历史run39218044291：148文件×3OS=444次文件执行；17测试行+1打包job=18次完整构建；这18个job的completedAt-startedAt合计2849秒（47.48分钟），非CPU或账单时间，未含作业排队。预算计时244.1秒含排队，仅作历史对照。
 
-集成最新master新增用例后，当前149个保留文件，默认执行233次（149+42+35+6+1），相对原444次基线减少47.5%；完整构建8次，减少55.6%。另有不构建的profile计划和结果汇总job，不能把它们漏记成“整个workflow只有8个job”。full成本单列，不能混算成PR节省。最终耗时以当前head实际CI为准，记录事件/profile、SHA和环境波动。
+集成最新master新增用例后，当前150个保留文件，默认执行234次（150+42+35+6+1），相对原444次基线减少47.3%；完整构建8次，减少55.6%。另有不构建的profile计划和结果汇总job，不能把它们漏记成“整个workflow只有8个job”。full成本单列，不能混算成PR节省。最终耗时以当前head实际CI为准，记录事件/profile、SHA和环境波动。
+
+
+## PR full 健康门禁
+
+稳定状态 `Full health / master` 是master ruleset的必需检查，绑定GitHub Actions app15368，保留其余保护且不额外要求PR更新到master。发布器只查GitHub API并发布commit status，不安装项目依赖、不构建、不执行PR代码或构建Artifact。`pull_request_target`、master push、CI full requested/in_progress/completed和手动刷新均从master可信代码读取实时事实，刷新所有开放master PR，事件乱序不会直接复用旧事件结论。
+
+| PR当前head最新full | master最新提交full | 结果 |
+|---|---|---|
+| success | 任意 | success，修复解锁 |
+| 排队/运行/重跑 | 任意 | pending，等待 |
+| 非成功 | 任意 | failure，拦截 |
+| 无 | success | success |
+| 无 | 排队/运行/重跑，或新master提交尚无full登记 | pending，等待 |
+| 无 | 非成功或无有效full历史 | failure，拦截 |
+| 任意 | 必要API/身份查询异常 | error，重试可信刷新 |
+
+full限定本仓库固定CI workflow335696122，profile标记及实际full汇总核证；default中的skipped汇总不算full。成功必须run和full汇总均success；取消、超时、neutral、skipped、汇总缺失等不会放行。最新按created_at/run ID和当前attempt；重跑期间pending，保留前次失败作审计，绝不回退更旧绿灯。当前PR head改变后，旧head full不能解锁。master则必须匹配实时最新SHA，不能借合入前的绿灯放行。
+
+恢复命令（修复PR每次更新后需对最新提交再跑full）：
+
+```bash
+gh workflow run ci.yml --ref <repair-branch> -f profile=full
+gh run list --workflow ci.yml --branch <repair-branch>
+# 已部署后可信手动刷新；通常full状态事件会自动刷新所有PR
+gh workflow run full-health.yml --ref master
+```
+
+API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通PR仍由精简default保护。
+
+### 首次安装与回滚
+
+发布器必须先进入默认分支才能自动触发；首次安装采用现有CI工作流受控bootstrap。维护者在Human架构/成果正式验收、精确head default/full/Security全部通过及只读dry-run成功后，先从最新ruleset追加必需context、Actions身份，保持全部现有规则和bypass设置；新增规则固定strict_required_status_checks_policy=false、do_not_enforce_on_create=false。此时验证required context尚未到达导致PR被阻拦，再由owner显式运行：
+
+```bash
+gh workflow run ci.yml --ref <reviewed-branch> -f full_health_bootstrap=true -f reviewed_sha=<exact-reviewed-head>
+```
+
+bootstrap要求owner workflow_dispatch，reviewed_sha等于实际运行github.sha，checkout精确SHA；仅轻量发布，无构建，且不能被识别为full。脚本检查master尚未安装正式发布器，已安装即拒绝bootstrap。依据真实当前head full成功发布状态，回读确认github-actions身份、required满足与PR恢复；不能伪造失败full来验证生产。首次真实接线验证仅missing→真实success，失败full路径由策略及本地HTTP集成覆盖；自动事件合入master后才生效。bootstrap到合入之间由Runner重查实际head/full，不声称已部署自动刷新。
+
+激活异常时只撤回本轮新增context和对应来源，保留全部既有及并发新增规则，回读确认；修复后重试。不移除其他保护，不把回滚当成完成。首次master full历史建立前，无自身head full证明的其他PR保守阻拦；可手动master full，或本次合入后的push full建立证明。

@@ -460,7 +460,7 @@ node scripts/model-data-smoke.mjs
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. For security issues, see [SECURITY.md](SECURITY.md).
 
-CI uses Node 22: PRs run the complete retained suite on Linux, native platform contracts on macOS/Windows, and installed-package Windows shell smoke tests. Daily and pre-release full runs cover all three platforms. See [CI profiles and test audit](docs/ci-performance.md) for commands, coverage tradeoffs and cost measurements.
+CI uses Node 22: PRs run the complete retained suite on Linux, native platform contracts on macOS/Windows, and installed-package Windows shell smoke tests. Full runs after merges into master and before releases cover all three platforms. Subsequent PRs wait for master full and are blocked on failure; a successful full on the repair PR’s current head unlocks it. See [CI profiles and test audit](docs/ci-performance.md) for commands, coverage tradeoffs and cost measurements.
 
 ## 9. License
 

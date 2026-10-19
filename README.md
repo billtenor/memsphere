@@ -462,7 +462,7 @@ node scripts/model-data-smoke.mjs
 
 参与开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请参阅 [SECURITY.md](SECURITY.md)。
 
-CI 使用 Node 22：PR 默认在 Linux 全量回归，并在 macOS/Windows 运行必要的平台契约及 Windows 安装包/Shell 冒烟；每日及发布前执行三平台完整检查。执行入口、覆盖取舍与收益见 [CI 分层与测试精简](docs/ci-performance.md)。
+CI 使用 Node 22：PR 默认在 Linux 全量回归，并在 macOS/Windows 运行必要的平台契约及 Windows 安装包/Shell 冒烟；合入 master 后及发布前执行三平台完整检查。master full 运行中后续 PR 等待、失败则拦截；修复 PR 最新提交的 full 通过可解锁。执行入口、覆盖取舍与收益见 [CI 分层与测试精简](docs/ci-performance.md)。
 
 ## 9. 许可证
 
