@@ -44,7 +44,14 @@ export const platformTests = [
   "windows-prerequisites.test.ts"
 ];
 
+// Balance the two existing Windows jobs using full-run file timings.
+const platformUpgradeTests = [
+  "system-upgrade-changeset.test.ts", "run-model-artifact.test.ts", "memory-changeset.test.ts"
+];
+
 export const testSuites = {
+  "platform-core": { title: "Platform Core Contracts", categories: [] },
+  "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
   platform: { title: "Platform Contracts", categories: [] },
   "platform-and-upgrades": { title: "Platform & Upgrade Contracts", categories: [] },
   "model-ui": { title: "Models & Settings UI", categories: ["model-ui"] },
@@ -81,6 +88,12 @@ export function selectTests(files, sources, durations, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
+    if (suite === "platform-core") {
+      return platformTests.includes(basename(file)) && !platformUpgradeTests.includes(basename(file));
+    }
+    if (suite === "platform-upgrades") {
+      return platformUpgradeTests.includes(basename(file)) || testCategory(file, sources[file]) === "project-upgrade";
+    }
     if (suite === "platform" || suite === "platform-and-upgrades") {
       return platformTests.includes(basename(file)) || (suite === "platform-and-upgrades" && testCategory(file, sources[file]) === "project-upgrade");
     }

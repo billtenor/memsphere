@@ -15,7 +15,7 @@ const linux = [
 ];
 const defaultRows = [...linux,
   ["macos-latest", "platform-and-upgrades", 3],
-  ["windows-latest", "platform", 4], ["windows-latest", "project-upgrade", 3]
+  ["windows-latest", "platform-core", 4], ["windows-latest", "platform-upgrades", 4]
 ];
 const fullRows = [...linux,
   ["macos-latest", "model-ui", 3], ["macos-latest", "review-ui", 3],

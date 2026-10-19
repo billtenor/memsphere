@@ -77,3 +77,7 @@ run_id: run-20261019-081003z-36eab35a
 已将origin/master d1cdc51集成，无冲突。master新增disclosure-state.test.ts，保留文件数148→149；新文件自动进入Linux和full，默认文件执行233（149+42+39+3），相对原444次减少47.5%，相对当前同文件全集447次减少47.9%；完整构建仍8次。集成后完整回归、typecheck和Store校验已重新启动，结果待收集，远端default/full仍待实跑。继承master的产品与Memory改动不属于本需求差异；相对origin/master本轮仍无Memory差异。
 
 成果评审意见已纳入后续交付：审计持久文件test-audit.json；master集成复验；GitHub master规则集Protect master（19767795）已只读核查，无required_status_checks精确旧名称绑定。
+
+## CI首轮结果与修正
+
+同一head 3ab922a的full工作流39244076890全部成功；default 39244056829仅Windows platform作业触及300秒时限，预算因此失败，未重跑掩盖。集成后本地npm test：149文件0失败，381.97秒，typecheck/Store通过。基于full文件实测，保持两个Windows作业及原42文件并集，将system-upgrade-changeset、run-model-artifact、memory-changeset移到升级组，形成platform-core36文件和platform-upgrades6文件，均4个文件进程。两组累计文件耗时约581/572秒，覆盖、233次文件执行、8次构建和285秒预算不变。调整后将以新head重新运行default/full；最终结果见PR和Run最终报告。
