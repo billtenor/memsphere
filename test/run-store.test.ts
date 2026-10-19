@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile as writeRawFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2341,6 +2343,46 @@ flow:
     assert.equal(completed.status, "done");
     assert.equal(completed.events.length, 2);
     assert.deepEqual(new Set(completed.events.map((event) => event.artifact.value)), new Set(["A", "B"]));
+  });
+});
+
+test("Windows Run reporting recovers transient sharing violations when opening its lock", {
+  skip: process.platform !== "win32" ? "Windows filesystem sharing semantics" : false
+}, async (t) => {
+  await withTempDir(async (dir) => {
+    const memoryRoot = join(dir, "memory");
+    const runsRoot = join(dir, "runs");
+    await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+    await writeFile(join(memoryRoot, "procedures", "lock-sharing.yaml"), `!procedure
+names: [lock-sharing]
+flow:
+  - !action
+    action: Capture the result.
+    artifact: !artifact
+      name: result
+`);
+    const started = await startRun({ name: "Sharing violation", memoryRoot, runsRoot, procedureName: "lock-sharing" });
+    const originalWrite = fs.writeFile;
+    let denied = 0;
+    const mockWrite = t.mock.method(fs, "writeFile", async (...args: Parameters<typeof fs.writeFile>) => {
+      if (String(args[0]).endsWith(".lock") && denied < 2) {
+        denied += 1;
+        throw Object.assign(new Error("Transient lock sharing violation"), { code: "EPERM" });
+      }
+      return originalWrite(...args);
+    });
+    syncBuiltinESMExports();
+    try {
+      const completed = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "saved" } });
+      assert.equal(denied, 2);
+      assert.equal(completed.status, "done");
+      assert.equal(completed.events.length, 1);
+      assert.equal(completed.events[0]!.artifact.value, "saved");
+      assert.deepEqual(await readdir(join(runsRoot, ".locks")), []);
+    } finally {
+      mockWrite.mock.restore();
+      syncBuiltinESMExports();
+    }
   });
 });
 

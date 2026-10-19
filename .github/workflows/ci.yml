@@ -30,7 +30,8 @@ jobs:
           - { os: macos-latest, suite: model-ui, title: "Models & Settings UI", workers: 3, browser: true }
           - { os: macos-latest, suite: review-ui, title: "Review & Shell UI", workers: 3, browser: true }
           - { os: macos-latest, suite: cli, title: "CLI & Packaging", workers: 4, browser: false }
-          - { os: macos-latest, suite: core, title: "Projects, Memory & Runtime", workers: 4, browser: true }
+          - { os: macos-latest, suite: memory-and-projects, title: "Projects & Memory", workers: 3, browser: true }
+          - { os: macos-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 3, browser: false }
           - { os: windows-latest, suite: model-ui, title: "Models & Settings UI", workers: 2, browser: true }
           - { os: windows-latest, suite: review-ui, title: "Review & Shell UI", workers: 3, browser: true }
           - { os: windows-latest, suite: memory-cli, title: "Memory & Project CLI", workers: 2, browser: false }
@@ -38,7 +39,7 @@ jobs:
           - { os: windows-latest, suite: project-core, title: "Project Lifecycle", workers: 3, browser: false }
           - { os: windows-latest, suite: project-upgrade, title: "Project Upgrades", workers: 3, browser: false }
           - { os: windows-latest, suite: memory-core, title: "Memory Stores & Changes", workers: 2, browser: true }
-          - { os: windows-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
+          - { os: windows-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 3, browser: false }
     env:
       CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
     steps:

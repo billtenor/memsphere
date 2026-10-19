@@ -71,6 +71,11 @@ Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别�
 最终检查结果以 PR #104 最新 head 的检查记录为准，不再为补写 CI 状态制造额外文档提交。
 
 
-后续运行39213333539中，拆分后的macOS UI任务分别为1分49秒和1分55秒，全部测试仍通过。Windows Project Lifecycle 本轮因同一runner中多个重型测试竞争资源，完整任务波动到4分56秒；耗时产物显示project-command单文件227.96秒、Managed升级186.42秒、Embedded升级130.60秒。
+后续运行39213333539中，拆分后的macOS UI任务分别为1分49秒和1分55秒，全部测试仍通过。Windows Project Lifecycle 本轮完整任务波动到4分56秒；耗时产物显示project-command单文件227.96秒、Managed升级186.42秒、Embedded升级130.60秒。
 
 进一步将Windows升级测试分配给独立的Project Upgrades任务，与Project Lifecycle分开运行，保留各任务三个文件进程。新增project-upgrade内部测试分类，并在Linux/macOS使用的聚合套件中保留该分类；跨平台全量覆盖检查及专门的归属回归测试共同保证没有遗漏或重复测试。五分钟总预算及全部原测试仍保留。最终状态继续以PR最新提交检查为准。
+
+
+运行39214127601又暴露Windows并发提交测试中的锁文件瞬态访问失败：争用期间独占打开锁文件返回EPERM，现有逻辑仅将EEXIST视为争用。Run获取锁现复用已有Windows文件访问重试，仍使用wx独占创建，保留owner token、争用截止时间和持久错误失败行为。新增Windows故障注入测试，先拒绝两次锁访问，再验证产物恰好保存一次、Run完成及锁清理；其他平台不模拟Windows文件共享规则。
+
+该轮macOS聚合核心任务测试阶段223.85秒、完整任务4分40秒。将其拆为现有Projects & Memory及Run, Data & SDK套件，均使用三个文件进程；Windows Run, Data & SDK也调整为三个文件进程。每个平台无遗漏/重复的覆盖检查保持不变，时间门禁不放宽。锁修复不修改Memory语法、锁文件格式或流程契约。
