@@ -1,12 +1,14 @@
 ---
 id: 20261019-run-human-executor
-status: accepting
 type: bugfix
 created: 2026-10-19
+completed_at: 2026-10-19
 run_id: run-20261019-055937z-2a5c530e
 ---
 
 # Run 展示 Human 执行者
+
+## 需求
 
 Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别人负责的步骤；Memory 详情已正确展示。无重复需求，关联已完成的 `20261011-human-step-executor`（Memory/ChangeSet 的 Human 标记展示）。
 
@@ -31,15 +33,16 @@ Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别�
 
 ## 验收结果
 
-显示修复阶段（5b5743a）本地验收及产品、研发、测试评审通过，等待提需方确认；保持 accepting，不提前归档。CI 性能扩展后的最终结果记录在关联 Run 与 PR。
+2026-10-19，提需方在当前 worktree 构建的独立 View 中查看「明确流程记忆字段职责」Run（run-20261011-070230z-f245b4b1）的 Human 执行者标记，并明确回复“验收通过”。显示修复及 CI 性能扩展验收完成；原修复 Run 已完成，本次归档 Run 为 run-20261019-065147z-b00ceb32。
 
 - 定向浏览器与样式测试：16/16 通过。
 - `npm run typecheck`：通过。
-- `npm test`：146/146 文件通过；1212 项通过、1 项跳过、0 失败，362.95 秒。pretest 包含 `npm run build`，已通过。
+- `npm test`：最终 148/148 文件通过；1212 项通过、1 项跳过、0 失败，372.82 秒。pretest 包含 `npm run build`，已通过。
 - `node dist/cli.js validate`、`git diff --check`：通过。
 - playwright-cli：桌面和 390px 窄屏实测通过；Human 和当前步骤提示共存，无横向溢出。窄屏中正文宽度 258px / 头部 326px，避免 metadata 挤窄正文。
 - 无 Memory 差异，不创建空 ChangeSet；此修复恢复已有 actor 展示语义，不修改执行、数据或快照。
-- 未执行项：本地未运行 macOS/Windows；由后续 PR CI 验证。当前用户运行中的 View 尚未部署此分支。
+- PR #104 的源码提交 1722736b09f862c33b20a53c36a4b92e83dd437b：Linux、macOS、Windows 共 17 项 CI 全部成功，含五分钟总预算。归档前再次读取检查状态，仍为 17/17 成功。
+- 当前 worktree 已重新 `npm run build` 并启动独立 View，实际页面确认 Human 标记可见；提需方已验收。正式 View 未替换，PR 由 human 审核合入。
 
 
 ## CI 性能扩展
@@ -52,7 +55,7 @@ Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别�
 
 - 拆分后升级测试：11/11 通过（28.72 秒，Linux 本地三个进程）。
 - 跨平台测试归属与调度测试：通过，确保每个平台没有丢失或重复测试。
-- CI 性能扩展后的完整回归与线上 CI 结果记录在关联 Run 与 PR，不以旧提交结果代替。
+- 最终完整回归：148 个文件全部通过；最新源码提交的 17 项 CI 全部成功。Windows Project Lifecycle 由超时降至 2分45秒，Review/Shell UI 由 4分41秒降至 3分28秒。
 
 ## 向前兼容
 
