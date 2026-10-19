@@ -5022,8 +5022,8 @@ async function existingRunPath(runsRoot: string, id: string): Promise<string> {
 }
 
 async function retryRunFileAccess<T>(operation: () => Promise<T>): Promise<T> {
-  // Windows can deny reads briefly while an atomic replacement is in progress.
-  // Retry sharing violations before listRuns mistakes a valid Run for an unrelated directory.
+  // Windows can briefly deny file access during atomic replacement or lock cleanup.
+  // Retry sharing violations, preserving the original error if they persist.
   const attempts = process.platform === "win32" ? 20 : 1;
   for (let attempt = 0; ; attempt += 1) {
     try {
@@ -5073,7 +5073,7 @@ async function withRunWriteLock<T>(runsRoot: string, runId: string, work: () => 
   const owner = { pid: process.pid, token: randomUUID(), startedAt: new Date().toISOString() };
   while (true) {
     try {
-      await writeFile(lockPath, `${JSON.stringify(owner)}\n`, { flag: "wx" });
+      await retryRunFileAccess(() => writeFile(lockPath, `${JSON.stringify(owner)}\n`, { flag: "wx" }));
       break;
     } catch (error) {
       if (!error || typeof error !== "object" || !("code" in error) || error.code !== "EEXIST") throw error;

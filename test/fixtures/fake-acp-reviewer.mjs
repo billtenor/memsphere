@@ -45,7 +45,7 @@ const app = acp
     if (mode === "approve" || mode === "request_changes") {
       try {
         await sendReviewActivity(client, params.sessionId);
-        completeReview(mode);
+        await completeReview(mode, client, params.sessionId);
       } catch (error) {
         process.stderr.write(`fake reviewer completion failed: ${error?.stack || error}\n`);
         throw error;
@@ -60,19 +60,25 @@ app.connect(acp.ndJsonStream(
   Readable.toWeb(process.stdin)
 ));
 
-function completeReview(vote) {
+async function completeReview(vote, client, sessionId) {
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");
-  invoke(cli, ["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
-  invoke(cli, [
+  let commandIndex = 0;
+  const invokeReviewCli = async (args) => {
+    // Report actual work boundaries so a busy fixture does not look idle between CLI calls.
+    await sendProgress(client, sessionId, `cli-${++commandIndex}`);
+    return invoke(cli, args);
+  };
+  await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
+  await invokeReviewCli([
     "run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"
   ]);
-  invoke(cli, ["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]);
+  await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]);
   if (vote === "request_changes") {
-    invoke(cli, ["run", "review", "comment", "--assignment", assignment, "--severity", "blocking", "--body", "Fake blocking finding", "--output", "json"]);
+    await invokeReviewCli(["run", "review", "comment", "--assignment", assignment, "--severity", "blocking", "--body", "Fake blocking finding", "--output", "json"]);
   }
-  invoke(cli, [
+  await invokeReviewCli([
     "run", "review", "submit", "--assignment", assignment,
     "--vote", vote === "request_changes" ? "request_changes" : "approve",
     "--summary", "Fake ACP review completed", "--output", "json"

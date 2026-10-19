@@ -115,6 +115,70 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
   } finally { await browser.close(); await close(server); }
 });
 
+for (const locale of ["en", "zh-CN"]) {
+  test(`Run identifies Human executors in current, completed and nested steps (${locale})`, async () => {
+    const [bundle, sdk, runtime] = await Promise.all([
+      buildRunBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()
+    ]);
+    const catalog = builtinModuleCatalog.find(entry => entry.moduleId === "org.memsphere.run")!;
+    const instances: ViewHostBootInstance[] = [{
+      pluginPath: bundlePath, routeGrants: catalog.routes,
+      module: { projectId: "demo", moduleId: catalog.moduleId, moduleVersion: "0.1.2", instanceId: catalog.instanceId }
+    }];
+    const action = (id: string, actor?: string) => ({ id, kind: "action", instruction: id, actor, artifact: { name: `${id} result` } });
+    const current = action("current-human", "human");
+    const run = {
+      id: "executors", name: "Executor Run", procedureName: "executors", status: "running",
+      stack: [{ type: "procedure", index: 0, steps: [current] }],
+      plan: [action("completed-human", "human"), current, action("agent", "agent"), action("default"),
+        { ...action("human-if", "human"), kind: "branch", branches: {
+          truthy: [action("nested-human", "human")], falsy: [action("nested-false-human", "human"), action("nested-agent", "agent")]
+        } },
+        { ...action("human-while", "human"), kind: "loop", loop: { body: [action("loop-human", "human")] } },
+        { id: "call", kind: "call", target: "other-procedure" }],
+      events: [{ stepId: "completed-human", artifact: { name: "completed-human result", renderedContent: "<p>Completed</p>" } }]
+    };
+    const server = createServer((request, response) => {
+      const url = new URL(request.url ?? "/", "http://localhost");
+      if (url.pathname === bundlePath) return send(response, "text/javascript", bundle);
+      if (url.pathname === viewSdkBundlePath) return send(response, "text/javascript", sdk);
+      if (url.pathname === viewRuntimeBundlePath) return send(response, "text/javascript", runtime);
+      if (url.pathname === "/api/runs") return json(response, { runs: [{ ...run, eventCount: 1 }] });
+      if (url.pathname === "/api/runs/executors") return json(response, { run });
+      return send(response, "text/html", renderViewHostHtml(locale, instances));
+    });
+    const origin = await listen(server);
+    const browser = await browserScope();
+    try {
+      const page = await browser.newPage();
+      await page.goto(`${origin}/tasks/executors`, { waitUntil: "networkidle" });
+      await page.getByRole("heading", { name: "Executor Run", exact: true }).waitFor();
+      const label = locale === "en" ? "Executor Human" : "执行者 Human";
+      for (const width of [1280, 390]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const id of ["completed-human", "current-human", "human-if", "nested-human", "nested-false-human", "human-while", "loop-human"]) {
+          const head = page.locator(`[data-step-id="${id}"] > .mem-content-flow-head`);
+          assert.equal(await head.locator(".run-flow-actor").count(), 1, `${id} exposes its Human executor`);
+          assert.equal(await head.locator(".run-flow-actor").textContent(), label);
+          assert.equal(await head.locator(".run-flow-actor").isVisible(), true);
+          assert.equal(await head.locator(".mem-content-artifact-contract .run-flow-actor").count(), 0);
+          assert.match(await head.locator(".mem-content-artifact-contract").innerText(), new RegExp(`${id} result`));
+        }
+        for (const id of ["agent", "default", "nested-agent", "call"]) {
+          assert.equal(await page.locator(`[data-step-id="${id}"] > .mem-content-flow-head .run-flow-actor`).count(), 0);
+        }
+        assert.equal(await page.locator('[aria-current="step"] .run-current-step-marker').innerText(), locale === "en" ? "Current step" : "当前步骤");
+        if (width === 390) {
+          const head = page.locator('[data-step-id="current-human"] > .mem-content-flow-head');
+          const [headBox, actionBox] = await Promise.all([head.boundingBox(), head.locator(".mem-content-flow-action").boundingBox()]);
+          assert(headBox && actionBox && actionBox.width > headBox.width / 2, "executor metadata leaves room to read the step on mobile");
+        }
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      }
+    } finally { await browser.close(); await close(server); }
+  });
+}
+
 async function buildRunBundle(): Promise<string> {
   const result = await build({ entryPoints: [fileURLToPath(new URL("../modules/org.memsphere.run/adapter/view/index.ts", import.meta.url))], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022", external: ["@memsphere/view-sdk"], logLevel: "silent" });
   return result.outputFiles[0]?.text ?? "";

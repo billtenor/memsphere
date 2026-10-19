@@ -215,10 +215,28 @@ function runFlowHooks(events: Map<string, Json>, active: Json | null, run: Json,
       }
     },
     decorateHead: (head, node) => {
-      if (active?.id !== node.id) return;
-      const marker = head.querySelector<HTMLElement>(".mem-content-flow-label")!;
-      marker.classList.add("run-current-step-marker");
-      marker.textContent = labels.current;
+      if (node.kind !== "call" && node.content.actor === "human") {
+        const actor = document.createElement("span");
+        actor.className = "run-flow-actor";
+        const label = document.createElement("span");
+        label.className = "mem-content-artifact-label";
+        label.textContent = labels.executor;
+        const value = document.createElement("span");
+        value.className = "mem-content-artifact-name";
+        value.textContent = "Human";
+        actor.append(label, " ", value);
+        const meta = document.createElement("div");
+        meta.className = "run-flow-meta";
+        const artifact = head.querySelector(".mem-content-artifact-contract");
+        meta.append(actor);
+        if (artifact) meta.append(artifact);
+        head.append(meta);
+      }
+      if (active?.id === node.id) {
+        const marker = head.querySelector<HTMLElement>(".mem-content-flow-label")!;
+        marker.classList.add("run-current-step-marker");
+        marker.textContent = labels.current;
+      }
     },
     renderBody: node => {
       const holder = document.createElement("div");
@@ -540,15 +558,17 @@ interface Labels {
   stopped: string; notStarted: string; time: string; validation: string; final: string; reviewer: string; schema: string; inlineSchema: string;
   referencedFrom: string; section: string; defines: string; rules: string; schemaWriting: string; progress: string;
   remaining: string; globalAdjustment: string; constraintSource: string; managedDraft: string; readOnlyDraft: string;
-  expandAll: string; collapseAll: string;
+  expandAll: string; collapseAll: string; executor: string;
   status: Record<string, string>;
 }
 
 function createLabels(locale = ""): Labels {
   const en = locale.startsWith("en");
   return en ? {
+    executor: "Executor",
     procedure:"Procedure",activeFrames:"Active frames",retainedFrames:"Retained frames",artifacts:"Artifacts",artifact:"Artifact",output:"Output",updated:"Updated",legacyReadOnly:"Legacy · Read-only",abandonedAt:"Abandoned",review:"Artifact review",jumpCurrent:"Jump to current step",bindings:"Runtime review bindings",reviewScopes:"Review scopes",skip:"Skip future reviews",save:"Update binding",asserts:"Required rules",suggests:"Suggested rules",flow:"Flow",finalArtifacts:"Final artifacts",noArtifacts:"No artifacts",if:"If",while:"While",else:"Else",step:"Step",call:"Call",noSteps:"No steps",completed:"Completed",current:"Current step",stopped:"Stopped",notStarted:"Not started",time:"Time",validation:"Validation",final:"Final",reviewer:"Reviewer",schema:"Schema",inlineSchema:"Inline Schema",referencedFrom:"Referenced from",section:"Section",defines:"Definitions",rules:"Rules",schemaWriting:"Schema writing",progress:"Progress",remaining:"Remaining",globalAdjustment:"Global adjustment",constraintSource:"Constraint source",managedDraft:"Managed draft",readOnlyDraft:"This draft is read-only",expandAll:"Expand all",collapseAll:"Collapse all",status:{running:"Running",done:"Done",abandoned:"Abandoned"}
   } : {
+    executor: "执行者",
     procedure:"流程",activeFrames:"活动帧",retainedFrames:"保留帧",artifacts:"产物",artifact:"产物",output:"产出物",updated:"更新时间",legacyReadOnly:"旧版 · 只读",abandonedAt:"废弃于",review:"产物评审",jumpCurrent:"跳到当前步骤",bindings:"运行时评审绑定",reviewScopes:"评审范围",skip:"跳过后续评审",save:"更新绑定",asserts:"必须遵守",suggests:"建议遵守",flow:"执行流程",finalArtifacts:"最终产物",noArtifacts:"暂无产物",if:"如果",while:"循环",else:"否则",step:"步骤",call:"调用流程",noSteps:"没有步骤",completed:"已完成",current:"当前步骤",stopped:"已停止",notStarted:"未开始",time:"时间",validation:"契约校验",final:"最终",reviewer:"评审人",schema:"图式",inlineSchema:"内联图式",referencedFrom:"引用自",section:"章节",defines:"定义",rules:"规则",schemaWriting:"Schema 填写",progress:"进度",remaining:"剩余",globalAdjustment:"全局调整",constraintSource:"约束来源",managedDraft:"受管草稿",readOnlyDraft:"该草稿只读",expandAll:"展开全部",collapseAll:"收起全部",status:{running:"运行中",done:"已完成",abandoned:"已废弃"}
   };
 }
