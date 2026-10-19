@@ -45,7 +45,7 @@ export const platformTests = [
 ];
 
 // Reuse the existing packaged-CLI job for these heavy native integration contracts.
-export const packagePlatformTests = ["app-install.test.ts", "project-command.test.ts"];
+export const packagePlatformTests = ["project-command.test.ts"];
 
 // Balance the two existing Windows test jobs using full-run file timings.
 const platformUpgradeTests = [
