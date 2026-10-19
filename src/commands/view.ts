@@ -2736,7 +2736,7 @@ function providerReferenceMap(projects: ProjectConfigReference[]): Record<string
       const reference = {
         projectName: project.name,
         actorId,
-        ...(actor.name ? { actorName: actor.name } : {})
+        actorName: actor.name?.trim() ? actor.name : actorId
       };
       (references[actor.agent.provider] ??= []).push(reference);
     }

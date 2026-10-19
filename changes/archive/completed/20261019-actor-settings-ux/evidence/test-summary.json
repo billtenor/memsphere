@@ -1,0 +1,46 @@
+{
+  "command": "npm test -- --test-concurrency=4",
+  "files": 146,
+  "tests": 1225,
+  "passed": 1224,
+  "failed": 0,
+  "skipped": 1,
+  "result": "Files: 146; failed: 0; elapsed: 186.36s",
+  "focused": {
+    "files": 6,
+    "passed": 73,
+    "failed": 0,
+    "skipped": 0
+  },
+  "platformSkip": "Windows shell Agent Review test; existing platform guard on Linux",
+  "typecheck": "passed",
+  "build": "passed",
+  "storeValidation": "passed",
+  "memoryChange": {
+    "id": "change-20261019-060004472z-18cf913a",
+    "status": "passed",
+    "digest": "6c81209fe21a50b2562ccbc7e23462b08ba59310ca1a0650db9cd24f180fbee7"
+  },
+  "implementationReview": {
+    "status": "passed",
+    "reviewId": "review-20261019-084112z-2bc58e24",
+    "roundId": "round-20261019-112116z-65b6e1d9",
+    "reviewers": {
+      "traex2": "approve",
+      "traex3": "approve",
+      "traex4": "approve"
+    },
+    "runner": "approve",
+    "blockingComments": 0,
+    "followup": "All applicable cross-platform CI must pass on the latest PR head; product final acceptance pending"
+  },
+  "productReview": {
+    "status": "passed",
+    "reviewId": "review-20261019-112911z-1f55fdd9",
+    "roundId": "round-20261019-112911z-aa7af495",
+    "human": "approve",
+    "productAgent": "approve",
+    "runner": "approve",
+    "humanAuthorization": "用户明确回复：验收通过"
+  }
+}

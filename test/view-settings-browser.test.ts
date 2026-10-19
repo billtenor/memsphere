@@ -1,6 +1,6 @@
 import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -462,4 +462,120 @@ test("model registration settings select Store first, preserve drafts and explic
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
+});
+
+async function withActorSettingsBrowser(fn: (page: Page, config: MemsphereConfig) => Promise<void>, personId = "person"): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-actor-settings-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const raw = JSON.parse(await readFile(config.configPath, "utf8"));
+  raw.control_plane = { runner: { permissions: [] }, actors: {
+    [personId]: { kind: "human", name: "Alice", permissions: [] },
+    bot: { kind: "agent", name: "   ", permissions: [], agent: { provider: "codex" } }
+  } };
+  await writeFile(config.configPath, JSON.stringify(raw));
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.setDefaultTimeout(8_000);
+    const errors: string[] = [];
+    page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/participants`);
+    await page.locator(`[data-participant="${personId}"]`).waitFor();
+    await fn(page, config);
+    assert.deepEqual(errors, []);
+  } finally {
+    await browser.close();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+async function saveActorSettings(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "保存", exact: true }).click();
+  await page.getByRole("heading", { name: "确认配置变更", exact: true }).waitFor();
+  const saved = page.waitForResponse(response => response.url().endsWith("/settings/project") && response.request().method() === "PUT");
+  await page.getByRole("button", { name: "确认保存", exact: true }).click();
+  assert.equal((await saved).ok(), true);
+  await page.waitForFunction(() => document.querySelector("#settings-status")?.textContent?.includes("已保存"));
+}
+
+test("Settings saves an empty Actor name and shows its ID before and after reload", async () => {
+  await withActorSettingsBrowser(async (page, config) => {
+    const person = page.locator('[data-participant="person"]');
+    const bot = page.locator('[data-participant="bot"]');
+    assert.equal(await bot.locator("summary strong").textContent(), "bot");
+    await person.locator("summary").click();
+    const name = person.getByLabel("名称", { exact: true });
+    assert.match(await name.getAttribute("placeholder") ?? "", /选填.*ID/);
+    await name.fill("");
+    assert.equal(await person.locator("summary strong").textContent(), "person");
+    await name.fill("New name");
+    assert.equal(await person.locator("summary strong").textContent(), "New name");
+    await name.fill("   ");
+    assert.equal(await person.locator("summary strong").textContent(), "person");
+    await saveActorSettings(page);
+    const raw = JSON.parse(await readFile(config.configPath, "utf8"));
+    assert.equal(Object.hasOwn(raw.control_plane.actors.person, "name"), false);
+    await page.reload();
+    await person.waitFor();
+    assert.equal(await person.locator("summary strong").textContent(), "person");
+    assert.equal(await bot.locator("summary strong").textContent(), "bot");
+    await person.locator("summary").click();
+    assert.equal(await name.inputValue(), "");
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  });
+});
+
+test("Changing Agent to Human removes the prompt field and its saved value", async () => {
+  await withActorSettingsBrowser(async (page, config) => {
+    const person = page.locator('[data-participant="person"]');
+    await person.locator("summary").click();
+    assert.equal(await person.getByLabel("系统提示词", { exact: true }).count(), 0);
+    await person.getByRole("combobox", { name: "类型", exact: true }).click();
+    await person.getByRole("option", { name: "Agent", exact: true }).click();
+    await person.getByLabel("系统提示词", { exact: true }).fill("Agent-only prompt");
+    await saveActorSettings(page);
+    assert.equal(JSON.parse(await readFile(config.configPath, "utf8")).control_plane.actors.person.system_prompt, "Agent-only prompt");
+    await person.getByRole("combobox", { name: "类型", exact: true }).click();
+    await person.getByRole("option", { name: "人", exact: true }).click();
+    assert.equal(await person.getByLabel("系统提示词", { exact: true }).count(), 0);
+    await saveActorSettings(page);
+    const saved = JSON.parse(await readFile(config.configPath, "utf8")).control_plane.actors.person;
+    assert.equal(saved.kind, "human");
+    assert.equal(Object.hasOwn(saved, "system_prompt"), false);
+    assert.equal(Object.hasOwn(saved, "agent"), false);
+    await page.reload();
+    await person.waitFor();
+    await person.locator("summary").click();
+    assert.equal(await person.getByLabel("系统提示词", { exact: true }).count(), 0);
+    await person.getByRole("combobox", { name: "类型", exact: true }).click();
+    await person.getByRole("option", { name: "Agent", exact: true }).click();
+    assert.equal(await person.getByLabel("系统提示词", { exact: true }).inputValue(), "");
+  });
+});
+
+// Actor IDs allow dots; field paths must not confuse the ID with the property.
+test("Settings edits an unnamed Actor with a dotted ID without losing its draft", async () => {
+  await withActorSettingsBrowser(async (page, config) => {
+    const person = page.locator('[data-participant="person.dotted"]');
+    await person.locator("summary").click();
+    await person.getByLabel("名称", { exact: true }).fill("");
+    assert.equal(await person.locator("summary strong").textContent(), "person.dotted");
+    await person.getByRole("combobox", { name: "类型", exact: true }).click();
+    await person.getByRole("option", { name: "Agent", exact: true }).click();
+    await person.getByLabel("系统提示词", { exact: true }).fill("Agent only");
+    await person.getByRole("combobox", { name: "类型", exact: true }).click();
+    await person.getByRole("option", { name: "人", exact: true }).click();
+    await saveActorSettings(page);
+    const raw = JSON.parse(await readFile(config.configPath, "utf8")).control_plane.actors["person.dotted"];
+    assert.equal(raw.kind, "human");
+    assert.equal(Object.hasOwn(raw, "name"), false);
+    assert.equal(Object.hasOwn(raw, "system_prompt"), false);
+    await page.reload();
+    await person.waitFor();
+    assert.equal(await person.locator("summary strong").textContent(), "person.dotted");
+  }, "person.dotted");
 });

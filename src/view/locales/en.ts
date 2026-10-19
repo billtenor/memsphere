@@ -19,6 +19,7 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.optionalActorName": "Optional; defaults to ID",
   "settings.registrationMigrationRequired": "Existing model registrations require revalidation and explicit migration confirmation.",
   "settings.modelRegistrationStorage": "Model registration storage",
   "settings.storeId": "Store ID",

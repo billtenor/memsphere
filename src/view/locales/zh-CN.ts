@@ -1,4 +1,5 @@
 export const zhCNViewMessages = {
+  "settings.optionalActorName": "选填，未填时显示 ID",
   "settings.registrationMigrationRequired": "已有模型登记数据，需要重新校验并明确确认迁移。",
   "settings.modelRegistrationStorage": "模型登记存储",
   "settings.storeId": "存储 ID",

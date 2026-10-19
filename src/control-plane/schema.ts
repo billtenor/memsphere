@@ -155,13 +155,12 @@ const agentRuntimeInputSchema = z.object({
 const actorInputSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("human"),
-    name: nonEmptyString,
-    permissions: permissionListSchema,
-    system_prompt: systemPromptSchema
+    name: z.string().trim().optional(),
+    permissions: permissionListSchema
   }).strict(),
   z.object({
     kind: z.literal("agent"),
-    name: nonEmptyString,
+    name: z.string().trim().optional(),
     permissions: permissionListSchema,
     system_prompt: systemPromptSchema,
     agent: agentRuntimeInputSchema
@@ -171,13 +170,13 @@ const actorInputSchema = z.discriminatedUnion("kind", [
 type ActorInput = z.infer<typeof actorInputSchema>;
 
 function resolveActor(
+  actorId: string,
   actor: ActorInput,
   providers: Record<string, AcpProviderInstance>
 ): ControlPlaneActor {
   const authority = {
-    name: actor.name,
-    permissions: [...actor.permissions],
-    systemPrompt: actor.system_prompt
+    name: actor.name?.trim() ? actor.name : actorId,
+    permissions: [...actor.permissions]
   };
   if (actor.kind === "human") return { kind: "human", ...authority };
   const provider = actor.agent.provider ?? "traex";
@@ -186,6 +185,7 @@ function resolveActor(
   return {
     kind: "agent",
     ...authority,
+    systemPrompt: actor.system_prompt,
     agent: {
       provider,
       providerType: instance.type,
@@ -246,7 +246,7 @@ const controlPlaneInputSchema = z.object({
     runner: controlPlane.runner,
     acpProviders,
     actors: Object.fromEntries(
-      Object.entries(controlPlane.actors).map(([id, actor]) => [id, resolveActor(actor, acpProviders)])
+      Object.entries(controlPlane.actors).map(([id, actor]) => [id, resolveActor(id, actor, acpProviders)])
     )
   };
 });
