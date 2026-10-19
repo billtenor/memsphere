@@ -51,7 +51,7 @@ test("CI bounds and supersedes cross-platform browser test runs", async () => {
   assert.equal(testJob?.["timeout-minutes"], 5);
   const matrix = testJob?.strategy?.matrix?.include ?? [];
   assert.deepEqual([...new Set(matrix.map(row => row.os))], [
-    "ubuntu-latest",
+    "ubuntu-24.04",
     "macos-latest",
     "windows-latest"
   ]);

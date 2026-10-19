@@ -23,10 +23,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, suite: browser, title: "Browser UI", workers: 3, browser: true }
-          - { os: ubuntu-latest, suite: cli, title: "CLI & Packaging", workers: 3, browser: false }
-          - { os: ubuntu-latest, suite: memory-and-projects, title: "Projects & Memory", workers: 2, browser: true }
-          - { os: ubuntu-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
+          # Pin Linux to a Playwright-supported image; latest can advance before browser support.
+          - { os: ubuntu-24.04, suite: browser, title: "Browser UI", workers: 3, browser: true }
+          - { os: ubuntu-24.04, suite: cli, title: "CLI & Packaging", workers: 3, browser: false }
+          - { os: ubuntu-24.04, suite: memory-and-projects, title: "Projects & Memory", workers: 2, browser: true }
+          - { os: ubuntu-24.04, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
           - { os: macos-latest, suite: model-ui, title: "Models & Settings UI", workers: 3, browser: true }
           - { os: macos-latest, suite: review-ui, title: "Review & Shell UI", workers: 3, browser: true }
           - { os: macos-latest, suite: cli, title: "CLI & Packaging", workers: 4, browser: false }
@@ -121,7 +122,7 @@ jobs:
 
   budget:
     name: CI five-minute budget
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: [test, windows-package-smoke]
     if: always()
     timeout-minutes: 1

@@ -82,3 +82,6 @@ Run 详情未展示步骤中已有的 `actor: human`，导致用户无法识别�
 
 
 运行39215473138中，Windows锁访问故障注入和原并发提交测试均通过，五分钟预算计时267.1秒。剩余失败为Agent Review测试fixture连续执行真实CLI期间不报告活动，触发既有10秒空闲超时。fixture现于每条CLI操作前发送实际进度，并使用pretest生成的dist/cli.js，避免每次子进程重新加载TypeScript；真实CLI调用、全部断言及启动/空闲/总时长限制保持不变。最终验证结果以PR最新提交的CI记录为准。
+
+
+运行39216561657的Linux浏览器任务在安装阶段失败：ubuntu-latest已分配Ubuntu 26.04，当前Playwright明确报错不支持chromium on ubuntu26.04-x64。Linux CI固定至受支持的Ubuntu 24.04，覆盖检查同步验证四个Linux套件仍完整运行；不跳过浏览器测试，不改变依赖或测试断言。
