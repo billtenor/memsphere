@@ -138,7 +138,9 @@
     "view-theme-registry.test.ts": 0.38,
     "windows-prerequisites.test.ts": 0.34,
     "test-plan.test.ts": 0.38,
-    "project-upgrade.test.ts": 73.29
+    "project-upgrade-embedded.test.ts": 20.81,
+    "project-upgrade-routing.test.ts": 15.34,
+    "project-upgrade.test.ts": 37.14
   },
   "darwin": {
     "agent-activity.test.ts": 0.9,
@@ -279,7 +281,9 @@
     "view-theme-registry.test.ts": 0.37,
     "windows-prerequisites.test.ts": 0.59,
     "test-plan.test.ts": 0.33,
-    "project-upgrade.test.ts": 77.99
+    "project-upgrade-embedded.test.ts": 22.15,
+    "project-upgrade-routing.test.ts": 16.32,
+    "project-upgrade.test.ts": 39.52
   },
   "win32": {
     "agent-activity.test.ts": 1.09,
@@ -420,6 +424,8 @@
     "view-theme-registry.test.ts": 0.47,
     "windows-prerequisites.test.ts": 0.37,
     "test-plan.test.ts": 0.45,
-    "project-upgrade.test.ts": 206.75
+    "project-upgrade-embedded.test.ts": 70.26,
+    "project-upgrade-routing.test.ts": 51.78,
+    "project-upgrade.test.ts": 125.36
   }
 }
