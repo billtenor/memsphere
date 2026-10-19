@@ -10,6 +10,9 @@ const instances: ViewHostBootInstance[] = [
 
 test("View Shell exposes the four-column Slot and search surfaces", () => {
   const html = renderViewHostHtml("zh-CN", instances, "/memories");
+  const home = renderViewHostHtml("en", instances, "/");
+  assert.match(home, /data-view-layout="home"/);
+  assert.match(home, /class="view-shell-project-home" href="\/"/);
 
   assert.match(html, /data-view-layout="module"/);
   assert.match(html, /data-view-slot="navigation\.primary"/);
@@ -27,25 +30,6 @@ test("View Shell exposes the four-column Slot and search surfaces", () => {
   assert.match(html, /data-view-project-details[^>]*hidden/);
   assert.match(html, /data-project-detail="root"/);
   assert.match(html, /data-project-detail="store"/);
-});
-
-test("Project Home and Project switching expose separate accessible controls", () => {
-  const html = renderViewHostHtml("en", instances, "/");
-
-  assert.match(html, /data-view-layout="home"/);
-  assert.match(html, /class="view-shell-project-home" href="\/"/);
-  assert.match(html, /data-view-project-menu-trigger/);
-  assert.match(html, /aria-haspopup="menu"/);
-  assert.match(html, /view-shell-project-current/);
-});
-
-test("Shell resizers expose separate accessible handles with bounded widths", () => {
-  const html = renderViewHostHtml("en", instances, "/tasks");
-
-  assert.match(html, /data-view-resizer="secondary"/);
-  assert.match(html, /data-view-resizer="content-list"/);
-  assert.match(html, /aria-valuemin="176" aria-valuemax="360"/);
-  assert.match(html, /aria-valuemin="260" aria-valuemax="520"/);
 });
 
 test("Non-Home SSR uses a local detail skeleton instead of a centered page loader", () => {

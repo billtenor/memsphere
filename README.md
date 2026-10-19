@@ -442,7 +442,7 @@ node scripts/model-data-smoke.mjs
 
 参与开发前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，安全问题请参阅 [SECURITY.md](SECURITY.md)。
 
-CI 统一使用 Node 22 LTS，在 Linux、macOS 和 Windows 上运行全部自动化测试，包含原生跨进程文件锁与模型/数据 CLI 测试；Windows 安装包检查验证四种受支持 Shell 中的 CLI。模型/数据 CLI 与安装包冒烟脚本也可手动运行。
+CI 使用 Node 22：PR 默认在 Linux 全量回归，并在 macOS/Windows 运行必要的平台契约及 Windows 安装包/Shell 冒烟；每日及发布前执行三平台完整检查。执行入口、覆盖取舍与收益见 [CI 分层与测试精简](docs/ci-performance.md)。
 
 ## 9. 许可证
 

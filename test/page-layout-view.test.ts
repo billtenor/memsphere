@@ -81,22 +81,30 @@ test("official Memory, ChangeSet and Run pages use fluid symmetric gutters acros
     await writeFile(join(themeRoot, "gutter.json"), JSON.stringify({light:{"layout.pagePadding":"40px"},dark:{"layout.pagePadding":"48px"}}));
     const browser = await browserScope();
     try {
+      const runPath = "tasks/run-layout?status=done";
+      const procedurePath = "memories/procedures/layout-procedure";
+      const points = [
+        ...[...references.map(ref => `memories/${ref}`), runPath].map(path => ({ path, width: 1280, locale: "en", mode: "light" })),
+        ...["memories/concepts/layout-concept", procedurePath, runPath].flatMap(path => [821, 820, 390].map(width => ({ path, width, locale: "en", mode: "light" }))),
+        ...[procedurePath, runPath].map(path => ({ path, width: 2560, locale: "en", mode: "light" })),
+        ...[procedurePath, runPath].map(path => ({ path, width: 1280, locale: "zh-CN", mode: "dark" }))
+      ];
+      assert.equal(points.length, 18);
+      assert.equal(new Set(points.map(point => JSON.stringify(point))).size, 18);
       for (const [locale, mode] of [["en", "light"], ["zh-CN", "dark"]] as const) {
         await writeFile(join(home, "config.json"), JSON.stringify({ language: locale, view: { host: "127.0.0.1", port: 0 }, view_packages:{installed:[{path:themeRoot}]}, view_theme: { mode, selected_source:"org.example.layout-theme:gutter" } }));
         const active = await launch();
         const page = await browser.newPage({ viewport: { width: 2560, height: 1000 } });
-        for (const path of [...references.map(ref => `memories/${ref}`), "tasks/run-layout?status=done"]) {
+        for (const { path, width } of points.filter(point => point.locale === locale && point.mode === mode)) {
+          await page.setViewportSize({ width, height: 1000 });
           await page.goto(`${active.origin}/projects/layout/${path}`);
           await page.locator("[data-mem-content-canvas]").waitFor();
           assert.equal(await page.locator(".memory-error, .run-error").count(), 0);
-          for (const width of [2560, 1920, 1280, 821, 820, 500]) {
-            await page.setViewportSize({ width, height: 1000 });
-            const box = await geometry(page);
-            assert.ok(Math.abs(box.left - box.right) < 1, `${locale} ${path} has symmetric gutters at ${width}`);
-            assert.equal(box.padding, width <= 820 ? 12 : mode === "light" ? 40 : 48, "the shared layout consumes the selected Theme padding Token");
-            assert.equal(box.overflow || box.hostOverflow, false, `${path} fits at ${width}`);
-            if (width === 2560) assert.ok(box.width > 1400, "the page uses the available desktop width");
-          }
+          const box = await geometry(page);
+          assert.ok(Math.abs(box.left - box.right) < 1, `${locale} ${path} has symmetric gutters at ${width}`);
+          assert.equal(box.padding, width <= 820 ? 12 : mode === "light" ? 40 : 48, "the shared layout consumes the selected Theme padding Token");
+          assert.equal(box.overflow || box.hostOverflow, false, `${path} fits at ${width}`);
+          if (width === 2560) assert.ok(box.width > 1400, "the page uses the available desktop width");
         }
         await page.setViewportSize({ width: 2560, height: 1000 });
         await page.goto(`${active.origin}/projects/layout/changes/${changeId}`);

@@ -1,0 +1,16 @@
+{
+  "removed": [
+    "CI bounds and supersedes cross-platform browser test runs",
+    "ViewHost document boots the builtin Module instances in catalog order",
+    "Project Home and Project switching expose separate accessible controls",
+    "Shell resizers expose separate accessible handles with bounded widths",
+    "real Memory and Run Modules pass the public style boundary and keep migrated control CSS removed",
+    "Memory and Run share one canonical Procedure flow renderer"
+  ],
+  "added": [
+    "PR runs every retained test on Linux and every declared native risk on macOS and Windows",
+    "Full CI retains complete exactly-once coverage on all platforms, including future files",
+    "CI separates full and default cancellation, trigger and result policies",
+    "Memory, Run and shared flow styles respect the public style boundary"
+  ]
+}
