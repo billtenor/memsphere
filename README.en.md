@@ -150,28 +150,48 @@ Memsphere is designed for Agents, so installation, initialization, and Project s
 Install and configure Memsphere in the current working directory. Perform all required terminal operations yourself:
 
 1. Check that Node.js 22 or later and Git are available. If a prerequisite is missing, tell me clearly what I need to install.
-2. Run npm install -g memsphere, then run memsphere skill init --global.
-3. Read and follow the Memsphere Skill you just installed. If this session does not automatically refresh its Skill list, read SKILL.md directly from the location reported by the installation command and continue this task; do not ask me to open a new session solely for that reason.
-4. Check whether the current directory is already bound to a Project. Reuse an existing binding. If it is not bound, ask whether I want a Managed Project or an Embedded Project. If I am unsure, recommend and create a Managed Project, then bind this directory.
-5. Run memsphere project show and memsphere validate, and resolve any installation or configuration issues you can handle.
-6. After setup succeeds, do not stop with a summary. Immediately use memsphere to discover and read the complete memsphere-tutorial-chapter-01 Procedure, start a named Run, and begin the tutorial by following the current step returned by the Run.
+2. Ask which installation method I want. If I have already specified one, use it directly. If I am unsure, recommend the stable npm release:
+   - Stable npm release: run npm install -g memsphere@latest to install the latest stable version published to npm.
+   - Latest GitHub source: choose a persistent source directory outside the working directory, run git clone --branch master --single-branch https://github.com/billtenor/memsphere.git <source-directory>, then enter that directory and run npm ci, npm run build, and npm link in order to build the latest master and create a global memsphere command link. Keep this source directory; the command link depends on its build output.
+3. Return to the original working directory, run memsphere --version, confirm that the command works and resolves to the chosen installation source, then run memsphere skill init --global.
+4. Read and follow the Memsphere Skill you just installed. If this session does not automatically refresh its Skill list, read SKILL.md directly from the location reported by the installation command and continue this task; do not ask me to open a new session solely for that reason.
+5. Check whether the current directory is already bound to a Project. Reuse an existing binding. If it is not bound, ask whether I want a Managed Project or an Embedded Project. If I am unsure, recommend and create a Managed Project, then bind this directory.
+6. Run memsphere project show and memsphere validate, and resolve any installation or configuration issues you can handle.
+7. After setup succeeds, do not stop with a summary. Immediately use memsphere to discover and read the complete memsphere-tutorial-chapter-01 Procedure, start a named Run, and begin the tutorial by following the current step returned by the Run.
 
-Pause only when you genuinely need me to choose a Project type, grant permission, or complete a human step.
+Pause only when you genuinely need me to choose an installation method or Project type, grant permission, or complete a human step.
 ~~~
 
 The goal of this prompt is not merely to install Memsphere. It tells the Agent to continue into the first tutorial chapter in the same task. Once the tutorial begins, the Agent performs the steps it can handle and pauses with clear instructions when your action or decision is required.
 
 ### 6.3 Installation Command Reference
 
-These are the core installation commands the Agent will run. You can also run them manually when troubleshooting installation:
+Choose either installation method below. You can also run these commands manually when troubleshooting installation.
+
+**Option 1: Stable npm Release (Recommended)**
 
 ~~~bash
-npm install -g memsphere
+npm install -g memsphere@latest
 ~~~
 
-Install the Memsphere Skill globally so that your Agent can discover it:
+**Option 2: Build the Latest GitHub Source and Link the Command**
+
+Replace <source-directory> with an absolute path outside your working directory where you will keep the source:
 
 ~~~bash
+git clone --branch master --single-branch https://github.com/billtenor/memsphere.git <source-directory>
+cd <source-directory>
+npm ci
+npm run build
+npm link
+~~~
+
+npm link links the global memsphere command to this directory's build output. Keep the directory while using this installation.
+
+After either installation, return to the original working directory where you want to use Memsphere, verify that the command works, and install the Memsphere Skill globally so that your Agent can discover it:
+
+~~~bash
+memsphere --version
 memsphere skill init --global
 ~~~
 

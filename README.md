@@ -150,28 +150,48 @@ Memsphere 面向 Agent 使用，安装、初始化和 Project 配置也建议直
 请帮我在当前工作目录安装并配置 Memsphere，全程由你执行需要的终端命令：
 
 1. 检查 Node.js 22 或更高版本以及 Git 是否可用；如果缺少环境，清楚告诉我需要补什么。
-2. 执行 npm install -g memsphere，然后执行 memsphere skill init --global。
-3. 读取刚安装的 Memsphere Skill 并遵循它。若当前会话没有自动刷新 Skill 列表，请根据安装命令返回的位置直接读取 SKILL.md，继续当前任务，不要仅因此要求我新开会话。
-4. 检查当前目录是否已经绑定 Project。已绑定就复用；未绑定时，询问我要使用 Managed Project 还是 Embedded Project。如果我不确定，推荐并创建 Managed Project，再绑定当前目录。
-5. 执行 memsphere project show 和 memsphere validate，解决可以由你处理的安装或配置问题。
-6. 安装配置成功后不要停在总结。请立即使用 memsphere，发现并完整读取“memsphere 教学流程-第一章”，启动一个有名称的 Run，并按照 Run 返回的当前步骤带我开始教学。
+2. 先询问我要使用哪种安装方式；如果我已经指定，直接按我的选择执行。如果我不确定，推荐 npm 稳定版：
+   - npm 稳定版：执行 npm install -g memsphere@latest，安装 npm 发布的最新稳定版本。
+   - GitHub 最新源码：在工作目录之外选择一个持久保留的源码目录，执行 git clone --branch master --single-branch https://github.com/billtenor/memsphere.git <源码目录>，进入该目录后依次执行 npm ci、npm run build 和 npm link，编译最新 master 并创建全局 memsphere 命令链接。保留该源码目录，命令链接依赖其中的构建产物。
+3. 回到最初的工作目录，执行 memsphere --version，确认命令可用且指向所选安装来源，然后执行 memsphere skill init --global。
+4. 读取刚安装的 Memsphere Skill 并遵循它。若当前会话没有自动刷新 Skill 列表，请根据安装命令返回的位置直接读取 SKILL.md，继续当前任务，不要仅因此要求我新开会话。
+5. 检查当前目录是否已经绑定 Project。已绑定就复用；未绑定时，询问我要使用 Managed Project 还是 Embedded Project。如果我不确定，推荐并创建 Managed Project，再绑定当前目录。
+6. 执行 memsphere project show 和 memsphere validate，解决可以由你处理的安装或配置问题。
+7. 安装配置成功后不要停在总结。请立即使用 memsphere，发现并完整读取“memsphere 教学流程-第一章”，启动一个有名称的 Run，并按照 Run 返回的当前步骤带我开始教学。
 
-执行过程中，只在确实需要我选择 Project 类型、授权或完成人类步骤时暂停询问我。
+执行过程中，只在确实需要我选择安装方式、Project 类型、授权或完成人类步骤时暂停询问我。
 ```
 
 这段指令的目标不只是“安装成功”，而是让 Agent 在同一个任务中继续启动第一章教学。教学流程开始后，Agent 会执行可以代劳的步骤，并在必须由你操作或选择时停下来说明。
 
 ### 6.3 安装命令参考
 
-下面是 Agent 将执行的核心安装命令，也可以在排查安装问题时手动运行：
+两种安装方式任选其一，也可以在排查安装问题时手动运行。
+
+**方式一：npm 稳定版（推荐）**
 
 ```bash
-npm install -g memsphere
+npm install -g memsphere@latest
 ```
 
-把 Memsphere Skill 安装到全局位置，使 Agent 能够发现它：
+**方式二：GitHub 最新源码编译并链接命令**
+
+将 `<源码目录>` 替换为工作目录之外、用于长期保留源码的绝对路径：
 
 ```bash
+git clone --branch master --single-branch https://github.com/billtenor/memsphere.git <源码目录>
+cd <源码目录>
+npm ci
+npm run build
+npm link
+```
+
+`npm link` 会把全局 `memsphere` 命令链接到此目录的构建产物。使用期间请保留该目录。
+
+完成任一种安装后，回到最初希望使用 Memsphere 的工作目录，确认命令可用，再把 Memsphere Skill 安装到全局位置，使 Agent 能够发现它：
+
+```bash
+memsphere --version
 memsphere skill init --global
 ```
 

@@ -14,6 +14,7 @@ import {
   type ViewUi
 } from "@memsphere/view-sdk";
 import { createRunDetailState, currentRunStep, renderRunDetail } from "./run-detail.js";
+import { DisclosureState, nativeDisclosure, type DisclosureBinding } from "../../../shared/view/disclosure-state.js";
 import { runDetailStyles } from "./run-styles.js";
 import { contentFlowStyles } from "../../../shared/view/content-flow.js";
 import { createPageLayout, pageLayoutStyles } from "../../../shared/view/page-layout.js";
@@ -545,6 +546,9 @@ class RunApplication {
   readonly #runDetailCache: Map<string, Json>;
   #reviewRoundId = ""; #reviewMaterial = "candidate";
   #activities = new Map<string, Json>();
+  #expandedActivities = new Set<string>();
+  #disclosures = new DisclosureState();
+  #reviewRenderGeneration = 0;
   #composerByActor = new Map<string,string>();
   #severityByActor = new Map<string,string>();
   #voteByActor = new Map<string,string>();
@@ -750,6 +754,7 @@ class RunApplication {
         });
       } else if (this.#reviewContext && replacement) {
         await this.#reloadReview(replacement);
+        if (!this.#controller.signal.aborted) this.#renderReview(replacement, this.#reviewContext.review.id);
       }
     } catch (error) { if (!this.#controller.signal.aborted) console.error("Unable to refresh Runs", error); }
   }
@@ -759,6 +764,7 @@ class RunApplication {
   }
   #renderLoading(): void { const box=document.createElement("div"); box.className=`run-panel run-loading${this.#reviewOnly?" run-review-loading":""}`; box.textContent=tr(this.#config,"loading"); this.#root.append(box); }
   #render(): void {
+    this.#disclosures.capture();
     this.#root.querySelector(":scope > .run-loading")?.remove();
     this.#root.querySelector(".run-layout")?.remove();
     this.#onListChange();
@@ -826,7 +832,7 @@ class RunApplication {
     const wrap=document.createElement("div"); const run=this.#detail;
     if(!run){const feedback=this.#ui.feedback(this.#detailError?{state:"error",title:{text:this.#detailError},icon:{kind:"system",name:"warning-circle"},action:this.#detailErrorRunId?{label:{text:tr(this.#config,"retry")},run:()=>this.#select(this.#detailErrorRunId)}:undefined}:{state:"empty",title:{text:tr(this.#config,"choose")}});feedback.classList.add(this.#detailError?"run-error":"run-panel");wrap.append(feedback);return wrap;}
     if (!this.#renderContext) return wrap;
-    return renderRunDetail(run, {
+    const detail = renderRunDetail(run, {
       locale: this.#config.locale,
       state: this.#runDetailState,
       ui: this.#ui,
@@ -836,6 +842,30 @@ class RunApplication {
       openReview: (runId, reviewId) => this.#openReview(runId, reviewId),
       renderArtifact: this.#renderArtifact
     });
+    const bindings: DisclosureBinding[] = [];
+    detail.querySelectorAll<HTMLDetailsElement>("details:not([data-disclosure-key])").forEach(node => {
+      const parent = node.parentElement?.closest<HTMLElement>("[data-disclosure-key], [data-step-id]");
+      const summaries: string[] = [];
+      for (let ancestor: HTMLElement | null = node; ancestor && ancestor !== parent; ancestor = ancestor.parentElement) {
+        if (ancestor instanceof HTMLDetailsElement) summaries.unshift(ancestor.querySelector(":scope > summary")?.textContent || "");
+      }
+      node.dataset.disclosureKey = JSON.stringify(["native", parent?.dataset.disclosureKey || parent?.dataset.stepId || "run", summaries]);
+    });
+    detail.querySelectorAll<HTMLElement>("[data-disclosure-key]").forEach(node => {
+      const key = node.dataset.disclosureKey!;
+      if (node instanceof HTMLDetailsElement) bindings.push(nativeDisclosure(node, key));
+      else if (node.matches(".effective-section, .effective-reference")) {
+        const body = node.querySelector<HTMLElement>(":scope > .section-body")!;
+        const header = node.querySelector<HTMLElement>(":scope > .section-header")!;
+        bindings.push({ key, read: () => !body.hidden, write: expanded => {
+          body.hidden = !expanded;
+          header.setAttribute("aria-expanded", String(expanded));
+        }});
+      }
+    });
+    this.#disclosures.restore(JSON.stringify([this.#config.projectApiBase || "", run.id]), bindings);
+    detail.querySelector(".run-detail-content")?.dispatchEvent(new Event("disclosure-state-restored"));
+    return detail;
   }
   async #archive(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"archive")},description:{text:tr(this.#config,"archiveConfirm")},confirmLabel:{text:tr(this.#config,"archive")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}}))return;this.#busy=true;try{await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}`,{method:"POST"});await this.#refresh();}finally{this.#busy=false;}}
   async #abandon(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"abandon")},description:{text:tr(this.#config,"abandonConfirm")},confirmLabel:{text:tr(this.#config,"abandon")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")},tone:"danger"}))return;this.#busy=true;try{await this.#request(`/api/runs/${encodeURIComponent(run.id)}/abandon`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});await this.#refresh();}finally{this.#busy=false;}}
@@ -865,6 +895,7 @@ class RunApplication {
   }
   #syncReviewUrl():void{const url=new URL(location.href);url.searchParams.set("round",this.#reviewRoundId);if(this.#reviewMaterial==="candidate")url.searchParams.delete("material");else url.searchParams.set("material",this.#reviewMaterial);history.replaceState(history.state,"",url);}
   #renderReview(runId:string,reviewId:string):void{
+    this.#reviewRenderGeneration += 1;
     const previous=this.#reviewDialog;this.#reviewMediaCleanup?.();this.#reviewMediaCleanup=null;previous?.remove();const context=this.#reviewContext;if(!context)return;
     const split=Math.min(75,Math.max(30,Number(localStorage.getItem("memsphere.artifactReviewSplit.v1"))||58));
     const dialog=document.createElement("div");dialog.className="artifact-review-modal";dialog.id="artifact-review-modal";dialog.style.setProperty("--artifact-review-left",`${split}%`);
@@ -954,16 +985,79 @@ class RunApplication {
   async #responseError(response:Response):Promise<string>{const text=await response.text();try{const payload=JSON.parse(text);return typeof payload?.error==="string"?payload.error:text;}catch{return text||tr(this.#config,"conflict");}}
   #participant(context:Json,round:Json,assignment:Json):HTMLElement{
     const row=document.createElement("article");row.className="artifact-review-row artifact-review-participant";row.id=`artifact-review-participant-${safeId(assignment.actorId)}`;const head=document.createElement("div");head.className="artifact-review-participant-head";const main=document.createElement("div");main.className="artifact-review-row-main";const name=document.createElement("b");name.textContent=assignmentName(assignment);const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(`${assignment.binding==="decision"?tr(this.#config,"decision"):tr(this.#config,"advisory")} · ${assignment.actorKind==="agent"?tr(this.#config,"agent"):assignment.actorKind||"Human"}`),pill(assignmentStatus(this.#config,assignment)),pill(voteLabel(this.#config,assignment.vote||assignment.submitted?.vote)));main.append(name,meta);head.append(main);row.append(head);
-    const attempts=assignment.attempts||(assignment.attempt?[assignment.attempt]:[]);if(assignment.actorKind==="agent"&&attempts.length){const evidence=document.createElement("span");evidence.className="muted";evidence.textContent=`${tr(this.#config,"implementationEvidence")}：${tr(this.#config,assignment.implementationEvidenceReferenced?"referenced":"notReferenced")}`;main.append(evidence);let toggle!:HTMLButtonElement;toggle=this.#ui.button({label:{text:tr(this.#config,"viewDetails")},run:async()=>{const existing=row.querySelector(".artifact-review-activity");if(existing){existing.remove();const label=tr(this.#config,"viewDetails");toggle.querySelector(":scope > span:not(.mem-view-button-error)")!.textContent=label;toggle.setAttribute("aria-label",label);toggle.setAttribute("aria-expanded","false");return;}const label=tr(this.#config,"hideDetails");toggle.querySelector(":scope > span:not(.mem-view-button-error)")!.textContent=label;toggle.setAttribute("aria-label",label);toggle.setAttribute("aria-expanded","true");head.insertAdjacentElement("afterend",await this.#agentActivity(context.review,round,{...assignment,attempts}));}});toggle.classList.add("artifact-review-activity-toggle");toggle.setAttribute("aria-expanded","false");head.append(toggle);}
+    const attempts = assignment.attempts || (assignment.attempt ? [assignment.attempt] : []);
+    if (assignment.actorKind === "agent" && attempts.length) {
+      const evidence = document.createElement("span"); evidence.className = "muted";
+      evidence.textContent = `${tr(this.#config,"implementationEvidence")}：${tr(this.#config,assignment.implementationEvidenceReferenced?"referenced":"notReferenced")}`;
+      main.append(evidence);
+      const activityKey = JSON.stringify([this.#config.projectApiBase || "", this.#detail?.id || this.#route.params.runId,
+        context.review.id, round.id, this.#reviewMaterial, context.submission?.id, assignment.actorId]);
+      const generation = this.#reviewRenderGeneration;
+      let toggle!: HTMLButtonElement;
+      const update = () => {
+        const expanded = this.#expandedActivities.has(activityKey);
+        const label = tr(this.#config, expanded ? "hideDetails" : "viewDetails");
+        toggle.querySelector(":scope > span:not(.mem-view-button-error)")!.textContent = label;
+        toggle.setAttribute("aria-label", label);
+        toggle.setAttribute("aria-expanded", String(expanded));
+      };
+      let requestVersion = 0;
+      const load = async () => {
+        const version = ++requestVersion;
+        const isCurrent = () => !this.#disposed && !this.#controller.signal.aborted && generation === this.#reviewRenderGeneration &&
+          version === requestVersion && row.isConnected && this.#expandedActivities.has(activityKey);
+        try {
+          const activity = await this.#agentActivity(context.review, round, { ...assignment, attempts }, activityKey, isCurrent);
+          if (!isCurrent()) return;
+          row.querySelector(".artifact-review-activity")?.remove();
+          head.insertAdjacentElement("afterend", activity);
+        } catch (error) { if (isCurrent()) throw error; }
+      };
+      const reportLoadError = (error: unknown) => {
+        if (this.#controller.signal.aborted || generation !== this.#reviewRenderGeneration || !row.isConnected) return;
+        console.error("Unable to load Agent Activity", error);
+        this.#expandedActivities.delete(activityKey); update();
+        const feedback = this.#ui.feedback({ state: "error", title: { text: error instanceof Error ? error.message : String(error) } });
+        feedback.classList.add("artifact-review-activity"); head.insertAdjacentElement("afterend", feedback);
+      };
+      toggle = this.#ui.button({ label: { text: tr(this.#config,"viewDetails") }, run: () => {
+        if (this.#expandedActivities.has(activityKey)) {
+          this.#expandedActivities.delete(activityKey); requestVersion += 1;
+          row.querySelector(".artifact-review-activity")?.remove(); update(); return;
+        }
+        row.querySelector(".artifact-review-activity")?.remove();
+        this.#expandedActivities.add(activityKey); update(); void load().catch(reportLoadError);
+      }});
+      toggle.classList.add("artifact-review-activity-toggle"); head.append(toggle); update();
+      if (this.#expandedActivities.has(activityKey)) void load().catch(reportLoadError);
+    }
     const opinion=assignment.submitted||((assignment.summary||assignment.vote)?assignment:null);if(opinion&&(opinion.renderedSummary||opinion.summary))row.append(this.#opinionBody(opinion,false));return row;
   }
   #runner(round:Json):HTMLElement{const runner=round?.runner;const row=document.createElement("article");row.className="artifact-review-participant";const head=document.createElement("div");head.className="artifact-review-participant-head";const main=document.createElement("div");main.className="artifact-review-row-main";const name=document.createElement("b");name.textContent=runner?.actorName||tr(this.#config,"runner");const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(tr(this.#config,"decision")),pill(runner?.status?assignmentStatus(this.#config,runner):tr(this.#config,"pendingVote")));main.append(name,meta);head.append(main);row.append(head);return row;}
   #submittedOpinion(assignment:Json):HTMLElement{const row=document.createElement("article");row.className="artifact-review-participant";const name=document.createElement("b");name.textContent=assignmentName(assignment);const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(`${tr(this.#config,"voteSummary")} · ${voteLabel(this.#config,assignment.vote||assignment.submitted?.vote)}`));const opinion=assignment.submitted||assignment;if(opinion.delegation?.kind==="runner")meta.append(pill(tr(this.#config,"delegatedByRunner")));row.append(name,meta);const body=this.#opinionBody(opinion);if(body.childElementCount)row.append(body);return row;}
   #opinionBody(opinion:Json,includeComments=true):HTMLElement{const wrap=document.createElement("div");wrap.className="artifact-review-opinion";if(opinion.delegation?.kind==="runner"&&opinion.delegation.authorizationNote){const note=textBlock(`${tr(this.#config,"authorizationNote")}：${opinion.delegation.authorizationNote}`);note.className="artifact-review-message";wrap.append(note);}if(opinion.renderedSummary){const summary=document.createElement("div");summary.innerHTML=opinion.renderedSummary;wrap.append(summary);}else if(opinion.summary){wrap.append(textBlock(opinion.summary));}if(includeComments)for(const comment of opinion.comments||[]){const card=commentCard(this.#ui,comment,"",tr(this.#config,"locate"));const severity=document.createElement("span");severity.className="artifact-review-comment-severity";severity.textContent=severityLabel(this.#config,comment.severity);card.prepend(severity);wrap.append(card);}return wrap;}
-  async #agentActivity(review:Json,round:Json,assignment:Json):Promise<HTMLElement>{
-    const attempts=assignment.attempts||[];const latest=attempts.at(-1);const wrap=document.createElement("section");wrap.className="artifact-review-activity";const head=document.createElement("div");head.className="artifact-review-activity-head";const title=document.createElement("b");title.textContent=tr(this.#config,"activity");head.append(title);wrap.append(head);if(!latest)return wrap;
-    const selectedKey=`${review.id}:${round.id}:${assignment.actorId}`;const selected=this.#activities.get(selectedKey)?.sequence||latest.sequence;head.append(chooser(this.#ui,"artifact-review-attempt-select",tr(this.#config,"selectAttempt"),`${tr(this.#config,"attempt")} ${selected} · ${assignmentStatus(this.#config,attempts.find((a:Json)=>a.sequence===selected)||latest)}`,attempts.map((attempt:Json)=>({id:String(attempt.sequence),label:`${tr(this.#config,"attempt")} ${attempt.sequence} · ${assignmentStatus(this.#config,attempt)}`,selected:attempt.sequence===selected})),sequence=>{this.#activities.set(selectedKey,{...(this.#activities.get(selectedKey)||{}),sequence:Number(sequence)});}));
-    const response=await this.#request(`/api/artifact-reviews/${encodeURIComponent(review.id)}/rounds/${encodeURIComponent(round.id)}/assignments/${encodeURIComponent(assignment.actorId)}/attempts/${encodeURIComponent(selected)}/activity?cursor=0&limit=500`);const log=document.createElement("div");log.className="artifact-review-activity-log";this.#appendActivityEvents(log,response.events||[]);this.#activities.set(selectedKey,{sequence:selected,cursor:response.nextCursor||0,reviewId:review.id,roundId:round.id,actorId:assignment.actorId,log});wrap.append(log);return wrap;
+  async #agentActivity(review: Json, round: Json, assignment: Json, selectedKey: string, isCurrent: () => boolean): Promise<HTMLElement> {
+    const attempts = assignment.attempts || [];
+    const latest = attempts.at(-1);
+    const wrap = document.createElement("section"); wrap.className = "artifact-review-activity";
+    const head = document.createElement("div"); head.className = "artifact-review-activity-head";
+    const title = document.createElement("b"); title.textContent = tr(this.#config,"activity"); head.append(title); wrap.append(head);
+    if (!latest) return wrap;
+    const cached = this.#activities.get(selectedKey);
+    const selected = attempts.some((attempt: Json) => attempt.sequence === cached?.sequence) ? cached!.sequence : latest.sequence;
+    head.append(chooser(this.#ui,"artifact-review-attempt-select",tr(this.#config,"selectAttempt"),
+      `${tr(this.#config,"attempt")} ${selected} · ${assignmentStatus(this.#config,attempts.find((attempt: Json) => attempt.sequence === selected) || latest)}`,
+      attempts.map((attempt: Json) => ({ id: String(attempt.sequence), label: `${tr(this.#config,"attempt")} ${attempt.sequence} · ${assignmentStatus(this.#config,attempt)}`, selected: attempt.sequence === selected })), sequence => {
+        this.#activities.set(selectedKey, { sequence: Number(sequence) });
+        this.#renderReview(this.#detail?.id || this.#route.params.runId || "", review.id);
+      }));
+    const log = cached && cached.sequence === selected && cached.log instanceof HTMLElement ? cached.log.cloneNode(true) as HTMLElement : document.createElement("div");
+    log.className = "artifact-review-activity-log";
+    const cursor = cached && cached.sequence === selected ? cached.cursor || 0 : 0;
+    const response = await this.#request(`/api/artifact-reviews/${encodeURIComponent(review.id)}/rounds/${encodeURIComponent(round.id)}/assignments/${encodeURIComponent(assignment.actorId)}/attempts/${encodeURIComponent(selected)}/activity?cursor=${encodeURIComponent(cursor)}&limit=500`);
+    this.#appendActivityEvents(log, response.events || []);
+    if (isCurrent()) this.#activities.set(selectedKey, { sequence: selected, cursor: response.nextCursor ?? cursor, reviewId: review.id, roundId: round.id, actorId: assignment.actorId, log });
+    wrap.append(log); return wrap;
   }
   async #pollActivities():Promise<void>{for(const entry of this.#activities.values()){const log=entry.log;if(!(log instanceof HTMLElement)||!log.isConnected)continue;try{const response=await this.#request(`/api/artifact-reviews/${encodeURIComponent(entry.reviewId)}/rounds/${encodeURIComponent(entry.roundId)}/assignments/${encodeURIComponent(entry.actorId)}/attempts/${encodeURIComponent(entry.sequence)}/activity?cursor=${encodeURIComponent(entry.cursor||0)}&limit=500`);const pinned=log.scrollHeight-log.clientHeight-log.scrollTop<20;const top=log.scrollTop;this.#appendActivityEvents(log,response.events||[]);entry.cursor=response.nextCursor||entry.cursor;if(pinned)log.scrollTop=log.scrollHeight;else log.scrollTop=top;}catch(error){if(!this.#controller.signal.aborted)console.error("Unable to refresh Agent Activity",error);}}}
   #appendActivityEvents(log:HTMLElement,events:Json[]):void{for(const event of events){const existing=log.querySelector(`[data-event-id="${CSS.escape(String(event.id||""))}"]`);existing?.remove();const item=document.createElement("article");item.className="artifact-review-activity-event";item.dataset.kind=event.kind;item.dataset.eventId=event.id||"";const eventHead=document.createElement("div");eventHead.className="artifact-review-activity-event-head";const kind=document.createElement("span");kind.className="artifact-review-activity-kind";kind.textContent=tr(this.#config,event.kind);const time=document.createElement("time");time.textContent=formatTime(event.updatedAt);eventHead.append(kind,time);const eventTitle=document.createElement("b");eventTitle.className="artifact-review-activity-event-title";eventTitle.textContent=event.title||"";item.append(eventHead,eventTitle);if(event.body)item.append(textBlock(event.body));if(event.plan?.length){const list=document.createElement("ol");for(const plan of event.plan){const li=document.createElement("li");li.textContent=`${plan.content} · ${plan.status}`;list.append(li);}item.append(list);}log.append(item);}}

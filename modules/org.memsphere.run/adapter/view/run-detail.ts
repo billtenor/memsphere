@@ -11,9 +11,9 @@ import {
 } from "../../../shared/view/content-flow.js";
 
 type Json = Record<string, any>;
+type PresentedRunEvent = { event: Json; occurrence: number };
 
 export interface RunDetailState {
-  readonly collapsedRules: Set<string>;
   readonly expandedBindings: Set<string>;
 }
 
@@ -29,7 +29,7 @@ export interface RunDetailOptions {
 }
 
 export function createRunDetailState(): RunDetailState {
-  return { collapsedRules: new Set<string>(), expandedBindings: new Set<string>() };
+  return { expandedBindings: new Set<string>() };
 }
 
 export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLElement {
@@ -43,8 +43,8 @@ export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLEleme
   if (assertTrees.length) {
     const contracts = document.createElement("section");
     contracts.className = "run-panel run-procedure-asserts";
-    assertTrees.forEach((tree, index) => contracts.append(
-      renderEffectiveRuleTree(tree, labels.asserts, `run:${run.id}:procedure-asserts:${index}`, options, labels)
+    assertTrees.forEach(({ tree, scope }) => contracts.append(
+      renderEffectiveRuleTree(tree, labels.asserts, scope, options, labels)
     ));
     wrap.append(contracts);
   }
@@ -52,19 +52,20 @@ export function renderRunDetail(run: Json, options: RunDetailOptions): HTMLEleme
   const bindings = renderBindings(run, options, labels);
   if (bindings) wrap.append(bindings);
 
+  const history = presentRunEvents(run.events || []);
   if (Array.isArray(run.plan) && run.plan.length) {
     const label = document.createElement("div");
     label.className = "run-section-title block-title mem-content-flow-title";
     label.textContent = labels.flow;
-    const events = new Map<string, Json>((run.events || []).map((event: Json) => [event.stepId, event]));
+    const events = new Map<string, PresentedRunEvent>(history.map(item => [item.event.stepId, item]));
     const active = currentRunStep(run);
     const flow = renderContentFlow(run.plan.map((step: Json) => normalizeRunFlowNode(step)), runFlowHooks(events, active, run, options, labels));
     flow.classList.add("run-flow", "flow");
     wrap.append(label, flow);
-    const finals = (run.events || []).filter((event: Json) => event.artifact?.final);
+    const finals = history.filter(item => item.event.artifact?.final);
     if (finals.length) wrap.append(renderArtifactCollection(finals, labels.finalArtifacts, options, run, labels));
   } else {
-    wrap.append(renderArtifactCollection(run.events || [], labels.artifacts, options, run, labels));
+    wrap.append(renderArtifactCollection(history, labels.artifacts, options, run, labels));
   }
   appendDisclosureToggle(wrap, labels);
   canvas.append(wrap);
@@ -186,7 +187,7 @@ function normalizeRunFlowNode(step: Json): ContentFlowNode<Json> {
   };
 }
 
-function runFlowHooks(events: Map<string, Json>, active: Json | null, run: Json, options: RunDetailOptions, labels: Labels): ContentFlowHooks<Json> {
+function runFlowHooks(events: Map<string, PresentedRunEvent>, active: Json | null, run: Json, options: RunDetailOptions, labels: Labels): ContentFlowHooks<Json> {
   return {
     ui: options.ui,
     labels: { step: labels.step, if: labels.if, while: labels.while, call: labels.call, else: labels.else },
@@ -244,13 +245,24 @@ function runFlowHooks(events: Map<string, Json>, active: Json | null, run: Json,
       const schemaWriting = renderSchemaWriting(run, node.content, options, labels);
       if (schemaWriting) holder.append(schemaWriting);
       const event = events.get(node.id);
-      if (event?.artifact) holder.append(renderArtifactResult(event, run, options, labels));
+      if (event?.event.artifact) holder.append(renderArtifactResult(event, run, options, labels));
       return [...holder.childNodes];
     }
   };
 }
 
-function renderArtifactCollection(events: Json[], heading: string, options: RunDetailOptions, run: Json, labels: Labels): HTMLElement {
+function presentRunEvents(events: Json[]): PresentedRunEvent[] {
+  const occurrences = new Map<string, number>();
+  // Accepted history is append-only. Count the complete history before filtering or selecting latest outputs.
+  return events.map(event => {
+    const identity = JSON.stringify([event.at, event.frame, event.stepId]);
+    const occurrence = occurrences.get(identity) || 0;
+    occurrences.set(identity, occurrence + 1);
+    return { event, occurrence };
+  });
+}
+
+function renderArtifactCollection(events: PresentedRunEvent[], heading: string, options: RunDetailOptions, run: Json, labels: Labels): HTMLElement {
   const wrap = document.createElement("section");
   wrap.className = "run-artifacts";
   const title = document.createElement("div");
@@ -262,10 +274,11 @@ function renderArtifactCollection(events: Json[], heading: string, options: RunD
   return wrap;
 }
 
-function renderArtifactResult(event: Json, run: Json, options: RunDetailOptions, labels: Labels, standalone = false): HTMLElement {
+function renderArtifactResult({ event, occurrence }: PresentedRunEvent, run: Json, options: RunDetailOptions, labels: Labels, standalone = false): HTMLElement {
   const card = document.createElement("details");
   card.className = `${standalone ? "run-artifact " : ""}run-collapsible task-result mem-content-disclosure`;
   const artifact = event.artifact || {};
+  stampDisclosure(card, `artifact:${standalone ? "collection" : "step"}:${event.stepId}`, { at: event.at, frame: event.frame, occurrence, type: artifact.type, name: artifact.name, path: artifact.path, format: artifact.format });
   const title = document.createElement("h3");
   title.className = "mem-content-disclosure-title";
   title.textContent = standalone ? (artifact.name || event.stepId || labels.artifact) : labels.output;
@@ -389,14 +402,16 @@ function appendFormatMeta(target: HTMLElement, format: unknown, schema: unknown,
 
 function appendRuleContracts(target: HTMLElement, step: Json, scope: string, options: RunDetailOptions, labels: Labels): void {
   if (step.assertTree) target.append(renderEffectiveRuleTree(step.assertTree, labels.asserts, `${scope}:asserts`, options, labels));
-  else if (step.asserts?.length) target.append(renderSimpleRules(step.asserts, labels.asserts, options.ui));
+  else if (step.asserts?.length) target.append(renderSimpleRules(step.asserts, labels.asserts, options.ui, `${scope}:asserts`));
   if (step.suggestTree) target.append(renderEffectiveRuleTree(step.suggestTree, labels.suggests, `${scope}:suggests`, options, labels));
-  else if (step.suggests?.length) target.append(renderSimpleRules(step.suggests, labels.suggests, options.ui));
+  else if (step.suggests?.length) target.append(renderSimpleRules(step.suggests, labels.suggests, options.ui, `${scope}:suggests`));
 }
 
-function renderSimpleRules(entries: unknown[], heading: string, ui?: ViewUi): HTMLElement {
+function renderSimpleRules(entries: unknown[], heading: string, ui?: ViewUi, scope = heading): HTMLElement {
   const values = entries.map(entry => document.createTextNode(typeof entry === "string" ? entry : (entry as Json)?.target || JSON.stringify(entry)));
-  return renderContentListDisclosure(heading, values, "action-contracts effective-rule-tree run-collapsible", ui);
+  const block = renderContentListDisclosure(heading, values, "action-contracts effective-rule-tree run-collapsible", ui);
+  stampDisclosure(block, scope);
+  return block;
 }
 
 function appendSimpleRuleGroup(target: HTMLElement, entries: unknown[], heading: string): void {
@@ -412,20 +427,21 @@ function appendSimpleRuleGroup(target: HTMLElement, entries: unknown[], heading:
 
 function renderEffectiveRuleTree(tree: Json, headingText: string, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
   const { block: wrap, body } = createContentListDisclosure(headingText, effectiveEntries(tree).length, "effective-rule-tree run-collapsible", options.ui);
+  stampDisclosure(wrap, scope);
   appendEffectiveEntries(body, effectiveEntries(tree), scope, options, labels);
-  for (const [index, section] of (tree.sections || []).entries()) body.append(renderEffectiveSection(section, `${scope}:section:${index}`, options, labels));
+  for (const section of tree.sections || []) body.append(renderEffectiveSection(section, `${scope}:section:${ruleIdentity(section)}`, options, labels));
   wrap.append(body);
   return wrap;
 }
 
 function appendEffectiveEntries(target: HTMLElement, entries: unknown[], scope: string, options: RunDetailOptions, labels: Labels): void {
   const list = createContentList(); list.classList.add("effective-rule-list");
-  entries.forEach((entry, index) => {
+  entries.forEach(entry => {
     const item = document.createElement("li");
     if (typeof entry === "string" || (entry as Json)?.kind === "rule") item.textContent = typeof entry === "string" ? entry : (entry as Json).text;
     else if (entry && typeof entry === "object" && ((entry as Json).kind === "reference" || (entry as Json).reference || (entry as Json).target)) {
       item.className = "effective-reference-item";
-      item.append(renderEffectiveReference(entry as Json, `${scope}:reference:${index}`, options, labels));
+      item.append(renderEffectiveReference(entry as Json, `${scope}:reference:${ruleIdentity(entry as Json)}`, options, labels));
     } else return;
     list.append(item);
   });
@@ -434,33 +450,33 @@ function appendEffectiveEntries(target: HTMLElement, entries: unknown[], scope: 
 
 function renderEffectiveReference(entry: Json, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
   const section = document.createElement("div"); section.className = "section effective-reference";
-  const body = document.createElement("div"); body.className = "section-body"; body.hidden = options.state.collapsedRules.has(scope);
-  const header = ruleToggle(`${labels.referencedFrom} ${entry.reference || entry.target}`, scope, body, options);
+  const body = document.createElement("div"); body.className = "section-body"; body.hidden = false;
+  stampDisclosure(section, scope);
+  const header = ruleToggle(`${labels.referencedFrom} ${entry.reference || entry.target}`, body, options);
   appendEffectiveEntries(body, effectiveEntries(entry), `${scope}:entries`, options, labels);
-  for (const [index, child] of (entry.sections || []).entries()) body.append(renderEffectiveSection(child, `${scope}:section:${index}`, options, labels));
+  for (const child of entry.sections || []) body.append(renderEffectiveSection(child, `${scope}:section:${ruleIdentity(child)}`, options, labels));
   section.append(header, body); return section;
 }
 
 function renderEffectiveSection(node: Json, scope: string, options: RunDetailOptions, labels: Labels): HTMLElement {
   const section = document.createElement("div"); section.className = "section effective-section";
-  const body = document.createElement("div"); body.className = "section-body"; body.hidden = options.state.collapsedRules.has(scope);
-  const header = ruleToggle(node.name || labels.section, scope, body, options);
+  const body = document.createElement("div"); body.className = "section-body"; body.hidden = false;
+  stampDisclosure(section, scope);
+  const header = ruleToggle(node.name || labels.section, body, options);
   if (node.defines?.length) appendSimpleRuleGroup(body, node.defines, labels.defines);
   const rules = effectiveEntries(node); if (rules.length) { const title = document.createElement("div"); title.className = "block-title"; title.textContent = labels.rules; body.append(title); appendEffectiveEntries(body, rules, `${scope}:entries`, options, labels); }
-  for (const [index, child] of (node.sections || []).entries()) body.append(renderEffectiveSection(child, `${scope}:section:${index}`, options, labels));
+  for (const child of node.sections || []) body.append(renderEffectiveSection(child, `${scope}:section:${ruleIdentity(child)}`, options, labels));
   section.append(header, body); return section;
 }
 
-function ruleToggle(label: string, scope: string, body: HTMLElement, options: RunDetailOptions): HTMLButtonElement {
+function ruleToggle(label: string, body: HTMLElement, options: RunDetailOptions): HTMLButtonElement {
   let control!: HTMLButtonElement;
   control = options.ui.button({ label: { text: label }, run: () => {
     body.hidden = !body.hidden;
     control.setAttribute("aria-expanded", String(!body.hidden));
-    if (body.hidden) options.state.collapsedRules.add(scope);
-    else options.state.collapsedRules.delete(scope);
   }});
   control.classList.add("section-header");
-  control.setAttribute("aria-expanded", String(!options.state.collapsedRules.has(scope)));
+  control.setAttribute("aria-expanded", String(!body.hidden));
   const chevron = document.createElement("span"); chevron.className = "chevron"; chevron.textContent = "›"; control.prepend(chevron); return control;
 }
 
@@ -468,6 +484,7 @@ function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, l
   const snapshot = run.schemaWriting;
   if (!snapshot || snapshot.parentStepId !== step.id) return null;
   const wrap = document.createElement("details"); wrap.className = "schema-writing run-collapsible mem-content-disclosure";
+  stampDisclosure(wrap, `schema:${step.id}`, { schemaRef: snapshot.schemaRef });
   const title = document.createElement("summary"); title.className = "block-title run-disclosure-summary mem-content-disclosure-summary"; title.append(disclosureChevron(), disclosureTitle(labels.schemaWriting)); wrap.append(title);
   const body = document.createElement("div"); body.className = "run-disclosure-body mem-content-disclosure-body";
   const progress = document.createElement("div"); progress.className = "schema-writing-progress run-meta";
@@ -475,16 +492,17 @@ function renderSchemaWriting(run: Json, step: Json, options: RunDetailOptions, l
   if (snapshot.currentField?.path) progress.append(pill(String(snapshot.currentField.path), "strong"));
   if (snapshot.draft?.status === "awaiting_finalization") progress.append(pill(labels.globalAdjustment, "warn"));
   body.append(progress);
-  for (const [index, source] of (snapshot.currentField?.sources || []).entries()) {
+  for (const source of snapshot.currentField?.sources || []) {
     const sourceElement = document.createElement("div"); sourceElement.className = "schema-writing-source";
     const sourceTitle = document.createElement("b"); sourceTitle.textContent = `${labels.constraintSource} · ${source.path}`; sourceElement.append(sourceTitle);
-    if (source.defines?.length) sourceElement.append(renderSimpleRules(source.defines, labels.defines));
-    if (source.assertTree) sourceElement.append(renderEffectiveRuleTree(source.assertTree, labels.asserts, `run:${run.id}:schema:${step.id}:${index}:asserts`, options, labels));
-    if (source.suggestTree) sourceElement.append(renderEffectiveRuleTree(source.suggestTree, labels.suggests, `run:${run.id}:schema:${step.id}:${index}:suggests`, options, labels));
+    if (source.defines?.length) sourceElement.append(renderSimpleRules(source.defines, labels.defines, undefined, `schema:${step.id}:source:${source.path}:defines`));
+    if (source.assertTree) sourceElement.append(renderEffectiveRuleTree(source.assertTree, labels.asserts, `schema:${step.id}:${source.path}:asserts`, options, labels));
+    if (source.suggestTree) sourceElement.append(renderEffectiveRuleTree(source.suggestTree, labels.suggests, `schema:${step.id}:${source.path}:suggests`, options, labels));
     body.append(sourceElement);
   }
   if (snapshot.draft) {
     const preview = document.createElement("details"); preview.className = "schema-draft-preview"; preview.open = snapshot.draft.status === "awaiting_finalization";
+    stampDisclosure(preview, `schema:${step.id}:draft`, { path: snapshot.draft.filePath });
     const summary = document.createElement("summary"); summary.textContent = labels.managedDraft; preview.append(summary);
     const path = document.createElement("div"); path.className = "schema-draft-path run-pre"; path.textContent = snapshot.draft.filePath || ""; preview.append(path);
     if (snapshot.draft.validation) preview.append(pill(`${labels.validation}: ${snapshot.draft.validation.status}`, snapshot.draft.validation.status === "passed" ? "done" : "warn"));
@@ -512,6 +530,7 @@ function appendDisclosureToggle(wrap: HTMLElement, labels: Labels): void {
     update();
   });
   wrap.addEventListener("toggle", update, true);
+  wrap.addEventListener("disclosure-state-restored", update);
   update();
   wrap.prepend(control);
 }
@@ -532,10 +551,27 @@ function findStep(steps: Json[], id: string): Json | null {
   return null;
 }
 
-function activeProcedureAssertTrees(run: Json): Json[] {
-  const trees = [run.assertTree, ...(run.stack || []).filter((frame: Json) => frame.type === "procedure").map((frame: Json) => frame.assertTree)].filter(Boolean);
+function activeProcedureAssertTrees(run: Json): { tree: Json; scope: string }[] {
+  const trees: { tree: Json; scope: string }[] = [];
   const seen = new Set<string>();
-  return trees.filter(tree => { const key = JSON.stringify(tree); if (seen.has(key)) return false; seen.add(key); return true; });
+  const ownerChain: unknown[][] = [["procedure", run.procedureName || ""]];
+  const append = (tree: Json | undefined) => {
+    if (!tree) return;
+    const content = JSON.stringify(tree);
+    if (seen.has(content)) return;
+    seen.add(content);
+    trees.push({ tree, scope: `procedure-asserts:${JSON.stringify(ownerChain)}` });
+  };
+  // Keep the existing root-first body deduplication, while retaining each displayed tree's owner.
+  append(run.assertTree);
+  let firstFrame = true;
+  for (const frame of run.stack || []) {
+    const rootFrame = firstFrame && frame.type === "procedure" && !frame.returnTo && !frame.sourceStepId;
+    firstFrame = false;
+    if (!rootFrame) ownerChain.push([frame.type, frame.memoryName || "", frame.returnTo || "", frame.sourceStepId || ""]);
+    if (frame.type === "procedure") append(frame.assertTree);
+  }
+  return trees;
 }
 
 function effectiveEntries(node: Json): unknown[] { return Array.isArray(node) ? node : node?.asserts || node?.suggests || node?.entries || []; }
@@ -571,4 +607,17 @@ function createLabels(locale = ""): Labels {
     executor: "执行者",
     procedure:"流程",activeFrames:"活动帧",retainedFrames:"保留帧",artifacts:"产物",artifact:"产物",output:"产出物",updated:"更新时间",legacyReadOnly:"旧版 · 只读",abandonedAt:"废弃于",review:"产物评审",jumpCurrent:"跳到当前步骤",bindings:"运行时评审绑定",reviewScopes:"评审范围",skip:"跳过后续评审",save:"更新绑定",asserts:"必须遵守",suggests:"建议遵守",flow:"执行流程",finalArtifacts:"最终产物",noArtifacts:"暂无产物",if:"如果",while:"循环",else:"否则",step:"步骤",call:"调用流程",noSteps:"没有步骤",completed:"已完成",current:"当前步骤",stopped:"已停止",notStarted:"未开始",time:"时间",validation:"契约校验",final:"最终",reviewer:"评审人",schema:"图式",inlineSchema:"内联图式",referencedFrom:"引用自",section:"章节",defines:"定义",rules:"规则",schemaWriting:"Schema 填写",progress:"进度",remaining:"剩余",globalAdjustment:"全局调整",constraintSource:"约束来源",managedDraft:"受管草稿",readOnlyDraft:"该草稿只读",expandAll:"展开全部",collapseAll:"收起全部",status:{running:"运行中",done:"已完成",abandoned:"已废弃"}
   };
+}
+
+function stampDisclosure(node: HTMLElement, path: string, identity?: unknown): void {
+  // Containers keep their identity when their rules or artifact body are revised.
+  node.dataset.disclosureKey = JSON.stringify([path, identity]);
+}
+
+function ruleIdentity(node: Json): string {
+  if (node.id) return JSON.stringify(["id", node.id]);
+  if (node.reference || node.target) return JSON.stringify(["reference", node.reference || node.target]);
+  if (node.name) return JSON.stringify(["name", node.name]);
+  // An unnamed replacement cannot safely inherit another anonymous node's choice.
+  return JSON.stringify(["anonymous", node]);
 }
