@@ -47,13 +47,15 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
-      NODE_COMPILE_CACHE: ${{ runner.temp }}/memsphere-node-compile-cache
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - run: npm ci
       - name: Install Playwright Chromium
         if: matrix.browser
