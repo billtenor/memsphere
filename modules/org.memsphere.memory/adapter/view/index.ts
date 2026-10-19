@@ -345,12 +345,15 @@ const memoryStyles = `
   .memory-inline-plus { position:absolute; top:4px; right:4px; display:none; width:25px; height:25px; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--accent); }
   .memory-commentable:hover>.memory-inline-plus,.memory-inline-plus:focus { display:block; }
   .memory-section.memory-commentable:hover>.memory-inline-plus { display:none; }
-  .memory-section.memory-commentable>.memory-section-header:hover~.memory-inline-plus,.memory-section.memory-commentable>.memory-inline-plus:focus { display:block; }
-  .text-list>li>.memory-commentable,.memory-inline-diff-content>.memory-commentable { display:inline; width:auto; }
-  .text-list>li>.memory-commentable>.memory-inline-plus,.memory-inline-diff-content>.memory-commentable>.memory-inline-plus,.memory-artifact-row.memory-commentable>.memory-inline-plus,.memory-flow-action.memory-commentable>.memory-inline-plus { position:static; display:inline-grid; place-items:center; vertical-align:middle; margin:-2px 0 0 8px; opacity:0; pointer-events:none; }
-  .memory-commentable:hover>.memory-inline-plus,.memory-commentable>.memory-inline-plus:focus,.text-list>li:not(.memory-inline-diff-item):hover>.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-inline-diff-content>.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-artifact-row.memory-commentable>.memory-inline-plus { opacity:1; pointer-events:auto; }
+  .memory-section.memory-commentable>.memory-section-header:hover~.memory-inline-plus,.memory-section.memory-commentable>.memory-inline-plus:hover,.memory-section.memory-commentable>.memory-inline-plus:focus { display:block; }
+  .text-list>li>.memory-commentable,.memory-inline-diff-content>span.memory-commentable { display:inline; width:auto; }
+  .text-list>li>.memory-commentable>.memory-inline-plus,.memory-inline-diff-content>span.memory-commentable>.memory-inline-plus,.memory-artifact-row.memory-commentable>.memory-inline-plus,.memory-flow-action.memory-commentable>.memory-inline-plus { position:static; display:inline-grid; place-items:center; vertical-align:middle; margin:-2px 0 0 8px; opacity:0; pointer-events:none; }
+  .memory-commentable:hover>.memory-inline-plus,.memory-commentable>.memory-inline-plus:focus,.text-list>li:not(.memory-inline-diff-item):hover>.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-inline-diff-content>span.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-artifact-row.memory-commentable>.memory-inline-plus { opacity:1; pointer-events:auto; }
   .memory-flow-action.memory-commentable { display:inline; }
   .memory-artifact-row.memory-commentable { padding-left:3px; }
+  .memory-inline-comments { display:grid; gap:8px; margin:8px 0; padding:0 8px; min-width:0; color:var(--text); white-space:normal; }
+  .memory-inline-comments .memory-comment { margin:0; }
+  .memory-schema-field>.memory-inline-comments,.memory-schema-field>.memory-inline-comment-editor { grid-column:1 / -1; }
   .memory-inline-comment-editor { display:grid; gap:var(--memory-page-space-line); margin:8px 0 4px; border:1px solid var(--mem-view-color-border-strong); border-radius:var(--memory-page-radius-section); background:var(--mem-view-color-subtle); padding:10px; box-shadow:0 1px 2px rgba(20,47,42,.05); list-style:none; }
   .memory-inline-comment-editor textarea { width:100%; min-height:72px; resize:vertical; border:1px solid var(--line); border-radius:7px; background:var(--surface); color:var(--text); padding:8px 9px; font-family:var(--memory-page-font-sans); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); }
   .memory-inline-comment-editor textarea:focus { outline:2px solid var(--mem-view-color-focus-ring); border-color:var(--mem-view-color-border-strong); }
@@ -1829,7 +1832,9 @@ class MemoryApplication {
     if (selected?.error) main.append(errorWorkspace(memoryName(selected), errorMessage(selected.error)));
     else if (selected) {
       const panel = el("section", "memory-panel"); panel.append(el("h3", "", memoryName(selected)), renderMeta(selected));
-      const comment = (target: string, snapshot: string, location: unknown) => void this.composeComment(selected, target, snapshot, location);
+      const comment: CommentCallback | undefined = this.canComment()
+        ? (target, snapshot, location) => void this.composeComment(selected, target, snapshot, location)
+        : undefined;
       const operation = String(selected.operation ?? "unchanged");
       if (this.#changeContentMode === "diff" && operation === "create") {
         panel.append(renderWholeMemoryChange(selected, "new", this.t.bind(this), comment, this.renderOptions()));
@@ -1848,6 +1853,7 @@ class MemoryApplication {
       }
       main.append(panel);
       main.append(this.renderReviewCompletion(selected));
+      this.mountInlineComments(main, selected, array(payload.comments));
       this.mountInlineCommentComposer(main, selected);
     }
     layout.append(main, this.renderComments(array(payload.comments)));
@@ -1866,21 +1872,58 @@ class MemoryApplication {
     const body = el("div", "memory-comments-body");
     if (!comments.length) body.append(el("p", "memory-muted", this.t("change.noComments")));
     for (const comment of comments) {
-      const item = el("article", "memory-comment");
-      const head = el("div", "memory-comment-head");
-      head.append(el("span", "", actorLabel(comment.submittedBy ?? comment.submitted_by ?? comment.operator ?? comment.actor)), this.#ui.badge({label:text(this.commentStatus(String(comment.status ?? "pending"))),tone:String(comment.status)==="completed"?"success":String(comment.status)==="processing"?"info":"default"}));
-      item.append(head);
-      if (comment.target || comment.location) item.append(el("button", "memory-comment-target", String(comment.target ?? (comment.location as JsonRecord)?.anchor ?? "")));
-      item.append(el("p", "memory-comment-body", String(comment.body ?? "")));
-      if (comment.status === "pending" && isMine(comment, this.currentOperator())) {
-        const actions = el("div", "memory-comment-actions");
-        actions.append(this.#ui.button({ label: text("编辑"), run: () => this.editComment(item, comment) }), this.#ui.button({ label: text("删除"), run: () => this.deleteComment(String(comment.id)) }, { tone: "danger" }));
-        item.append(actions);
-      }
-      body.append(item);
+      body.append(this.renderComment(comment));
     }
     section.append(header, body);
     return section;
+  }
+
+  private renderComment(comment: JsonRecord, showTarget = true): HTMLElement {
+    const item = el("article", "memory-comment");
+    const head = el("div", "memory-comment-head");
+    head.append(el("span", "", actorLabel(comment.submittedBy ?? comment.submitted_by ?? comment.operator ?? comment.actor)), this.#ui.badge({label:text(this.commentStatus(String(comment.status ?? "pending"))),tone:String(comment.status)==="completed"?"success":String(comment.status)==="processing"?"info":"default"}));
+    item.append(head);
+    if (showTarget && (comment.target || comment.location)) item.append(el("button", "memory-comment-target", String(comment.target ?? (comment.location as JsonRecord)?.anchor ?? "")));
+    item.append(el("p", "memory-comment-body", String(comment.body ?? "")));
+    if (this.canComment() && comment.status === "pending" && isMine(comment, this.currentOperator())) {
+      const actions = el("div", "memory-comment-actions");
+      actions.append(this.#ui.button({ label: text("编辑"), run: () => this.editComment(item, comment) }), this.#ui.button({ label: text("删除"), run: () => this.deleteComment(String(comment.id)) }, { tone: "danger" }));
+      item.append(actions);
+    }
+    return item;
+  }
+
+  private mountInlineComments(main: HTMLElement, memory: MemorySummary, comments: JsonRecord[]): void {
+    const groups = new Map<HTMLElement, HTMLElement>();
+    for (const comment of comments) {
+      const reference = String(comment.memoryReference ?? comment.memory_reference ?? "");
+      if (reference ? reference !== memory.id : comment.path !== memory.path) continue;
+      const target = String((comment.location as JsonRecord)?.anchor ?? comment.target ?? "");
+      const anchor = [...main.querySelectorAll<HTMLElement>("[data-anchor]")].find(node => node.dataset.anchor === target);
+      if (!anchor) continue;
+      const host = this.inlineCommentHost(anchor);
+      let group = groups.get(host);
+      if (!group) {
+        group = el("div", "memory-inline-comments");
+        group.setAttribute("role", "group");
+        group.setAttribute("aria-label", this.t("change.comments"));
+        group.dataset.commentAnchor = target;
+        groups.set(host, group);
+        this.insertInlineComment(host, group);
+      }
+      group.append(this.renderComment(comment, false));
+
+    }
+  }
+
+  private inlineCommentHost(anchor: HTMLElement): HTMLElement {
+    return anchor.closest<HTMLElement>("li, .memory-schema-field, .memory-flow-head") ?? anchor;
+  }
+
+  private insertInlineComment(host: HTMLElement, content: HTMLElement): void {
+    if (host.matches(".memory-section")) sectionBody(host).prepend(content);
+    else if (host.matches(".memory-flow-head, .memory-artifact-row")) host.after(content);
+    else host.append(content);
   }
 
   private mountInlineCommentComposer(main: HTMLElement, memory: MemorySummary): void {
@@ -1888,10 +1931,7 @@ class MemoryApplication {
     if (!draft?.target || !this.canComment()) return;
     const anchor = [...main.querySelectorAll<HTMLElement>("[data-anchor]")].find(node => node.dataset.anchor === draft.target);
     if (!anchor) return;
-    const host = anchor.closest<HTMLElement>(".memory-inline-diff-line")
-      ?? anchor.closest<HTMLElement>(".memory-flow-head")
-      ?? anchor.closest<HTMLElement>("li, .memory-schema-field, .memory-commentable")
-      ?? anchor;
+    const host = this.inlineCommentHost(anchor);
     host.classList.add("has-comment-draft");
     const composer = el("div", "memory-inline-comment-editor");
     const field = this.#ui.textareaField({
@@ -1906,8 +1946,7 @@ class MemoryApplication {
     submit.disabled = true;
     actions.append(this.#ui.button({ label: text(this.t("change.cancelComment")), run: () => { this.#commentDraft = null; this.render(); } }), submit);
     composer.append(field.root, actions);
-    if (host.matches(".memory-inline-diff-line, .memory-flow-head")) host.after(composer);
-    else host.append(composer);
+    this.insertInlineComment(host, composer);
     const collapsedList = composer.closest<HTMLDetailsElement>("details.memory-collapsible-list");
     if (collapsedList) collapsedList.open = true;
     queueMicrotask(() => { textarea.focus({ preventScroll: true }); composer.scrollIntoView({ block: "nearest" }); });
@@ -2144,7 +2183,10 @@ class MemoryApplication {
     stored[project] = operator.id; localStorage.setItem(changeActorSelectionKey, JSON.stringify(stored)); return operator;
   }
 
-  private canComment(): boolean { return (this.#changeDetail?.change as ChangeSummary | undefined)?.status === "active" && !Boolean((this.#changeDetail?.change as ChangeSummary | undefined)?.claimed); }
+  private canComment(): boolean {
+    const status = (this.#changeDetail?.change as ChangeSummary | undefined)?.status;
+    return status === "active" && !Boolean((this.#changeDetail?.change as ChangeSummary | undefined)?.claimed);
+  }
   private marketStatusLabel(status: string): string { return this.t(`market.${({ not_imported: "notImported", importing: "importing", consistent: "consistent", different: "different", name_conflict: "nameConflict" } as Record<string, string>)[status] ?? status}`); }
   private changeStatusLabel(status: string): string { return this.t(`change.status.${status}`) === `change.status.${status}` ? status : this.t(`change.status.${status}`); }
   private operationLabel(operation: string): string { const key = `change.operation.${operation}`; return this.t(key) === key ? operation : this.t(key); }
@@ -2291,7 +2333,7 @@ function renderMemoryComparison(
   candidate: MemorySummary,
   base: MemorySummary,
   t: (key: string) => string,
-  comment: CommentCallback,
+  comment: CommentCallback | undefined,
   options: RenderOptions,
   change?: ChangeSummary
 ): HTMLElement {
@@ -2786,7 +2828,12 @@ function nodeSection(title: string, path: string, snapshot: unknown, comment?: C
   header.append(el("span", "memory-chevron", "›"), el("span", "memory-node-title", title));
   const badgeWrap = el("span", "node-badges"); badges.filter(Boolean).forEach(value => badgeWrap.append(el("span", "memory-pill", value))); header.append(badgeWrap);
   section.append(header, el("div", "memory-section-body"));
-  if (comment) section.append(plusButton(() => comment(path, scalar(snapshot), { anchor: path })));
+  if (comment) section.append(plusButton(() => {
+    // Opening this editor is an explicit user action; saved comments never expand sections.
+    section.classList.add("open");
+    section.dispatchEvent(new CustomEvent("memory-disclosure-change", { bubbles: true }));
+    comment(path, scalar(snapshot), { anchor: path });
+  }));
   return section;
 }
 function appendDisclosureToggle(section: HTMLElement, t: (key: string) => string): void {

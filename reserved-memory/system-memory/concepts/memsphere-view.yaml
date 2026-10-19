@@ -41,3 +41,4 @@ defines:
   - Artifact Review 右侧内容跟随所选材料：当前待评审产物展示其评审与可用编辑操作；前序产物展示对应已接受快照的只读评审；冻结契约与无对应记录的材料展示空状态。切回当前待评审产物保留未提交的本地意见。
   - App 的 View Package 随 Project 安装、配置与启用，只在对应 Project 装配；Home 主题与显式 Slot 选择继续生效。Module 可以声明 main.view@1:route:<route-id> 对应自身路由，通过 App 绑定的 ctx.api.invoke 调用清单声明的业务操作。
   - 公共 UI v1 的 ui.modelDefinition({model, view?, locale?}) 可在官方模型页和独立 View Package/App 中呈现已读取的 ModelPresentationDefinition；默认 structure，source 保留原文，语言默认由 Host 提供且可按组件覆盖。Draft-07 复用官方树表，raw 显示整体只读反馈，其他元模型显示不支持结构，读取失败由调用方处理。组件自行提供 renderer Slot 的深冻结输入与官方 defaultRender，无条目或全部候选失败时仍回退默认实现；Host 加载公开主题组件样式，不依赖 Models 模块或私有 DOM，每次调用拥有独立展开状态，移除节点即可清理默认节点事件，不读取数据或授予写权限。
+  - ChangeSet 已保存的定位 Comment 同时保留在右侧意见列表及当前 Memory 匹配锚点的原行附近；两处的编辑、删除结果一致。同一行多条意见保持保存顺序，其他 Memory 的意见不挂入当前正文。整体意见或锚点已不存在的意见只在侧栏保留，不猜测正文落点。原行意见随所属正文的展开状态显示或隐藏，展示意见不自动展开或收起章节；用户主动点击收起章节的 + 打开编辑器时，展开该目标章节以显示输入框。完整刷新沿用正文默认状态。completed、abandoned 及已被处理者认领的 ChangeSet 不显示新增或修改评论入口，已有意见仍可阅读；基线专属和删除内容不提供候选评论入口。

@@ -710,30 +710,39 @@ test("ChangeSet comment saves preserve mixed disclosure choices", async () => {
     const saved = page.waitForResponse(response => response.url().endsWith("/comments") && response.request().method() === "POST");
     await editor.getByRole("button", { name: "Submit comment", exact: true }).click();
     assert.equal((await saved).status(), 200);
-    await page.locator(".memory-comment-body").getByText("First located review comment", { exact: true }).waitFor();
+    await page.locator(".memory-comments .memory-comment-body").getByText("First located review comment", { exact: true }).waitFor();
     assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true, "saving a comment must retain the expanded definitions list");
     await assertMixed();
     await defines.locator(".memory-inline-new").hover();
     await defines.locator(".memory-inline-new .memory-inline-plus").click();
     await editor.locator("textarea").fill("Second located review comment");
     await editor.getByRole("button", { name: "Submit comment", exact: true }).click();
-    await page.getByText("Second located review comment", { exact: true }).waitFor();
+    await page.locator(".memory-comments").getByText("Second located review comment", { exact: true }).waitFor();
     assert.equal(fixture.comments.length, 2);
     await assertMixed();
     assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
-    const firstComment = page.locator(".memory-comment").filter({ hasText: "First located review comment" });
+    const firstComment = page.locator(".memory-comments .memory-comment").filter({ hasText: "First located review comment" });
     await firstComment.getByRole("button", { name: "编辑", exact: true }).click();
     await firstComment.locator("textarea").fill("Edited located review comment");
     await firstComment.getByRole("button", { name: "保存", exact: true }).click();
-    await page.getByText("Edited located review comment", { exact: true }).waitFor();
+    await page.locator(".memory-comments").getByText("Edited located review comment", { exact: true }).waitFor();
     assert.equal(fixture.comments[0]?.body, "Edited located review comment");
+    await defines.locator(".memory-inline-comments").getByText("Edited located review comment", { exact: true }).waitFor();
     await assertMixed();
     assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
-    await page.locator(".memory-comment").filter({ hasText: "Edited located review comment" }).getByRole("button", { name: "删除", exact: true }).click();
-    await page.getByText("Edited located review comment", { exact: true }).waitFor({ state: "detached" });
+    await page.locator(".memory-comments .memory-comment").filter({ hasText: "Edited located review comment" }).getByRole("button", { name: "删除", exact: true }).click();
+    await page.locator(".memory-comments").getByText("Edited located review comment", { exact: true }).waitFor({ state: "detached" });
     assert.equal(fixture.comments.length, 1);
-    assert.equal(await page.getByText("Second located review comment", { exact: true }).count(), 1);
+    assert.equal(await page.locator(".memory-inline-comments").getByText("Edited located review comment", { exact: true }).count(), 0);
+    assert.equal(await page.locator(".memory-comments").getByText("Second located review comment", { exact: true }).count(), 1);
     assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), true);
+    await assertMixed();
+    await defines.locator(":scope > summary").click();
+    await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Collapse comments", exact: true }).click();
+    assert.equal(await defines.evaluate(node => (node as HTMLDetailsElement).open), false, "inline comments must not reopen a deliberately collapsed source");
+    await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Expand comments", exact: true }).click();
+    assert.equal(await defines.locator(".memory-inline-comments").isVisible(), false);
+    await defines.locator(":scope > summary").click();
     await assertMixed();
     const overall = await page.request.post(`${fixture.origin}/api/changes/disclosure-change/comments`, { data: { operator: fixture.comments[0]!.operator, memoryReference: fixture.memory.id, path: fixture.memory.path, body: "Overall review through the supported comment API" } });
     assert.equal(overall.status(), 200);
@@ -1007,6 +1016,158 @@ async function disclosureFixture(freezeBaseline = false) {
   });
   const origin = await listen(server);
   return { origin, server, comments, memory };
+}
+
+test("Created schema diff keeps its block geometry while hovering Added and its section comment button", async () => {
+  const fixture = await createdSchemaFixture(); const browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await page.goto(`${fixture.origin}/projects/demo/changes/change-created`, { waitUntil: "networkidle" });
+    const root = page.locator('.memory-inline-diff-content > [data-anchor="schema"]');
+    await root.waitFor();
+    const before = await root.boundingBox();
+    await page.locator(".memory-inline-diff-label").hover();
+    assert.equal(await root.evaluate(n => getComputedStyle(n).display), "block");
+    assert.deepEqual(await root.boundingBox(), before, "hovering Added must not reflow the document");
+    assert.equal(await root.evaluate(n => n.getBoundingClientRect().width >= n.parentElement!.clientWidth - 1), true);
+    const section = page.locator('[data-anchor="schema.fields[1]"]');
+    await section.locator(":scope > .memory-section-header").hover();
+    await section.locator(":scope > .memory-inline-plus").click();
+    const editor = section.locator(":scope > .memory-section-body > .memory-inline-comment-editor");
+    await editor.locator("textarea").fill("Review this schema field");
+    assert.equal(await editor.getByRole("button", { name: "Submit comment", exact: true }).isEnabled(), true);
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await page.setViewportSize({ width: 500, height: 1000 });
+    assert.equal(await page.locator(".memory-change-main").evaluate(n => n.scrollWidth <= n.clientWidth + 1), true);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Saved section comments follow the section disclosure without hiding the sidebar record", async () => {
+  const fixture = await createdSchemaFixture(); const browser = await browserScope();
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/changes/change-created`, { waitUntil: "networkidle" });
+    const section = page.locator('[data-anchor="schema.fields[1]"]');
+    const header = section.locator(":scope > .memory-section-header");
+    await header.click();
+    assert.equal(await section.evaluate(n => n.classList.contains("open")), false);
+    await header.hover();
+    await section.locator(":scope > .memory-inline-plus").click();
+    const editor = section.locator(":scope > .memory-section-body > .memory-inline-comment-editor");
+    await editor.locator("textarea").fill("Section discussion");
+    await editor.getByRole("button", { name: "Submit comment", exact: true }).click();
+    await editor.waitFor({ state: "detached" });
+    const inline = section.locator(":scope > .memory-section-body > .memory-inline-comments");
+    await inline.getByText("Section discussion", { exact: true }).waitFor();
+    await header.click();
+    assert.equal(await inline.isVisible(), false, "collapsing the section hides its own comments");
+    assert.equal(await page.locator(".memory-comments").getByText("Section discussion", { exact: true }).isVisible(), true);
+    await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Collapse comments", exact: true }).click();
+    await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Expand comments", exact: true }).click();
+    assert.equal(await section.evaluate(n => n.classList.contains("open")), false);
+    assert.equal(await inline.isVisible(), false, "rerendering must not reopen saved comments");
+    await header.click();
+    assert.equal(await inline.getByText("Section discussion", { exact: true }).isVisible(), true);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Saved comments render at their own Memory and source row in both ChangeSet modes", async () => {
+  const fixture = await createdSchemaFixture(); const browser = await browserScope();
+  fixture.comments.push(
+    { id: "legacy", status: "pending", memory_reference: fixture.memory.id, target: "schema.names[2]", body: "Existing alias comment" },
+    { id: "foreign", status: "pending", memory_reference: "schemas/other", location: { anchor: "schema.names[2]" }, body: "Other Memory comment" },
+    { id: "missing", status: "pending", memory_reference: fixture.memory.id, target: "schema.missing", body: "Missing source comment" }
+  );
+  try {
+    const page = await browser.newPage();
+    await page.goto(`${fixture.origin}/projects/demo/changes/change-created`, { waitUntil: "networkidle" });
+    for (const mode of ["Diff", "Full content"]) {
+      await page.getByRole("radio", { name: mode, exact: true }).click();
+      const names = page.locator('details[data-diff-path="schema.names"]');
+      if (!(await names.evaluate(n => (n as HTMLDetailsElement).open))) await names.locator(":scope > summary").click();
+      const row = page.locator('[data-anchor="schema.names[2]"]').locator('..');
+      await row.locator('.memory-commentable').first().hover();
+      await row.locator('.memory-inline-plus').click();
+      const editor = page.locator(".memory-inline-comment-editor");
+      const body = `${mode} alias comment`;
+      await editor.locator("textarea").fill(body);
+      await editor.getByRole("button", { name: "Submit comment", exact: true }).click();
+      await editor.waitFor({ state: "detached" });
+      await row.locator('.memory-inline-comments').getByText(body, { exact: true }).waitFor();
+      assert.equal(await row.locator('.memory-inline-comments').getByText("Existing alias comment", { exact: true }).isVisible(), true);
+      assert.equal(await page.locator('.memory-inline-comments').getByText("Other Memory comment", { exact: true }).count(), 0);
+      assert.equal(await page.locator('.memory-inline-comments').getByText("Missing source comment", { exact: true }).count(), 0);
+      await page.locator('.memory-comments').getByText("Missing source comment", { exact: true }).waitFor();
+      assert.equal(fixture.comments.at(-1)?.memoryReference, fixture.memory.id);
+      assert.equal((fixture.comments.at(-1)?.location as Record<string, unknown>).anchor, "schema.names[2]");
+      await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Collapse comments", exact: true }).click();
+      assert.equal(await row.locator('.memory-inline-comments').isVisible(), true);
+      await page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: "Expand comments", exact: true }).click();
+      await page.reload({ waitUntil: "networkidle" });
+      await page.getByRole("radio", { name: mode, exact: true }).click();
+      if (!(await names.evaluate(n => (n as HTMLDetailsElement).open))) await names.locator(":scope > summary").click();
+      await row.locator('.memory-inline-comments').getByText(body, { exact: true }).waitFor();
+    }
+    await page.locator('.mem-view-list-item').filter({ hasText: 'Other schema' }).click();
+    const names = page.locator('details[data-diff-path="schema.names"]');
+    if (!(await names.evaluate(n => (n as HTMLDetailsElement).open))) await names.locator(":scope > summary").click();
+    await page.locator('.memory-inline-comments').getByText("Other Memory comment", { exact: true }).waitFor();
+    assert.equal(await page.locator('.memory-inline-comments').getByText("Existing alias comment", { exact: true }).count(), 0);
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+test("Terminal or claimed ChangeSets expose saved comments without comment mutation controls", async () => {
+  const fixture = await createdSchemaFixture(); const browser = await browserScope();
+  fixture.comments.push({ id: "saved", status: "pending", memory_reference: fixture.memory.id, location: { anchor: "schema.names[2]" }, body: "Saved before completion" });
+  try {
+    const page = await browser.newPage();
+    for (const state of [{ status: "completed", claimed: false }, { status: "abandoned", claimed: false }, { status: "active", claimed: true }]) {
+      Object.assign(fixture.change, state);
+      await page.goto(`${fixture.origin}/projects/demo/changes/change-created`, { waitUntil: "networkidle" });
+      for (const mode of ["Diff", "Full content"]) {
+        await page.getByRole("radio", { name: mode, exact: true }).click();
+        await page.locator('.memory-comments').getByText('Saved before completion', { exact: true }).waitFor();
+        assert.equal(await page.locator('.memory-inline-plus').count(), 0);
+        assert.equal(await page.locator('.memory-comment-actions').count(), 0);
+        assert.equal(await page.locator('.memory-inline-comment-editor').count(), 0);
+        const names = page.locator('details[data-diff-path="schema.names"]');
+        if (!(await names.evaluate(n => (n as HTMLDetailsElement).open))) await names.locator(":scope > summary").click();
+        assert.equal(await page.locator('.memory-inline-comments').getByText('Saved before completion', { exact: true }).isVisible(), true);
+      }
+    }
+  } finally { await browser.close(); await close(fixture.server); }
+});
+
+async function createdSchemaFixture() {
+  const [bundle, sdk, runtime] = await Promise.all([buildMemoryBundle(), browserModule("../src/view/view-sdk.ts"), browserRuntimeBundle()]);
+  const instances: ViewHostBootInstance[] = [{ pluginPath: memoryBundlePath, routeBasePath: "/", module: { projectId: "demo", moduleId: "org.memsphere.memory", moduleVersion: "0.1.2", instanceId: "memory" } }];
+  const memory = { id: "schemas/created", kind: "schemas", path: "schemas/created.yaml", entity: {
+    names: ["created", "Created schema"], defines: ["Schema definition"], type: "object",
+    fields: [{ names: ["information", "Information"], type: "object", fields: ["Impact"] }]
+  } };
+  const other = { ...memory, id: "schemas/other", path: "schemas/other.yaml", entity: { ...memory.entity, names: ["other", "Other schema"] } };
+  const change = { id: "change-created", status: "active", claimed: false, valid: true, memoryPaths: [memory.path, other.path] };
+  const comments: Record<string, unknown>[] = [];
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://localhost");
+    if (url.pathname === memoryBundlePath) return send(response, 200, "text/javascript", bundle);
+    if (url.pathname === viewSdkBundlePath) return send(response, 200, "text/javascript", sdk);
+    if (url.pathname === viewRuntimeBundlePath) return send(response, 200, "text/javascript", runtime);
+    if (url.pathname === "/api/projects") return json(response, { current: "demo", projects: [{ name: "demo" }] });
+    if (url.pathname === "/api/memories") return json(response, { memories: [] });
+    if (url.pathname === "/api/market/memories") return json(response, { count: 0, memories: [] });
+    if (url.pathname === "/api/changes") return json(response, { changes: [change] });
+    if (url.pathname === "/api/changes/change-created/comments" && request.method === "POST") {
+      let body = ""; for await (const chunk of request) body += chunk;
+      const comment = { id: `comment-${comments.length}`, status: "pending", ...JSON.parse(body) };
+      comments.push(comment); return json(response, { comment });
+    }
+    if (url.pathname === "/api/changes/change-created") return json(response, {
+      change, targetMemories: [memory, other].map(memory => ({ reference: memory.id, operation: "create", memory })), comments
+    });
+    return send(response, 200, "text/html", renderViewHostHtml("en", instances));
+  });
+  return { origin: await listen(server), server, memory, change, comments };
 }
 
 async function buildMemoryBundle(): Promise<string> {
