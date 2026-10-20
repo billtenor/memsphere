@@ -19,7 +19,7 @@
 
 Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更用例放入升级组，其余35项平台保护由core组执行；project-command重型集成用例复用原有安装包job的空闲时间（runner并发上限2，实际一个文件），直接调用测试runner，不再触发pretest重建。full仍由原有矩阵覆盖这份用例，安装包job仅在default追加该文件。不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。39项平台清单位于 `scripts/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
 
-默认CI与Security的整条workflow目标均为300秒（含排队）。原 `scripts/ci-budget.mjs` 保持285秒检查线，为清理预留15秒；测试/打包job仍5分钟超时。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
+不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试/打包及Security仅保留GitHub原生job 5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
 
 ## 合入 master / 发布前完整检查
 
@@ -33,7 +33,7 @@ gh run watch <run-id> --exit-status
 
 必须核验run的head SHA为目标提交；仅看到某次历史full通过不足以证明当前版本可发布。发布前待发布SHA必须具备成功的full记录，失败或缺失不得声明可发布。当前没有自动发布流水线，此项是维护者的发布要求，不宣称已建立平台强制发布门禁。
 
-full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包。每个OS对所有保留文件恰好执行一次；各行原有2–4文件进程数不变，单job10分钟有界超时。它验证跨平台质量，不适用PR五分钟反馈预算；该预算作业明确不适用，而不是伪报为成功。`Full cross-platform regression`必须等全部测试/打包成功才成功。
+full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包。每个OS对所有保留文件恰好执行一次；各行原有2–4文件进程数不变，full测试/打包job采用20分钟有界超时，full汇总job采用5分钟。它验证跨平台质量，没有整条workflow五分钟预算。正常执行远低于20分钟；额外余量容纳已观察到的runner收尾长尾，不改变测试失败结果。`Full cross-platform regression`必须等全部测试/打包成功才成功。
 
 default按PR号或ref分组，继续取消同目标旧default运行。full按run ID独立分组且不取消，保证连续master push不会挤掉旧pending full，与default互不取消。bootstrap独立，不能提供full证明。合入后full会暴露未进入PR平台集的OS组合故障，失败阻拦后续PR，修复PR可手动验证其自身full再解锁。无合入时不主动检测依赖或runner变化，仍可手动触发full。full触发自身失败也必须处理。
 

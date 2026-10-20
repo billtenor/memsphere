@@ -48,7 +48,7 @@ jobs:
     needs: plan
     name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 10 || 5 }}
+    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -84,7 +84,7 @@ jobs:
     needs: plan
     name: Windows packaged CLI shells
     runs-on: windows-latest
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 10 || 5 }}
+    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     env:
       MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
     steps:
@@ -152,30 +152,12 @@ jobs:
           path: ci-results
           if-no-files-found: error
 
-  budget:
-    name: CI five-minute budget
-    runs-on: ubuntu-24.04
-    needs: [plan, test, windows-package-smoke]
-    if: always() && needs.plan.outputs.profile == 'default'
-    timeout-minutes: 1
-    steps:
-      - uses: actions/checkout@v7
-      - name: Require all tests and the full workflow to meet the budget
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          TEST_RESULT: ${{ needs.test.result }}
-          PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
-        run: |
-          node scripts/ci-budget.mjs
-          test "$TEST_RESULT" = success
-          test "$PACKAGE_RESULT" = success
-
   full-result:
     name: Full cross-platform regression
     runs-on: ubuntu-24.04
     needs: [plan, test, windows-package-smoke]
     if: always() && needs.plan.outputs.profile == 'full'
-    timeout-minutes: 1
+    timeout-minutes: 5
     steps:
       - env:
           TEST_RESULT: ${{ needs.test.result }}

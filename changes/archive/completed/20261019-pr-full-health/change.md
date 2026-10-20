@@ -12,7 +12,7 @@ run_id: run-20261019-131051z-f3f21f57
 取消每日定时full，改为每次合入master（push master）后运行full，把master最新提交的full健康状态作为后续PR合入门禁，避免依赖Human主动查看结果。用户明确选择：master full失败时，该PR最新提交的full成功即可解锁，避免修复PR死锁。
 
 ## 当前迭代范围
-1. 去掉CI schedule。普通PR保持default精简覆盖与五分钟预算；push master使用full，workflow_dispatch仍可手动选择default/full。每次master推送的full都执行，不以取消旧运行优化开销。
+1. 去掉CI schedule。普通PR保持default精简覆盖与原生job五分钟超时；push master使用full，workflow_dispatch仍可手动选择default/full。每次master推送的full都执行，不以取消旧运行优化开销。
 2. 稳定门禁 `Full health / master`：master最新提交的有效full排队/执行中时，后续PR等待（pending）；非成功时拦截；成功允许。新master提交尚未出现full运行时也等待，不能借上一个提交的绿灯放行。API错误为error，无full记录不得伪报成功。
 3. 用户授权修复解锁：该PR当前head对应最新有效full成功可解锁master等待/失败/无记录；旧head或其他SHA的成功不适用。当前head自己的最新full排队/运行时等待，完成为非成功时拦截，即使master成功也不能冒充通过。
 4. master full只认当前仓库固定CI workflow身份、push master或手动master full；PR head full只认该head有效full。default与bootstrap不属于full。候选最新按created_at、run ID降序；重跑以最新attempt为准，进行中明确等待，保留之前失败证据且不回退较旧绿灯。成功必须整run及实际执行的full汇总均success；失败、取消、超时等都拦截。
@@ -79,3 +79,7 @@ statements/memsphere-repository-requirement-rules（独立兼容决策）、stat
 已落实v5：移除schedule、master push full；运行/未登记等待、失败阻拦、当前PR head full成功解锁；可信master发布器和受控owner精确SHA首次bootstrap，规则仅追加稳定context与Actions15368来源。
 Human方案第2轮、成果第1轮均正式通过；成果review-20261019-145546z-7665bec8由Runner接纳。研发发现的排队旧event SHA与实时checkout不同的竞态已修复，真实CLI回归证明撤旧success为pending；研发blocking与架构risk均accepted-fixed记录。
 最终本地npm test：150文件，1239通过、2平台跳过、0失败，372.42秒；受影响15项、typecheck、build、Store校验通过。无Memory差异，不创建空ChangeSet。当前阶段完成实现/验证/成果验收并归档，整个Run仍等待PR CI、真实规则接线及Human合入确认；不能将本地验收当成线上生效。
+
+
+## Human确认的CI策略修订（2026-10-20，v6）
+Human明确同意去掉把排队计入失败的整体五分钟预算，并授权依据full数据适当放宽10分钟job超时。删除CI预算job、Security预算step及脚本；default与Security仍原生job5分钟，full测试/打包20分钟、full汇总5分钟。整体耗时仅观察，失败断言/覆盖/构建数量不变，API失败直接error无退避。依据与原话已在当前Run CI跟进受管产物记录；旧固定285/300秒约束由本次确认替代。此前full macOS步骤58秒结束后出现569秒收尾空档并被10分钟上限取消，调试重跑87秒成功，故扩展有界余量以容纳runner长尾，不能冒称测试本身耗时10分钟。

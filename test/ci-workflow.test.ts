@@ -74,9 +74,9 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(workflow.jobs.test.strategy.matrix, "${{ fromJSON(needs.plan.outputs.matrix) }}");
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").run, 'node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"');
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").env.CI_PROFILE, "${{ inputs.profile || 'default' }}");
-  assert.equal(workflow.jobs.budget.if, "always() && needs.plan.outputs.profile == 'default'");
+  assert.equal(workflow.jobs.budget, undefined, "queueing is not a failure");
   assert.equal(workflow.jobs["full-result"].if, "always() && needs.plan.outputs.profile == 'full'");
-  for (const name of ["budget", "full-result"]) {
+  for (const name of ["full-result"]) {
     assert.deepEqual(workflow.jobs[name].needs, ["plan", "test", "windows-package-smoke"]);
     const result = workflow.jobs[name].steps.at(-1);
     assert.equal(result.env.TEST_RESULT, "${{ needs.test.result }}");
@@ -84,8 +84,12 @@ test("CI separates full and default cancellation, trigger and result policies", 
     assert.match(result.run, /test "\$TEST_RESULT" = success/);
     assert.match(result.run, /test "\$PACKAGE_RESULT" = success/);
   }
-  assert.match(workflow.jobs.budget.steps.at(-1).run, /node scripts\/ci-budget.mjs/);
-  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 10 || 5 }}");
+  const security = parse(await readFile(".github/workflows/security.yml", "utf8"));
+  assert.equal(security.jobs.gitleaks["timeout-minutes"], 5);
+  assert.equal(security.jobs.gitleaks.steps.some(step => step.run?.includes("ci-budget")), false);
+  assert.equal(workflow.jobs["full-result"]["timeout-minutes"], 5);
+  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
+  assert.equal(workflow.jobs["windows-package-smoke"]["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
   const steps = workflow.jobs.test.steps;
   const browserInstall = steps.find(step => step.name === "Install Playwright Chromium");
   assert.equal(browserInstall.if, "matrix.browser");

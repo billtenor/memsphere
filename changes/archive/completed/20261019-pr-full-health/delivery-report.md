@@ -19,3 +19,24 @@
 实现/验证/成果验收已完成，需求记录移至changes/archive/completed/20261019-pr-full-health，移除active状态并记录completed_at。整个Run未完成。后续按当前Run commit、更新既有PR108、跟进最终head default/full/Security，之后在CI跟进Agent步骤完成required context missing阻拦→owner精确SHA bootstrap真实success恢复、身份/规则回读。异常仅撤本轮新增context，保留其他规则；不伪造full失败、不创建额外测试PR/分支。
 
 自动事件工作流合入master后才正式部署，合入前只声称模拟事件、真实只读和bootstrap接线。GitHub事件/状态API有传播窗口，不能与点击合入原子同步；API读取失败error，写入服务本身故障时工作流失败并暴露无法刷新。无合入时不主动发现环境变化，仍可手动full；不新增过期策略或外部通知系统。最终Human合入并确认无问题后，再验证实际merged、完整纳入与安全清理本地分支。Agent不合入或开启自动合入。
+
+
+## 2026-10-20 Human确认修订
+取消整体五分钟预算（含Security同类step）；default/Security保留原生job5分钟，full测试/打包20分钟、full汇总5分钟，排队不作为失败。依据、原话及修订范围已记录于当前Run CI跟进产物，替代历史预算约束。API不增加退避重试，测试覆盖和8次PR构建不变。修订后的当前head仍须完成本地/远端验证和真实接线。
+
+
+## CI耗时调查与超时选择依据
+
+| 运行 / job | job总时长 | 最后步骤完成后的空档 | 结果 |
+|---|---:|---:|---|
+| default第2轮 Windows core | 396秒 | 185秒 | 取消 |
+| default第2轮 Windows upgrades | 334秒 | 77秒 | 取消 |
+| default第2轮 macOS platform | 317秒 | 111秒 | 取消 |
+| full macOS runtime | 627秒 | 569秒 | 10分钟超时 |
+| full汇总 | 154秒 | 153秒 | 1分钟超时 |
+| 定向调试复跑 macOS runtime | 87秒 | 约2秒 | 成功 |
+| 定向调试复跑 full汇总 | 2秒 | 约1秒 | 成功 |
+
+full异常macOS runtime实际81文件38.75秒、0失败，所有步骤58秒结束；同源码复跑成功。因此观察到的异常集中在步骤之后，并非测试需要运行十分钟。对齐GitHub runner v2.337.0官方源码，后续还有进程检查、日志队列排空、临时目录清理和CompleteJob结果上报；成功调试没有复现失败长尾，不能凭此声称已查明或修复其中某个内部根因。20分钟full/5分钟汇总用于容纳已观察到的收尾波动，仍有明确终止界限；default5分钟不变。整体含排队时间只观察，API失败不增加重试，测试断言不变。
+
+本次v6最终验证：npm test 150文件、1239通过、2平台跳过、0失败，362.10秒；构建（pretest）、typecheck、Store校验和15项受影响验证通过，git diff --check通过。远端验证必须使用v6提交的新head，旧head调试成功仅作为耗时诊断依据。
