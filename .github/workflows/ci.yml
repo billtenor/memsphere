@@ -1,46 +1,57 @@
 name: CI
+run-name: ${{ inputs.full_health_bootstrap && 'Full health bootstrap' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
 
 on:
   pull_request:
   push:
     branches: [master]
   workflow_dispatch:
+    inputs:
+      profile:
+        description: Default PR checks or complete cross-platform regression
+        type: choice
+        options: [default, full]
+        default: full
+      full_health_bootstrap:
+        description: Owner only, first-install status publisher (no builds)
+        type: boolean
+        default: false
+      reviewed_sha:
+        description: Exact architect-reviewed SHA required for first install
+        type: string
 
 permissions:
   contents: read
   actions: read
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.workflow }}-${{ inputs.full_health_bootstrap && 'bootstrap' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'full' || 'default') }}-${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && github.run_id || (github.event.pull_request.number || github.ref) }}
+  cancel-in-progress: ${{ !inputs.full_health_bootstrap && github.event_name != 'push' && !(github.event_name == 'workflow_dispatch' && inputs.profile == 'full') }}
 
 jobs:
+  plan:
+    if: ${{ !inputs.full_health_bootstrap }}
+    name: Select CI profile
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      profile: ${{ steps.plan.outputs.profile }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: plan
+        env:
+          CI_PROFILE: ${{ inputs.profile || 'default' }}
+        run: node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"
+
   test:
+    needs: plan
     name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Pin Linux to a Playwright-supported image; latest can advance before browser support.
-          - { os: ubuntu-24.04, suite: browser, title: "Browser UI", workers: 3, browser: true }
-          - { os: ubuntu-24.04, suite: cli, title: "CLI & Packaging", workers: 3, browser: false }
-          - { os: ubuntu-24.04, suite: memory-and-projects, title: "Projects & Memory", workers: 2, browser: true }
-          - { os: ubuntu-24.04, suite: runtime-core, title: "Run, Data & SDK", workers: 2, browser: false }
-          - { os: macos-latest, suite: model-ui, title: "Models & Settings UI", workers: 3, browser: true }
-          - { os: macos-latest, suite: review-ui, title: "Review & Shell UI", workers: 3, browser: true }
-          - { os: macos-latest, suite: cli, title: "CLI & Packaging", workers: 4, browser: false }
-          - { os: macos-latest, suite: memory-and-projects, title: "Projects & Memory", workers: 3, browser: true }
-          - { os: macos-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 3, browser: false }
-          - { os: windows-latest, suite: model-ui, title: "Models & Settings UI", workers: 2, browser: true }
-          - { os: windows-latest, suite: review-ui, title: "Review & Shell UI", workers: 3, browser: true }
-          - { os: windows-latest, suite: memory-cli, title: "Memory & Project CLI", workers: 2, browser: false }
-          - { os: windows-latest, suite: app-cli, title: "App, Model & Data CLI", workers: 2, browser: false }
-          - { os: windows-latest, suite: project-core, title: "Project Lifecycle", workers: 3, browser: false }
-          - { os: windows-latest, suite: project-upgrade, title: "Project Upgrades", workers: 3, browser: false }
-          - { os: windows-latest, suite: memory-core, title: "Memory Stores & Changes", workers: 2, browser: true }
-          - { os: windows-latest, suite: runtime-core, title: "Run, Data & SDK", workers: 3, browser: false }
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
     steps:
@@ -49,6 +60,10 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - name: Reuse Node compilation within this job
+        if: runner.os == 'Windows'
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - run: npm ci
       - name: Install Playwright Chromium
         if: matrix.browser
@@ -66,9 +81,10 @@ jobs:
           if-no-files-found: error
 
   windows-package-smoke:
+    needs: plan
     name: Windows packaged CLI shells
     runs-on: windows-latest
-    timeout-minutes: 5
+    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     env:
       MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
     steps:
@@ -79,6 +95,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - name: Pack and install
         shell: pwsh
         run: |
@@ -120,20 +139,52 @@ jobs:
           cd ".ci windows project"
           ../.ci-install/node_modules/.bin/memsphere view status
 
-  budget:
-    name: CI five-minute budget
-    runs-on: ubuntu-24.04
-    needs: [test, windows-package-smoke]
-    if: always()
-    timeout-minutes: 1
-    steps:
-      - uses: actions/checkout@v7
-      - name: Require all tests and the full workflow to meet the budget
+      - name: Native platform contracts
+        if: needs.plan.outputs.profile == 'default'
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          CI_TEST_RESULTS: ci-results/windows-latest-package-platform.json
+        run: node scripts/run-tests.mjs --suite=package-platform --test-concurrency=2
+      - name: Preserve native contract timings
+        if: always() && needs.plan.outputs.profile == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-windows-latest-package-platform
+          path: ci-results
+          if-no-files-found: error
+
+  full-result:
+    name: Full cross-platform regression
+    runs-on: ubuntu-24.04
+    needs: [plan, test, windows-package-smoke]
+    if: always() && needs.plan.outputs.profile == 'full'
+    timeout-minutes: 5
+    steps:
+      - env:
           TEST_RESULT: ${{ needs.test.result }}
           PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
         run: |
-          node scripts/ci-budget.mjs
           test "$TEST_RESULT" = success
           test "$PACKAGE_RESULT" = success
+
+  full-health-bootstrap:
+    name: First-install full health publisher
+    if: github.event_name == 'workflow_dispatch' && inputs.full_health_bootstrap && github.actor == github.repository_owner && inputs.reviewed_sha == github.sha
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+        run: node scripts/full-health.mjs --bootstrap --publish

@@ -98,3 +98,38 @@ test("renderMarkdownContent renders GFM blocks while escaping unsafe HTML and li
   assert.doesNotMatch(rendered, /<script>/);
   assert.doesNotMatch(rendered, /href="javascript:/);
 });
+
+
+test("Memory API identifies installed system memory independently of its file path", async t => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-system-memory-api-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const memoryRoot = join(root, "memory");
+  await mkdir(join(memoryRoot, "concepts"), { recursive: true });
+  await writeFile(join(memoryRoot, "concepts/memory-8aaf6c34fc49.yaml"), withCurrentMemorySyntax(
+    "!concept\nnames: [memsphere-memory, Memory]\ndefines: [System fixture]\n"
+  ));
+  await writeFile(join(memoryRoot, "concepts/user-note.yaml"), withCurrentMemorySyntax(
+    "!concept\nnames: [user-note]\ndefines: [User fixture]\n"
+  ));
+  const config: MemsphereConfig = {
+    configPath: join(root, "config.json"), scopeRoot: root, homeRoot: root,
+    language: "en", memoryRoot, runsRoot: join(root, "runs"), archiveRoot: join(root, "archives"),
+    debug: { agentReview: false, root: join(root, ".runtime") }, view: { host: "127.0.0.1", port: 0 }
+  };
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise<void>(resolve => server.close(() => resolve())));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const response = await fetch(`${url}/api/memories`);
+  const payload = await response.json() as {
+    memories: Array<{ path: string; system: boolean; entity?: { names?: string[] } }>;
+    systemMemoryPaths?: unknown;
+  };
+  assert.equal(response.status, 200);
+  assert.equal(Object.hasOwn(payload, "systemMemoryPaths"), false);
+  const systemMemory = payload.memories.find(memory => memory.entity?.names?.[0] === "memsphere-memory");
+  assert.equal(systemMemory?.path, "concepts/memory-8aaf6c34fc49.yaml");
+  assert.equal(systemMemory?.system, true);
+  const userMemory = payload.memories.find(memory => memory.entity?.names?.[0] === "user-note");
+  assert.equal(userMemory?.system, false);
+});

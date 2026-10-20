@@ -414,6 +414,8 @@ test("Shell panel widths support pointer drag, reload persistence, keyboard adju
       const contentList = page.locator('[data-view-resizer="content-list"]');
       await secondary.waitFor();
       await contentList.waitFor();
+      assert.deepEqual(await secondary.evaluate(node => [node.getAttribute("aria-valuemin"), node.getAttribute("aria-valuemax")]), ["176", "360"]);
+      assert.deepEqual(await contentList.evaluate(node => [node.getAttribute("aria-valuemin"), node.getAttribute("aria-valuemax")]), ["260", "520"]);
 
       const initialSecondary = Number(await secondary.getAttribute("aria-valuenow"));
       const secondaryBox = await secondary.boundingBox();
@@ -840,23 +842,6 @@ test("Memory navigation uses aliases while the detail header exposes the canonic
     } finally {
       await page.close();
     }
-  });
-});
-
-test("Memory API identifies installed system memory independently of its file path", async () => {
-  await withResponsiveView(async (_browser, url) => {
-    const response = await fetch(`${url}/api/projects/responsive/memories`);
-    const payload = await response.json() as {
-      memories: Array<{ path: string; system: boolean; entity?: { names?: string[] } }>;
-      systemMemoryPaths?: unknown;
-    };
-    assert.equal(response.status, 200);
-    assert.equal(Object.hasOwn(payload, "systemMemoryPaths"), false);
-    const systemMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "memsphere-memory");
-    assert.equal(systemMemory?.path, "concepts/memory-8aaf6c34fc49.yaml");
-    assert.equal(systemMemory?.system, true);
-    const userMemory = payload.memories.find((memory) => memory.entity?.names?.[0] === "user-note");
-    assert.equal(userMemory?.system, false);
   });
 });
 

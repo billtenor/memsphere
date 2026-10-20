@@ -62,7 +62,16 @@ test("View keeps Project selection in the URL and isolates concurrent Project re
       ]);
       const memoryHome = page.locator(".view-home-module-grid").getByRole("button", { name: /^记忆/ });
       await memoryHome.waitFor();
+      const homeLink = page.locator(".view-shell-project-home");
+      assert.equal(await homeLink.getAttribute("href"), "/");
+      const projectMenu = page.locator("[data-view-project-menu-trigger]");
+      assert.equal(await projectMenu.getAttribute("aria-haspopup"), "menu");
+      assert.equal(await homeLink.evaluate((link, menu) => link !== menu, await projectMenu.elementHandle()), true);
       assert.equal(await page.locator(".view-host-module-error").count(), 0);
+      await memoryHome.click();
+      await page.waitForURL(`${origin}/projects/alpha/memories`);
+      await homeLink.click();
+      await page.waitForURL(`${origin}/projects/alpha`);
       await memoryHome.click();
       await page.waitForURL(`${origin}/projects/alpha/memories`);
       await Promise.all([
@@ -70,6 +79,7 @@ test("View keeps Project selection in the URL and isolates concurrent Project re
         betaPage.getByRole("button", { name: /beta-memory/ }).waitFor()
       ]);
       await page.locator("#view-shell-project-trigger").click();
+      assert.equal(await page.locator(".view-shell-project-current").count(), 1);
       await page.locator("#view-shell-project-menu").getByRole("menuitem", { name: "beta", exact: true }).click();
       await page.waitForLoadState("networkidle");
       await page.getByRole("button", { name: /beta-memory/ }).waitFor();
