@@ -1,5 +1,5 @@
 name: CI
-run-name: ${{ inputs.full_health_bootstrap && 'Full health bootstrap' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
+run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
 
 on:
   pull_request:
@@ -167,7 +167,7 @@ jobs:
           test "$PACKAGE_RESULT" = success
 
   full-health-bootstrap:
-    name: First-install full health publisher
+    name: First-install merge gate publisher
     if: github.event_name == 'workflow_dispatch' && inputs.full_health_bootstrap && github.actor == github.repository_owner && inputs.reviewed_sha == github.sha
     runs-on: ubuntu-24.04
     timeout-minutes: 3

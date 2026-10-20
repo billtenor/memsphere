@@ -1,4 +1,5 @@
-name: Full health
+name: Update PR merge gate
+run-name: Update PR merge gate (${{ github.event_name == 'workflow_run' && format('CI {0}', github.event.action) || github.event_name == 'push' && 'master updated' || github.event_name == 'pull_request_target' && format('PR {0}', github.event.action) || 'manual refresh' }})
 
 on:
   pull_request_target:
@@ -24,7 +25,7 @@ concurrency:
 
 jobs:
   refresh:
-    name: Refresh PR full health
+    name: Publish merge gate status (no tests)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -35,9 +36,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Publish current full health
+      - name: Query full regression and update PR statuses
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # Temporary rollout bridge; remove the repository variable after ruleset cutover.
+          FULL_HEALTH_PUBLISH_LEGACY: ${{ vars.FULL_HEALTH_PUBLISH_LEGACY }}
         run: |
           export CHECKED_OUT_SHA="$(git rev-parse HEAD)"
           node scripts/full-health.mjs --publish

@@ -6,7 +6,7 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { parse } from "yaml";
 import {
-  ACTIONS_APP_ID, CONTEXT, FULL_JOB, REPOSITORY, WORKFLOW_ID, computeHealth, createApi,
+  ACTIONS_APP_ID, CONTEXT, LEGACY_CONTEXT, FULL_JOB, REPOSITORY, WORKFLOW_ID, computeHealth, createApi,
   decideHealth, fullEvidence, refreshHealth, requiredCheckRules, verifyBootstrap
 } from "../scripts/full-health.mjs";
 
@@ -25,6 +25,7 @@ const summary = (conclusion = "success") => ({ name: FULL_JOB, status: "complete
 // A real HTTP boundary verifies query strings, pagination and status payloads without GitHub credentials.
 async function fixture(t: any, options: any = {}) {
   const posts: any[] = [];
+  const statusAttempts: any[] = [];
   const paths: string[] = [];
   const pulls = options.pulls || [{ number: 108, state: "open", head: { sha }, base: { ref: "master" } }];
   const server = createServer(async (req, res) => {
@@ -38,8 +39,10 @@ async function fixture(t: any, options: any = {}) {
     else if (req.method === "POST") {
       let raw = "";
       for await (const chunk of req) raw += chunk;
-      posts.push({ sha: path.split("/").at(-1), ...JSON.parse(raw) });
-      value = {};
+      const post = { sha: path.split("/").at(-1), ...JSON.parse(raw) };
+      statusAttempts.push(post);
+      if (options.rejectPost?.(post)) { status = 503; value = { message: "Status write unavailable" }; }
+      else { posts.push(post); value = {}; }
     } else if (path === "") value = { full_name: REPOSITORY, default_branch: "master" };
     else if (path === "/actions/workflows/ci.yml") value = { id: WORKFLOW_ID, path: ".github/workflows/ci.yml" };
     else if (path === "/git/ref/heads/master") value = { object: { sha: options.master?.() || master } };
@@ -55,7 +58,7 @@ async function fixture(t: any, options: any = {}) {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve())));
   const address: any = server.address();
-  return { api: createApi({ token: "fixture", apiUrl: `http://127.0.0.1:${address.port}` }), endpoint: `http://127.0.0.1:${address.port}`, posts, paths };
+  return { api: createApi({ token: "fixture", apiUrl: `http://127.0.0.1:${address.port}` }), endpoint: `http://127.0.0.1:${address.port}`, posts, statusAttempts, paths };
 }
 
 test("PR repair proof wins; pending and failed full never borrow an older green result", () => {
@@ -76,7 +79,7 @@ test("Only this repository's genuine full can supply success, including failure 
   }
   assert.equal((await fullEvidence(api, run(1))).state, "success");
   for (const overrides of [
-    { display_title: "CI (default)" }, { display_title: "Full health bootstrap" },
+    { display_title: "CI (default)" }, { display_title: "Full health bootstrap" }, { display_title: "Initialize PR merge gate" },
     { workflow_id: 1 }, { repository: { full_name: "elsewhere/repo" } }, { event: "pull_request" },
     { event: "push", head_branch: "feature" }
   ]) assert.equal(await fullEvidence(api, run(1, master, overrides)), undefined);
@@ -167,6 +170,74 @@ test("API/identity failures produce error statuses, never stale success; dry run
   assert.equal(f.posts.length, 0);
 });
 
+test("Renamed merge gate publishes only its new status unless the temporary rollout bridge is enabled", async t => {
+  assert.equal(CONTEXT, "Merge gate / full regression");
+  for (const state of ["success", "pending", "failure"]) {
+    const runs = [run(1, master, state === "pending" ? { status: "in_progress", conclusion: null }
+      : { conclusion: state })];
+    const { api, posts } = await fixture(t, { runs });
+    await refreshHealth(api, { publish: true, env: { FULL_HEALTH_PUBLISH_LEGACY: "true" } });
+    for (let i = 0; i < posts.length; i += 2) {
+      assert.equal(posts[i].context, LEGACY_CONTEXT, "revoke the still-required old gate first");
+      assert.deepEqual(posts[i + 1], { ...posts[i], context: CONTEXT });
+    }
+    assert.equal(posts.at(-1).state, state);
+    for (const value of [undefined, "", "false", "TRUE"]) {
+      const start = posts.length;
+      await refreshHealth(api, { publish: true, env: { FULL_HEALTH_PUBLISH_LEGACY: value } });
+      assert(posts.slice(start).every(p => p.context === CONTEXT), "only exact true enables dual publication");
+    }
+    const beforeDryRun = posts.length;
+    await refreshHealth(api, { env: { FULL_HEALTH_PUBLISH_LEGACY: "true" } });
+    assert.equal(posts.length, beforeDryRun);
+  }
+});
+
+test("Rollout marks both status names as error on identity or per-PR lookup failure", async t => {
+  for (const broken of ["/actions/workflows/ci.yml", "/actions/workflows/335696122/runs"]) {
+    const { api, posts } = await fixture(t, { runs: [run(1)], reply: (p: string) => p === broken && { status: 503, value: {} } });
+    await assert.rejects(refreshHealth(api, { publish: true, env: { FULL_HEALTH_PUBLISH_LEGACY: "true" } }), /HTTP 503/);
+    assert.deepEqual(posts.slice(0, 2).map(p => [p.context, p.state]), [[LEGACY_CONTEXT, "pending"], [CONTEXT, "pending"]]);
+    assert.deepEqual(posts.slice(-2).map(p => [p.context, p.state]), [[LEGACY_CONTEXT, "error"], [CONTEXT, "error"]]);
+    assert.equal(posts.some(p => p.state === "success"), false);
+  }
+});
+
+test("Partial status write failure stops rollout without retrying or leaving the writable old gate stale", async t => {
+  const env = { FULL_HEALTH_PUBLISH_LEGACY: "true" };
+  for (const context of [LEGACY_CONTEXT, CONTEXT]) {
+    const f = await fixture(t, { runs: [run(1)], rejectPost: (p: any) => p.context === context && p.state === "pending" });
+    await assert.rejects(refreshHealth(f.api, { publish: true, env }), /HTTP 503/);
+    assert.deepEqual(f.statusAttempts.map(p => p.context), [LEGACY_CONTEXT, CONTEXT], "attempt each independent revocation once");
+    assert.equal(f.posts.some(p => p.state === "success"), false);
+    if (context === CONTEXT) assert.equal(f.posts.at(-1).state, "pending", "new-name failure leaves the old required gate blocked");
+    else assert.equal(f.posts.some(p => p.context === LEGACY_CONTEXT), false, "if the old status API itself rejects writes, revocation cannot be guaranteed");
+    assert.equal(f.paths.some(p => p.startsWith("/actions/")), false, "no health query or success after pending write failure");
+  }
+  for (const context of [LEGACY_CONTEXT, CONTEXT]) {
+    const f = await fixture(t, { runs: [run(1)], rejectPost: (p: any) => p.context === context && p.state === "success" });
+    await assert.rejects(refreshHealth(f.api, { publish: true, env }), /HTTP 503/);
+    assert.equal(f.statusAttempts.filter(p => p.context === context && p.state === "success").length, 1);
+    for (const name of [LEGACY_CONTEXT, CONTEXT]) assert.equal(f.posts.filter(p => p.context === name).at(-1).state, "error");
+  }
+});
+
+test("Rollout revokes every writable PR gate before reporting a partial status write failure", async t => {
+  const pulls = [sha, old].map((head, i) => ({ number: 108 + i, state: "open", base: { ref: "master" }, head: { sha: head } }));
+  for (const brokenContext of [LEGACY_CONTEXT, CONTEXT]) {
+    const f = await fixture(t, { pulls, runs: [run(1)],
+      rejectPost: (p: any) => p.sha === sha && p.context === brokenContext });
+    await assert.rejects(refreshHealth(f.api, { publish: true, env: { FULL_HEALTH_PUBLISH_LEGACY: "true" } }), /HTTP 503/);
+    assert.deepEqual(f.statusAttempts.map(p => [p.sha, p.context]), [
+      [sha, LEGACY_CONTEXT], [old, LEGACY_CONTEXT], [sha, CONTEXT], [old, CONTEXT]
+    ]);
+    assert.equal(f.posts.filter(p => p.sha === old && p.context === LEGACY_CONTEXT).at(-1).state, "pending");
+    if (brokenContext === CONTEXT) assert.equal(f.posts.filter(p => p.sha === sha && p.context === LEGACY_CONTEXT).at(-1).state, "pending");
+    assert(f.posts.every(p => p.state === "pending"));
+    assert.equal(f.paths.some(p => p.startsWith("/actions/")), false, "failed revocation never proceeds to health queries");
+  }
+});
+
 test("Bootstrap requires explicit owner and reviewed SHA, and retires after master installation", async t => {
   const { api } = await fixture(t);
   const env = { GITHUB_EVENT_NAME: "workflow_dispatch", GITHUB_ACTOR: "billtenor", GITHUB_SHA: sha, REVIEWED_SHA: sha };
@@ -198,6 +269,12 @@ test("Required context binds Actions without changing existing protections; roll
 
 test("Publisher always checks out trusted master, uses minimal permissions and never executes PR assets", async () => {
   const health = parse(await readFile(".github/workflows/full-health.yml", "utf8"));
+  assert.equal(health.name, "Update PR merge gate");
+  assert.match(health["run-name"], /Update PR merge gate.*github\.event\.action/);
+  for (const label of ["format('CI {0}', github.event.action)", "'master updated'", "format('PR {0}', github.event.action)", "'manual refresh'"]) {
+    assert(health["run-name"].includes(label), `missing human-readable event label: ${label}`);
+  }
+  assert.equal(health.jobs.refresh.name, "Publish merge gate status (no tests)");
   assert.deepEqual(health.on.workflow_run.types, ["requested", "in_progress", "completed"]);
   assert.deepEqual(health.on.push.branches, ["master"]);
   assert.deepEqual(health.on.pull_request_target.branches, ["master"]);
@@ -210,6 +287,7 @@ test("Publisher always checks out trusted master, uses minimal permissions and n
   assert.equal(steps.some((s: any) => /npm |download-artifact|cache@/.test(s.run || s.uses || "")), false);
   assert.notEqual(health.jobs.refresh.name, CONTEXT);
   assert.match(steps.at(-1).run, /export CHECKED_OUT_SHA="\$\(git rev-parse HEAD\)"/);
+  assert.equal(steps.at(-1).env.FULL_HEALTH_PUBLISH_LEGACY, "${{ vars.FULL_HEALTH_PUBLISH_LEGACY }}");
   const ci = parse(await readFile(".github/workflows/ci.yml", "utf8"));
   const bootstrap = ci.jobs["full-health-bootstrap"];
   assert.match(bootstrap.if, /github.actor == github.repository_owner/);
