@@ -460,7 +460,7 @@ node scripts/model-data-smoke.mjs
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing. For security issues, see [SECURITY.md](SECURITY.md).
 
-CI uses Node 22 LTS to run all automated tests on Linux, macOS and Windows, including native cross-process file locks and the model/data CLI. The Windows package check verifies the CLI in all four supported shells. The model/data CLI and installed-package smoke scripts are also available for manual runs.
+CI uses Node 22: PRs run the complete retained suite on Linux, native platform contracts on macOS/Windows, and installed-package Windows shell smoke tests. Full runs after merges into master and before releases cover all three platforms. Subsequent PRs wait for master full and are blocked on failure; a successful full on the repair PR’s current head unlocks it. See [CI profiles and test audit](docs/ci-performance.md) for commands, coverage tradeoffs and cost measurements.
 
 ## 9. License
 

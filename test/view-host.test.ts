@@ -25,33 +25,6 @@ const viewSdkBundle = await transpileBrowserModule("../src/view/view-sdk.ts");
 const systemIconBundle = await transpileBrowserModule("../src/view/system-icon.ts");
 const viewRuntimeBundle = await browserRuntimeBundle();
 
-test("ViewHost document boots the builtin Module instances in catalog order", () => {
-  const instances = builtinModuleCatalog.map(entry => bootInstance(
-    entry.moduleId,
-    entry.instanceId,
-    `/assets/modules/${entry.moduleId}/index.js`,
-    entry.routes
-  ));
-  const html = renderViewHostHtml("en", instances);
-  const bootSource = html.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
-  assert(bootSource);
-  const boot = JSON.parse(bootSource);
-
-  assert.equal(boot.locale, "en");
-  assert.equal(boot.runtimePath, viewRuntimeBundlePath);
-  assert.deepEqual(
-    boot.instances.map((instance: { module: { moduleId: string } }) => instance.module.moduleId),
-    builtinModuleCatalog.map(entry => entry.moduleId)
-  );
-  assert.deepEqual(boot.instances.map((instance: { routeGrants: unknown }) => instance.routeGrants), builtinModuleCatalog.map(entry => entry.routes));
-  assert.equal(boot.messages["common.refresh"], "Refresh");
-  assert.match(html, /id="memsphere-view-root"/);
-  assert.match(html, /"@memsphere\/view-sdk":"\/assets\/view-sdk\.js"/);
-  assert.match(html, /import\(instance\.pluginPath\)/);
-  assert.match(html, /runtimeModule\.startViewHost/);
-  assert.doesNotMatch(html, /legacy-view\.js|org\.memsphere\.legacy-view/);
-});
-
 test("View server serves Host, SDK, Runtime, and all builtin bundles without serving retired assets", async () => {
   const server = createViewServer({ language: "en" } as MemsphereConfig);
   const origin = await listen(server);
@@ -64,6 +37,13 @@ test("View server serves Host, SDK, Runtime, and all builtin bundles without ser
     const bootSource = host.match(/<script id="memsphere-view-boot" type="application\/json">([\s\S]*?)<\/script>/)?.[1];
     assert(bootSource);
     const boot = JSON.parse(bootSource);
+    assert.equal(boot.locale, "en");
+    assert.equal(boot.runtimePath, viewRuntimeBundlePath);
+    assert.deepEqual(boot.instances.map((instance: ViewHostBootInstance) => instance.routeGrants), builtinModuleCatalog.map(entry => entry.routes));
+    assert.equal(boot.messages["common.refresh"], "Refresh");
+    assert.match(host, /id="memsphere-view-root"/);
+    assert.match(host, /"@memsphere\/view-sdk":"\/assets\/view-sdk\.js"/);
+    assert.doesNotMatch(host, /legacy-view\.js|org\.memsphere\.legacy-view/);
     assert.deepEqual(boot.instances.map((instance: ViewHostBootInstance) => instance.module.moduleId), builtinModuleCatalog.map(entry => entry.moduleId));
     const memory = boot.instances.find((instance: { module: { moduleId: string } }) => (
       instance.module.moduleId === "org.memsphere.memory"

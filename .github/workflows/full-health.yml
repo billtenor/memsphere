@@ -1,0 +1,43 @@
+name: Full health
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_run:
+    workflows: [CI]
+    types: [requested, in_progress, completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  statuses: write
+
+# Every run refreshes all PRs from live facts, including after coalesced events.
+concurrency:
+  group: full-health-publisher
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Refresh PR full health
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/heads/master
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Publish current full health
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          export CHECKED_OUT_SHA="$(git rev-parse HEAD)"
+          node scripts/full-health.mjs --publish

@@ -1,6 +1,63 @@
 import { basename } from "node:path";
 
+// Native filesystem/process risks retained on every supported PR platform.
+// See docs/ci-performance.md for the source-boundary audit and full-run policy.
+export const platformTests = [
+  "agent-review.test.ts",
+  "app-install.test.ts",
+  "archive-store.test.ts",
+  "business-data-service.test.ts",
+  "cli-errors.test.ts",
+  "config-management.test.ts",
+  "data-filesystem-datastore.test.ts",
+  "data-filesystem-helpers.test.ts",
+  "data-filesystem-json-valuestore.test.ts",
+  "data-filesystem-open.test.ts",
+  "data-filesystem-process.test.ts",
+  "data-filesystem-revisions.test.ts",
+  "embedded-changeset.test.ts",
+  "example-relocation.test.ts",
+  "file-lock.test.ts",
+  "git.test.ts",
+  "home.test.ts",
+  "memory-changeset.test.ts",
+  "memory-sync.test.ts",
+  "model-operation.test.ts",
+  "model-registration.test.ts",
+  "model-service.test.ts",
+  "model-storage-paths.test.ts",
+  "persistence.test.ts",
+  "project-command.test.ts",
+  "project-registry.test.ts",
+  "project-resolver.test.ts",
+  "report-execution.test.ts",
+  "reserved-models.test.ts",
+  "reserved-store.test.ts",
+  "run-memory-backfill.test.ts",
+  "run-model-artifact.test.ts",
+  "run-output.test.ts",
+  "run-rule-integration.test.ts",
+  "run-store.test.ts",
+  "system-upgrade-changeset.test.ts",
+  "view-package-registry.test.ts",
+  "view-service.test.ts",
+  "windows-prerequisites.test.ts"
+];
+
+// Reuse the existing packaged-CLI job for these heavy native integration contracts.
+export const packagePlatformTests = ["project-command.test.ts"];
+
+// Balance the two existing Windows test jobs using full-run file timings.
+const platformUpgradeTests = [
+  "system-upgrade-changeset.test.ts", "run-model-artifact.test.ts", "memory-changeset.test.ts"
+];
+
 export const testSuites = {
+  "package-platform": { title: "Packaged Job Platform Contracts", categories: [] },
+  "platform-core": { title: "Platform Core Contracts", categories: [] },
+  "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
+  platform: { title: "Platform Contracts", categories: [] },
+  "platform-and-upgrades": { title: "Platform & Upgrade Contracts", categories: [] },
   "model-ui": { title: "Models & Settings UI", categories: ["model-ui"] },
   "review-ui": { title: "Review & Shell UI", categories: ["review-ui"] },
   "memory-cli": { title: "Memory & Project CLI", categories: ["memory-cli"] },
@@ -33,6 +90,19 @@ export function testCategory(file, source) {
 
 export function selectTests(files, sources, durations, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
-  return files.filter(file => suite === "all" || testSuites[suite].categories.includes(testCategory(file, sources[file])))
+  return files.filter(file => {
+    if (suite === "all") return true;
+    if (suite === "package-platform") return packagePlatformTests.includes(basename(file));
+    if (suite === "platform-core") {
+      return platformTests.includes(basename(file)) && !platformUpgradeTests.includes(basename(file)) && !packagePlatformTests.includes(basename(file));
+    }
+    if (suite === "platform-upgrades") {
+      return platformUpgradeTests.includes(basename(file)) || testCategory(file, sources[file]) === "project-upgrade";
+    }
+    if (suite === "platform" || suite === "platform-and-upgrades") {
+      return platformTests.includes(basename(file)) || (suite === "platform-and-upgrades" && testCategory(file, sources[file]) === "project-upgrade");
+    }
+    return testSuites[suite].categories.includes(testCategory(file, sources[file]));
+  })
     .sort((a, b) => (durations[basename(b)] ?? 2) - (durations[basename(a)] ?? 2) || a.localeCompare(b, "en"));
 }
