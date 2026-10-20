@@ -7,6 +7,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { parseControlPlaneConfig } from "../src/control-plane/index.js";
+import { DefaultMemoryCatalog } from "../src/memory/catalog.js";
+import { FileMemoryProvider } from "../src/memory/file-provider.js";
 import { memoryKinds } from "../src/memory/kinds.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import {
@@ -1066,16 +1068,17 @@ flow:
   });
 });
 
-test("external schemas are snapshotted when a Run starts", async () => {
-  await withTempDir(async (dir) => {
-    const memoryRoot = join(dir, "memory");
-    const proceduresRoot = join(memoryRoot, "procedures");
-    const schemasRoot = join(memoryRoot, "schemas");
-    const runsRoot = join(dir, "runs");
-    await mkdir(proceduresRoot, { recursive: true });
-    await mkdir(schemasRoot, { recursive: true });
-    const schemaPath = join(schemasRoot, "release.yaml");
-    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+for (const useCatalog of [false, true]) {
+  test(`external schemas are snapshotted when a Run starts (${useCatalog ? "catalog" : "filesystem"})`, async () => {
+    await withTempDir(async (dir) => {
+      const memoryRoot = join(dir, "memory");
+      const proceduresRoot = join(memoryRoot, "procedures");
+      const schemasRoot = join(memoryRoot, "schemas");
+      const runsRoot = join(dir, "runs");
+      await mkdir(proceduresRoot, { recursive: true });
+      await mkdir(schemasRoot, { recursive: true });
+      const schemaPath = join(schemasRoot, "release.yaml");
+      await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
 names: [schema-snapshot]
 flow:
   - !action
@@ -1086,32 +1089,37 @@ flow:
       format: { name: markdown, layout: outline }
       schema: release-schema
 `);
-    await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [summary]\n");
+      await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [summary]\n");
 
-    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-snapshot" });
-    assert.equal(started.stack[0]?.steps[0]?.schema?.kind, "external");
-    assert.deepEqual(started.stack[0]?.steps[0]?.schema?.node?.fields, ["summary"]);
-    await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [different]\n");
+      const started = await startRun({
+        name: "Test run", memoryRoot, runsRoot, procedureName: "schema-snapshot",
+        memoryCatalog: useCatalog ? new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)) : undefined
+      });
+      assert.equal(started.stack[0]?.steps[0]?.schema?.kind, "external");
+      assert.deepEqual(started.stack[0]?.steps[0]?.schema?.node?.fields, ["summary"]);
+      await writeFile(schemaPath, "!schema\nnames: [release-schema]\nfields: [different]\n");
 
-    const done = await reportRun({
-      runsRoot,
-      runId: started.id,
-      artifact: { kind: "inline", value: "# Release\n\n## summary\n\nReady.\n" }
+      const done = await reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "# Release\n\n## summary\n\nReady.\n" }
+      });
+      assert.equal(done.status, "done");
     });
-    assert.equal(done.status, "done");
   });
-});
+}
 
-test("schema Memory refs are resolved into the Run schema snapshot", async () => {
-  await withTempDir(async (dir) => {
-    const memoryRoot = join(dir, "memory");
-    const proceduresRoot = join(memoryRoot, "procedures");
-    const schemasRoot = join(memoryRoot, "schemas");
-    const runsRoot = join(dir, "runs");
-    await mkdir(proceduresRoot, { recursive: true });
-    await mkdir(schemasRoot, { recursive: true });
+for (const useCatalog of [false, true]) {
+  test(`schema Memory refs are resolved into the Run schema snapshot (${useCatalog ? "catalog" : "filesystem"})`, async () => {
+    await withTempDir(async (dir) => {
+      const memoryRoot = join(dir, "memory");
+      const proceduresRoot = join(memoryRoot, "procedures");
+      const schemasRoot = join(memoryRoot, "schemas");
+      const runsRoot = join(dir, "runs");
+      await mkdir(proceduresRoot, { recursive: true });
+      await mkdir(schemasRoot, { recursive: true });
 
-    await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
+      await writeFile(join(proceduresRoot, "target.yaml"), `!procedure
 names: [schema-ref-procedure]
 flow:
   - !action
@@ -1123,53 +1131,92 @@ flow:
       schema: !ref
         target: schemas/delivery-schema
 `);
-    await writeFile(join(schemasRoot, "delivery.yaml"), `!schema
+      await writeFile(join(schemasRoot, "delivery.yaml"), `!schema
 names: [delivery-schema, Delivery Schema]
 fields:
   - summary
   - !ref
     target: schemas/detail-schema
 `);
-    await writeFile(join(schemasRoot, "detail.yaml"), `!schema
+      await writeFile(join(schemasRoot, "detail.yaml"), `!schema
 names: [detail-schema, Detail Schema]
 fields: [owner]
 `);
 
-    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "schema-ref-procedure" });
-    const step = started.stack[0].steps[0];
-    assert.equal(step.schema?.kind, "external");
-    assert.equal(step.schema?.name, "schemas/delivery-schema");
-    assert.deepEqual(step.schema?.node?.fields?.map((field) => typeof field === "string" ? field : field.names[0]), [
-      "summary",
-      "detail-schema"
-    ]);
+      const started = await startRun({
+        name: "Test run", memoryRoot, runsRoot, procedureName: "schema-ref-procedure",
+        memoryCatalog: useCatalog ? new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)) : undefined
+      });
+      const step = started.stack[0].steps[0];
+      assert.equal(step.schema?.kind, "external");
+      assert.equal(step.schema?.name, "schemas/delivery-schema");
+      assert.deepEqual(step.schema?.node?.fields?.map((field) => typeof field === "string" ? field : field.names[0]), [
+        "summary",
+        "detail-schema"
+      ]);
 
-    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/delivery-schema" });
-    assert.deepEqual(entered.stack.at(-1)?.steps.map((schemaStep) => schemaStep.artifact), [
-      "schemas/delivery-schema",
-      "schemas/delivery-schema.summary",
-      "schemas/delivery-schema.detail-schema",
-      "schemas/delivery-schema.detail-schema.owner"
-    ]);
+      // Entering the Schema must use the frozen top-level and nested definitions.
+      await writeFile(join(schemasRoot, "delivery.yaml"), "!schema\nnames: [delivery-schema]\nfields: [changed]\n");
+      await writeFile(join(schemasRoot, "detail.yaml"), "!schema\nnames: [detail-schema]\nfields: [changed]\n");
 
-    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
-    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "ready" } });
-    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Detail" } });
-    const awaitingFinalization = await reportRun({
-      runsRoot,
-      runId: started.id,
-      artifact: { kind: "inline", value: "Ada" }
+      const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id, schemaName: "schemas/delivery-schema" });
+      assert.deepEqual(entered.stack.at(-1)?.steps.map((schemaStep) => schemaStep.artifact), [
+        "schemas/delivery-schema",
+        "schemas/delivery-schema.summary",
+        "schemas/delivery-schema.detail-schema",
+        "schemas/delivery-schema.detail-schema.owner"
+      ]);
+
+      await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
+      await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "ready" } });
+      await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Detail" } });
+      const awaitingFinalization = await reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "Ada" }
+      });
+
+      assert.equal(awaitingFinalization.status, "running");
+      assert(currentSchemaFinalization(awaitingFinalization));
+      const done = await submitManagedSchemaDraft(runsRoot, started.id);
+      assert.equal(done.status, "done");
+      const delivery = done.events.find((event) => event.artifact.name === "delivery")?.artifact;
+      assert(delivery?.path);
+      assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## detail-schema\n\nDetail\n\n### owner\n\nAda/);
     });
-
-    assert.equal(awaitingFinalization.status, "running");
-    assert(currentSchemaFinalization(awaitingFinalization));
-    const done = await submitManagedSchemaDraft(runsRoot, started.id);
-    assert.equal(done.status, "done");
-    const delivery = done.events.find((event) => event.artifact.name === "delivery")?.artifact;
-    assert(delivery?.path);
-    assert.match(await readFile(join(runsRoot, delivery.path), "utf8"), /## detail-schema\n\nDetail\n\n### owner\n\nAda/);
   });
-});
+}
+
+for (const useCatalog of [false, true]) {
+  for (const schema of ["missing-schema", "!ref\n        target: schemas/missing-schema"]) {
+    test(`missing external Schema reports the original reference (${useCatalog ? "catalog" : "filesystem"}, ${schema.startsWith("!ref") ? "!ref" : "bare name"})`, async () => {
+      await withTempDir(async (dir) => {
+        const memoryRoot = join(dir, "memory");
+        const runsRoot = join(dir, "runs");
+        await mkdir(join(memoryRoot, "procedures"), { recursive: true });
+        await writeFile(join(memoryRoot, "procedures", "missing.yaml"), `!procedure
+names: [missing-schema-consumer]
+flow:
+  - !action
+    action: Produce delivery.
+    artifact: !artifact
+      name: delivery
+      type: object
+      format: { name: markdown, layout: outline }
+      schema: ${schema}
+`);
+        await assert.rejects(startRun({
+          name: "Missing Schema",
+          memoryRoot,
+          runsRoot,
+          procedureName: "missing-schema-consumer",
+          memoryCatalog: useCatalog ? new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)) : undefined
+        }), { message: `schema not found: ${schema.startsWith("!ref") ? "schemas/missing-schema" : schema}` });
+        assert.deepEqual((await readdir(runsRoot)).filter((name) => name.startsWith("run-")), []);
+      });
+    });
+  }
+}
 
 test("Run persistent dependencies reject kebab-case aliases", async () => {
   await withTempDir(async (dir) => {
@@ -1217,14 +1264,15 @@ flow:
   });
 });
 
-test("inline schema contracts are snapshotted, enter without a name, and persist final artifacts", async () => {
-  await withTempDir(async (dir) => {
-    const memoryRoot = join(dir, "memory");
-    const proceduresRoot = join(memoryRoot, "procedures");
-    const runsRoot = join(dir, "runs");
-    await mkdir(proceduresRoot, { recursive: true });
-    const procedurePath = join(proceduresRoot, "inline.yaml");
-    await writeFile(procedurePath, `!procedure
+for (const useCatalog of [false, true]) {
+  test(`inline schema contracts are snapshotted, enter without a name, and persist final artifacts (${useCatalog ? "catalog" : "filesystem"})`, async () => {
+    await withTempDir(async (dir) => {
+      const memoryRoot = join(dir, "memory");
+      const proceduresRoot = join(memoryRoot, "procedures");
+      const runsRoot = join(dir, "runs");
+      await mkdir(proceduresRoot, { recursive: true });
+      const procedurePath = join(proceduresRoot, "inline.yaml");
+      await writeFile(procedurePath, `!procedure
 names: [inline-contract]
 flow:
   - !action
@@ -1242,35 +1290,39 @@ flow:
         fields: [summary]
 `);
 
-    const started = await startRun({ name: "Test run", memoryRoot, runsRoot, procedureName: "inline-contract" });
-    const step = started.stack[0].steps[0];
-    assert.deepEqual(step.asserts, ["Keep every required field."]);
-    assert.deepEqual(step.suggests, ["Prefer short prose."]);
-    assert.equal(step.schema?.kind, "inline");
-    assert(step.schema?.kind === "inline" && step.schema.id.startsWith("inline:flow[1]:delivery"));
-    await writeFile(procedurePath, validProcedure);
+      const started = await startRun({
+        name: "Test run", memoryRoot, runsRoot, procedureName: "inline-contract",
+        memoryCatalog: useCatalog ? new DefaultMemoryCatalog(new FileMemoryProvider(memoryRoot)) : undefined
+      });
+      const step = started.stack[0].steps[0];
+      assert.deepEqual(step.asserts, ["Keep every required field."]);
+      assert.deepEqual(step.suggests, ["Prefer short prose."]);
+      assert.equal(step.schema?.kind, "inline");
+      assert(step.schema?.kind === "inline" && step.schema.id.startsWith("inline:flow[1]:delivery"));
+      await writeFile(procedurePath, validProcedure);
 
-    const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
-    const inlineSchemaId = step.schema?.kind === "inline" ? step.schema.id : "";
-    assert.equal(entered.stack.at(-1)?.memoryName, inlineSchemaId);
-    assert.equal(entered.stack.at(-1)?.steps[0]?.artifact, inlineSchemaId);
-    await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
-    const awaitingFinalization = await reportRun({
-      runsRoot,
-      runId: started.id,
-      artifact: { kind: "inline", value: "finished" }
+      const entered = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+      const inlineSchemaId = step.schema?.kind === "inline" ? step.schema.id : "";
+      assert.equal(entered.stack.at(-1)?.memoryName, inlineSchemaId);
+      assert.equal(entered.stack.at(-1)?.steps[0]?.artifact, inlineSchemaId);
+      await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery\n" } });
+      const awaitingFinalization = await reportRun({
+        runsRoot,
+        runId: started.id,
+        artifact: { kind: "inline", value: "finished" }
+      });
+      assert(currentSchemaFinalization(awaitingFinalization));
+      const done = await submitManagedSchemaDraft(runsRoot, started.id);
+      assert.equal(done.status, "done");
+      assert.equal(finalArtifacts(done).length, 1);
+      const delivery = finalArtifacts(done)[0];
+      assert.equal(delivery.schema?.kind, "inline");
+      assert.equal(delivery.final, true);
+      assert.match(delivery.path ?? "", /\.md$/);
+      assert.equal(await readFile(join(runsRoot, delivery.path ?? ""), "utf8"), "# Delivery\n\n## summary\n\nfinished\n");
     });
-    assert(currentSchemaFinalization(awaitingFinalization));
-    const done = await submitManagedSchemaDraft(runsRoot, started.id);
-    assert.equal(done.status, "done");
-    assert.equal(finalArtifacts(done).length, 1);
-    const delivery = finalArtifacts(done)[0];
-    assert.equal(delivery.schema?.kind, "inline");
-    assert.equal(delivery.final, true);
-    assert.match(delivery.path ?? "", /\.md$/);
-    assert.equal(await readFile(join(runsRoot, delivery.path ?? ""), "utf8"), "# Delivery\n\n## summary\n\nfinished\n");
   });
-});
+}
 
 test("enter-schema records a local Markdown table as one complete structured step", async () => {
   await withTempDir(async (dir) => {
