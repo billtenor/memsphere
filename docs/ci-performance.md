@@ -86,7 +86,18 @@ default按PR号或ref分组，继续取消同目标旧default运行。full按run
 
 ## PR full 健康门禁
 
-稳定状态 `Full health / master` 是master ruleset的必需检查，绑定GitHub Actions app15368，保留其余保护且不额外要求PR更新到master。发布器只查GitHub API并发布commit status，不安装项目依赖、不构建、不执行PR代码或构建Artifact。`pull_request_target`、master push、CI full requested/in_progress/completed和手动刷新均从master可信代码读取实时事实，刷新所有开放master PR，事件乱序不会直接复用旧事件结论。
+
+| 界面名称 | 对象与职责 |
+|---|---|
+| `CI (full)` | Actions工作流运行，真正执行完整跨平台测试。 |
+| `Update PR merge gate` | Actions工作流，查询测试结果并通过API更新PR状态；不跑测试。 |
+| `Merge gate / full regression` | 挂在PR最新提交SHA上的Commit Status标志，不执行任务；GitHub保护规则要求它成功。 |
+
+刷新任务的运行标题带事件来源，例如 `Update PR merge gate (master updated)`、`Update PR merge gate (CI completed)`、`Update PR merge gate (PR opened)`。同一工作流会被不同事件启动多次，每次都按实时事实刷新所有开放master PR，不读取另一次刷新任务的结果。default CI事件也会产生工作流运行，但脚本直接退出，不发布门禁状态。刷新job名 `Publish merge gate status (no tests)` 与PR状态名刻意不同。
+
+新建普通PR时，default CI测试该PR；同时PR创建事件启动门禁刷新。状态最初不存在，必需状态缺失会阻拦合入；刷新脚本先通过API写pending，再查询当前master提交对应的full（或PR自身最新head的full），最后写success/failure/pending，必要查询失败写error。master变化会触发新刷新，撤掉其他PR保存的旧绿灯；master full结束的completed事件再次刷新这些PR。无需重跑其他PR的default CI，就能更新它们的合入门禁。查询/写入使用[GitHub Commit Status API](https://docs.github.com/en/rest/commits/statuses)，状态记录与真正执行测试的任务在PR检查区中并排展示。
+
+状态 `Merge gate / full regression` 是master ruleset的必需检查，绑定GitHub Actions app15368，保留其余保护且不额外要求PR更新到master。发布器只查GitHub API并发布commit status，不安装项目依赖、不构建、不执行PR代码或构建Artifact。`pull_request_target`、master push、CI full requested/in_progress/completed和手动刷新均从master可信代码读取实时事实，刷新所有开放master PR，事件乱序不会直接复用旧事件结论。
 
 | PR当前head最新full | master最新提交full | 结果 |
 |---|---|---|
@@ -122,3 +133,17 @@ gh workflow run ci.yml --ref <reviewed-branch> -f full_health_bootstrap=true -f 
 bootstrap要求owner workflow_dispatch，reviewed_sha等于实际运行github.sha，checkout精确SHA；仅轻量发布，无构建，且不能被识别为full。脚本检查master尚未安装正式发布器，已安装即拒绝bootstrap。依据真实当前head full成功发布状态，回读确认github-actions身份、required满足与PR恢复；不能伪造失败full来验证生产。首次真实接线验证仅missing→真实success，失败full路径由策略及本地HTTP集成覆盖；自动事件合入master后才生效。bootstrap到合入之间由Runner重查实际head/full，不声称已部署自动刷新。
 
 激活异常时只撤回本轮新增context和对应来源，保留全部既有及并发新增规则，回读确认；修复后重试。不移除其他保护，不把回滚当成完成。首次master full历史建立前，无自身head full证明的其他PR保守阻拦；可手动master full，或本次合入后的push full建立证明。
+
+
+### 从旧名称迁移
+
+旧context是 `Full health / master`，旧发布工作流显示名是 `Full health`；工作流文件路径 `full-health.yml` 保持不变。历史Actions运行及旧提交上的状态记录仍可显示旧名，不能把它们当作新任务；新名称用于后续发布。初始化运行现在显示 `Initialize PR merge gate`，历史 `Full health bootstrap` 同样被明确排除在full证明之外。
+
+迁移需要维护者按顺序完成：
+
+1. 合入改名PR前确认旧required context仍为Actions15368，保留全部原保护；设置仓库变量 `FULL_HEALTH_PUBLISH_LEGACY=true`。新代码未合入时，线上旧发布器继续正常工作，改名PR仍由旧门禁验收。
+2. 合入后新发布器从可信master执行，临时向旧context和新context发布相同状态。撤旧分阶段进行：先对所有PR写旧context pending，再对所有PR写新context pending；即使某一笔失败，也继续尝试其余独立的撤旧写入，每笔仅尝试一次。撤旧阶段有任何错误就整体失败，全部成功后才查询事实。新context写入失败时所有可写旧门禁已等待，不会留下后续PR的旧绿灯；不自动重试。若旧context写服务本身不可用，无法保证撤销旧绿灯，与原有API不可写边界相同，不能声称此时仍能强制拦截。
+3. 手动可信刷新并检查新状态确实由 `github-actions[bot]` 发布，和旧状态的SHA、结果、full目标链接一致。读取最新ruleset，将旧context原位替换为 `Merge gate / full regression`，保留Actions15368、其他required checks、strict策略、bypass和全部其他规则；不通过先删除保护再重建进行切换。
+4. 回读规则及PR状态确认门禁生效后，删除仓库变量，重新运行可信刷新验证只写新名。已有旧提交上的历史状态仍可能显示；之后的新提交只使用新名。切换期间已启动的刷新可能携带旧变量值，待其完成后再作最终确认。
+
+异常时保留双写和旧必需context；若已切换，则只恢复本次context名称，保留并发新增的其他规则。实际新状态与规则回读成功前不宣称线上迁移完成。发布脚本只持有statuses写权限，不修改仓库变量或ruleset；上述配置操作由维护者执行。

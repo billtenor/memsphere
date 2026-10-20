@@ -3,7 +3,9 @@ import { pathToFileURL } from "node:url";
 
 export const REPOSITORY = "billtenor/memsphere";
 export const WORKFLOW_ID = 335696122;
-export const CONTEXT = "Full health / master";
+export const CONTEXT = "Merge gate / full regression";
+export const LEGACY_CONTEXT = "Full health / master";
+const bootstrapTitles = ["Initialize PR merge gate", "Full health bootstrap"];
 export const FULL_JOB = "Full cross-platform regression";
 export const ACTIONS_APP_ID = 15368;
 const target = `https://github.com/${REPOSITORY}/actions/workflows/ci.yml`;
@@ -29,7 +31,7 @@ export function requiredCheckRules(rules, remove = false) {
   }
   if (rule) {
     const existing = rule.parameters.required_status_checks.find(check => check.context === CONTEXT);
-    if (existing && existing.integration_id !== ACTIONS_APP_ID) throw new Error("Full health context has an unexpected source");
+    if (existing && existing.integration_id !== ACTIONS_APP_ID) throw new Error("Merge gate context has an unexpected source");
     if (!existing) rule.parameters.required_status_checks.push({ context: CONTEXT, integration_id: ACTIONS_APP_ID });
   } else copy.push({ type: "required_status_checks", parameters: {
     required_status_checks: [{ context: CONTEXT, integration_id: ACTIONS_APP_ID }],
@@ -73,7 +75,7 @@ export async function verifySource(api) {
 export async function fullEvidence(api, run) {
   if (run.workflow_id !== WORKFLOW_ID || run.repository?.full_name !== REPOSITORY) return undefined;
   if (!(run.event === "workflow_dispatch" || ((run.event === "push" || run.event === "schedule") && run.head_branch === "master"))) return undefined;
-  if (run.display_title === "Full health bootstrap" || run.display_title === "CI (default)") return undefined;
+  if (bootstrapTitles.includes(run.display_title) || run.display_title === "CI (default)") return undefined;
   const marked = run.display_title === "CI (full)" || run.event === "schedule";
   // Pushes only became full when the fixed profile marker was introduced.
   // Earlier master pushes were default and must not require a jobs query each.
@@ -130,7 +132,7 @@ export async function verifyBootstrap(api, env) {
     throw new Error("Bootstrap requires owner workflow_dispatch at the exact reviewed SHA");
   }
   const installed = await api.request("/contents/.github/workflows/full-health.yml?ref=master", { allowMissing: true });
-  if (installed) throw new Error("Full health is installed on master; use the trusted master refresh workflow");
+  if (installed) throw new Error("Merge gate publisher is installed on master; use the trusted master refresh workflow");
 }
 
 // All callers refresh all open master PRs, so coalesced/late events still converge on current facts.
@@ -139,17 +141,30 @@ export async function refreshHealth(api, { publish = false, bootstrap = false, e
   const pulls = await api.list("/pulls?state=open&base=master");
   const reports = [];
   const errors = [];
-  const post = (sha, status) => api.request(`/statuses/${sha}`, { method: "POST", body: {
-    context: CONTEXT, state: status.state, description: status.description.slice(0, 140), target_url: status.target_url
+  // During rollout the old context is still required: revoke it before touching
+  // the new name. Each request is attempted once; API errors fail the refresh.
+  const contexts = env.FULL_HEALTH_PUBLISH_LEGACY === "true" ? [LEGACY_CONTEXT, CONTEXT] : [CONTEXT];
+  const writeStatus = (sha, status, context) => api.request(`/statuses/${sha}`, { method: "POST", body: {
+    context, state: status.state, description: status.description.slice(0, 140), target_url: status.target_url
   } });
+  const post = async (sha, status) => {
+    for (const context of contexts) await writeStatus(sha, status, context);
+  };
   // Revoke all old green lights before potentially slow history/job queries.
   if (publish) {
-    for (const pull of pulls) await post(pull.head.sha, result("pending", "Refreshing full health"));
+    const failures = [];
+    // Finish the old-context phase for every PR before any new-context write.
+    // A failure must not leave other writable PR gates with stale green lights.
+    for (const context of contexts) for (const pull of pulls) {
+      try { await writeStatus(pull.head.sha, result("pending", "Refreshing merge gate"), context); }
+      catch (error) { failures.push(error); }
+    }
+    if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join("\n"));
   }
   try {
     await verifySource(api);
   } catch (error) {
-    if (publish) for (const pull of pulls) await post(pull.head.sha, result("error", "Full health identity query failed; retry trusted refresh"));
+    if (publish) for (const pull of pulls) await post(pull.head.sha, result("error", "Merge gate identity query failed; refresh on master"));
     throw error;
   }
   for (const item of pulls) {
@@ -160,7 +175,7 @@ export async function refreshHealth(api, { publish = false, bootstrap = false, e
         const pull = await api.request(`/pulls/${item.number}`);
         if (pull.state !== "open" || pull.base.ref !== "master") { settled = true; break; }
         sha = pull.head.sha;
-        if (publish) await post(sha, result("pending", "Refreshing full health"));
+        if (publish) await post(sha, result("pending", "Refreshing merge gate"));
         const master = await masterSha(api);
         const health = await computeHealth(api, sha, master);
         const freshPull = await api.request(`/pulls/${item.number}`);
@@ -175,7 +190,7 @@ export async function refreshHealth(api, { publish = false, bootstrap = false, e
       if (!settled) throw new Error("Head/master changed repeatedly; retry trusted refresh");
     } catch (error) {
       errors.push(`PR #${item.number}: ${error.message}`);
-      if (publish) await post(sha, result("error", "Full health query failed; retry trusted refresh"));
+      if (publish) await post(sha, result("error", "Merge gate query failed; refresh on master"));
     }
   }
   if (errors.length) throw new Error(errors.join("\n"));
@@ -201,7 +216,7 @@ async function main() {
     const event = JSON.parse(await readFile(env.GITHUB_EVENT_PATH, "utf8"));
     // This filter only saves work for explicitly inapplicable profiles. Actual health is
     // always recomputed from the API, including unknown/legacy or out-of-order events.
-    if (["CI (default)", "Full health bootstrap"].includes(event.workflow_run?.display_title)) return;
+    if (["CI (default)", ...bootstrapTitles].includes(event.workflow_run?.display_title)) return;
   }
   const reports = await refreshHealth(api, { publish, bootstrap, env });
   console.log(JSON.stringify(reports.map(({ number, sha, state, description, target_url, masterSha }) =>

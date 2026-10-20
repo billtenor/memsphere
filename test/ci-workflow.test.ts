@@ -63,7 +63,7 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(ciProfile("workflow_dispatch", "default"), "default");
   assert.throws(() => ciProfile("workflow_dispatch", "unknown"), /Unknown CI profile/);
   const full = "github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')";
-  assert.equal(workflow["run-name"], "${{ inputs.full_health_bootstrap && 'Full health bootstrap' || ((" + full + ") && 'CI (full)' || 'CI (default)') }}");
+  assert.equal(workflow["run-name"], "${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((" + full + ") && 'CI (full)' || 'CI (default)') }}");
   assert.equal(workflow.concurrency.group, "ci-${{ github.workflow }}-${{ inputs.full_health_bootstrap && 'bootstrap' || ((" + full + ") && 'full' || 'default') }}-${{ (" + full + ") && github.run_id || (github.event.pull_request.number || github.ref) }}");
   assert.equal(workflow.concurrency["cancel-in-progress"], "${{ !inputs.full_health_bootstrap && github.event_name != 'push' && !(github.event_name == 'workflow_dispatch' && inputs.profile == 'full') }}");
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.profile.options, ["default", "full"]);
