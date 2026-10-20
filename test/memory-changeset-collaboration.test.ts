@@ -273,6 +273,20 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
     const completed = await completeMemoryChange(completable.id);
     assert.equal(completed.status, "completed");
 
+    await assert.rejects(createMemoryChangeComment({
+      home, project: "project", changeId: completed.id, actor,
+      memoryReference: "concepts/shared", path: completed.scope[0]!.path,
+      target: "memory.defines[1]", body: "Too late"
+    }), /already completed/);
+    await assert.rejects(updateMemoryChangeComment({
+      home, project: "project", changeId: completed.id, actor,
+      commentId: "any-comment", body: "Too late"
+    }), /already completed/);
+    await assert.rejects(deleteMemoryChangeComment({
+      home, project: "project", changeId: completed.id, actor,
+      commentId: "any-comment"
+    }), /already completed/);
+
     const stale = await createViewMemoryChange({
       home,
       project: "project",

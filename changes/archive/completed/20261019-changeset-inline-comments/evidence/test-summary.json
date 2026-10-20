@@ -1,0 +1,21 @@
+{
+  "command": "npm test",
+  "build": "passed via npm test pretest -> npm run build",
+  "files": 149,
+  "passed": 1247,
+  "failed": 0,
+  "skipped": 2,
+  "elapsedSeconds": 364.76,
+  "typecheck": "passed",
+  "targetedTests": 35,
+  "styleLocaleReservedTests": 27,
+  "sourceSha256": {
+    "modules/org.memsphere.memory/adapter/view/index.ts": "d24503ef7c402ae795f45e27dad1e4b6a964096ed070f17eecf5322571efbc91",
+    "test/builtin-memory-view.test.ts": "8acb58ec2f8be6b1065c1be435150fe6ea7bfc79e2815dccd52e35dc84b17616",
+    "test/memory-changeset-collaboration.test.ts": "7251d7049663f292bf051874321ac7a01bbf4a59969d0e94e3401049e3063f20",
+    "reserved-memory/system-memory/concepts/memsphere-view.yaml": "8d19c380372208790e135e06d183f86cfb3c2f340435a7789e43a03156f5e685",
+    ".memsphere/memory/concepts/memsphere-view.yaml": "8d19c380372208790e135e06d183f86cfb3c2f340435a7789e43a03156f5e685",
+    "src/skills/memsphere/SKILL.md": "87f5bda1919a8f01e9230813162c5ddaf3fde09273a2fe9dc5d981dcef8edd2c"
+  },
+  "revision": 2
+}
