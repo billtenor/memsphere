@@ -4618,8 +4618,10 @@ async function snapshotExternalSchemas(
 ): Promise<void> {
   for (const step of steps) {
     if (step.schema?.kind === "external" && !step.schema.node) {
+      // !ref targets are already full references; legacy strings may be bare names.
+      const reference = step.schema.name.startsWith("schemas/") ? step.schema.name : `schemas/${step.schema.name}`;
       const memory = lookup
-        ? await lookup("schemas", `schemas/${step.schema.name}`)
+        ? await lookup("schemas", reference)
         : await findSchemaMemory(memoryRoot, step.schema.name);
       if (!memory) throw new Error(`schema not found: ${step.schema.name}`);
       step.schema.node = await resolveSchemaReferences(
