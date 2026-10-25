@@ -4,7 +4,7 @@ import type { Snapshot } from "./types.js";
 
 export function contextRunPayload(snapshot: Snapshot) {
   const { run } = snapshot;
-  return { ...run, representation: "context-control", procedureName: "", updatedAt: run.endedAt ?? snapshot.steps.map(s => s.endedAt ?? s.createdAt).sort().at(-1) ?? run.createdAt,
+  return { ...run, outputArtifactIds: snapshot.outputArtifactIds, representation: "context-control", procedureName: "", updatedAt: run.endedAt ?? snapshot.steps.map(s => s.endedAt ?? s.createdAt).sort().at(-1) ?? run.createdAt,
     contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, readOnly: false, context: snapshot };
 }
 export async function contextRunSummaries(service: ContextControl | undefined) {

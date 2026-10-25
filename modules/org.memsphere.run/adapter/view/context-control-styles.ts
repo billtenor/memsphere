@@ -26,9 +26,15 @@ export const contextControlStyles = `
 .cc-chip-accent { color:var(--mem-view-color-accent); background:var(--mem-view-color-accent-soft); border-color:transparent; }
 .cc-chip-note { background:var(--mem-view-color-surface); }
 .cc-graph-card { overflow:hidden; border:1px solid var(--mem-view-color-border); border-radius:10px; background:var(--mem-view-color-surface); }
-.cc-canvas-scroll { overflow:auto; min-height:390px; background-image:radial-gradient(var(--mem-view-color-border) .7px,transparent .7px); background-size:18px 18px; }
+.cc-canvas-scroll { overflow:auto; min-height:280px; height:calc(100dvh - 240px); max-height:760px; cursor:grab; background-image:radial-gradient(var(--mem-view-color-border) .7px,transparent .7px); background-size:18px 18px; }
 .cc-graph { position:relative; margin:0 auto; width:890px; height:330px; }
 .cc-graph svg { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; overflow:visible; }
+.cc-edge-hit { fill:none; stroke:transparent; stroke-width:16; pointer-events:stroke; }
+.cc-edge[data-highlighted="true"] { opacity:1; stroke-width:3; }
+.cc-node[data-edge-highlighted="true"] { border-color:var(--mem-view-color-accent); box-shadow:0 0 0 2px var(--mem-view-color-accent-soft); }
+.cc-canvas-scroll[data-dragging="true"] { cursor:grabbing; user-select:none; }
+.cc-external strong, .cc-external-source { overflow-wrap:anywhere; }
+.cc-external-pane { flex:1; min-height:0; }
 .cc-edge { fill:none; stroke:var(--mem-view-color-accent); stroke-width:1.5; opacity:.58; }
 .cc-node-stack { position:absolute; width:226px; }
 .cc-node-stack:focus-within { z-index:4; }

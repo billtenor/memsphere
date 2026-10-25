@@ -31,7 +31,7 @@ flow:
       await archiveRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id: legacy.id });
     }
     const service = (await openContextControl(f.root, true))!;
-    await service.stores.run.create({}, legacy.id, { id: legacy.id, name: "同ID新来源", status: "running", language: "zh-CN", createdAt: new Date().toISOString(), finalArtifactIds: [] });
+    await service.stores.run.create({}, legacy.id, { id: legacy.id, name: "同ID新来源", status: "running", language: "zh-CN", createdAt: new Date().toISOString() });
     const artifact = (await service.report(legacy.id, { name: "产物", content: textContent("禁止泄露的新来源正文") })).artifact;
     const server = createViewServer(config);
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });

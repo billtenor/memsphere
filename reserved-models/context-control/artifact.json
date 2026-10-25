@@ -24,7 +24,7 @@
         "draft",
         "submitted"
       ],
-      "description": "draft 为草稿，可修改且只保存当前内容；submitted 为已提交，除 tags 外的字段及所引用内容固定。只允许从 draft 变为 submitted，不允许退回草稿。tags 为分类信息，可更新且不影响已固定的依赖。评审结果由 Review 记录，最终交付选择由 Run.finalArtifactIds 记录。"
+      "description": "draft 为草稿，可修改且只保存当前内容；submitted 为已提交，除 tags 外的字段及所引用内容固定。只允许从 draft 变为 submitted，不允许退回草稿。tags 为分类信息，可更新且不影响已固定的依赖。评审结果由 Review 记录，当前成果及最终交付根由完整 Artifact 的依赖、修订关系与 Run.outputOverrides 人工增删共同推导。"
     },
     "tags": {
       "type": "array",

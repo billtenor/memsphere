@@ -6,86 +6,73 @@ import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { businessFixture } from "./helpers/business-data.js";
-import { openContextControl } from "../src/project/context-control.js";
-import { textContent } from "../src/context_control/types.js";
-import { createHash } from "node:crypto";
-import { withNativeFileLock } from "../src/file-lock.js";
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
-
-test("exploration CLI persists create/read/report, comments, revisions and delivery in model Stores", { timeout: 60000 }, async t => {
+async function fixture(t: test.TestContext) {
   const f = await businessFixture(t, {});
-  const call = async (...args: string[]) => {
-    const r = await exec(process.execPath, [cli, "--project", "test-project", "run", ...args, "--output", "json"], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
-    assert.equal(r.stderr, ""); assert.ok(r.stdout.trim(), `CLI returned no output: ${args.join(" ")}, fixture=${f.root}`); return JSON.parse(r.stdout);
-  };
-  const run = await call("start", "--name", "CLI探索"); const r = ["--run", run.id];
-  const a = await call("report", ...r, "--name", "要求", "--artifact", "离线查询", "--tag", "requirements");
-  const target = await call("artifact", "create", ...r, "--name", "方案", "--tag", "design");
+  const invoke = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
+  const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
+  return { ...f, invoke, call };
+}
+
+test("direct production, Continue, independent reads, repeated comments and immutable revision", { timeout: 60000 }, async t => {
+  const f = await fixture(t); const run = await f.call("run", "start", "--name", "CLI探索");
+  assert.match(run.contextId, /^context-/);
+  const help = await f.invoke("continue", run.contextId, "--help"); assert.match(help.stdout, /report.*review create/);
+  await assert.rejects(f.invoke("continue", "missing", "--help"), /not found/);
+  const a = await f.call("continue", run.contextId, "report", "--name", "要求", "--artifact", "离线查询", "--tag", "requirements");
   const out = join(f.directory, "input.md");
-  await call("artifact", "show", ...r, "--artifact", a.artifactId, "--for", target.artifactId, "--out", out);
+  await f.call("run", "artifact", "show", "--run", run.id, "--artifact", a.artifactId, "--out", out);
   assert.equal(await readFile(out, "utf8"), "离线查询");
-  const b = await call("report", ...r, "--target", target.artifactId, "--artifact", "快照", "--depends-on", "tag:requirements");
-  assert.equal(b.artifactId, target.artifactId);
-  const review = await call("review", "create", ...r, "--artifact", b.artifactId, "--reviewer", "human", "--comment", "恢复路径", "--comment", "补充测试");
+  const b = await f.call("continue", run.contextId, "report", "--name", "方案", "--artifact", "快照", "--depends-on", "tag:requirements");
+  assert.deepEqual(b.candidates, []);
+  const review = await f.call("continue", run.contextId, "review", "create", "--artifact", b.artifactId, "--reviewer", "human", "--comment", "恢复路径", "--comment", "补充测试");
   assert.equal(review.comments.length, 2);
-  const revised = await call("report", ...r, "--revised-from", b.artifactId, "--artifact", "完整快照");
-  const snapshot = await call("show", ...r);
+  const revised = await f.call("continue", run.contextId, "report", "--revised-from", b.artifactId, "--artifact", "完整快照");
+  const snapshot = await f.call("run", "show", "--run", run.id);
   assert.equal(snapshot.steps.length, 3); assert.equal(snapshot.artifacts.length, 3);
-  assert.equal(snapshot.steps.find((s: any) => s.id === b.stepId).reads[`artifact:${a.artifactId}`] !== undefined, true);
-  assert.equal((await call("status")).runs.some((v: any) => v.id === run.id), true);
-  await call("finish", ...r, "--artifact", revised.artifactId);
-  assert.equal((await call("status", ...r)).run.status, "done");
+  assert.ok(snapshot.steps.find((s: any) => s.id === b.stepId).reads[`artifact:${a.artifactId}`]);
+  assert.deepEqual(snapshot.outputArtifactIds, [revised.artifactId]);
+  assert.equal(snapshot.commandStates[0].contextId, run.contextId);
+  assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
+  await f.call("continue", run.contextId, "finish", "--artifact", revised.artifactId);
+  assert.match((await f.invoke("continue", run.contextId, "--help")).stdout, /No further transitions/);
+  await assert.rejects(f.call("continue", run.contextId, "report", "--name", "late", "--artifact", "no"), /No transitions/);
   const record = JSON.parse(await readFile(join(f.root, "data/context_control/artifacts", run.id, `${b.artifactId}.json`), "utf8"));
-  assert.equal(record.id, `${run.id}/${b.artifactId}`); assert.equal(record.value.id, b.artifactId);
+  assert.equal(record.id, `${run.id}/${b.artifactId}`); assert.equal(record.value.content.payload.content, "快照");
 });
 
-test("exploration CLI rejects caller system fields and preserves exclusive output files", { timeout: 30000 }, async t => {
-  const f = await businessFixture(t, {});
-  const invoke = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", "run", ...args, "--output", "json"], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
-  const run = JSON.parse((await invoke("start", "--name", "边界")).stdout);
-  const input = join(f.directory, "invalid.json"); await writeFile(input, JSON.stringify({ id: "caller-id", content: {} }));
-  await assert.rejects(invoke("report", "--run", run.id, "--file", input), (error: any) => JSON.parse(error.stderr).error.code === "INVALID_ARGUMENT");
-  const a = JSON.parse((await invoke("report", "--run", run.id, "--name", "内容", "--artifact", "正文")).stdout);
-  const output = join(f.directory, "retained.txt"); await writeFile(output, "原文");
-  await assert.rejects(invoke("artifact", "show", "--run", run.id, "--artifact", a.artifactId, "--out", output), (error: any) => JSON.parse(error.stderr).error.code === "ALREADY_EXISTS");
-  assert.equal(await readFile(output, "utf8"), "原文");
-});
-
-for (const kind of ["artifact", "external"] as const) {
-  test(`${kind} reads export exclusively and preserve output when accounting targets are invalid`, { timeout: 60000 }, async t => {
-    const f = await businessFixture(t, {}); const s = (await openContextControl(f.root, true))!;
-    const run = await s.start("读取矩阵"); const other = await s.start("其他Run");
-    const source = kind === "artifact" ? (await s.report(run.id, { name: "来源", content: textContent("原始正文") })).artifact : await s.addExternal(run.id, "用户输入", { content: textContent("原始正文") });
-    const invoke = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", "run", kind, "show", "--run", run.id, `--${kind}`, source.id, ...args], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
-    for (const fileOutput of [false, true]) {
-      const target = await s.createArtifact(run.id, { name: "生产目标" }); const out = join(f.directory, `${kind}-success-${fileOutput}.txt`);
-      const response = await invoke("--for", target.id, ...(fileOutput ? ["--out", out] : []));
-      assert.equal(response.stderr, ""); assert.equal(fileOutput ? await readFile(out, "utf8") : response.stdout, "原始正文");
-      assert.ok((await s.snapshot(run.id)).steps.find(step => step.id === target.stepId)!.reads?.[`${kind}:${source.id}`]);
-    }
-    const crossRun = await s.createArtifact(other.id, { name: "跨Run目标" });
-    const completed = (await s.report(run.id, { name: "已完成", content: textContent("完成") })).artifact;
-    for (const target of ["missing", crossRun.id, completed.id]) for (const fileOutput of [false, true]) {
-      const out = join(f.directory, `${kind}-${target}-${fileOutput}.txt`);
-      const response = await invoke("--for", target, ...(fileOutput ? ["--out", out] : []));
-      assert.match(response.stderr, /accounting skipped/);
-      assert.equal(fileOutput ? await readFile(out, "utf8") : response.stdout, "原始正文");
-    }
-    assert.equal((await s.snapshot(other.id)).steps[0].reads, undefined);
-    const target = await s.createArtifact(run.id, { name: "输出失败不记账" });
-    const retained = join(f.directory, `${kind}-retained.txt`); await writeFile(retained, "保留原文");
-    await assert.rejects(invoke("--for", target.id, "--out", retained));
-    assert.equal(await readFile(retained, "utf8"), "保留原文");
-    await assert.rejects(invoke("--for", target.id, "--out", join(f.directory, "missing-parent", "out.txt")));
-    assert.equal((await s.snapshot(run.id)).steps.find(step => step.id === target.stepId)!.reads, undefined);
-    const lock = join(f.root, ".runtime", "context-control", `${createHash("sha256").update(run.id).digest("hex")}.lock`);
-    for (const fileOutput of [false, true]) {
-      const out = join(f.directory, `${kind}-timeout-${fileOutput}.txt`);
-      const response = await withNativeFileLock(lock, () => invoke("--for", target.id, ...(fileOutput ? ["--out", out] : [])));
-      assert.match(response.stderr, /accounting skipped/);
-      assert.equal(fileOutput ? await readFile(out, "utf8") : response.stdout, "原始正文");
-    }
-    assert.equal((await s.snapshot(run.id)).steps.find(step => step.id === target.stepId)!.reads, undefined);
+for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201]) {
+  test(`${kind} previews ${length} Unicode chars and exports original bytes`, { timeout: 30000 }, async t => {
+    const f = await fixture(t); const run = await f.call("run", "start", "--name", "preview");
+    const content = "中a😀".repeat(67).slice(0); const value = Array.from(content).slice(0, length).join("");
+    const saved = kind === "artifact" ? await f.call("run", "report", "--run", run.id, "--name", "正文", "--artifact", value) : await f.call("run", "external", "add", "--run", run.id, "--source", "来源", "--content", value);
+    const id = saved.artifactId ?? saved.externalId;
+    if (kind === "external") assert.deepEqual(Object.keys(saved).sort(), ["externalId", "runId"]);
+    const args = ["run", kind, "show", "--run", run.id, `--${kind}`, id];
+    const result = await f.call(...args);
+    assert.equal(result.content, Array.from(value).slice(0, 200).join("") + (length > 200 ? "..." : ""));
+    assert.equal(result.truncated, length > 200);
+    assert.equal(!!result.exportCommand, length > 200);
+    const text = await f.invoke(...args); assert.equal(text.stdout, result.content);
+    assert.equal(text.stderr.includes("Export full content"), length > 200);
+    const out = join(f.directory, "original.txt"); await f.call(...args, "--out", out);
+    assert.equal(await readFile(out, "utf8"), value);
+    await assert.rejects(f.call(...args, "--out", out), (error: any) => JSON.parse(error.stderr).error.code === "ALREADY_EXISTS");
   });
 }
+
+test("derived outputs retain manual removals and removed production-boundary flags are rejected", { timeout: 30000 }, async t => {
+  const f = await fixture(t); const r = await f.call("run", "start", "--name", "outputs");
+  const a = await f.call("continue", r.contextId, "report", "--name", "A", "--artifact", "A");
+  await f.call("continue", r.contextId, "outputs", "update", "--remove", a.artifactId);
+  const b = await f.call("continue", r.contextId, "report", "--name", "B", "--artifact", "B");
+  const outputs = await f.call("run", "outputs", "list", "--run", r.id); assert.deepEqual(outputs.items.map((a: any) => a.id), [b.artifactId]);
+  await f.call("continue", r.contextId, "outputs", "update", "--remove", b.artifactId, "--add", a.artifactId);
+  await assert.rejects(f.call("continue", r.contextId, "outputs", "update", "--remove", a.artifactId, "--add", a.artifactId));
+  await assert.rejects(f.call("run", "artifact", "create", "--run", r.id, "--name", "no"));
+  await assert.rejects(f.call("run", "artifact", "show", "--run", r.id, "--artifact", a.artifactId, "--for", b.artifactId));
+  await assert.rejects(f.call("run", "report", "--run", r.id, "--target", a.artifactId, "--artifact", "no"));
+  const invalid = join(f.directory, "invalid.json"); await writeFile(invalid, JSON.stringify({ id: "caller", content: {} }));
+  await assert.rejects(f.call("run", "report", "--run", r.id, "--file", invalid));
+});

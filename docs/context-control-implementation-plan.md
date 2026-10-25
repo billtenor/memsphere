@@ -1,3 +1,5 @@
+> 历史文档：自由探索相关规则已由20261025“自由探索体验优化”迭代取代。当前用法见[自由探索 CLI](context-control-exploration-cli.md)，当前完整需求及方案见[本轮变更目录](../changes/archive/completed/20261025-exploration-experience/requirements-revised.md)。下文保留旧Run的契约与评审历史，其中artifact create、--for、finalArtifactIds等接口不代表当前用法。
+
 # 上下文控制：实施与验证方案
 
 Run：`run-20261022-130223z-496d73ae`。基准：第 4 轮已通过的《当前迭代需求契约》，Review Round：`round-20261024-092331z-93d24a8d`。本方案待研发工程师、架构师和测试工程师评审；不将方案提交等同于开始产品实现。

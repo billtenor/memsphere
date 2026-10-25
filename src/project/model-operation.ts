@@ -95,17 +95,28 @@ async function allowedPaths(root: string, operation?: Operation) {
   }
   if (!candidates.length) candidates.push({});
   const roots = new Set<string>();
+  let contextRunRoot: string | undefined;
   for (const value of candidates) {
     if (!value || typeof value !== "object") throw new TypeError("Invalid Project config for recovery");
     const input = value as { modelsDirectory?: string; modelRegistration?: import("./model-registration-contract.js").ModelRegistrationConfig };
     const paths = await validateModelStoragePaths({ root, ...input });
     roots.add(paths.modelsDirectory); roots.add(paths.registrationDirectory);
+    if (operation?.kind === "context-control.outputs-upgrade") {
+      const binding = (value as { dataStores?: Record<string, { kind?: string; factory?: string; model?: string; config?: { directory?: string } }> }).dataStores?.["context_control/runs"];
+      if (binding?.kind !== "value" || binding.factory !== "memsphere/filesystem-json" || binding.model !== "memsphere/context_control/run.json" || !binding.config?.directory) throw failure("MODEL_OPERATION_DAMAGED", "Invalid context Run upgrade binding");
+      contextRunRoot = await canonicalPath(resolve(root, binding.config.directory));
+      roots.add(contextRunRoot);
+    }
   }
-  return { configPath, roots: [...roots] };
+  return { configPath, roots: [...roots], contextRunRoot };
 }
 async function assertAllowed(path: string, allowed: Awaited<ReturnType<typeof allowedPaths>>, directory = false) {
   const canonical = await canonicalPath(path);
   if (resolve(path) !== canonical) throw failure("MODEL_OPERATION_CONFLICT", `Symbolic link or path alias in model operation: ${path}`);
+  if (allowed.contextRunRoot && within(path, allowed.contextRunRoot) && !directory) {
+    const name = relative(allowed.contextRunRoot, path).replaceAll("\\", "/");
+    if (!name.endsWith(".json") || name.split("/").some(segment => segment.startsWith(".memsphere-"))) throw failure("MODEL_OPERATION_DAMAGED", `Not a context Run record: ${path}`);
+  }
   if (path !== allowed.configPath && !allowed.roots.some(root => within(path, root) || directory && dirname(path) !== path && within(root, path)))
     throw failure("MODEL_OPERATION_DAMAGED", `Path outside model storage: ${path}`);
 }

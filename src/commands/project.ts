@@ -1130,7 +1130,9 @@ export async function projectModelsInitializeCommand(nameInput?: string, options
     return withModelRegistrationLock(context.primary.paths.root, async () => {
       const current = projectConfigSchema.parse(JSON.parse(await readFile(context.primary.paths.configPath, "utf8")));
       const initialized = await initializeProjectModelRegistrations({}, { root: context.primary.paths.root, modelsDirectory: current.modelsDirectory, modelRegistration: current.modelRegistration }, { config: { path: context.primary.paths.configPath, value: current } });
-      return initialized;
+      const { upgradeContextControlOutputs } = await import("../project/context-control-upgrade.js");
+      const contextControl = await upgradeContextControlOutputs(context.primary.paths.root);
+      return { ...initialized, ...(contextControl ? { contextControl } : {}) };
     });
   });
   if (options.output === "json") console.log(JSON.stringify(result, null, 2));

@@ -26,5 +26,5 @@ export function downstream(snapshot: Snapshot, id: string): string[] {
 export function scopedSnapshot(snapshot: Snapshot, roots: string[]): Snapshot {
   const ids = dependencyClosure(snapshot, roots); const artifacts = snapshot.artifacts.filter(a => ids.includes(a.id));
   const externalIds = artifacts.flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id));
-  return { ...snapshot, artifacts, steps: snapshot.steps.filter(s => artifacts.some(a => a.stepId === s.id)), externals: snapshot.externals.filter(e => externalIds.includes(e.id)), reviews: snapshot.reviews.filter(r => ids.includes(r.artifactId)), completeIds: ids };
+  return { ...snapshot, artifacts, steps: snapshot.steps.filter(s => artifacts.some(a => a.stepId === s.id)), externals: snapshot.externals.filter(e => externalIds.includes(e.id)), reviews: snapshot.reviews.filter(r => ids.includes(r.artifactId)), completeIds: ids, outputArtifactIds: [...new Set(roots)] };
 }

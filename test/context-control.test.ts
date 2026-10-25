@@ -48,14 +48,14 @@ test("redo reuses the draft target and Step IDs after creation is interrupted", 
   assert.equal(snap.steps[0].id, saved.stepId); assert.equal(snap.steps[0].status, "done");
 });
 
-test("submitted content survives interruption and the next write redoes only Step completion", async t => {
+test("submitted content survives interruption and the next read recovers its original Step", async t => {
   const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
   const run = await service.start("提交恢复"); const target = await service.createArtifact(run.id, { name: "结果" });
   const store = service.stores.step; const update = store.update.bind(store);
   store.update = async () => { throw Error("interrupted step completion"); };
   await assert.rejects(service.report(run.id, { target: target.id, content: textContent("固定正文") }), /interrupted/);
   store.update = update;
-  assert.equal((await service.snapshot(run.id)).completeIds.length, 0);
+  assert.equal((await service.snapshot(run.id)).completeIds.length, 1);
   await service.finish(run.id, [target.id]);
   const snap = await service.snapshot(run.id); assert.equal(snap.artifacts.length, 1); assert.deepEqual(snap.completeIds, [target.id]);
 });

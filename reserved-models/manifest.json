@@ -230,5 +230,12 @@
         }
       ]
     }
+  ],
+  "home_models": [
+    {
+      "id": "memsphere/command-state.json",
+      "metaModel": "json-schema/draft-07.json",
+      "source": "home-models/command-state.json"
+    }
   ]
 }

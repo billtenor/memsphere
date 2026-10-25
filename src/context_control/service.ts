@@ -1,3 +1,5 @@
+import { automaticOutputs, deriveOutputs, outputOverrides } from "./outputs.js";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "../data/api/context.js";
 import type { ValueStore, StoredValue } from "../data/api/value-store.js";
@@ -17,7 +19,11 @@ const uniqueRefs = (refs: Ref[]) => [...new Map(refs.map(r => [refKey(r), r])).v
 
 /** Domain writes use ValueStore CAS; the application coordinates a short Run lock. */
 export class ContextControl {
-  constructor(readonly stores: Stores, private readonly lock: RunLock, private readonly contentReader: ContentReader) {}
+  constructor(readonly stores: Stores, private readonly lock: RunLock, private readonly contentReader: ContentReader) {
+    const active = new AsyncLocalStorage<string>();
+    const acquire = lock;
+    this.lock = (runId, action, signal) => active.getStore() === runId ? action() : acquire(runId, () => active.run(runId, action), signal);
+  }
   private key(entity: Entity, runId: string, entityId: string) { return entity === "run" ? entityId : `${runId}/${entityId}`; }
   private async record<T>(entity: Entity, runId: string, entityId: string, context: Context = {}): Promise<(StoredValue & { value: T }) | undefined> {
     const row = await this.stores[entity].get(context, this.key(entity, runId, entityId));
@@ -54,10 +60,20 @@ export class ContextControl {
     } while (cursor);
     return values;
   }
-  async findRun(runId: string): Promise<Run | undefined> { return (await this.record<Run>("run", runId, runId))?.value; }
-  async listRuns(): Promise<Run[]> { return this.list<Run>("run"); }
+  async findRun(runId: string): Promise<Run | undefined> {
+    return this.lock(runId, async () => {
+      const row = await this.record<Run>("run", runId, runId);
+      if (row?.value.status === "running") await this.recover(runId);
+      return (await this.record<Run>("run", runId, runId))?.value;
+    });
+  }
+  async listRuns(): Promise<Run[]> {
+    const result: Run[] = [];
+    for (const row of await this.list<Run>("run")) { const run = await this.findRun(row.id); if (run) result.push(run); }
+    return result;
+  }
   async start(name: string, language: Run["language"] = "zh-CN") {
-    const run: Run = { id: id("run"), name: nonblank(name, "name"), status: "running", language, createdAt: now(), finalArtifactIds: [] };
+    const run: Run = { id: id("run"), name: nonblank(name, "name"), status: "running", language, createdAt: now() };
     await this.create("run", run.id, run); return run;
   }
   private async running(runId: string, context: Context = {}) {
@@ -66,6 +82,13 @@ export class ContextControl {
     return row;
   }
   async snapshot(runId: string): Promise<Snapshot> {
+    return this.lock(runId, async () => {
+      const run = await this.require<Run>("run", runId, runId);
+      if (run.value.status === "running") await this.recover(runId);
+      return this.snapshotValue(runId);
+    });
+  }
+  private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.require<Run>("run", runId, runId)).value;
     const [steps, artifacts, externals, reviews] = await Promise.all([
       this.list<Step>("step", runId), this.list<Artifact>("artifact", runId), this.list<External>("external", runId), this.list<Review>("review", runId)
@@ -73,7 +96,9 @@ export class ContextControl {
     for (const step of steps) if (step.runId !== runId) throw failure("INVALID_STATE", `Step belongs to another Run: ${step.id}`);
     for (const e of externals) if (e.runId !== runId) throw failure("INVALID_STATE", `External belongs to another Run: ${e.id}`);
     const completeIds = artifacts.filter(a => a.status === "submitted" && steps.some(s => s.id === a.stepId && s.status === "done" && s.artifact?.mode === "produce" && s.artifact.id === a.id)).map(a => a.id);
-    return { run, steps, artifacts, externals, reviews, completeIds };
+    const selected = deriveOutputs(run, artifacts, completeIds);
+    if (selected.some(id => !completeIds.includes(id))) throw failure("INCOMPLETE_ARTIFACT", "Output override references an incomplete or unknown Artifact");
+    return { run, steps, artifacts, externals, reviews, completeIds, outputArtifactIds: selected };
   }
   private async complete(runId: string, artifactId: string): Promise<Artifact> {
     const a = (await this.require<Artifact>("artifact", runId, artifactId)).value;
@@ -113,6 +138,7 @@ export class ContextControl {
   private async redo(runId: string) {
     const artifacts = await this.list<Artifact>("artifact", runId);
     for (const a of artifacts) {
+      try {
       let step = await this.record<Step>("step", runId, a.stepId);
       if (step && (step.value.runId !== runId || step.value.artifact?.id !== a.id)) throw failure("INVALID_STATE", `Conflicting Step for ${a.id}`);
       if (step?.value.status === "done") {
@@ -124,8 +150,41 @@ export class ContextControl {
         const value: Step = { id: a.stepId, runId, createdAt: now(), status: "running", artifact: { mode: "produce", id: a.id } };
         await this.create("step", runId, value); step = await this.require<Step>("step", runId, a.stepId);
       }
-      if (a.status === "submitted" && step.value.status !== "done") await this.update("step", runId, step, { ...step.value, status: "done", endedAt: now() });
+      if (a.status === "submitted" && step.value.status !== "done") {
+        await this.update("step", runId, step, { ...step.value, status: "done", endedAt: now() });
+      }
+      } catch (error) { throw Object.assign(error as object, { details: { runId, artifactId: a.id, stepId: a.stepId } }); }
     }
+  }
+  private async recover(runId: string) {
+    try { await this.redo(runId); }
+    catch (cause) {
+      const details = { runId, ...(cause as { details?: object }).details };
+      throw Object.assign(failure("RECOVERY_REQUIRED", `Run recovery failed; retry run status --run ${runId} after correcting the storage error`), { cause, details });
+    }
+  }
+  async outputs(runId: string) {
+    return (await this.snapshot(runId)).outputArtifactIds;
+  }
+  async updateOutputs(runId: string, add: string[], remove: string[]) {
+    if (!add.length && !remove.length) throw failure("INVALID_ARGUMENT", "Provide --add or --remove");
+    if (add.some(id => remove.includes(id))) throw failure("INVALID_ARGUMENT", "An Artifact cannot be both added and removed");
+    return this.write(runId, async () => {
+      for (const id of add) await this.complete(runId, nonblank(id, "artifact id"));
+      for (const id of remove) await this.require<Artifact>("artifact", runId, nonblank(id, "artifact id"));
+      const row = await this.running(runId);
+      const previous = row.value.outputOverrides;
+      const overrides = {
+        addedArtifactIds: [...new Set([...(previous?.addedArtifactIds ?? []).filter(id => !remove.includes(id)), ...add])],
+        removedArtifactIds: [...new Set([...(previous?.removedArtifactIds ?? []).filter(id => !add.includes(id)), ...remove])]
+      };
+      if (JSON.stringify(overrides) !== JSON.stringify(previous)) await this.update("run", runId, row, { ...row.value, outputOverrides: overrides });
+      return (await this.snapshotValue(runId)).outputArtifactIds;
+    });
+  }
+  async productionReads(runId: string, stepId: string, reads: Step["reads"]) {
+    const row = await this.require<Step>("step", runId, stepId);
+    await this.update("step", runId, row, { ...row.value, reads });
   }
   private write<T>(runId: string, action: () => Promise<T>) {
     return this.lock(runId, async () => { await this.running(runId); await this.redo(runId); return action(); });
@@ -166,13 +225,23 @@ export class ContextControl {
       }
       const artifact: Artifact = { id: target?.value.id ?? id("artifact"), stepId: target?.value.stepId ?? id("step"), name: target?.value.name ?? nonblank(input.name ?? previous?.name, "name"), status: "submitted", tags: tags([...(target?.value.tags ?? []), ...(input.tags ?? [])]), dependencies: uniqueRefs(dependencies), ...(revisedFrom ? { revisedFrom } : {}), ...(input.revisedSummary !== undefined ? { revisedSummary: input.revisedSummary } : {}), ...(input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) }) };
       await this.validateRefs(runId, artifact.dependencies, artifact.id);
-      if (target) await this.update("artifact", runId, target, artifact); else await this.create("artifact", runId, artifact);
-      await this.redo(runId);
+      try {
+        if (target) await this.update("artifact", runId, target, artifact); else await this.create("artifact", runId, artifact);
+        await this.redo(runId);
+      } catch (error) {
+        try {
+          const saved = await this.record<Artifact>("artifact", runId, artifact.id);
+          if (saved?.value.status === "submitted") Object.assign(error as object, { details: { runId, artifactId: artifact.id, stepId: artifact.stepId, recoveryCommand: `memsphere run status --run ${runId}`, message: "Artifact saved; query status to recover. Repeating report creates a new Artifact." } });
+        } catch { /* The primary error remains authoritative if storage cannot be read. */ }
+        throw error;
+      }
       const step = (await this.require<Step>("step", runId, artifact.stepId)).value;
       return { artifact, step, candidates: Object.keys(step.reads ?? {}).filter(key => !artifact.dependencies.some(r => refKey(r) === key)) };
     });
   }
-  async readArtifact(runId: string, artifactId: string) { return this.body(await this.complete(runId, artifactId)); }
+  async readArtifact(runId: string, artifactId: string) {
+    return this.lock(runId, async () => { const run = await this.require<Run>("run", runId, runId); if (run.value.status === "running") await this.recover(runId); return this.body(await this.complete(runId, artifactId)); });
+  }
   async readExternal(runId: string, externalId: string) {
     await this.require<Run>("run", runId, runId); const e = (await this.require<External>("external", runId, externalId)).value;
     if (e.runId !== runId) throw failure("INVALID_STATE", "External Run mismatch"); return { ...await this.body(e), source: e.source };
@@ -212,9 +281,11 @@ export class ContextControl {
     const roots = [...new Set(artifactIds)].sort(); if (!roots.length) throw failure("INVALID_ARGUMENT", "At least one final Artifact required");
     return this.lock(runId, async () => {
       const row = await this.require<Run>("run", runId, runId);
-      if (row.value.status === "done" && JSON.stringify([...row.value.finalArtifactIds].sort()) === JSON.stringify(roots)) return row.value;
+      if (row.value.status === "done" && JSON.stringify([...(await this.snapshotValue(runId)).outputArtifactIds].sort()) === JSON.stringify(roots)) return row.value;
       await this.running(runId); await this.redo(runId); await this.validateRefs(runId, roots.map(id => ({ kind: "artifact", id })));
-      const value: Run = { ...row.value, status: "done", finalArtifactIds: roots, endedAt: now() }; await this.update("run", runId, row, value); return value;
+      const current = await this.running(runId);
+      const snapshot = await this.snapshotValue(runId);
+      const value: Run = { ...current.value, status: "done", outputOverrides: outputOverrides(automaticOutputs(snapshot.artifacts, snapshot.completeIds), roots), endedAt: now() }; await this.update("run", runId, current, value); return value;
     });
   }
   async abandon(runId: string, reason?: string) {

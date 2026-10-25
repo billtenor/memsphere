@@ -46,7 +46,7 @@
 | --- | --- |
 | 运行、运行名称 | Run、Run.name |
 | 运行中 / 已完成 / 已废弃 | Run.status：running / done / abandoned |
-| 最终交付物 | Run.finalArtifactIds |
+| 最终交付物 | Snapshot.outputArtifactIds（由图及人工增删推导） |
 | 产物、产物名称 | Artifact、Artifact.name |
 | 草稿 / 已提交 | Artifact.status：draft / submitted |
 | 产物内容、依赖、标签 | Artifact.content、dependencies、tags |
@@ -80,7 +80,7 @@
 ## 版本浏览规则
 
 - 图是查看投影，底层 Artifact、dependencies 和 revisedFrom 不变。切换版本不执行回退命令，也不修改 Run 的交付选择。
-- 运行中默认查看最新产物；已交付默认查看 finalArtifactIds 的精确依赖闭包，不能用较新版本替换交付时引用的旧 ID。
+- 运行中默认查看 outputArtifactIds 的依赖闭包；已交付默认查看 outputArtifactIds 的精确依赖闭包，不能用较新版本替换交付时引用的旧 ID。
 - 点击节点下的「历史版本」选择任一版本，只切换依赖图，不自动打开浮窗。在浮窗中用上一版、下一版或下拉列表切换时，保持浮窗打开，直接更新正文和评审，背后的依赖图同步切换。列表限定高度并可滚动，不随历史数量拉长主图。
 - 选择某个历史版本后，图切换到它的实际上下文：追溯该 ID 的上游，再沿 dependencies 查找真正使用它的下游；不沿 revisedFrom 接下游，不按时间截断整张图。
 - 下游包含多个兼容修订时默认收起历史；始终保留所选版本的实际依赖，不能用最新同名产物替换。没有下游就不展示下游。

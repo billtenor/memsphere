@@ -1363,11 +1363,11 @@ async function handleRequest(
   // operation chooses a source. A failed/conflicting source never falls back.
   const contextRunPath = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/|$)/);
   const contextLocation = contextRunPath ? await contextRunForView(config, decodeURIComponent(contextRunPath[1])) : undefined;
-  const contextArtifactMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/artifacts\/([^/]+)\/content$/);
+  const contextArtifactMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/(artifacts|externals)\/([^/]+)\/content$/);
   if (request.method === "GET" && contextArtifactMatch) {
     if (!contextLocation) { sendJson(response, 404, { error: "Run not found" }); return; }
     try {
-      const value = await contextLocation.service.readArtifact(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[2]));
+      const value = await (contextArtifactMatch[2] === "externals" ? contextLocation.service.readExternal(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])) : contextLocation.service.readArtifact(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])));
       if (url.searchParams.get("download") === "1") {
         response.writeHead(200, { "content-type": value.contentType, "content-disposition": "attachment", "x-content-type-options": "nosniff" });
         response.end(value.bytes); return;

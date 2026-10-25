@@ -1,3 +1,4 @@
+import { withContextControlAccess, isContextControlStore } from "./context-control-access.js";
 import { randomUUID } from "node:crypto";
 import { open, link, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -49,7 +50,7 @@ function contentTypeFor(opened: Opened, id: string): string {
   if (!match) throw serviceError("INVALID_ARGUMENT", "Data ID has no configured MIME suffix", { id });
   return match[1];
 }
-export async function listData(context: Context, root: string, storeId: string, options: PaginationOptions = {}) {
+async function listDataUnlocked(context: Context, root: string, storeId: string, options: PaginationOptions = {}) {
   const limit = parseListLimit(options.limit);
   const opened = await openBusinessStore(context, root, storeId);
   const scope = { command: "data.list", scope: { root, storeId, binding: opened.binding, directory: opened.directory } };
@@ -58,7 +59,7 @@ export async function listData(context: Context, root: string, storeId: string, 
   await assertModelOperationStamp(root, opened.stamp);
   return { items: page.items, ...(page.nextCursor === undefined ? {} : { nextCursor: encodeListCursor(scope, page.nextCursor) }) };
 }
-export async function readData(context: Context, root: string, storeId: string, id: string, options: { metadataOnly?: boolean; path?: string } = {}) {
+async function readDataUnlocked(context: Context, root: string, storeId: string, id: string, options: { metadataOnly?: boolean; path?: string } = {}) {
   if (options.metadataOnly && options.path !== undefined) throw serviceError("INVALID_ARGUMENT", "metadata-only and path are mutually exclusive");
   const opened = await openBusinessStore(context, root, storeId);
   assertId(opened, id);
@@ -75,7 +76,7 @@ export async function readData(context: Context, root: string, storeId: string, 
   await assertModelOperationStamp(root, opened.stamp);
   return { id, modelRef: opened.binding.model, ...metadata(record), ...("data" in record ? { contentType: record.data.payload.contentType } : {}), ...(options.metadataOnly ? {} : { value }) };
 }
-export async function hasData(context: Context, root: string, storeId: string, id: string) {
+async function hasDataUnlocked(context: Context, root: string, storeId: string, id: string) {
   const opened = await openBusinessStore(context, root, storeId); assertId(opened, id);
   const exists = await opened.store.has(context, id);
   await assertModelOperationStamp(root, opened.stamp);
@@ -113,7 +114,7 @@ export async function writeData(context: Context, root: string, storeId: string,
     }
     return { operation: `data.${operation}`, id, modelRef: opened.binding.model, ...(result ? metadata(result) : {}) };
   };
-  return options.dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
+  return options.dryRun ? execute() : withContextControlAccess(root, execute, context.signal);
 }
 export async function upsertData(context: Context, root: string, storeId: string, id: string, input: DataInput, options: { dryRun?: boolean } = {}) {
   const execute = async () => {
@@ -126,7 +127,7 @@ export async function upsertData(context: Context, root: string, storeId: string
     const record = await opened.store.upsert(context, id, input.value);
     return { operation: "data.upsert", id, modelRef: opened.binding.model, ...metadata(record) };
   };
-  return options.dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
+  return options.dryRun ? execute() : withContextControlAccess(root, execute, context.signal);
 }
 
 export async function deleteData(context: Context, root: string, storeId: string, id: string, options: { expectedRevision?: number; dryRun?: boolean } = {}) {
@@ -141,7 +142,7 @@ export async function deleteData(context: Context, root: string, storeId: string
     const deleted = await opened.store.delete(context, id, { expectedRevision: options.expectedRevision });
     return { operation: "data.delete", id, modelRef: opened.binding.model, deleted };
   };
-  return options.dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
+  return options.dryRun ? execute() : withContextControlAccess(root, execute, context.signal);
 }
 export async function editData(context: Context, root: string, storeId: string, id: string, patch: unknown, options: { expectedRevision?: number; dryRun?: boolean } = {}) {
   const opened = await openBusinessStore(context, root, storeId); assertId(opened, id); requireCas(opened, options.expectedRevision, true);
@@ -153,7 +154,7 @@ export async function editData(context: Context, root: string, storeId: string, 
   const value = applyJsonPatch(record.value, patch);
   await prepareInput(context, opened, id, { kind: "value", value });
   if (options.dryRun) return { operation: "data.edit", id, modelRef: opened.binding.model, expectedRevision: record.revision, dryRun: true };
-  return withProjectSettingsLock(root, async () => {
+  return withContextControlAccess(root, async () => {
     const current = await openBusinessStore(context, root, storeId);
     if (current.store.kind !== "ValueStore" || !isSameBinding(opened, current)) throw serviceError("REVISION_CONFLICT", "Store binding changed during edit");
     const saved = await current.store.update(context, id, value, { expectedRevision: record.revision });
@@ -176,7 +177,7 @@ export async function validateData(context: Context, root: string, options: { id
   const record = await readData(context, root, options.storeId, options.id);
   return { operation: "data.validate", id: options.id, modelRef: record.modelRef, valid: true };
 }
-export async function exportData(context: Context, root: string, storeId: string, id: string, as: "payload" | "json", out: string) {
+async function exportDataUnlocked(context: Context, root: string, storeId: string, id: string, as: "payload" | "json", out: string) {
   const opened = await openBusinessStore(context, root, storeId); assertId(opened, id);
   const record = await opened.store.get(context, id);
   if (!record) throw serviceError("NOT_FOUND", `Record not found: ${id}`);
@@ -203,3 +204,11 @@ export async function exportData(context: Context, root: string, storeId: string
   } finally { await rm(temporary, { force: true }); }
   return { operation: "data.export", id, modelRef: opened.binding.model, out: destination, bytes: bytes.byteLength };
 }
+
+export const listData = (...args: Parameters<typeof listDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => listDataUnlocked(...args)) : listDataUnlocked(...args);
+
+export const readData = (...args: Parameters<typeof readDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => readDataUnlocked(...args)) : readDataUnlocked(...args);
+
+export const hasData = (...args: Parameters<typeof hasDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => hasDataUnlocked(...args)) : hasDataUnlocked(...args);
+
+export const exportData = (...args: Parameters<typeof exportDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => exportDataUnlocked(...args)) : exportDataUnlocked(...args);

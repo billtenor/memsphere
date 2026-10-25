@@ -157,3 +157,12 @@ test("Completed staging state stays readable after Project publication without a
   await recoverModelOperation(published);
   assert.equal(await readFile(join(published, "models/json-schema/draft-07/existing.json"), "utf8"), "published\n");
 });
+
+test("ordinary model operations cannot write business records and the narrow upgrade cannot target Store metadata", async t => {
+  const f = await businessFixture(t); await f.createStore();
+  const path = join(f.root, "data/records/record.json");
+  await assert.rejects(withProjectModelWrite(f.root, () => commitModelOperation(f.root, "model.update", [{ path, before: undefined, after: Buffer.from("{}") }])) , { code: "MODEL_OPERATION_DAMAGED" });
+  const { openContextControl } = await import("../src/project/context-control.js"); await openContextControl(f.root, true);
+  const metadata = join(f.root, "data/context_control/runs/.memsphere-json-store/invalid.json");
+  await assert.rejects(withProjectModelWrite(f.root, () => commitModelOperation(f.root, "context-control.outputs-upgrade", [{ path: metadata, before: undefined, after: Buffer.from("{}") }])) , { code: "MODEL_OPERATION_DAMAGED" });
+});

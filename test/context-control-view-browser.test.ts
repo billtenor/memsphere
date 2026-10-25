@@ -41,3 +41,55 @@ test("real Run graph changes history without opening an overlay and keeps its di
     assert.equal(await page.locator(".cc-node").count(), 3);
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
+
+test("External projection, full details, edge endpoints and two-axis grab panning use the real Run view", { timeout: 60000 }, async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!, run = await service.start("图交互");
+  const external = await service.addExternal(run.id, "共享外部来源", { content: textContent("完整资料".repeat(100), "text/markdown") });
+  await service.addExternal(run.id, "尚未使用的资料", { content: textContent("new") });
+  const hiddenInput = await service.addExternal(run.id, "历史独占来源", { content: textContent("old") });
+  const hidden = (await service.report(run.id, { name: "收起产物", content: textContent("old"), dependencies: [{ kind: "external", id: hiddenInput.id }] })).artifact;
+  await service.updateOutputs(run.id, [], [hidden.id]);
+  let last = (await service.report(run.id, { name: "主干", content: textContent("A"), dependencies: [{ kind: "external", id: external.id }] })).artifact;
+  for (let i = 0; i < 4; i++) last = (await service.report(run.id, { name: `后续${i}`, content: textContent("B"), dependencies: [{ kind: "artifact", id: last.id }] })).artifact;
+  for (let i = 0; i < 7; i++) await service.report(run.id, { name: `并行${i}`, content: textContent("C") });
+  const server = createViewServer(await readProjectConfig("test-project", f.home));
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
+    const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
+    await page.goto(`${origin}/projects/test-project/tasks/${run.id}`);
+    await page.getByRole("button", { name: /共享外部来源/ }).waitFor();
+    assert.equal(await page.getByRole("button", { name: /历史独占来源/ }).count(), 0);
+    await page.getByRole("button", { name: /尚未使用的资料/ }).waitFor();
+    await page.locator(".cc-edge-hit").first().hover();
+    assert.equal(await page.locator('.cc-edge[data-highlighted="true"]').count(), 1);
+    assert.equal(await page.locator('.cc-node[data-edge-highlighted="true"]').count(), 2);
+    const canvas = page.locator(".cc-canvas-scroll"), box = (await canvas.boundingBox())!;
+    await page.mouse.move(box.x + box.width - 25, box.y + 210); await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 205, box.y + 80, { steps: 8 }); await page.mouse.up();
+    const offset = await canvas.evaluate(e => [e.scrollLeft, e.scrollTop]); assert.ok(offset[0] > 0 && offset[1] > 0);
+    await page.mouse.move(box.x + 50, box.y + 50); assert.deepEqual(await canvas.evaluate(e => [e.scrollLeft, e.scrollTop]), offset);
+    for (const cancel of ["pointercancel", "lostpointercapture", "blur"]) {
+      await canvas.evaluate(e => { e.scrollLeft = 0; e.scrollTop = 0; });
+      await page.mouse.move(box.x + box.width - 25, box.y + 210); await page.mouse.down();
+      await page.mouse.move(box.x + box.width - 105, box.y + 150);
+      await canvas.evaluate((e, name) => {
+        if (name === "blur") window.dispatchEvent(new Event("blur"));
+        else e.dispatchEvent(new PointerEvent(name, { pointerId: 1, bubbles: true }));
+      }, cancel);
+      const stopped = await canvas.evaluate(e => [e.scrollLeft, e.scrollTop]);
+      await page.mouse.move(box.x + box.width - 205, box.y + 80);
+      assert.deepEqual(await canvas.evaluate(e => [e.scrollLeft, e.scrollTop]), stopped, cancel);
+      await page.mouse.up();
+    }
+    await page.getByRole("button", { name: /共享外部来源/ }).click();
+    await page.locator(".cc-external-pane .cc-document").getByText("完整资料".repeat(100), { exact: true }).waitFor();
+    assert.equal(await page.locator("dialog .cc-pane-review").count(), 0); assert.equal(await page.locator("dialog .cc-version-select").count(), 0);
+    await page.keyboard.press("Escape");
+    await service.updateOutputs(run.id, [], await service.outputs(run.id));
+    await page.reload(); await page.getByRole("button", { name: /尚未使用的资料/ }).waitFor();
+    assert.equal(await page.locator("[data-artifact-id]").count(), 0); assert.equal(await page.locator(".cc-external").count(), 1);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

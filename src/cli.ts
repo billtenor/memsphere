@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerContinueCommand } from "./commands/continue.js";
 import { registerExplorationCommands } from "./commands/context-control.js";
 import { projectUpgradeCommand } from "./commands/project-upgrade.js";
 import { createRequire } from "node:module";
@@ -602,6 +603,7 @@ run
   .action(runStatusCommand);
 
 registerExplorationCommands(run);
+registerContinueCommand(program, run);
 
 const migrate = program
   .command("migrate")

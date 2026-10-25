@@ -1,3 +1,5 @@
+import { withContextControlAccess } from "./context-control-access.js";
+import { readModelOperationStamp } from "./model-operation.js";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -12,12 +14,39 @@ import { createBusinessStore, openBusinessStore, readBusinessProject } from "./b
 import { mutateModel } from "./model-service.js";
 import { createProjectModelHost } from "./models.js";
 
-export async function openContextControl(root: string, initialize = false): Promise<ContextControl | undefined> {
+export async function openContextControl(root: string, initialize = false, legacyUpgrade = false): Promise<ContextControl | undefined> {
   if (initialize) await initializeContextControl(root);
+  return withContextControlAccess(root, async () => {
+    const service = await openContextControlUnlocked(root, legacyUpgrade);
+    if (!service) return undefined;
+    let stamp = await readModelOperationStamp(root);
+    return new Proxy(service, { get(target, property, receiver) {
+      const value = Reflect.get(target, property, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => withContextControlAccess(root, async () => {
+        const latest = await readModelOperationStamp(root);
+        if (latest !== stamp) {
+          const fresh = await openContextControlUnlocked(root, legacyUpgrade);
+          if (!fresh) throw failure("STORE_INCOMPATIBLE", "Context control bindings were removed");
+          Object.assign(target.stores, fresh.stores); stamp = latest;
+        }
+        return value.apply(target, args);
+      });
+    } });
+  });
+}
+
+async function openContextControlUnlocked(root: string, legacyUpgrade: boolean): Promise<ContextControl | undefined> {
   const config = await readBusinessProject(root);
   const bindings = ENTITIES.map(e => config.dataStores?.[storeId(e)]);
   if (bindings.every(b => !b)) return undefined;
   if (bindings.some(b => !b)) throw failure("INITIALIZATION_INCOMPLETE", "Context control Store bindings are incomplete; start a free exploration to initialize");
+  if (!legacyUpgrade) {
+    const host = await createProjectModelHost({}, { root, ...config });
+    for (const asset of readContextControlModels()) {
+      if (!isDeepStrictEqual((await host.definition(asset.id)).definition, asset.definition)) throw failure("MODEL_INCOMPATIBLE", `Context control models need an explicit upgrade: memsphere project models initialize (${asset.id})`);
+    }
+  }
   const stores = {} as Stores;
   for (const entity of ENTITIES) {
     const opened = await openBusinessStore({}, root, storeId(entity));

@@ -1,7 +1,7 @@
 {
   "type": "object",
   "title": "Run",
-  "description": "整个流程的一次运行实例，保存记忆快照、运行级配置、流程调度状态及最终交付选择。",
+  "description": "整个流程的一次运行实例，保存记忆快照、运行级配置、流程调度状态及成果的人工调整。成果集合由已完整提交的产物关系推导。",
   "properties": {
     "id": {
       "$ref": "#/definitions/Id",
@@ -165,16 +165,39 @@
         "additionalProperties": false
       }
     },
-    "finalArtifactIds": {
-      "type": "array",
-      "title": "最终交付物",
-      "description": "本次明确选定的交付 Artifact ID；必须同属此 Run 且 status=submitted。最终交付选择不改变 Artifact；有效依赖图从这些根节点计算。",
-      "items": {
-        "$ref": "#/definitions/Id",
-        "title": "标识",
-        "description": "关联记录或定义的标识。"
+    "outputOverrides": {
+      "type": "object",
+      "title": "成果人工调整",
+      "description": "只保存明确添加或移除的成果入口；两组 ID 不得重叠。自动成果为完整 submitted 产物中未被其他完整产物依赖、也未被修订替换的产物；实际成果为（自动成果 ∪ 人工添加）减去人工移除。普通 report 和 redo 不修改本字段。未人工调整时省略；终态后固定。",
+      "properties": {
+        "addedArtifactIds": {
+          "type": "array",
+          "title": "人工添加",
+          "description": "明确保留为成果入口的完整 submitted 产物；直到手动移除。后续被依赖或修订仍保留此人工选择。",
+          "items": {
+            "$ref": "#/definitions/Id",
+            "title": "产物标识",
+            "description": "同一 Run 中的 Artifact ID。"
+          },
+          "uniqueItems": true
+        },
+        "removedArtifactIds": {
+          "type": "array",
+          "title": "人工移除",
+          "description": "明确从成果入口隐藏的产物；后续推导不会恢复此 ID，不影响新修订 ID 自动成为成果，也不删除记录或依赖。作为其他成果的依赖时仍可展示。",
+          "items": {
+            "$ref": "#/definitions/Id",
+            "title": "产物标识",
+            "description": "同一 Run 中的 Artifact ID。"
+          },
+          "uniqueItems": true
+        }
       },
-      "uniqueItems": true
+      "required": [
+        "addedArtifactIds",
+        "removedArtifactIds"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -182,8 +205,7 @@
     "name",
     "status",
     "createdAt",
-    "language",
-    "finalArtifactIds"
+    "language"
   ],
   "additionalProperties": false,
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -677,7 +699,6 @@
           }
         }
       },
-      "finalArtifactIds": [],
       "permissionConfig": {
         "runner": {
           "permissions": [
@@ -759,9 +780,12 @@
       "createdAt": "2026-10-17T08:00:00Z",
       "endedAt": "2026-10-17T08:05:00Z",
       "language": "zh-CN",
-      "finalArtifactIds": [
-        "artifact-exploration"
-      ]
+      "outputOverrides": {
+        "addedArtifactIds": [
+          "artifact-exploration"
+        ],
+        "removedArtifactIds": []
+      }
     },
     {
       "id": "run-business",
@@ -775,8 +799,7 @@
           "modelRef": "purchase-request.json",
           "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
         }
-      ],
-      "finalArtifactIds": []
+      ]
     },
     {
       "id": "run-abandoned",
@@ -787,8 +810,7 @@
       "abandonment": {
         "source": "view"
       },
-      "language": "zh-CN",
-      "finalArtifactIds": []
+      "language": "zh-CN"
     },
     {
       "id": "run-abandoned-cli",
@@ -800,8 +822,7 @@
         "reason": "需求已取消。",
         "source": "cli"
       },
-      "language": "zh-CN",
-      "finalArtifactIds": []
+      "language": "zh-CN"
     },
     {
       "id": "run-binding-updated",
@@ -820,7 +841,6 @@
           }
         }
       },
-      "finalArtifactIds": [],
       "permissionConfig": {
         "runner": {
           "permissions": [
@@ -908,24 +928,42 @@
       "name": "逐项编写说明",
       "status": "running",
       "createdAt": "2026-10-17T08:00:00Z",
-      "language": "zh-CN",
-      "finalArtifactIds": []
+      "language": "zh-CN"
     },
     {
       "id": "run-agent-review",
       "name": "Agent 评审执行与重试",
       "status": "running",
       "createdAt": "2026-10-17T08:00:00Z",
-      "language": "zh-CN",
-      "finalArtifactIds": []
+      "language": "zh-CN"
     },
     {
       "id": "run-retry",
       "name": "重试方案编写",
       "status": "running",
       "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN"
+    },
+    {
+      "id": "run-exploration-progress",
+      "name": "技术方案共创",
+      "status": "running",
+      "createdAt": "2026-10-25T08:00:00Z",
       "language": "zh-CN",
-      "finalArtifactIds": []
+      "outputOverrides": {
+        "addedArtifactIds": [
+          "artifact-cli-design",
+          "artifact-graph-design"
+        ],
+        "removedArtifactIds": []
+      }
+    },
+    {
+      "id": "run-exploration-hidden",
+      "name": "继续探索",
+      "status": "running",
+      "createdAt": "2026-10-25T08:00:00Z",
+      "language": "zh-CN"
     }
   ]
 }
