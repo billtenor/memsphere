@@ -13,6 +13,41 @@ import { bytesContent } from "../src/data/extensions/shared/payload.js";
 import { withRecordLock } from "../src/data/extensions/shared/filesystem.js";
 import { createPlainRuntime } from "../src/data/extensions/shared/reflection.js";
 
+test("hierarchical ValueStore IDs preserve full paths, CAS and deleted revisions independently", async () => {
+  await withStore(async (store, directory, runtime) => {
+    const value = { name: "nested", count: 1 };
+    await store.create({}, "run-a/artifact", value);
+    await store.create({}, "run-b/artifact", value);
+    assert.equal(JSON.parse(await readFile(join(directory, "run-a/artifact.json"), "utf8")).id, "run-a/artifact");
+    const changed = await store.update({}, "run-a/artifact", { name: "changed", count: 2 }, { expectedRevision: 1 });
+    assert.equal(changed.revision, 2);
+    await assert.rejects(store.update({}, "run-a/artifact", value, { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
+    await store.delete({}, "run-a/artifact", { expectedRevision: 2 });
+    assert.equal((await store.create({}, "run-a/artifact", value)).revision, 3);
+    await assert.rejects(store.delete({}, "run-a/artifact", { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
+    assert.equal((await store.get({}, "run-b/artifact"))!.revision, 1);
+    const reopened = await new FilesystemJsonValueStoreFactory().openExisting({}, STORE_ID, runtime, new Config({ directory }));
+    assert.equal((await reopened.get({}, "run-a/artifact"))!.revision, 3);
+  });
+});
+
+test("hierarchical list paginates mixed flat and nested full IDs and read misses do not create parents", async () => {
+  await withStore(async (store, directory) => {
+    assert.equal(await store.get({}, "missing/child"), undefined);
+    assert.equal(await store.has({}, "missing/child"), false);
+    assert.deepEqual(await readdir(directory), []);
+    const ids = ["flat", "run-a/a", "run-a/deep/b", "run-b/a"];
+    for (const id of ids) await store.upsert({}, id, { name: id, count: 0 });
+    let cursor: string | undefined;
+    const found: string[] = [];
+    do {
+      const page = await store.list({}, { limit: 1, cursor });
+      found.push(...page.items.map(x => x.id)); cursor = page.nextCursor;
+    } while (cursor);
+    assert.deepEqual(found, ids);
+  });
+});
+
 const MODEL = "example/filesystem-json-value-v1.json";
 const STORE_ID = "example/values";
 
@@ -257,7 +292,7 @@ test("filesystem JSON ValueStore respects cancellation and portable configuratio
     for (const id of ["", " ", undefined as unknown as string]) {
       await assert.rejects(new FilesystemJsonValueStoreFactory().createStore({}, id, runtime, new Config({ directory })), /store id/i);
     }
-    for (const id of ["../../../value-outside", "a/b", "a\\b", ".", "..", "CON", "aux.txt", "LPT1", "x:y", "x?y", "x*y", "x|y", "x<y", "x>y", 'x"y', "trailing.", "trailing ", "bad\u0000", "bad\ud800", "e\u0301"]) {
+    for (const id of ["../../../value-outside", "a//b", "/a", "a/", "a/../b", "a\\b", ".", "..", "CON", "aux.txt", "LPT1", "x:y", "x?y", "x*y", "x|y", "x<y", "x>y", 'x"y', "trailing.", "trailing ", "bad\u0000", "bad\ud800", "e\u0301"]) {
       await assert.rejects(store.create({}, id, value), id);
     }
     for (const id of ["订单 001", "café", "already.json"]) {

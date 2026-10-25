@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { registerContinueCommand } from "./commands/continue.js";
+import { registerExplorationCommands } from "./commands/context-control.js";
 import { projectUpgradeCommand } from "./commands/project-upgrade.js";
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
@@ -599,6 +601,9 @@ run
   .description("Show run status or list recent runs.")
   .option("--run <id>", "run id")
   .action(runStatusCommand);
+
+registerExplorationCommands(run);
+registerContinueCommand(program, run);
 
 const migrate = program
   .command("migrate")

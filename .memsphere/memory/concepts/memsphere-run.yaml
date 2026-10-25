@@ -4,15 +4,27 @@ names:
   - memsphere-run
   - Run
 defines:
-  - Procedure 的一次有名称、有状态且可追溯的实际执行；同一个 Procedure 可以产生多个彼此独立的 Run。
-  - Run 按 Procedure 的 flow 逐步推进，同一时刻只有一个当前步骤，并记录每一步的 Artifact、Review 和状态变化。
+  - 一次有名称、有状态且可追溯的运行，可执行 Procedure，也可承载 Agent 自由探索。
+  - 流程执行模式的 Run 按 Procedure 的 flow 逐步推进，同一时刻只有一个当前步骤，并记录每一步的 Artifact、Review 和状态变化。
   - Action 的 actor 只区分 human 与 agent：human 表示 Run 暂停并等待 Human 提供结果，agent 表示由当前 Runner 执行。
   - Runner 是 Memsphere 在当前通用 Agent 框架中的实际执行者。Runner 由 Agent 框架托管：框架只使用主 Agent 时，Runner 就是主 Agent；框架启用子 Agent 时，主 Agent 和子 Agent 共同构成 Runner。Memsphere 只把 Agent Action 交给这个 Runner，不介入 Agent 框架内部如何分工。
   - Artifact Review 是 Run 中对已提交 Artifact 的独立评审环节；Reviewer 负责审查，Runner 仍负责执行和推进。
   - Run 正常完成时进入 done；只有 Human 可以主动将仍在执行的 Run 变为 abandoned。两种终态都保留已有执行证据。
-  - Run 的 Artifact、中间产物、Memory 快照文件、Agent 活动日志和活动快照分别由四类 raw 模型描述，经当前或归档 DataStore 按 DataId 访问；资源发现沿用 Run 状态中的业务引用，Memory 快照补充 memorySnapshot.files。
-  - Run status 与 .archive.json 仍是原生 JSON 状态文件，不进入内容 Store。归档与恢复先复制覆盖并校验内容，最后切换 Run status，再清理旧端；状态切换后重试只续做清理。
+  - 流程执行模式的 Run 的 Artifact、中间产物、Memory 快照文件、Agent 活动日志和活动快照分别由四类 raw 模型描述，经当前或归档 DataStore 按 DataId 访问；资源发现沿用 Run 状态中的业务引用，Memory 快照补充 memorySnapshot.files。
+  - 流程执行模式的 Run status 与 .archive.json 仍是原生 JSON 状态文件，不进入内容 Store。归档与恢复先复制覆盖并校验内容，最后切换 Run status，再清理旧端；状态切换后重试只续做清理。
   - 归档或恢复前须确认已有记录的 Agent Worker PID 已退出；无法确认时保留两端并重试，不主动终止 Worker。
-  - Run 启动冻结全部可达模型产物的目标绑定和模型指纹；report 及接受写入前检查，变化时明确拒绝。stepExecutionId 持久化且同次失败重试、审核修改重交复用，循环或 Call 的下一次执行生成新身份；业务数据 ID 默认取 run_id 与 stepExecutionId 的组合，显式选择规则见下文。
-  - 模型 Artifact 仍完整保存不可变提交快照，用于 Review、历史查看和追溯；接受后另行将同一模型值整条 upsert 到业务 Store，成功才推进。业务记录后续更新不改变历史快照；Store revision 不是历史内容读取能力，Artifact 不仅保存业务引用。写入后 Run 保存失败时同 ID redo，允许 revision 增长；取消、删除、归档或恢复 Run 不联动删除或重写业务数据。
-  - 模型 Artifact 可通过 run report --write-options 内联 JSON 对象（可选 data_id 字段） 选择稳定业务 ID，仅适用于绑定业务 Store 的普通模型产物（空对象也受此限制）；仅接受 JSON 对象与当前支持的 data_id 字段，不支持文件引用，未知字段或非字符串值拒绝；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则（含 .json 后缀长度），不修剪或编码。省略时按 Run ID 与 stepExecutionId 生成。首个通过格式及模型校验的候选在评审或业务写入前持久化目标，重试/评审修订省略时继承、同 ID 可重交、不同 ID 拒绝；校验失败尚未冻结目标。不同步骤、循环或 Run 可显式选择同一 ID，执行身份和历史快照仍独立。候选 modelTarget、评审材料和接受 modelData 回执记录业务 ID，接受只写已评审目标；旧记录未含目标字段时按原生成规则处理。写入为无条件整条原子 upsert，最后成功写入覆盖，不合并字段，无 expected-revision 或 CAS，写入后 Run 保存失败以同 ID redo。
+  - 流程执行模式的 Run 启动冻结全部可达模型产物的目标绑定和模型指纹；report 及接受写入前检查，变化时明确拒绝。stepExecutionId 持久化且同次失败重试、审核修改重交复用，循环或 Call 的下一次执行生成新身份；业务数据 ID 默认取 run_id 与 stepExecutionId 的组合，显式选择规则见下文。
+  - 流程执行模式的模型 Artifact 仍完整保存不可变提交快照，用于 Review、历史查看和追溯；接受后另行将同一模型值整条 upsert 到业务 Store，成功才推进。业务记录后续更新不改变历史快照；Store revision 不是历史内容读取能力，Artifact 不仅保存业务引用。写入后 Run 保存失败时同 ID redo，允许 revision 增长；取消、删除、归档或恢复 Run 不联动删除或重写业务数据。
+  - 流程执行模式的模型 Artifact 可通过 run report --write-options 内联 JSON 对象（可选 data_id 字段） 选择稳定业务 ID，仅适用于绑定业务 Store 的普通模型产物（空对象也受此限制）；仅接受 JSON 对象与当前支持的 data_id 字段，不支持文件引用，未知字段或非字符串值拒绝；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则（含 .json 后缀长度），不修剪或编码。省略时按 Run ID 与 stepExecutionId 生成。首个通过格式及模型校验的候选在评审或业务写入前持久化目标，重试/评审修订省略时继承、同 ID 可重交、不同 ID 拒绝；校验失败尚未冻结目标。不同步骤、循环或 Run 可显式选择同一 ID，执行身份和历史快照仍独立。候选 modelTarget、评审材料和接受 modelData 回执记录业务 ID，接受只写已评审目标；旧记录未含目标字段时按原生成规则处理。写入为无条件整条原子 upsert，最后成功写入覆盖，不合并字段，无 expected-revision 或 CAS，写入后 Run 保存失败以同 ID redo。
+  - Run 也可承载没有 Procedure 的自由探索；执行流程模式沿用 flow 调度与原生 RunState，自由探索使用上下文控制五模型的 Store，两种模式并行且不自动迁移。
+  - 自由探索通过 run start --name 创建并返回前文 contextId；准备好完整成果后直接 report，系统关联 Step。memsphere continue C 仅承接项目和 Run，内容、评论、依赖及操作对象显式提供，continue C --help 查询当前可执行命令；旧流程、ChangeSet 和 ACP 暂不接入。
+  - 自由探索的 Run、Step、Artifact、External、Review 对应 memsphere/context_control 下五个 .json 模型；默认 Store 为 context_control/runs、steps、artifacts、externals、reviews（后四项同样带 context_control/ 前缀）。Run 的 data_id 是 run_id，其他实体是 run_id/实体_id，值内的 id 仍为实体标识。
+  - 自由探索的产物内容由 content.model（definedBy、definition）与 content.payload（contentType、content 字符串）表达，或使用 contentRef（storeId、dataId、sha256）引用固定内容；submitted 必须二选一；普通自由探索直接提交完整成果，不预建空 draft。引用内容读取时验证 SHA-256。
+  - 自由探索的已提交 Artifact 内容、依赖和修订来源固定；修改或回到历史成果重做时创建新的 Artifact/Step，revisedFrom 指向原成果但不是自动依赖。不提供普通 report --draft 或独立 rewind，Schema 渐进撰写仍走原流程。
+  - 每个自由探索 Artifact 自动带 default 标签，额外标签由 --tag 或 artifact tag 添加且仅在当前 Run 生效；--depends-on 支持 artifact:ID、external:ID、tag:名称，标签只在当前提交时展开成已提交成果的具体 ID，不追随后续标签变化，历史版本也匹配。修订省略依赖继承原具体 ID，显式依赖替换，结构化空数组清空；自定义标签不从旧版继承。
+  - 自由探索按真实需要使用 artifact show 或 external show 读取材料；不为登记依赖重复读取，也不声明生产目标。CLI 正文最多预览200个Unicode字符，截断后追加...并给出完整导出命令；--out 排他创建完整原始内容文件，不覆盖既有文件。JSON 保持单一合法对象，网页展示完整内容。
+  - 自由探索的轻量 Review 以 review create --reviewer human/agent 记录意见，重复 --comment 保留多条独立评论，也可使用 --comment-file；两种入口互斥。source 是声明的来源类别，不要求预配置 Actor，不产生正式轮次、投票或生产门禁。
+  - 自由探索由 ValueStore 保证单记录 CAS，Project、Run 和记录依次短锁编排。提交中断后查询及后续业务写入先按原 Artifact/Step 身份 redo，再返回完整成果；持续失败明确报错。原样重新 report 是新生产请求，不承诺去重，应先按回执给出的身份查询 status 恢复。绑定旧定义的 Store 用 project models initialize 执行已知字段的受限转换，保留记录及版本元数据。
+  - outputs 由完整 submitted 产物图推导：排除被其他完整产物依赖或被 revisedFrom 替换的产物，再合并人工添加并减去人工移除。Run.outputOverrides 只保存 addedArtifactIds 与 removedArtifactIds；普通 report 和 redo 不修改 Run。outputs list 查看，outputs update 通过重复 --add/--remove 幂等调整；人工添加明确保留直到移除，人工移除只隐藏具体 ID，新修订 ID 可自动成为成果。finish 显式确认交付根，仅在结束更新中保存相对自动成果的增删差值；同根重复完成幂等，终态不可修改。
+  - 自由探索在现有 Run 模块展示推导成果 outputArtifactIds 的依赖闭包；空集合不回退全图。External 纳入真实依赖图，运行中尚未引用的新资料也显示；点击资料看完整来源及内容。顶部展示一份 Run 名称和状态，产物节点保留名称与 Badge 标签。历史选择只切图，点击才开浮窗，浮窗翻页保持打开；返回当前成果恢复默认根图。空白及边上按住鼠标可横纵拖拽，悬停边同时高亮边及直接端点。
+  - CommandState 使用 Home 级独立模型及 Store，不依赖 Project 模型登记；run start 创建，status 只找回已有ID，普通场景显式传前文ID。Continue 仅支持 report、review create、external add、artifact tag、outputs update、finish、abandon，查询和读取保留原命令。

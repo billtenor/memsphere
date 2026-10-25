@@ -1,0 +1,12 @@
+export type Ref = { kind: "artifact" | "external"; id: string };
+export type Content = { model: { definedBy: string; definition: string }; payload: { contentType: string; content: string } };
+export type ContentRef = { storeId: string; dataId: string; sha256: string };
+export type Body = { content?: Content; contentRef?: ContentRef };
+export type Run = { id: string; name: string; status: "running" | "done" | "abandoned"; createdAt: string; language: "zh-CN" | "en"; outputOverrides?: { addedArtifactIds: string[]; removedArtifactIds: string[] }; endedAt?: string; abandonment?: { source: "cli" | "view"; reason?: string } };
+export type Step = { id: string; runId: string; createdAt: string; status: "running" | "done"; endedAt?: string; artifact: { mode: "produce"; id: string }; reads?: Record<string, { readAt: string }> };
+export type Artifact = Body & { id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
+export type External = Body & { id: string; runId: string; source: string; capturedAt: string };
+export type Review = { id: string; artifactId: string; reviewer: { role: "reviewer"; source: "human" | "agent" }; status: "submitted"; comments: Array<{ id: string; body: string; createdAt: string }>; createdAt: string; endedAt: string };
+export type Snapshot = { run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; outputArtifactIds: string[] };
+export type ReportInput = Body & { target?: string; name?: string; revisedFrom?: string; revisedSummary?: string; tags?: string[]; dependencies?: Ref[]; dependsOn?: string[] };
+export const textContent = (content: string, contentType = "text/plain"): Content => ({ model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType, content } });

@@ -8,6 +8,12 @@ The only configuration field is the required, nonblank `directory` string.
 Relative paths at this Factory boundary resolve against the process cwd; the
 Project service resolves them against the Registry Project root before calling.
 
+IDs may be portable relative paths such as `run-id/artifact-id`; only the final
+segment receives `.json`, and list returns the complete ID. Flat and hierarchical
+IDs coexist without migration. Parent directories are created only by create/upsert;
+reads of missing IDs do not create directories. Path traversal, aliases and
+symlink parents are rejected.
+
 Records remain readable `<id>.json` files containing `id`, `revision`, timestamps,
 and `value`. Every create/update/delete acquires the same native per-record lock
 across processes and Factory instances. Conditions are checked inside that lock.
@@ -25,6 +31,12 @@ lock without deleting it. Lock waits time out and support `Context.signal`; a
 timeout never steals a live lock. Unsupported native locking fails before the
 record action. External file edits or removal of internal metadata bypass these
 guarantees. No cross-record transaction or power-loss recovery is promised.
+
+Creating a hierarchical record also briefly locks its top-level directory
+namespace using the same portable name key. This prevents different leaf records
+from concurrently creating case or Unicode aliases of their shared parents.
+Failed publication removes only empty directories created by that operation.
+Updates of existing records and creation in other namespaces remain independent.
 
 `validateFilesystemJsonStoreMetadata(context, directory)` performs a pure check
 of retained internal state for explicit directory registration. It accepts only

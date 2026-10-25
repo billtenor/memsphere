@@ -3,7 +3,7 @@ import { join } from "node:path";
 import type { Context } from "../../api/context.js";
 import {
   atomicPublish, FILESYSTEM_JSON_METADATA_DIRECTORY, isCode, readFileSnapshot,
-  recordStateKey, requirePositiveInteger, validateFilename
+  recordStateKey, requirePositiveInteger, validateRelativeFilePath
 } from "../shared/filesystem.js";
 
 const FORMAT = "memsphere/filesystem-json-revision/1";
@@ -62,9 +62,9 @@ function parseState(bytes: Uint8Array, stateName: string): RevisionState {
   try {
     const state = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as RevisionState;
     if (!state || typeof state !== "object" || Array.isArray(state) || Object.keys(state).sort().join(",") !== "filename,format,revision" || state.format !== FORMAT) throw new TypeError("Invalid revision metadata format");
-    validateFilename(state.filename);
+    validateRelativeFilePath(state.filename);
     if (!state.filename.endsWith(".json") || `${recordStateKey(state.filename)}.revision.json` !== stateName) throw new TypeError("Revision metadata filename mismatch");
-    validateFilename(state.filename.slice(0, -5));
+    validateRelativeFilePath(state.filename.slice(0, -5));
     requirePositiveInteger(state.revision, "retained revision");
     return state;
   } catch (cause) {

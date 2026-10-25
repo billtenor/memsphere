@@ -9,7 +9,7 @@ import { FilesystemJsonValueStoreFactory, parseFilesystemJsonValueStoreConfig, v
 import { FilesystemDataStoreFactory, parseFilesystemDataStoreConfig } from "../data/extensions/filesystem-datastore/index.js";
 import { assertJsonDescriptor } from "../data/extensions/json-serializer/index.js";
 import { listRelativeFilenames } from "../data/extensions/shared/filesystem.js";
-import { validateFilename, validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
+import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
 import { createProjectModelHost } from "./models.js";
 import { projectConfigSchema, businessStoreBindingSchema, type ProjectConfigFile, type BusinessStoreBinding } from "./model.js";
 import { canonicalPath, validateModelStoragePaths, within } from "./model-storage-paths.js";
@@ -101,11 +101,11 @@ async function assertDirectoryProtocol(context: Context, directory: string, bind
         await validateFilesystemJsonStoreMetadata(context, directory); continue;
       }
       if (file.name.toLowerCase().startsWith(".memsphere-")) throw serviceError("STORE_INCOMPATIBLE", `Unknown internal Store entry: ${name}`);
-      if (file.isDirectory() && binding.kind === "data") { validateRelativeFilePath(name); await visit(join(folder, file.name), name); continue; }
+      if (file.isDirectory()) { validateRelativeFilePath(name); await visit(join(folder, file.name), name); continue; }
       if (!file.isFile()) throw serviceError("STORE_INCOMPATIBLE", `Unknown Store entry: ${name}`);
       if (binding.kind === "value") {
         if (!file.name.endsWith(".json")) throw serviceError("STORE_INCOMPATIBLE", `Unknown Store entry: ${name}`);
-        validateFilename(file.name.slice(0, -5));
+        validateRelativeFilePath(name.slice(0, -5));
       } else {
         validateRelativeFilePath(name);
         if (!extensions!.some(([suffix]) => file.name.toLowerCase().endsWith(suffix))) throw serviceError("STORE_INCOMPATIBLE", `No MIME mapping for Store entry: ${name}`);

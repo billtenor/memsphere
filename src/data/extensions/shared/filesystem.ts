@@ -369,7 +369,7 @@ export async function withRecordLock<T>(
   filename: string,
   action: () => Promise<T>
 ): Promise<T> {
-  validateFilename(filename);
+  validateRelativeFilePath(filename);
   throwIfAborted(context);
   const canonical = await fs.realpath(directory);
   throwIfAborted(context);
@@ -385,7 +385,7 @@ export async function withRecordLock<T>(
 
 /** Short internal names preserve support for maximum-length public record IDs. */
 export function recordStateKey(filename: string): string {
-  validateFilename(filename);
+  validateRelativeFilePath(filename);
   return createHash("sha256").update(portableNameKey(filename)).digest("hex");
 }
 

@@ -1,3 +1,4 @@
+import { createContextGraph } from "./context-control.js";
 import {
   defineViewPlugin,
   portableSlots,
@@ -534,6 +535,8 @@ function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Nav
 class RunApplication {
   readonly #root: HTMLElement; readonly #portal: HTMLElement; readonly #config: Readonly<RunConfig>;
   #detailRoot: HTMLElement | null = null;
+  #contextGraph: ReturnType<typeof createContextGraph> | undefined;
+  #contextGraphRun = "";
   readonly #routes: RunRoutes; #route: RouteLocation; readonly #controller: AbortController;readonly #navigate:Navigate;
   readonly #ui: ViewUi;
   readonly #onListChange: () => void;
@@ -572,13 +575,13 @@ class RunApplication {
     if (!this.#detail) return { title: { text: tr(this.#config,"run") } };
     return {
       title: { text: displayName(this.#detail) },
-      subtitle: { text: `${tr(this.#config, String(this.#detail.status ?? "running"))} · ${String(this.#detail.id ?? "")}` },
+      subtitle: { text: this.#detail.representation === "context-control" ? tr(this.#config, String(this.#detail.status)) : `${tr(this.#config, String(this.#detail.status ?? "running"))} · ${String(this.#detail.id ?? "")}` },
       breadcrumbs: [{ label: { text: tr(this.#config,"run") }, route: this.#routes.index.to(undefined, { query: this.#status === "running" ? {} : { status: this.#status } }) }]
     };
   }
   headerActions(): readonly PublishedRunHeaderAction[] {
     const run = this.#detail;
-    if (!run || this.#route.routeKey?.endsWith("artifact-review")) return [];
+    if (!run || run.representation === "context-control" || this.#route.routeKey?.endsWith("artifact-review")) return [];
     const actions: PublishedRunHeaderAction[] = [];
     if (currentRunStep(run)) {
       actions.push({
@@ -673,6 +676,7 @@ class RunApplication {
     if (this.#polling) await Promise.allSettled([this.#polling]);
     this.#reviewMediaCleanup?.();
     this.#reviewDialog?.remove();
+    this.#contextGraph?.dispose();
   }
   async refresh(): Promise<void> {
     if (this.#busy) return;
@@ -707,7 +711,7 @@ class RunApplication {
     if (requestedStatus !== this.#status) return undefined;
     const nextRuns = payload.runs || [];
     const nextListVersion = JSON.stringify(nextRuns.map((run: Json) => [
-      run.id, run.status, run.updatedAt, run.eventCount, run.archived, run.readOnly,
+      run.id, run.status, run.updatedAt, run.eventCount, run.archived, run.readOnly, run.contextRevision,
       run.reviewProgress?.id, run.reviewProgress?.updatedAt, run.reviewProgress?.status
     ]));
     const listChanged = nextListVersion !== this.#runListVersion;
@@ -769,6 +773,20 @@ class RunApplication {
     this.#root.querySelector(".run-layout")?.remove();
     this.#onListChange();
     if (!this.#detailRoot) return;
+    if (this.#detail?.representation === "context-control") {
+      if (!this.#contextGraph || this.#contextGraphRun !== this.#detail.id) {
+        this.#contextGraph?.dispose();
+        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase);
+        this.#contextGraphRun = this.#detail.id;
+      }
+      this.#contextGraph.update(this.#detail.context);
+      if (!this.#detailRoot.contains(this.#contextGraph.element)) {
+        for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
+        const main = createPageLayout("run-workspace"); main.append(this.#contextGraph.element); this.#detailRoot.append(main);
+      }
+      return;
+    }
+    this.#contextGraph?.dispose(); this.#contextGraph = undefined; this.#contextGraphRun = "";
     for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
     const main=createPageLayout("run-workspace"); main.append(this.#renderDetail());
     this.#detailRoot.append(main);
@@ -806,7 +824,7 @@ class RunApplication {
             icon: { kind: "system" as const, name: run.status === "running" ? "play-circle" : run.status === "done" ? "check-circle" : "archive" },
             selected: id === this.#detail?.id,
             route: this.#routes.detail.to({ runId: id }, { query: this.#status === "running" ? {} : { status: this.#status } }),
-            trailingActions: run.readOnly ? undefined : [{
+            trailingActions: run.readOnly || run.representation === "context-control" ? undefined : [{
               label: { text: tr(this.#config, destructive ? "abandon" : "archive") },
               icon: { kind: "system" as const, name: "archive" },
               run: () => destructive ? this.#abandon(run) : this.#archive(run)

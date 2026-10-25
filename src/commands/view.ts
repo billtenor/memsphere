@@ -1,3 +1,5 @@
+import { openContextControl } from "../project/context-control.js";
+import { contextRunPayload, contextRunSummaries, assertUniqueRunSources } from "../context_control/view.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { gzipSync } from "node:zlib";
@@ -1346,11 +1348,34 @@ async function handleRequest(
         sendJson(response, 400, { error: "unsupported Run status" });
         return;
       }
-      const runs = await listRunSummaries(config.runsRoot);
+      const legacyRuns = await listRunSummaries(config.runsRoot);
+      const contextRuns = await contextRunSummaries(await contextControlForView(config));
+      assertUniqueRunSources(legacyRuns, contextRuns);
+      const runs = [...legacyRuns, ...contextRuns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       sendJson(response, 200, { runs: status ? runs.filter(run => run.status === status) : runs });
       return;
     }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
+    return;
+  }
+
+  // Resolve shared Run identity before any detail, content, download or legacy
+  // operation chooses a source. A failed/conflicting source never falls back.
+  const contextRunPath = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/|$)/);
+  const contextLocation = contextRunPath ? await contextRunForView(config, decodeURIComponent(contextRunPath[1])) : undefined;
+  const contextArtifactMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/(artifacts|externals)\/([^/]+)\/content$/);
+  if (request.method === "GET" && contextArtifactMatch) {
+    if (!contextLocation) { sendJson(response, 404, { error: "Run not found" }); return; }
+    try {
+      const value = await (contextArtifactMatch[2] === "externals" ? contextLocation.service.readExternal(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])) : contextLocation.service.readArtifact(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])));
+      if (url.searchParams.get("download") === "1") {
+        response.writeHead(200, { "content-type": value.contentType, "content-disposition": "attachment", "x-content-type-options": "nosniff" });
+        response.end(value.bytes); return;
+      }
+      const previewable = /^text\//.test(value.contentType) || /(?:json|yaml|xml)/.test(value.contentType);
+      const content = previewable ? Buffer.from(value.bytes).toString("utf8") : "";
+      sendJson(response, 200, { contentType: value.contentType, content, previewable, ...(value.contentType === "text/markdown" ? { renderedContent: renderMarkdownContent(content) } : {}) });
+    } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
     return;
   }
 
@@ -1604,6 +1629,10 @@ async function handleRequest(
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const runId = decodeURIComponent(runMatch[1]);
+    if (contextLocation) {
+      sendJson(response, 200, { run: contextRunPayload(await contextLocation.service.snapshot(runId)) });
+      return;
+    }
     let located: Awaited<ReturnType<typeof readViewRunById>>;
     try {
       located = await readViewRunById(config, runId);
@@ -2094,6 +2123,24 @@ async function systemMemoryReferences(): Promise<Set<string>> {
   return systemMemoryReferencesPromise;
 }
 
+// Existing embedders may supply a bare Run configuration. Model-backed Runs
+// require a Project; never treat an actual Project Store failure as absence.
+function contextControlForView(config: MemsphereConfig) {
+  return config.project ? openContextControl(config.scopeRoot) : undefined;
+}
+
+async function contextRunForView(config: MemsphereConfig, runId: string) {
+  const service = await contextControlForView(config);
+  const run = service && await service.findRun(runId);
+  if (!run) return undefined;
+  try { await readViewRunById(config, runId); }
+  catch (error) {
+    if (error instanceof Error && error.message === `Run not found: ${runId}`) return { service: service!, run };
+    throw error;
+  }
+  throw new Error("Run ID exists in both legacy and model Stores");
+}
+
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
   const runs = await listRuns(config.runsRoot);
   await Promise.all(runs.map((run) => dispatchArtifactReviewAgents({ config, run })));
@@ -2101,7 +2148,10 @@ async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
   const restored = await Promise.all(
     refreshed.map((run) => ensureCurrentSchemaDraft(config.runsRoot, run))
   );
-  return Promise.all(restored.map((run) => toViewRunPayload(config.runsRoot, run)));
+  const legacy = await Promise.all(restored.map((run) => toViewRunPayload(config.runsRoot, run)));
+  const context = await contextRunSummaries(await contextControlForView(config));
+  assertUniqueRunSources(restored, context);
+  return [...legacy, ...context];
 }
 
 async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {

@@ -14,7 +14,7 @@ const registrationSchema = z.unknown().transform(value => { validateModelRegistr
 const entrySchema = z.object({ source: z.string().min(1), metaModel: z.enum([JSON_SCHEMA_DRAFT_07, RAW_MODEL]), registration: registrationSchema }).strict();
 const nonemptyName = z.string().min(1).refine(value => value.trim() === value && value.length > 0, "name must not have surrounding whitespace");
 const packageSchema = z.object({ id: nonemptyName, name: nonemptyName, description: z.string(), models: z.array(entrySchema).min(1) }).strict();
-export const reservedModelManifestSchema = z.object({ version: z.literal(1), system_models: z.array(entrySchema).min(1), market_packages: z.array(packageSchema) }).strict();
+export const reservedModelManifestSchema = z.object({ version: z.literal(1), system_models: z.array(entrySchema).min(1), market_packages: z.array(packageSchema), home_models: z.array(z.object({ id: z.string().min(1), metaModel: z.literal(JSON_SCHEMA_DRAFT_07), source: z.string().min(1) }).strict()).default([]) }).strict();
 export type ReservedModelManifest = z.infer<typeof reservedModelManifestSchema>;
 export type BundledModelDescriptor = {
   sourcePath: string;
@@ -24,7 +24,8 @@ export type BundledModelDescriptor = {
   registration: ModelRegistration;
 };
 export type BundledModelPackage = { id: string; name: string; description: string; models: BundledModelDescriptor[] };
-export type ReservedModelCatalog = { manifest: ReservedModelManifest; systemModels: BundledModelDescriptor[]; marketPackages: BundledModelPackage[] };
+export type HomeModelDescriptor = { id: string; metaModel: string; sourcePath: string; source: string; definition: unknown };
+export type ReservedModelCatalog = { homeModels: HomeModelDescriptor[]; manifest: ReservedModelManifest; systemModels: BundledModelDescriptor[]; marketPackages: BundledModelPackage[] };
 
 export function bundledReservedModelsRoot(): string {
   return resolve(dirname(fileURLToPath(import.meta.url)), "../../reserved-models");
@@ -115,7 +116,21 @@ export function readReservedModelCatalog(sourceRoot = bundledReservedModelsRoot(
   for (const source of [...sourceFiles(root, "system-models"), ...sourceFiles(root, "market-models")]) {
     if (!sources.has(source)) throw new TypeError(`Model asset is missing from manifest: ${source}`);
   }
-  return { manifest, systemModels, marketPackages };
+  const homeModels = manifest.home_models.map(entry => {
+    validateRelativeFilePath(entry.id); validateRelativeFilePath(entry.source);
+    const key = portableNameKey(entry.id);
+    if (identities.has(key)) throw new TypeError(`Duplicate bundled modelRef: ${entry.id}`);
+    identities.add(key);
+    if (!entry.source.startsWith("home-models/") || !entry.source.endsWith(".json")) throw new TypeError(`Invalid Home model source: ${entry.source}`);
+    const source = readSource(root, entry.source); const definition = JSON.parse(source.replace(/^\uFEFF/, ""));
+    validateJsonSchemaDefinition(definition);
+    return { ...entry, sourcePath: join(root, entry.source), source, definition };
+  });
+  if (homeModels.length) {
+    const declared = new Set(manifest.home_models.map(entry => entry.source));
+    for (const path of sourceFiles(root, "home-models")) if (!declared.has(path)) throw new TypeError(`Home model missing from manifest: ${path}`);
+  }
+  return { manifest, systemModels, marketPackages, homeModels };
 }
 
 export function readBundledSystemModels(sourceRoot = bundledReservedModelsRoot()): BundledModelDescriptor[] {
@@ -125,3 +140,5 @@ export function readBundledSystemModels(sourceRoot = bundledReservedModelsRoot()
 export function readBundledMarketModelPackages(sourceRoot = bundledReservedModelsRoot()): BundledModelPackage[] {
   return readReservedModelCatalog(sourceRoot).marketPackages;
 }
+
+export function readBundledHomeModels(sourceRoot = bundledReservedModelsRoot()): HomeModelDescriptor[] { return readReservedModelCatalog(sourceRoot).homeModels; }

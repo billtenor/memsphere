@@ -74,11 +74,37 @@ memsphere data delete order-001 --store orders --expected-revision 2
 memsphere data store remove orders
 ```
 
-`--path <path>` 当前使用 RFC 9535 JSONPath，结果始终是匹配值数组。`data edit` 使用 RFC 6902 JSON Patch，修改完整副本后校验并以读取时的 revision 条件保存，冲突不自动重试。ValueStore 的 update/delete 可选 `--expected-revision`，省略表示无条件写；删除后重建同 ID 的 revision 继续增加，旧 revision 不能命中新记录。DataStore 不支持条件写或 edit；它支持原始 Payload 的文件和 MIME 检查、原样写入及导出，二进制不能按 JSON 路径读取。
+`--path <path>` 当前使用 RFC 9535 JSONPath，结果始终是匹配值数组。`data edit` 使用 RFC 6902 JSON Patch，修改完整副本后校验并以读取时的 revision 条件保存，冲突不自动重试。JSON ValueStore 的 data_id 可使用 run_id/artifact_id 等分层相对路径；列表、data 操作和重新登记保留完整 ID，旧扁平数据不迁移。ValueStore 的 update/delete 可选 `--expected-revision`，省略表示无条件写；删除后重建同 ID 的 revision 继续增加，旧 revision 不能命中新记录。DataStore 不支持条件写或 edit；它支持原始 Payload 的文件和 MIME 检查、原样写入及导出，二进制不能按 JSON 路径读取。
 
 `data store remove` 只移除绑定，保留记录、锁文件和已删除记录的 revision 历史。重新登记非空目录须完整检查格式和兼容性。export 文件目标必须不存在；`--out -` 只输出正文，不能同时请求 JSON 回执。输入文件参数中的 `-` 明确表示标准输入，不带参数时不会自动读标准输入。
 
 所有 list 命令都支持 `--limit <n>`、`--cursor <token>`：默认 100、最多 1000，先筛选再分页，响应使用 `items` 和可选 `nextCursor`。需要完整列表时，把返回的 nextCursor 原样传给同一查询继续读取，直到不再返回；不要把第一页当作全部结果。可更改 limit/output，不能更改 Project、Store 或筛选条件后复用 cursor，分页不承诺并发修改期间的快照。新增模型、数据和 data store 命令默认 `--output text`，成功用 YAML 键值、缩进和列表展示完整结果，包括嵌套值和 nextCursor；失败只在 stderr 显示文本说明。使用 `--output json` 时，成功只在 stdout 输出一个 JSON，失败只在 stderr 输出 `{ "error": { "code": "...", "message": "...", "details": ... } }` 并以非零状态退出。原始导出正文不经过回执格式转换。
+
+## 自由探索上下文
+
+没有预定义 Procedure 时，使用 `memsphere run start --name "任务名称" --output json`，回执返回 Run ID 和前文 contextId。前文自动创建，跨 Shell 显式传同一 C；`run status --run R` 找回已有 ID。全局 Continue 本轮仅支持自由探索，旧流程、ChangeSet 和 ACP 保持原入口。
+
+```bash
+memsphere continue C --help
+memsphere run artifact show --run R --artifact A --out input.md
+memsphere continue C report --name "方案" --artifact-file plan.md --content-type text/markdown --depends-on artifact:A
+memsphere continue C external add --source "用户补充" --content "约束说明"
+memsphere continue C review create --artifact B --reviewer human --comment "修改要求一" --comment "修改要求二"
+memsphere continue C report --revised-from B --artifact-file revised.md
+memsphere run outputs list --run R
+memsphere continue C outputs update --remove A --add B_NEW
+memsphere continue C finish --artifact B_NEW
+```
+
+- 完整成果准备好后直接 report，不预建产物或声明开始工作；系统关联 Step。文本、--artifact-file、结构化 --file 互斥。结构化只接收 name、content/contentRef、dependencies、tags、revisedFrom、revisedSummary，系统身份字段拒绝。Schema 局部草稿仍走原流程。
+- Continue 仅承接公共项目和 Run；产物、评论、依赖、标签和交付根显式填写。查询及读取仍使用完整普通命令，状态结束后不能继续生产。完整原生命令也保留。
+- 只按真实需要读取材料，不为登记依赖重复读取。Artifact／External 正文超过200 chars时仅预览前200字符加...，并提示完整导出命令；--out完整排他导出原始字节，网页内容不截断。JSON正文及提示在同一合法对象内。
+- content由model（definedBy、definition JSON字符串）和payload（contentType、content字符串）构成，或用contentRef（storeId、dataId、sha256）固定引用；已提交内容及依赖不可改，修订创建新ID。revisedFrom不等于依赖，修订省略依赖继承原集合，显式依赖完整替换，结构化[]清空。
+- 每份产物自动带default标签，--tag及artifact tag可添加；--depends-on接受artifact:ID、external:ID、tag:名称，标签当次固定为具体ID。external add支持短source/content或结构化file，成功只返回runId、externalId。轻量Review支持重复--comment或--comment-file，不引入正式轮次或门禁。
+- outputs从完整submitted产物及实际依赖、修订关系推导；Run.outputOverrides只保存人工添加／移除，report及redo不写Run。outputs update支持重复--add／--remove及幂等操作；人工添加明确保留，人工移除隐藏具体ID，直到反向操作。默认图是成果根的依赖闭包，空集合不回退全图。移出根不删除产物，仍被依赖时仍显示。
+- 部分report错误若给出已保存Artifact／Step身份，先执行回执中的run status恢复，不盲目原样重发；新report不承诺请求去重。terminal状态只读，Human决定取消后可abandon。
+- 自由探索持久化使用五个项目模型Store；Run的data_id为run_id，其他实体为run_id/实体_id。Home CommandState不依赖Project登记。已知旧模型需显式project models initialize转换，保留历史及已有成果选择，转换为人工增删差值。
+- 图属于现有Run模块；External点击显示完整来源和内容，产物浮窗左右展示内容及Review，历史选择只切图、浮窗翻页不关闭。空白或边上可按住鼠标手抓平移，悬停边高亮直接端点。无graph DSL、缩放或图编辑器。
 
 ## Memsphere 如何组织记忆
 
@@ -276,7 +302,7 @@ flow:
 - Memsphere Home `config.json` 的 `acp_providers` 定义与内置类型同名的 ACP Provider 配置。首批固定支持 `traex`、`qwen`、`kimi`、`codex`；CLI command 和 ACP 入口由类型固定，配置维护非托管 args、非敏感 env 和启动/空闲/总运行超时。配置中心可自动检测可执行文件路径和版本，但 Provider 自己负责安装、认证和模型账户配置。
 - Agent Actor 只配置 ACP Provider 实例 id `provider` 和可选 `model`；工作目录、托管安全参数与 Prompt version 由 Memsphere 管理。旧的 Actor 内 `command`、`args`、`env`、`cwd`、Prompt version 和 timeout 字段不兼容，也不会被自动迁移。
 - 原生 Windows 要求 Windows Node.js 与 Git for Windows；用户和 Agent CLI 支持 Windows PowerShell 5.1、PowerShell 7、CMD、Git for Windows 随附的 Git Bash。WSL 按独立 Linux 环境处理，MSYS2/Cygwin 不在当前支持范围。Provider 的安装检测与 Windows 支持等级分别展示。
-- `memsphere run start` 必须通过 `--name` 指定本次 Run 的非空名称，并会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用相同的 `--name` 和 `--review-config <path>` 启动。
+- 执行 Procedure 的 `memsphere run start` 必须通过 `--name` 指定本次 Run 的非空名称，并会先列出所有 Review scope、Slot、可用 Actor 和内置 Decision Policy。把预检示例保存并调整后，使用相同的 `--name` 和 `--review-config <path>` 启动。
 - Review 配置必须为每个 scope 选择 Policy，并为每个 Slot 绑定 Actor 或显式 `skip`；一个 Actor 绑定多个 Slot 时只产生一个 Assignment 和 Vote。
 - 当前 Run 的全部可达 Review Slot 都显式 `skip` 时，不创建 Artifact Review，也不要求 Project 配置 `control_plane`；只要任一 Slot 实际绑定 Actor，Project 仍必须配置 Control Plane。无 Control Plane 时预检仍列出内置 Decision Policy，提供有效全 skip 示例；已经提供含 Actor Binding 的 Review 配置时，CLI 必须明确报告缺少 `control_plane`，不得误报为未提供 Review 配置。
 - Permission 只在 Runner/Actor 的 `permissions` 中配置；Run Review 配置不追加临时权限。Memory YAML 不允许 `role_bindings` 或 `permission_grants`。

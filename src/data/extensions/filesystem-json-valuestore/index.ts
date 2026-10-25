@@ -7,10 +7,10 @@ import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } f
 import type { StoredValue, ValueStore, ValueStoreFactory } from "../../api/value-store.js";
 import { JsonPayloadSerializer } from "../json-serializer/index.js";
 import {
-  atomicPublish, deleteFile, findFile, listFilenames, openExistingDirectory, paginate, prepareDirectory,
-  readFileSnapshot, requirePositiveInteger, requireString, validateFilename, withRecordLock
+  atomicPublish, cleanupCreatedDirectories, deleteFile, findFile, listRelativeFilenames, openExistingDirectory, paginate, prepareDirectory,
+  readFileSnapshot, requirePositiveInteger, requireString, resolveFileParent, validateRelativeFilePath, withRecordLock
 } from "../shared/filesystem.js";
-import { readDeletedRevision, retainDeletedRevision } from "./revision-state.js";
+import { readDeletedRevision, retainDeletedRevision, validateFilesystemJsonStoreMetadata } from "./revision-state.js";
 
 export { FILESYSTEM_JSON_METADATA_DIRECTORY } from "../shared/filesystem.js";
 export { validateFilesystemJsonStoreMetadata } from "./revision-state.js";
@@ -20,7 +20,7 @@ type JsonRecord = StoredValue & { revision: number; createdAt: number; updatedAt
 /**
  * Each record is readable, formatted JSON at `${directory}/${id}.json`:
  * { id, revision, createdAt, updatedAt, value }. The model belongs to this Store,
- * not the file. IDs are portable filename stems, never hashed or encoded.
+ * not the file. IDs are portable '/' paths, never hashed or encoded.
  *
  * Same-record writes share a native file lock across all Store instances and
  * processes. Permanent lock files and deleted revision high-water marks live in
@@ -63,19 +63,19 @@ class FilesystemJsonValueStore implements ValueStore {
   }
 
   async has(context: Context, id: DataId): Promise<boolean> {
-    return (await findFile(context, this.directory, recordFilename(id))) !== undefined;
+    return (await this.find(context, recordFilename(id))) !== undefined;
   }
 
   async create(context: Context, id: DataId, value: unknown): Promise<StoredValue> {
     const filename = recordFilename(id);
     const snapshot = await this.prepare(context, value);
     return withRecordLock(context, this.directory, filename, async () => {
-      if (await findFile(context, this.directory, filename)) throw Object.assign(new Error(`Record ${id} already exists`), { code: "ALREADY_EXISTS" });
+      if (await this.find(context, filename)) throw Object.assign(new Error(`Record ${id} already exists`), { code: "ALREADY_EXISTS" });
       const revision = await readDeletedRevision(context, this.directory, filename);
       if (revision === Number.MAX_SAFE_INTEGER) throw new RangeError(`Record ${id} revision overflow`);
       const now = Date.now();
       const record: JsonRecord = { id, revision: revision + 1, createdAt: now, updatedAt: now, value: snapshot };
-      await atomicPublish(context, this.directory, filename, recordBytes(record), "create");
+      await this.publish(context, filename, record, "create");
       return record;
     });
   }
@@ -91,7 +91,7 @@ class FilesystemJsonValueStore implements ValueStore {
       const now = Date.now();
       const record: JsonRecord = { id, revision: revision + 1, createdAt: previous?.createdAt ?? now, updatedAt: now, value: snapshot };
       if (previous && Object.hasOwn(previous, "createdBy")) record.createdBy = previous.createdBy;
-      await atomicPublish(context, this.directory, filename, recordBytes(record), previous ? "replace" : "create");
+      await this.publish(context, filename, record, previous ? "replace" : "create");
       return record;
     });
   }
@@ -111,7 +111,7 @@ class FilesystemJsonValueStore implements ValueStore {
         updatedAt: Date.now(), value: snapshot
       };
       if (Object.hasOwn(previous, "createdBy")) record.createdBy = previous.createdBy;
-      await atomicPublish(context, this.directory, filename, recordBytes(record), "replace");
+      await this.publish(context, filename, record, "replace");
       return record;
     });
   }
@@ -125,13 +125,15 @@ class FilesystemJsonValueStore implements ValueStore {
       if (previous === undefined) return false;
       await this.checkRetainedRevision(context, filename, previous.revision);
       await retainDeletedRevision(context, this.directory, filename, previous.revision);
-      return deleteFile(context, this.directory, filename);
+      const target = await resolveFileParent(context, this.directory, filename);
+      return target ? deleteFile(context, target.directory, target.filename) : false;
     });
   }
 
   async list(context: Context, options?: ListOptions): Promise<ListResult> {
     const captured = options === undefined ? undefined : { limit: options.limit, cursor: options.cursor };
-    const filenames = await listFilenames(context, this.directory);
+    await validateFilesystemJsonStoreMetadata(context, this.directory);
+    const filenames = await listRelativeFilenames(context, this.directory);
     const ids = filenames.filter((name) => name.endsWith(".json")).map((name) => {
       const id = name.slice(0, -5);
       recordFilename(id);
@@ -159,7 +161,9 @@ class FilesystemJsonValueStore implements ValueStore {
   }
 
   private async read(context: Context, id: DataId, filename: string): Promise<JsonRecord | undefined> {
-    const file = await readFileSnapshot(context, this.directory, filename);
+    const target = await resolveFileParent(context, this.directory, filename);
+    if (!target) return undefined;
+    const file = await readFileSnapshot(context, target.directory, target.filename);
     if (file === undefined) return undefined;
     const record: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(file.bytes));
     assertRecord(record, id);
@@ -168,12 +172,37 @@ class FilesystemJsonValueStore implements ValueStore {
     record.value = await this.prepare(context, record.value);
     return record;
   }
+
+  private async find(context: Context, filename: string) {
+    const target = await resolveFileParent(context, this.directory, filename);
+    return target ? findFile(context, target.directory, target.filename) : undefined;
+  }
+
+  private async publish(context: Context, filename: string, record: JsonRecord, mode: "create" | "replace") {
+    const publish = async () => {
+      const created: string[] = [];
+      try {
+        const target = await resolveFileParent(context, this.directory, filename, mode === "create", created);
+        if (!target) throw Object.assign(new Error(`Record ${record.id} does not exist`), { code: "NOT_FOUND" });
+        return await atomicPublish(context, target.directory, target.filename, recordBytes(record), mode);
+      } catch (error) {
+        await cleanupCreatedDirectories(created);
+        throw error;
+      }
+    };
+    // Different leaf records may create portable aliases of the same parent.
+    // Arbitrate creation/publication within their top-level namespace; other
+    // namespaces and updates of existing records keep their independent locks.
+    return mode === "create" && filename.includes("/")
+      ? withRecordLock(context, this.directory, filename.split("/")[0], publish)
+      : publish();
+  }
 }
 
 function recordFilename(id: DataId): string {
-  validateFilename(id);
+  validateRelativeFilePath(id);
   const filename = `${id}.json`;
-  validateFilename(filename);
+  validateRelativeFilePath(filename);
   return filename;
 }
 
