@@ -14,6 +14,16 @@ import { runGit } from "../src/git.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { projectConfigSchema } from "../src/project/model.js";
 
+test("business ValueStore hierarchical records remain editable and readable after re-registering the directory", async (t) => {
+  const { root, createStore } = await businessFixture(t); await createStore();
+  await writeData({}, root, "records", "run-1/artifact-1", "create", { kind: "value", value: { name: "first", count: 1 } });
+  await editData({}, root, "records", "run-1/artifact-1", [{ op: "replace", path: "/count", value: 2 }]);
+  await removeBusinessStore({}, root, "records");
+  await createStore();
+  assert.deepEqual((await readData({}, root, "records", "run-1/artifact-1")).value, { name: "first", count: 2 });
+  assert.deepEqual(await listData({}, root, "records"), { items: [{ id: "run-1/artifact-1" }] });
+});
+
 test("business ValueStores preserve each JSON root type through CRUD and candidate validation", async (t) => {
   const examples = [
     ["null", { type: "null" }, null, null], ["boolean", { type: "boolean" }, false, true],

@@ -1,0 +1,181 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "External · 外部资料",
+  "description": "本次 Run 使用的一份外部材料，记录来源和实际内容。content 与 contentRef 二选一；被依赖后的材料内容保持不变。",
+  "properties": {
+    "id": {
+      "$ref": "#/definitions/Id",
+      "description": "这份外部材料的稳定标识。"
+    },
+    "runId": {
+      "$ref": "#/definitions/Id",
+      "description": "使用这份材料的 Run；引用者须属于同一 Run。"
+    },
+    "source": {
+      "type": "string",
+      "title": "来源",
+      "minLength": 1,
+      "pattern": "\\S",
+      "description": "用一句话描述材料来源，可包含链接、版本或其他标识。"
+    },
+    "content": {
+      "$ref": "#/definitions/Content",
+      "title": "材料内容",
+      "description": "直接保存的材料内容，与 contentRef 二选一。"
+    },
+    "contentRef": {
+      "$ref": "#/definitions/ContentRef",
+      "title": "材料内容引用",
+      "description": "已存储的固定材料引用，与 content 二选一。"
+    },
+    "capturedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "description": "取得并固定材料的时间。"
+    }
+  },
+  "required": [
+    "id",
+    "runId",
+    "source",
+    "capturedAt"
+  ],
+  "additionalProperties": false,
+  "definitions": {
+    "Id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "稳定标识。"
+    },
+    "ContentRef": {
+      "type": "object",
+      "title": "内容存储引用",
+      "description": "指向 Store 中一份可读取、不可变的内容。",
+      "properties": {
+        "storeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "保存内容的 Store ID。"
+        },
+        "dataId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容在该 Store 中的 ID。"
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容字节的 SHA-256，以 64 位小写十六进制表示；读取时核对。",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "storeId",
+        "dataId",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "Timestamp": {
+      "type": "string",
+      "minLength": 1,
+      "description": "带时区的 RFC 3339 时间。",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "Content": {
+      "type": "object",
+      "title": "产物内容",
+      "description": "材料的模型定义和实际内容。",
+      "properties": {
+        "model": {
+          "$ref": "#/definitions/ArtifactModel",
+          "description": "描述材料结构与要求的模型。",
+          "title": "产物模型"
+        },
+        "payload": {
+          "$ref": "#/definitions/Payload",
+          "description": "材料的实际内容及其格式。",
+          "title": "产物内容"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "payload"
+      ]
+    },
+    "ArtifactModel": {
+      "type": "object",
+      "title": "产物模型",
+      "description": "描述内容结构与要求的模型定义。",
+      "properties": {
+        "definedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "解释模型定义的元模型 ID。"
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1,
+          "description": "模型定义的 JSON 文本，由 definedBy 指定的元模型解释。"
+        }
+      },
+      "required": [
+        "definedBy",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "Payload": {
+      "type": "object",
+      "title": "产物内容",
+      "description": "以文本保存的实际内容及其格式。",
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容的 MIME 类型，例如 text/plain、text/markdown 或 application/json。"
+        },
+        "content": {
+          "type": "string",
+          "title": "产物正文",
+          "description": "正文原文，保留换行、排版和注释；空字符串表示空内容。"
+        }
+      },
+      "required": [
+        "contentType",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "id": "external-001",
+      "runId": "run-001",
+      "capturedAt": "2026-10-03T06:00:00Z",
+      "source": "来自项目仓库 https://example.test/team/project.git，commit bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 的 docs/requirements.md。",
+      "content": {
+        "model": {
+          "definedBy": "json-schema/draft-07.json",
+          "definition": "{\"type\":\"string\"}"
+        },
+        "payload": {
+          "contentType": "text/markdown",
+          "content": "# 需求\n\n系统须支持批量导入。\n"
+        }
+      }
+    },
+    {
+      "id": "external-002",
+      "runId": "run-001",
+      "capturedAt": "2026-10-03T06:00:00Z",
+      "source": "用户在本次讨论中提供的需求说明，原始材料已固定保存。",
+      "contentRef": {
+        "storeId": "external-materials",
+        "dataId": "requirements-001",
+        "sha256": "740b6d4f8d17fc41925d06beb1a6fe6f1113c3c6348c27b98f6172432ccaf715"
+      }
+    }
+  ]
+}

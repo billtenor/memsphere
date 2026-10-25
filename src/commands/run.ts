@@ -1,3 +1,4 @@
+import { tryContextCommand, startExploration, contextRunList } from "./context-control.js";
 import { randomUUID } from "node:crypto";
 import { lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -176,7 +177,7 @@ export async function runStartCommand(procedureName: string | undefined, options
   const procedure = procedureName?.trim();
   const procedureFile = options.file?.trim();
   const changeId = options.change?.trim();
-  if (!procedure && !procedureFile) throw new Error("provide a procedure name or --file <path>");
+  if (!procedure && !procedureFile) { await startExploration(options); return; }
   if (procedure && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
   if (changeId && procedureFile) throw new Error("--change cannot be used with --file");
   const runName = normalizeRunName(options.name);
@@ -308,6 +309,7 @@ export function parseRunReviewConfiguration(value: unknown): RunReviewConfigurat
 }
 
 export async function runReportCommand(options: ReportOptions): Promise<void> {
+  if (await tryContextCommand("report", options)) return;
   const runId = requireRunId(options.run);
   let writeOptions;
   if (options.writeOptions !== undefined) {
@@ -593,6 +595,7 @@ export async function runReviewResolveCommand(options: ReviewResolveOptions): Pr
 }
 
 export async function runShowCommand(options: RunShowOptions): Promise<void> {
+  if (await tryContextCommand("show", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
@@ -663,6 +666,7 @@ export async function runStepShowCommand(options: RunStepShowOptions): Promise<v
 }
 
 export async function runArtifactShowCommand(options: RunArtifactShowOptions): Promise<void> {
+  if (await tryContextCommand("artifact-show", options)) return;
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);
@@ -880,6 +884,7 @@ export async function runSkipCommand(options: RunIdOptions): Promise<void> {
 }
 
 export async function runAbandonCommand(options: RunAbandonOptions): Promise<void> {
+  if (await tryContextCommand("abandon", options)) return;
   const runId = requireRunId(options.run);
   if (options.reason !== undefined && options.reasonFile !== undefined) {
     throw new Error("use only one of --reason or --reason-file");
@@ -898,6 +903,8 @@ export async function runAbandonCommand(options: RunAbandonOptions): Promise<voi
 }
 
 export async function runStatusCommand(options: RunIdOptions): Promise<void> {
+  if (!options.run && await contextRunList(options)) return;
+  if (options.run && await tryContextCommand("status", options)) return;
   const config = await readConfig();
   if (options.run) {
     const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, options.run));

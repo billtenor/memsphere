@@ -7,7 +7,7 @@ import type { StoredData } from "../data/api/data-store.js";
 import { JsonPayloadSerializer, encodeJsonValue } from "../data/extensions/json-serializer/index.js";
 import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { parseFilesystemDataStoreConfig } from "../data/extensions/filesystem-datastore/index.js";
-import { validateFilename, validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
+import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
 import { Config } from "../data/api/config.js";
 import { applyJsonPatch } from "../data/operations/json-patch.js";
 import { queryJsonPath } from "../data/operations/json-path.js";
@@ -20,8 +20,7 @@ import { encodeListCursor, decodeListCursor, parseListLimit, type PaginationOpti
 type Opened = Awaited<ReturnType<typeof openBusinessStore>>;
 export type DataInput = { kind: "value"; value: unknown } | { kind: "payload"; bytes: Uint8Array; contentType: string };
 function assertId(opened: Opened, id: string) {
-  if (opened.store.kind === "ValueStore") validateFilename(id);
-  else validateRelativeFilePath(id);
+  validateRelativeFilePath(id);
 }
 function assertRevision(revision: number | undefined) {
   if (revision !== undefined && (!Number.isSafeInteger(revision) || revision < 1)) throw serviceError("INVALID_ARGUMENT", "expected-revision must be a positive safe integer");

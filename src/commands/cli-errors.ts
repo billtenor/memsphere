@@ -73,7 +73,8 @@ export function requestedCliOutput(program: Command, args: readonly string[]): "
     }
   }
   const structured = (path[0] === "project" && path[1] === "upgrade") || path[0] === "model" || path[0] === "data"
-    || (path[1] === "list" && ["project", "memory", "archive"].includes(path[0]));
+    || (path[1] === "list" && ["project", "memory", "archive"].includes(path[0]))
+    || (path[0] === "run" && ["start", "report", "status", "show", "abandon", "finish", "artifact", "external", "review"].includes(path[1]));
   return structured && output === "json" ? "json" : "text";
 }
 

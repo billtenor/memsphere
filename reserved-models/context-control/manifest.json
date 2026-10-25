@@ -1,0 +1,41 @@
+{
+  "package": "memsphere.context_control",
+  "name": "上下文控制",
+  "models": [
+    {
+      "entity": "run",
+      "id": "memsphere/context_control/run.json",
+      "name": "运行",
+      "source": "run.json",
+      "baselineSha256": "7d0612cb7ece147e5475fba998cabd5fb35f6f58a315db4c8ac4014e247990a3"
+    },
+    {
+      "entity": "step",
+      "id": "memsphere/context_control/step.json",
+      "name": "步骤",
+      "source": "step.json",
+      "baselineSha256": "57c3c3d8a71d582349a1d04f128cb29cbc005e55774ef2ec32eade7c24d853ce"
+    },
+    {
+      "entity": "artifact",
+      "id": "memsphere/context_control/artifact.json",
+      "name": "产物",
+      "source": "artifact.json",
+      "baselineSha256": "3c0aad3afea3d863e0641087f80f96f33b7636e04059170b063f4fb9ff5aff07"
+    },
+    {
+      "entity": "external",
+      "id": "memsphere/context_control/external.json",
+      "name": "外部资料",
+      "source": "external.json",
+      "baselineSha256": "7b6a9bf6fae736c9e2e49e748bbd6d36c9409bf72cd9e2da6b3fc694df24e395"
+    },
+    {
+      "entity": "review",
+      "id": "memsphere/context_control/review.json",
+      "name": "评审",
+      "source": "review.json",
+      "baselineSha256": "042116ac4e983ac00772fd0a432f51040a5cbf69ea410bc3640758dd762745a0"
+    }
+  ]
+}

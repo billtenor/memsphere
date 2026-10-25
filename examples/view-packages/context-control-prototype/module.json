@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.context-control.prototype",
+  "version": "0.1.0",
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": ["router.register", "styles.scoped"],
+    "styles": [{ "id": "context-control", "file": "./prototype.css", "scope": "module" }],
+    "contributions": [
+      { "id": "navigation", "cell": "navigation.primary@1:navigation", "priority": 100 },
+      { "id": "title", "cell": "header.title@1:title", "priority": 100 },
+      { "id": "list", "cell": "content.list@1:list", "priority": 100 },
+      { "id": "page", "cell": "main.view@1:route:prototype", "priority": 100 }
+    ]
+  }
+}

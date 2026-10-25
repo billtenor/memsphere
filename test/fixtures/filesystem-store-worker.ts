@@ -6,9 +6,10 @@ import { FilesystemJsonValueStoreFactory } from "../../src/data/extensions/files
 import { createPlainRuntime } from "../../src/data/extensions/shared/reflection.js";
 import { withNativeFileLock } from "../../src/file-lock.js";
 
-type Request = { operation: "create" | "update" | "delete" | "lock"; expectedRevision?: number; pause?: "after-lock" | "before-publish" | "after-publish" | "after-history"; timeoutMs?: number; value?: unknown };
+type Request = { id?: string; operation: "create" | "update" | "delete" | "lock"; expectedRevision?: number; pause?: "after-lock" | "before-parent-mkdir" | "before-publish" | "after-publish" | "after-history"; timeoutMs?: number; value?: unknown };
 const directory = await fs.realpath(process.argv[2]);
 const request = JSON.parse(process.argv[3]) as Request;
+const recordId = request.id ?? "item";
 const locks = createRequire(import.meta.url)("fs-native-extensions");
 const originalTryLock = locks.tryLock;
 let acquired = false;
@@ -31,6 +32,11 @@ async function barrier(phase: Request["pause"]): Promise<void> {
 }
 
 const originalReaddir = fs.readdir.bind(fs);
+const originalMkdir = fs.mkdir.bind(fs);
+fs.mkdir = (async (...args: Parameters<typeof fs.mkdir>) => {
+  if (recordId.includes("/") && String(args[0]) === join(directory, recordId.split("/")[0])) await barrier("before-parent-mkdir");
+  return originalMkdir(...args);
+}) as typeof fs.mkdir;
 fs.readdir = (async (...args: Parameters<typeof fs.readdir>) => {
   if (acquired && String(args[0]) === directory) await barrier("after-lock");
   return originalReaddir(...args);
@@ -38,11 +44,11 @@ fs.readdir = (async (...args: Parameters<typeof fs.readdir>) => {
 for (const method of ["link", "rename", "unlink"] as const) {
   const original = fs[method].bind(fs) as (...args: string[]) => Promise<void>;
   (fs as unknown as Record<string, unknown>)[method] = async (...args: string[]) => {
-    if (args[method === "unlink" ? 0 : 1] === join(directory, "item.json")) {
+    if (args[method === "unlink" ? 0 : 1] === join(directory, `${recordId}.json`)) {
       await barrier(method === "unlink" ? "after-history" : "before-publish");
     }
     await original(...args);
-    if (method !== "unlink" && args[1] === join(directory, "item.json")) await barrier("after-publish");
+    if (method !== "unlink" && args[1] === join(directory, `${recordId}.json`)) await barrier("after-publish");
   };
 }
 
@@ -59,9 +65,9 @@ process.on("message", async (message) => {
         await released;
         return true;
       }, { timeoutMs: request.timeoutMs ?? 5_000 });
-    } else if (request.operation === "create") value = await store!.create({}, "item", request.value ?? { value: "created" });
-    else if (request.operation === "update") value = await store!.update({}, "item", request.value ?? { value: "updated" }, { expectedRevision: request.expectedRevision });
-    else value = await store!.delete({}, "item", { expectedRevision: request.expectedRevision });
+    } else if (request.operation === "create") value = await store!.create({}, recordId, request.value ?? { value: "created" });
+    else if (request.operation === "update") value = await store!.update({}, recordId, request.value ?? { value: "updated" }, { expectedRevision: request.expectedRevision });
+    else value = await store!.delete({}, recordId, { expectedRevision: request.expectedRevision });
     process.send!({ type: "result", ok: true, value });
   } catch (error) {
     const failure = error as Error & { code?: string };
