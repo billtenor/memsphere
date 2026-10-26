@@ -14,7 +14,7 @@ async function readReserved(relativePath: string): Promise<string> {
   return (await readFile(join(reservedRoot, relativePath), "utf8")).replace(/\r\n/g, "\n");
 }
 
-test("README, System Memory, and Skill share the personalized software positioning", async () => {
+test("README and System Memory retain product positioning while Skill points to its definitions", async () => {
   const [readme, personalizedSoftware, framework, memory, skill] = await Promise.all([
     readFile(join(root, "README.md"), "utf8"),
     readReserved("concepts/memsphere-personalized-software.yaml"),
@@ -23,7 +23,7 @@ test("README, System Memory, and Skill share the personalized software positioni
     readFile(join(root, "src", "skills", "memsphere", "SKILL.md"), "utf8")
   ]);
 
-  for (const source of [readme, framework, skill]) {
+  for (const source of [readme, framework]) {
     assert.match(source, /个性化软件/);
     assert.match(source, /Memsphere (?:本身)?不是(?:另一个)? Agent/);
     assert.match(source, /App/);
@@ -31,7 +31,7 @@ test("README, System Memory, and Skill share the personalized software positioni
   }
   assert.match(personalizedSoftware, /个性化软件/);
   assert.doesNotMatch(personalizedSoftware, /Memsphere 不是 Agent|当前版本首先实现/);
-  for (const source of [personalizedSoftware, skill]) {
+  for (const source of [personalizedSoftware]) {
     assert.match(source, /Prompt/);
     assert.match(source, /Skill/);
     assert.match(source, /个性化 CLI/);
@@ -41,6 +41,8 @@ test("README, System Memory, and Skill share the personalized software positioni
     assert.match(source, /确定性算力/);
   }
   assert.match(framework, /memsphere-personalized-software 定义/);
+  assert.match(skill, /memsphere-framework/);
+  assert.match(skill, /memsphere-personalized-software/);
   assert.match(memory, /Agent 理解并进入个性化软件的入口/);
   assert.match(memory, /不等同于完整的 Memsphere/);
   for (const source of [personalizedSoftware, framework, memory, skill]) {
@@ -71,7 +73,8 @@ test("Skill and project delivery memories enforce the Memory ChangeSet gate", as
     readFile(join(projectMemoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"), "utf8")
   ]);
 
-  assert(skill.indexOf("## Memory 写入硬门禁") < skill.indexOf("## Memsphere 如何组织记忆"));
+  assert.match(skill, /## Memory 变更与资源边界/);
+  assert.match(skill, /评审、提交或交付前/);
   for (const source of [skill, framework, development, testing, delivery, agile]) {
     assert.match(source, /memsphere memory change validate \[change-id\]/);
     assert.match(source, /不能(?:代替|满足)/);

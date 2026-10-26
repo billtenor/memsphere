@@ -5,7 +5,7 @@ description: 发现并应用项目 Memory；按任务运行适用的 Procedure �
 
 # Memsphere
 
-使用当前 Workspace 的 Primary Project 和已安装的 `memsphere` CLI。Concept 解释含义，Statement 表达事实与规则，Procedure 组织可复用流程，Schema 定义结构。不熟悉的命令先查看 `memsphere <命令组> --help`；具体业务规则按任务读取适用 Memory。
+使用当前 Workspace 的 Primary Project 和已安装的 `memsphere` CLI。Concept 解释含义，Statement 表达事实与规则，Procedure 组织可复用流程，Schema 定义结构。产品定位按需读取 `memsphere-framework` 和 `memsphere-personalized-software`。不熟悉的命令先查看 `memsphere <命令组> --help`；具体业务规则按任务读取适用 Memory。
 
 ## 发现并使用 Memory
 
@@ -42,6 +42,6 @@ Procedure Run 遵循冻结的步骤与产物契约。读取选定流程及相关
 
 ## Memory 变更与资源边界
 
-本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [change-id]`，记录 ChangeSet ID、通过状态和 View 入口；后续再改则重新校验。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet。遵守适用的开发、测试和交付 Statement。
+本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [change-id]`，记录 ChangeSet ID、校验状态和 View 入口；后续再改则重新校验。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet。遵守适用的开发、测试和交付 Statement。
 
 `project upgrade` 更新随包的 System Memory 与模型资源，`project repair` 只处理 System Memory，`skill upgrade` 更新本 Skill；升级前确认实际 Project 和 CLI 安装来源。Managed Memory 写入走受控 ChangeSet，Embedded 写入当前 Git worktree，Mounted Project 只读。App 安装、启停及外部工具绑定遵循 `memsphere-app-usage-rules`，不执行未知的绑定程序。其他操作查看 `memsphere model/data/view/project --help` 和适用 Memory。
