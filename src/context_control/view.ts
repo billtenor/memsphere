@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import type { ContextControl } from "./service.js";
-import type { Snapshot } from "./types.js";
+import type { Run, Snapshot } from "./types.js";
+
+/** Basic list metadata must not depend on any child records. */
+export function contextRunSummary(run: Run) {
+  return { ...run, representation: "context-control", procedureName: "", updatedAt: run.endedAt ?? run.createdAt,
+    archived: Boolean(run.archived), readOnly: Boolean(run.archived) };
+}
 
 export function contextRunPayload(snapshot: Snapshot) {
   const { run } = snapshot;
