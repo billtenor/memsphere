@@ -17,7 +17,7 @@ test("skill init installs only the unified memsphere skill", async () => {
 
     const source = (await readFile(join(dir, "memsphere", "SKILL.md"), "utf8")).replace(/\r\n/g, "\n");
     assert.match(source, /^---\nname: memsphere\n/);
-    assert.equal(source, await readFile(join(process.cwd(), "src/skills/memsphere/SKILL.md"), "utf8"));
+    assert.equal(source, (await readFile(join(process.cwd(), "src/skills/memsphere/SKILL.md"), "utf8")).replace(/\r\n/g, "\n"));
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);
     assert.match(source, /memsphere run start/);

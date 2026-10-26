@@ -56,7 +56,7 @@ test("Managed upgrade preserves a same-path customized Procedure and accepts CRL
     assert.deepEqual(await readdir(join(project, "changes")), changesBefore);
 
     const crlfName = "crlf-original";
-    await seedManaged(f, crlfName, entry, Buffer.from(original.replaceAll("\n", "\r\n")));
+    await seedManaged(f, crlfName, entry, Buffer.from(original.replaceAll("\r\n", "\n").replaceAll("\n", "\r\n")));
     const upgraded = f.upgrade(crlfName);
     assert.equal(upgraded.result.status, 0, JSON.stringify(upgraded.value));
     assert.equal(upgraded.value.memory.deleted, 1);
