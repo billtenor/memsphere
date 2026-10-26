@@ -15,6 +15,22 @@ async function fixture(t: test.TestContext) {
   return { ...f, invoke, call };
 }
 
+test("native CLI finishes current outputs and lists/restores archived exploration records", { timeout: 60000 }, async t => {
+  const f = await fixture(t), run = await f.call("run", "start", "--name", "结束归档");
+  await assert.rejects(f.invoke("archive", "run", run.id), /Finish or abandon/);
+  const a = await f.call("run", "report", "--run", run.id, "--name", "A", "--artifact", "A");
+  await f.call("run", "finish", "--run", run.id);
+  const snapshot = await f.call("run", "status", "--run", run.id);
+  assert.equal(snapshot.run.status, "done"); assert.deepEqual(snapshot.outputArtifactIds, [a.artifactId]);
+  assert.equal(snapshot.commandStates[0].status, "closed");
+  await f.invoke("archive", "run", run.id);
+  assert.equal((await f.call("run", "status")).runs.some((r: any) => r.id === run.id), false);
+  assert.ok((await f.call("archive", "list", "runs")).items.some((r: any) => r.id === run.id));
+  await f.invoke("archive", "restore", "run", run.id);
+  assert.equal((await f.call("run", "status", "--run", run.id)).run.status, "done");
+  assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
+});
+
 test("direct production, Continue, independent reads, repeated comments and immutable revision", { timeout: 60000 }, async t => {
   const f = await fixture(t); const run = await f.call("run", "start", "--name", "CLI探索");
   assert.match(run.contextId, /^context-/);

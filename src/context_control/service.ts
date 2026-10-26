@@ -33,6 +33,7 @@ export class ContextControl {
   private async require<T>(entity: Entity, runId: string, entityId: string, context: Context = {}) {
     const row = await this.record<T>(entity, runId, entityId, context);
     if (!row) throw failure("NOT_FOUND", `${entity} not found: ${entityId}`);
+    if (entity === "run" && (row.value as Run).status === "running" && (row.value as Run).archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
     if ((row.value as { id: string }).id !== entityId) throw failure("INVALID_STATE", `Stored identity mismatch: ${entityId}`);
     return row;
   }
@@ -63,6 +64,7 @@ export class ContextControl {
   async findRun(runId: string): Promise<Run | undefined> {
     return this.lock(runId, async () => {
       const row = await this.record<Run>("run", runId, runId);
+      if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
       if (row?.value.status === "running") await this.recover(runId);
       return (await this.record<Run>("run", runId, runId))?.value;
     });
@@ -78,12 +80,13 @@ export class ContextControl {
   }
   private async running(runId: string, context: Context = {}) {
     const row = await this.require<Run>("run", runId, runId, context);
-    if (row.value.status !== "running") throw failure("RUN_FINISHED", `Run is ${row.value.status}`);
+    if (row.value.status !== "running" || row.value.archived) throw failure("RUN_FINISHED", `Run is ${row.value.status}`);
     return row;
   }
   async snapshot(runId: string): Promise<Snapshot> {
     return this.lock(runId, async () => {
       const run = await this.require<Run>("run", runId, runId);
+      if (run.value.status === "running" && run.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
       if (run.value.status === "running") await this.recover(runId);
       return this.snapshotValue(runId);
     });
@@ -277,18 +280,30 @@ export class ContextControl {
     comments.forEach(c => nonblank(c, "comment"));
     return this.write(runId, async () => { await this.complete(runId, artifactId); const time = now(); const r: Review = { id: id("review"), artifactId, reviewer: { role: "reviewer", source }, status: "submitted", comments: comments.map(body => ({ id: id("comment"), body, createdAt: time })), createdAt: time, endedAt: time }; await this.create("review", runId, r); return r; });
   }
-  async finish(runId: string, artifactIds: string[]) {
-    const roots = [...new Set(artifactIds)].sort(); if (!roots.length) throw failure("INVALID_ARGUMENT", "At least one final Artifact required");
+  async finish(runId: string, artifactIds?: string[]) {
     return this.lock(runId, async () => {
       const row = await this.require<Run>("run", runId, runId);
+      if (row.value.status === "running") await this.redo(runId);
+      const roots = [...new Set(artifactIds ?? (await this.snapshotValue(runId)).outputArtifactIds)].sort();
       if (row.value.status === "done" && JSON.stringify([...(await this.snapshotValue(runId)).outputArtifactIds].sort()) === JSON.stringify(roots)) return row.value;
-      await this.running(runId); await this.redo(runId); await this.validateRefs(runId, roots.map(id => ({ kind: "artifact", id })));
+      await this.running(runId); await this.validateRefs(runId, roots.map(id => ({ kind: "artifact", id })));
       const current = await this.running(runId);
       const snapshot = await this.snapshotValue(runId);
       const value: Run = { ...current.value, status: "done", outputOverrides: outputOverrides(automaticOutputs(snapshot.artifacts, snapshot.completeIds), roots), endedAt: now() }; await this.update("run", runId, current, value); return value;
     });
   }
-  async abandon(runId: string, reason?: string) {
-    return this.write(runId, async () => { const row = await this.require<Run>("run", runId, runId); const value: Run = { ...row.value, status: "abandoned", endedAt: now(), abandonment: { source: "cli", ...(reason ? { reason } : {}) } }; await this.update("run", runId, row, value); return value; });
+  async abandon(runId: string, reason?: string, source: "cli" | "view" = "cli") {
+    return this.write(runId, async () => { const row = await this.require<Run>("run", runId, runId); const value: Run = { ...row.value, status: "abandoned", endedAt: now(), abandonment: { source, ...(reason ? { reason } : {}) } }; await this.update("run", runId, row, value); return value; });
+  }
+  /** Archiving changes visibility only; all evidence remains in its bound model Stores. */
+  async archive(runId: string, archived = true) {
+    return this.lock(runId, async () => {
+      const row = await this.require<Run>("run", runId, runId);
+      if (row.value.status === "running") throw failure("RUN_RUNNING", "Finish or abandon the Run before archiving");
+      if (Boolean(row.value.archived) === archived) return row.value;
+      const value = { ...row.value };
+      value.archived = archived;
+      await this.update("run", runId, row, value); return value;
+    });
   }
 }

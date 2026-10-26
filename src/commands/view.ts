@@ -1,5 +1,6 @@
 import { openContextControl } from "../project/context-control.js";
 import { contextRunPayload, contextRunSummaries, assertUniqueRunSources } from "../context_control/view.js";
+import { closeRunCommandStates } from "../home/command-state-store.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { gzipSync } from "node:zlib";
@@ -18,7 +19,7 @@ import {
   ViewPackageAssetRegistry,
   type ResolvedViewPackageComposition
 } from "../module/package-registry.js";
-import { archiveRun } from "../archive/store.js";
+import { archiveRun, restoreRun } from "../archive/store.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { agentActivityDelta, readAgentActivitySnapshot } from "../acp/activity.js";
 import { requireRunContent } from "../project/run-data.js";
@@ -1348,11 +1349,14 @@ async function handleRequest(
         sendJson(response, 400, { error: "unsupported Run status" });
         return;
       }
-      const legacyRuns = await listRunSummaries(config.runsRoot);
+      const archived = url.searchParams.get("archived") === "true";
+      const activeLegacy = await listRunSummaries(config.runsRoot);
+      const archivedLegacy = (await listRunSummaries(join(config.archiveRoot, "runs"))).map(run => ({ ...run, archived: true, readOnly: true }));
+      const legacyRuns = [...activeLegacy, ...archivedLegacy];
       const contextRuns = await contextRunSummaries(await contextControlForView(config));
       assertUniqueRunSources(legacyRuns, contextRuns);
       const runs = [...legacyRuns, ...contextRuns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      sendJson(response, 200, { runs: status ? runs.filter(run => run.status === status) : runs });
+      sendJson(response, 200, { runs: runs.filter(run => Boolean("archived" in run && run.archived) === archived && (!status || run.status === status)) });
       return;
     }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
@@ -1379,6 +1383,18 @@ async function handleRequest(
     return;
   }
 
+  const runFinishMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/finish$/);
+  if (request.method === "POST" && runFinishMatch) {
+    if (!contextLocation) { sendJson(response, 400, { error: "Only free exploration Runs can be finished here" }); return; }
+    try {
+      const body = await readJsonBody<{ artifactIds?: unknown }>(request);
+      if (body.artifactIds !== undefined && (!Array.isArray(body.artifactIds) || body.artifactIds.some(id => typeof id !== "string"))) throw new Error("artifactIds must be an array of strings");
+      await contextLocation.service.finish(contextLocation.run.id, body.artifactIds as string[] | undefined);
+      const warnings = await closeRunCommandStates(config.project!.name, contextLocation.run.id, config.homeRoot);
+      sendJson(response, 200, { run: contextRunPayload(await contextLocation.service.snapshot(contextLocation.run.id)), warnings });
+    } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
+    return;
+  }
   const runAbandonMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/abandon$/);
   if (request.method === "POST" && runAbandonMatch) {
     try {
@@ -1388,6 +1404,12 @@ async function handleRequest(
       }
       if (body.actorId !== undefined && typeof body.actorId !== "string") {
         throw new Error("actorId must be a string");
+      }
+      if (contextLocation) {
+        await contextLocation.service.abandon(contextLocation.run.id, body.reason, "view");
+        const warnings = await closeRunCommandStates(config.project!.name, contextLocation.run.id, config.homeRoot);
+        sendJson(response, 200, { run: contextRunPayload(await contextLocation.service.snapshot(contextLocation.run.id)), warnings });
+        return;
       }
       const result = await abandonRun({
         runsRoot,
@@ -1650,15 +1672,33 @@ async function handleRequest(
         await readRun(located.runsRoot, located.run.id)
       )
       : { ...located.run, readOnly: true as const };
+    const payload = await toViewRunPayload(located.runsRoot, run);
     sendJson(response, 200, {
-      run: await toViewRunPayload(located.runsRoot, run)
+      run: located.runsRoot === runsRoot ? payload : { ...(payload as Record<string, unknown>), archived: true }
     });
     return;
   }
 
 
+  const restoreContextRunMatch = url.pathname.match(/^\/api\/archive\/runs\/([^/]+)\/restore$/);
+  if (request.method === "POST" && restoreContextRunMatch) {
+    const id = decodeURIComponent(restoreContextRunMatch[1]);
+    const located = await contextRunForView(config, id);
+    if (!located) {
+      const run = await restoreRun({ archiveRoot, runsRoot, id });
+      sendJson(response, 200, { run: await toViewRunPayload(runsRoot, run) }); return;
+    }
+    await located.service.archive(id, false);
+    sendJson(response, 200, { run: contextRunPayload(await located.service.snapshot(id)) }); return;
+  }
   const archiveRunMatch = url.pathname.match(/^\/api\/archive\/runs\/([^/]+)$/);
   if (request.method === "POST" && archiveRunMatch) {
+    const id = decodeURIComponent(archiveRunMatch[1]);
+    const located = await contextRunForView(config, id);
+    if (located) {
+      await located.service.archive(id);
+      sendJson(response, 200, { archived: { kind: "runs", id, archived: true } }); return;
+    }
     const entry = await archiveRun({
       archiveRoot,
       runsRoot,
@@ -2151,7 +2191,7 @@ async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
   const legacy = await Promise.all(restored.map((run) => toViewRunPayload(config.runsRoot, run)));
   const context = await contextRunSummaries(await contextControlForView(config));
   assertUniqueRunSources(restored, context);
-  return [...legacy, ...context];
+  return [...legacy, ...context.filter(run => !run.archived)];
 }
 
 async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {

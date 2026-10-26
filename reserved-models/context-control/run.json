@@ -198,6 +198,11 @@
         "removedArtifactIds"
       ],
       "additionalProperties": false
+    },
+    "archived": {
+      "type": "boolean",
+      "title": "已归档",
+      "description": "true 表示已归档；false 或未填写表示未归档。仅终态 Run 可归档，恢复归档保持原终态，数据保留在原 Store。"
     }
   },
   "required": [

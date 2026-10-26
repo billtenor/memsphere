@@ -1,0 +1,974 @@
+{
+  "type": "object",
+  "title": "Run",
+  "description": "整个流程的一次运行实例，保存记忆快照、运行级配置、流程调度状态及成果的人工调整。成果集合由已完整提交的产物关系推导。",
+  "properties": {
+    "id": {
+      "$ref": "#/definitions/Id",
+      "title": "运行标识",
+      "description": "本次运行的稳定标识。"
+    },
+    "name": {
+      "type": "string",
+      "title": "名称",
+      "description": "供人识别本次工作的名称。",
+      "minLength": 1
+    },
+    "status": {
+      "type": "string",
+      "title": "状态",
+      "description": "运行中、已完成或已废弃。",
+      "minLength": 1,
+      "enum": [
+        "running",
+        "done",
+        "abandoned"
+      ]
+    },
+    "createdAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "创建时间",
+      "description": "本次运行创建的时间。"
+    },
+    "endedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "结束时间",
+      "description": "完成或废弃的时间；运行中省略。"
+    },
+    "abandonment": {
+      "type": "object",
+      "title": "废弃信息",
+      "description": "废弃运行时的原因和操作来源；时间使用 endedAt。",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "title": "原因",
+          "description": "废弃的原因。",
+          "minLength": 1
+        },
+        "source": {
+          "type": "string",
+          "title": "操作来源",
+          "description": "view 表示前端操作，cli 表示通过 CLI 执行。",
+          "enum": [
+            "view",
+            "cli"
+          ]
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "additionalProperties": false
+    },
+    "language": {
+      "type": "string",
+      "title": "工作语言",
+      "description": "本次运行使用的工作语言。",
+      "minLength": 1,
+      "enum": [
+        "zh-CN",
+        "en"
+      ]
+    },
+    "memoryRef": {
+      "type": "string",
+      "title": "根流程记忆",
+      "description": "本次运行的根流程记忆完整引用，例如 procedures/example-procedure；必须对应 memorySnapshot.memories 中的键，创建后保持不变。执行流程记忆时填写，自由探索时省略。",
+      "minLength": 1
+    },
+    "memorySnapshot": {
+      "$ref": "#/definitions/MemorySnapshot",
+      "title": "记忆快照",
+      "description": "本次运行所需原始记忆及全部传递依赖的完整内嵌快照；创建后不可修改，更新运行状态时须保持原样。"
+    },
+    "permissionConfig": {
+      "$ref": "#/definitions/PermissionConfig",
+      "title": "权限配置",
+      "description": "本次运行使用的权限、策略和参与者配置。"
+    },
+    "reviewConfig": {
+      "$ref": "#/definitions/ReviewConfig",
+      "title": "评审配置",
+      "description": "评审策略选择和当前槽位绑定。"
+    },
+    "storeConfig": {
+      "type": "array",
+      "title": "业务存储配置",
+      "description": "本次运行固定的业务 Store 与模型绑定；每个 Store 只保存一份。",
+      "items": {
+        "type": "object",
+        "title": "Store 绑定",
+        "description": "业务写入前核对的固定绑定。",
+        "properties": {
+          "storeId": {
+            "type": "string",
+            "title": "Store",
+            "description": "业务 Store ID。",
+            "minLength": 1
+          },
+          "modelRef": {
+            "type": "string",
+            "title": "模型",
+            "description": "该 Store 绑定的模型 ID。",
+            "minLength": 1
+          },
+          "sha256": {
+            "type": "string",
+            "title": "绑定 SHA-256",
+            "description": "Store 配置、模型定义及元模型定义共同计算的 SHA-256。",
+            "minLength": 1,
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        },
+        "required": [
+          "storeId",
+          "modelRef",
+          "sha256"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "frames": {
+      "type": "array",
+      "title": "调用栈",
+      "description": "本 Run 的流程级执行栈，按外层到内层排列，最后一项为当前活动帧。执行 flow 流程时保存，全部调用结束后为空数组；没有流程执行栈时省略。每项用 type 标识类型并保存对应状态，流程定义从完整 memorySnapshot 解析。 每个执行帧的 id 在本 Run 的 frames 内唯一。",
+      "items": {
+        "type": "object",
+        "title": "执行帧",
+        "description": "流程级的一次执行上下文，外层保存标识和类型，流程专属状态保存在 procedureFrame。",
+        "properties": {
+          "id": {
+            "$ref": "#/definitions/Id",
+            "title": "执行帧标识",
+            "description": "本执行帧的稳定标识，在所属 Run 的 frames 内唯一；创建后保持不变，不使用数组位置作为身份。不同 Run 或 Step 的执行帧可以使用相同 id，不要求全局唯一。"
+          },
+          "type": {
+            "type": "string",
+            "title": "帧类型",
+            "description": "当前支持 procedure，表示一次流程调用。",
+            "enum": [
+              "procedure"
+            ]
+          },
+          "procedureFrame": {
+            "$ref": "#/definitions/ProcedureFrame",
+            "title": "流程帧状态",
+            "description": "type=procedure 时必须填写，保存流程记忆引用、展开序列、当前位置及可选返回位置。"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "procedureFrame"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "outputOverrides": {
+      "type": "object",
+      "title": "成果人工调整",
+      "description": "只保存明确添加或移除的成果入口；两组 ID 不得重叠。自动成果为完整 submitted 产物中未被其他完整产物依赖、也未被修订替换的产物；实际成果为（自动成果 ∪ 人工添加）减去人工移除。普通 report 和 redo 不修改本字段。未人工调整时省略；终态后固定。",
+      "properties": {
+        "addedArtifactIds": {
+          "type": "array",
+          "title": "人工添加",
+          "description": "明确保留为成果入口的完整 submitted 产物；直到手动移除。后续被依赖或修订仍保留此人工选择。",
+          "items": {
+            "$ref": "#/definitions/Id",
+            "title": "产物标识",
+            "description": "同一 Run 中的 Artifact ID。"
+          },
+          "uniqueItems": true
+        },
+        "removedArtifactIds": {
+          "type": "array",
+          "title": "人工移除",
+          "description": "明确从成果入口隐藏的产物；后续推导不会恢复此 ID，不影响新修订 ID 自动成为成果，也不删除记录或依赖。作为其他成果的依赖时仍可展示。",
+          "items": {
+            "$ref": "#/definitions/Id",
+            "title": "产物标识",
+            "description": "同一 Run 中的 Artifact ID。"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "addedArtifactIds",
+        "removedArtifactIds"
+      ],
+      "additionalProperties": false
+    },
+    "archivedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "归档时间",
+      "description": "仅已完成或已废弃的运行可归档。填写时从普通运行列表隐藏；恢复时移除此字段，保留终态和全部产物。"
+    }
+  },
+  "required": [
+    "id",
+    "name",
+    "status",
+    "createdAt",
+    "language"
+  ],
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Id": {
+      "type": "string",
+      "title": "标识",
+      "description": "对象或定义的稳定标识。",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "Timestamp": {
+      "type": "string",
+      "title": "时间",
+      "description": "带时区的 RFC 3339 时间。",
+      "minLength": 1,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "Binding": {
+      "type": "object",
+      "title": "槽位绑定",
+      "description": "actorIds 与 skip 二选一。",
+      "properties": {
+        "actorIds": {
+          "type": "array",
+          "title": "参与者",
+          "description": "绑定到槽位的 Actor。",
+          "items": {
+            "$ref": "#/definitions/Id",
+            "title": "标识",
+            "description": "关联记录或定义的标识。"
+          },
+          "uniqueItems": true,
+          "minItems": 1
+        },
+        "skip": {
+          "type": "boolean",
+          "title": "跳过",
+          "description": "明确不分配该槽位。",
+          "const": true
+        }
+      },
+      "required": [],
+      "additionalProperties": false,
+      "minProperties": 1,
+      "maxProperties": 1
+    },
+    "MemorySnapshot": {
+      "type": "object",
+      "title": "记忆快照",
+      "description": "完整内嵌保存本次运行使用的原始记忆及全部传递依赖，包括根流程、子流程、规则和 Schema；加载与恢复时以此解析执行定义。快照创建后不得替换、删除或修改，也不得增删记忆条目。",
+      "properties": {
+        "memories": {
+          "type": "object",
+          "title": "记忆内容",
+          "description": "以 memoryRef 为键保存完整记忆集合；每项 memoryRef 与键一致，全部传递依赖均须包含在集合内。创建后不得增删或修改条目。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "记忆快照项",
+            "description": "一份记忆的逻辑引用及完整原始内容；随快照固定保存，创建后不可修改。",
+            "properties": {
+              "memoryRef": {
+                "type": "string",
+                "title": "记忆引用",
+                "description": "记忆类型与规范名称组成的逻辑引用，必须与本项在 memories 中的键及内容中的记忆身份一致。",
+                "pattern": "^(concepts|statements|schemas|procedures)/[a-z0-9]+(?:-[a-z0-9]+)*$",
+                "minLength": 1
+              },
+              "payload": {
+                "type": "object",
+                "title": "记忆内容",
+                "description": "完整内嵌的原始记忆内容。",
+                "properties": {
+                  "contentType": {
+                    "type": "string",
+                    "title": "内容类型",
+                    "description": "记忆内容的媒体类型，例如 application/yaml。",
+                    "minLength": 1
+                  },
+                  "content": {
+                    "type": "string",
+                    "title": "内容",
+                    "description": "完整原始记忆文本，按原样保存。",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "contentType",
+                  "content"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "memoryRef",
+              "payload"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "memories"
+      ],
+      "additionalProperties": false
+    },
+    "PermissionConfig": {
+      "type": "object",
+      "title": "权限配置",
+      "description": "本次运行的权限说明、决策策略、Runner 权限和参与者配置。",
+      "properties": {
+        "revision": {
+          "type": "string",
+          "title": "配置版本",
+          "description": "权限、策略和参与者配置的内容版本。",
+          "minLength": 1,
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "permissionDescriptions": {
+          "type": "object",
+          "title": "权限说明",
+          "description": "以权限 ID 为键保存权限说明；每项 id 必须与对应的键一致。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "权限说明项",
+            "description": "一项权限的说明信息。",
+            "properties": {
+              "id": {
+                "type": "string",
+                "title": "权限标识",
+                "description": "权限 ID，必须与本项在 permissionDescriptions 中的键一致。",
+                "minLength": 1
+              },
+              "description": {
+                "type": "string",
+                "title": "说明",
+                "description": "使用 Run.language 编写的权限含义说明。",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "id",
+              "description"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "decisionPolicies": {
+          "type": "object",
+          "title": "决策策略",
+          "description": "以策略 ID 为键保存完整的决策策略。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "决策策略",
+            "description": "产物接纳的决策规则；id 必须与本项在 decisionPolicies 中的键一致。",
+            "properties": {
+              "id": {
+                "type": "string",
+                "title": "策略标识",
+                "description": "策略 ID，必须与本项在 decisionPolicies 中的键一致。",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "title": "用途",
+                "description": "策略的决策用途。",
+                "minLength": 1,
+                "const": "artifact_acceptance"
+              },
+              "completion": {
+                "type": "string",
+                "title": "完成条件",
+                "description": "所有已分配的参与者提交正式意见。",
+                "minLength": 1,
+                "const": "all_assigned"
+              },
+              "resolution": {
+                "type": "string",
+                "title": "通过条件",
+                "description": "具有决定权的正式决定一致同意。",
+                "minLength": 1,
+                "const": "unanimous"
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "completion",
+              "resolution"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "runner": {
+          "type": "object",
+          "title": "Runner 权限",
+          "description": "本次运行执行者的权限。",
+          "properties": {
+            "permissions": {
+              "type": "array",
+              "title": "权限",
+              "description": "Runner 的权限 ID。",
+              "items": {
+                "$ref": "#/definitions/Id",
+                "title": "标识",
+                "description": "关联记录或定义的标识。"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "permissions"
+          ],
+          "additionalProperties": false
+        },
+        "actors": {
+          "type": "object",
+          "title": "参与者",
+          "description": "以 Actor ID 为键的参与者配置。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "参与者",
+            "description": "本次运行的 Human 或 Agent；Agent 须填写 agent。",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "title": "类型",
+                "description": "参与者类型。",
+                "minLength": 1,
+                "enum": [
+                  "human",
+                  "agent"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "title": "名称",
+                "description": "参与者的显示名称。",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "title": "权限",
+                "description": "授予该参与者的权限 ID。",
+                "items": {
+                  "$ref": "#/definitions/Id",
+                  "title": "标识",
+                  "description": "关联记录或定义的标识。"
+                },
+                "uniqueItems": true
+              },
+              "systemPrompt": {
+                "type": "string",
+                "title": "系统提示",
+                "description": "参与者使用的系统提示。",
+                "minLength": 1
+              },
+              "agent": {
+                "type": "object",
+                "title": "Agent 配置",
+                "description": "该 Agent 的执行服务与启动参数。",
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "title": "Provider",
+                    "description": "执行服务标识。",
+                    "minLength": 1
+                  },
+                  "providerType": {
+                    "type": "string",
+                    "title": "Provider 类型",
+                    "description": "执行服务的实现类型。",
+                    "minLength": 1
+                  },
+                  "command": {
+                    "type": "string",
+                    "title": "程序",
+                    "description": "启动程序。",
+                    "minLength": 1
+                  },
+                  "args": {
+                    "type": "array",
+                    "title": "参数",
+                    "description": "程序启动参数。",
+                    "items": {
+                      "type": "string",
+                      "title": "参数",
+                      "description": "一个启动参数。"
+                    }
+                  },
+                  "env": {
+                    "type": "object",
+                    "title": "环境设置",
+                    "description": "运行所需的非敏感环境设置；凭据由执行环境提供。",
+                    "additionalProperties": {
+                      "type": "string",
+                      "title": "值",
+                      "description": "环境设置值。"
+                    }
+                  },
+                  "model": {
+                    "type": "string",
+                    "title": "模型",
+                    "description": "明确指定的 Agent 模型。",
+                    "minLength": 1
+                  },
+                  "startupTimeoutMs": {
+                    "type": "integer",
+                    "title": "启动超时",
+                    "description": "启动超时的毫秒数。",
+                    "minimum": 1
+                  },
+                  "idleTimeoutMs": {
+                    "type": "integer",
+                    "title": "空闲超时",
+                    "description": "空闲超时的毫秒数。",
+                    "minimum": 1
+                  },
+                  "maxRuntimeMs": {
+                    "type": "integer",
+                    "title": "总运行时限",
+                    "description": "最大运行毫秒数；省略表示不限制总运行时间。",
+                    "minimum": 1
+                  }
+                },
+                "required": [
+                  "provider",
+                  "providerType",
+                  "command",
+                  "args",
+                  "env",
+                  "startupTimeoutMs",
+                  "idleTimeoutMs"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "kind",
+              "name",
+              "permissions"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "revision",
+        "permissionDescriptions",
+        "decisionPolicies",
+        "runner",
+        "actors"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewConfig": {
+      "type": "object",
+      "title": "评审配置",
+      "description": "评审范围使用的策略和当前槽位绑定；调整槽位影响后续开启的评审。",
+      "properties": {
+        "reviewPolicies": {
+          "type": "object",
+          "title": "评审策略",
+          "description": "以评审范围为键选择策略：来自流程记忆的 Step 使用 <流程名称>#<节点路径>，例如 example-procedure#flow[1]；自由探索的 Step 使用 Step.id。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "策略选择",
+            "description": "该评审范围使用的决策策略。",
+            "properties": {
+              "policy": {
+                "type": "string",
+                "title": "策略标识",
+                "description": "permissionConfig.decisionPolicies 中的策略 ID。",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "policy"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reviewBindings": {
+          "type": "object",
+          "title": "评审参与者绑定",
+          "description": "以完整评审槽位名称为键，保存当前参与者绑定或跳过决定。",
+          "additionalProperties": {
+            "$ref": "#/definitions/Binding",
+            "title": "绑定",
+            "description": "参与者列表或明确跳过。"
+          }
+        }
+      },
+      "required": [
+        "reviewPolicies",
+        "reviewBindings"
+      ],
+      "additionalProperties": false
+    },
+    "ProcedureFrame": {
+      "type": "object",
+      "title": "流程帧状态",
+      "description": "一次 flow 流程调用的展开序列、执行位置及子流程返回位置；流程定义从 Run.memorySnapshot 解析。",
+      "properties": {
+        "memoryRef": {
+          "type": "string",
+          "title": "流程记忆",
+          "description": "本次调用的流程记忆完整引用，例如 procedures/example-procedure；必须对应 Run.memorySnapshot.memories 中的键。根调用对应 Run.memoryRef，子调用指向实际被调用的流程。",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "array",
+          "title": "展开序列",
+          "description": "本次流程调用中已展开的执行节点；分支和循环展开更新此序列。",
+          "items": {
+            "type": "object",
+            "title": "执行项",
+            "description": "一个展开的流程节点及其 Step 引用。",
+            "properties": {
+              "nodePath": {
+                "type": "string",
+                "title": "节点路径",
+                "description": "解析后流程执行节点的路径；循环展开的各次执行使用不同路径。",
+                "minLength": 1
+              },
+              "stepId": {
+                "$ref": "#/definitions/Id",
+                "title": "生产步骤",
+                "description": "该节点本次执行的 Step；尚未创建时省略。"
+              }
+            },
+            "required": [
+              "nodePath"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "index": {
+          "type": "integer",
+          "title": "当前位置",
+          "description": "下一执行项在 sequence 中的零基位置；允许等于序列长度。当前 Action 未完成时，保持在对应 Step 所在位置。",
+          "minimum": 0
+        },
+        "returnTo": {
+          "type": "object",
+          "title": "返回位置",
+          "description": "子流程结束后恢复的父调用位置。",
+          "properties": {
+            "frameId": {
+              "$ref": "#/definitions/Id",
+              "title": "父调用",
+              "description": "同一 Run.frames 中父执行帧的 id；不得引用其他 Run 或 Step 的执行帧。"
+            },
+            "index": {
+              "type": "integer",
+              "title": "返回位置",
+              "description": "父帧 procedureFrame.sequence 中继续执行的零基位置。",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "frameId",
+            "index"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "memoryRef",
+        "sequence",
+        "index"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "id": "run-example",
+      "name": "方案设计",
+      "status": "running",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN",
+      "memorySnapshot": {
+        "memories": {
+          "procedures/example-procedure": {
+            "memoryRef": "procedures/example-procedure",
+            "payload": {
+              "contentType": "application/yaml",
+              "content": "!procedure\nsyntax: memsphere-20260721-stable\nnames:\n  - example-procedure\ngoals:\n  - 完成方案设计。\nflow:\n  - !action\n    action: 编写方案。\n    artifact: !artifact\n      name: 方案\n      type: string\n      format: markdown\n      review:\n        - owner\n"
+            }
+          }
+        }
+      },
+      "permissionConfig": {
+        "runner": {
+          "permissions": [
+            "artifact.read",
+            "artifact.submit",
+            "decision.decide"
+          ]
+        },
+        "actors": {
+          "owner": {
+            "kind": "human",
+            "name": "领域专家",
+            "permissions": [
+              "artifact.read",
+              "decision.decide"
+            ]
+          }
+        },
+        "permissionDescriptions": {
+          "artifact.read": {
+            "id": "artifact.read",
+            "description": "读取评审材料"
+          },
+          "artifact.submit": {
+            "id": "artifact.submit",
+            "description": "提交产物"
+          },
+          "decision.decide": {
+            "id": "decision.decide",
+            "description": "作出正式决定"
+          }
+        },
+        "decisionPolicies": {
+          "unanimous": {
+            "id": "unanimous",
+            "kind": "artifact_acceptance",
+            "completion": "all_assigned",
+            "resolution": "unanimous"
+          }
+        },
+        "revision": "sha256:7444ab28bae884eef0a56289fdd0e7e58ba31cbb0890112a470db9374a856769"
+      },
+      "reviewConfig": {
+        "reviewPolicies": {
+          "example-procedure#flow[1]": {
+            "policy": "unanimous"
+          }
+        },
+        "reviewBindings": {
+          "example-procedure::owner": {
+            "actorIds": [
+              "owner"
+            ]
+          }
+        }
+      },
+      "memoryRef": "procedures/example-procedure",
+      "frames": [
+        {
+          "id": "call-1",
+          "type": "procedure",
+          "procedureFrame": {
+            "sequence": [
+              {
+                "nodePath": "steps[0]",
+                "stepId": "step-example"
+              }
+            ],
+            "index": 0,
+            "memoryRef": "procedures/example-procedure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "run-exploration",
+      "name": "探索实现方案",
+      "status": "done",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "endedAt": "2026-10-17T08:05:00Z",
+      "language": "zh-CN",
+      "outputOverrides": {
+        "addedArtifactIds": [
+          "artifact-exploration"
+        ],
+        "removedArtifactIds": []
+      }
+    },
+    {
+      "id": "run-business",
+      "name": "生成采购记录",
+      "status": "running",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN",
+      "storeConfig": [
+        {
+          "storeId": "purchase-requests",
+          "modelRef": "purchase-request.json",
+          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    },
+    {
+      "id": "run-abandoned",
+      "name": "取消本次执行",
+      "status": "abandoned",
+      "createdAt": "2026-10-18T08:00:00Z",
+      "endedAt": "2026-10-18T08:05:00Z",
+      "abandonment": {
+        "source": "view"
+      },
+      "language": "zh-CN"
+    },
+    {
+      "id": "run-abandoned-cli",
+      "name": "停止已取消的需求",
+      "status": "abandoned",
+      "createdAt": "2026-10-18T08:00:00Z",
+      "endedAt": "2026-10-18T08:05:00Z",
+      "abandonment": {
+        "reason": "需求已取消。",
+        "source": "cli"
+      },
+      "language": "zh-CN"
+    },
+    {
+      "id": "run-binding-updated",
+      "name": "调整后续评审参与者",
+      "status": "running",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN",
+      "memorySnapshot": {
+        "memories": {
+          "procedures/example-procedure": {
+            "memoryRef": "procedures/example-procedure",
+            "payload": {
+              "contentType": "application/yaml",
+              "content": "!procedure\nsyntax: memsphere-20260721-stable\nnames:\n  - example-procedure\ngoals:\n  - 完成方案设计。\nflow:\n  - !action\n    action: 编写方案。\n    artifact: !artifact\n      name: 方案\n      type: string\n      format: markdown\n      review:\n        - owner\n"
+            }
+          }
+        }
+      },
+      "permissionConfig": {
+        "runner": {
+          "permissions": [
+            "artifact.read",
+            "artifact.submit",
+            "decision.decide"
+          ]
+        },
+        "actors": {
+          "owner": {
+            "kind": "human",
+            "name": "领域专家",
+            "permissions": [
+              "artifact.read",
+              "decision.decide"
+            ]
+          },
+          "backup": {
+            "kind": "human",
+            "name": "替补专家",
+            "permissions": [
+              "artifact.read",
+              "decision.decide"
+            ]
+          }
+        },
+        "permissionDescriptions": {
+          "artifact.read": {
+            "id": "artifact.read",
+            "description": "读取评审材料"
+          },
+          "artifact.submit": {
+            "id": "artifact.submit",
+            "description": "提交产物"
+          },
+          "decision.decide": {
+            "id": "decision.decide",
+            "description": "作出正式决定"
+          }
+        },
+        "decisionPolicies": {
+          "unanimous": {
+            "id": "unanimous",
+            "kind": "artifact_acceptance",
+            "completion": "all_assigned",
+            "resolution": "unanimous"
+          }
+        },
+        "revision": "sha256:4b14397629d2644be61e162544e48f0354b54e8ee06d557fba986e2f882bbe7e"
+      },
+      "reviewConfig": {
+        "reviewPolicies": {
+          "example-procedure#flow[1]": {
+            "policy": "unanimous"
+          }
+        },
+        "reviewBindings": {
+          "example-procedure::owner": {
+            "actorIds": [
+              "backup"
+            ]
+          }
+        }
+      },
+      "memoryRef": "procedures/example-procedure",
+      "frames": [
+        {
+          "id": "call-1",
+          "type": "procedure",
+          "procedureFrame": {
+            "sequence": [
+              {
+                "nodePath": "steps[0]",
+                "stepId": "step-example"
+              }
+            ],
+            "index": 0,
+            "memoryRef": "procedures/example-procedure"
+          }
+        }
+      ]
+    },
+    {
+      "id": "run-schema-writing",
+      "name": "逐项编写说明",
+      "status": "running",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN"
+    },
+    {
+      "id": "run-agent-review",
+      "name": "Agent 评审执行与重试",
+      "status": "running",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN"
+    },
+    {
+      "id": "run-retry",
+      "name": "重试方案编写",
+      "status": "running",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "language": "zh-CN"
+    },
+    {
+      "id": "run-exploration-progress",
+      "name": "技术方案共创",
+      "status": "running",
+      "createdAt": "2026-10-25T08:00:00Z",
+      "language": "zh-CN",
+      "outputOverrides": {
+        "addedArtifactIds": [
+          "artifact-cli-design",
+          "artifact-graph-design"
+        ],
+        "removedArtifactIds": []
+      }
+    },
+    {
+      "id": "run-exploration-hidden",
+      "name": "继续探索",
+      "status": "running",
+      "createdAt": "2026-10-25T08:00:00Z",
+      "language": "zh-CN"
+    }
+  ]
+}

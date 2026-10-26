@@ -93,7 +93,7 @@ memsphere continue C review create --artifact B --reviewer human --comment "修�
 memsphere continue C report --revised-from B --artifact-file revised.md
 memsphere run outputs list --run R
 memsphere continue C outputs update --remove A --add B_NEW
-memsphere continue C finish --artifact B_NEW
+memsphere continue C finish  # 默认采用当前成果，可用 --artifact 显式选择
 ```
 
 - 完整成果准备好后直接 report，不预建产物或声明开始工作；系统关联 Step。文本、--artifact-file、结构化 --file 互斥。结构化只接收 name、content/contentRef、dependencies、tags、revisedFrom、revisedSummary，系统身份字段拒绝。Schema 局部草稿仍走原流程。
@@ -105,6 +105,8 @@ memsphere continue C finish --artifact B_NEW
 - 部分report错误若给出已保存Artifact／Step身份，先执行回执中的run status恢复，不盲目原样重发；新report不承诺请求去重。terminal状态只读，Human决定取消后可abandon。
 - 自由探索持久化使用五个项目模型Store；Run的data_id为run_id，其他实体为run_id/实体_id。Home CommandState不依赖Project登记。已知旧模型需显式project models initialize转换，保留历史及已有成果选择，转换为人工增删差值。
 - 图属于现有Run模块；External点击显示完整来源和内容，产物浮窗左右展示内容及Review，历史选择只切图、浮窗翻页不关闭。空白或边上可按住鼠标手抓平移，悬停边高亮直接端点。无graph DSL、缩放或图编辑器。
+
+自由探索支持 `run finish --run R`，默认采用当前推导成果；已完成或已废弃的 Run 可用 `archive run R` 归档，`archive list runs` 查看，`archive restore run R` 恢复。归档保留模型 Store 原位记录，只隐藏普通列表；恢复保持终态。Run.archived 缺省为 false。View 提供“已归档”找回入口与恢复操作；结束确认列出具体成果数量与名称。产物图在浏览器本地使用 ELK 计算实际尺寸布局，不上传图数据。
 
 ## Memsphere 如何组织记忆
 
@@ -309,8 +311,8 @@ flow:
 - `runner` 是当前 Run 执行上下文，不需要 Slot Binding。
 - Human 完成当前 Review Round 后若不再参与后续流程，Runner 可以执行 `memsphere run binding show --run <run_id>` 查看 Run 冻结的 Actor、当前 Round Binding、下一 Round Binding、影响 scope 和历史，再执行 `memsphere run binding update --run <run_id> --slot <procedure::slot> --actor <actor_id>` 换绑；多个 Actor 重复传 `--actor`，未来不需要该 Slot 时使用 `--skip`。只能选择 Run 启动时已经冻结的 Actor；更新不改变已经创建的当前或历史 Round、Assignment、Comment、Vote 和结算，同一 Review 的下一 Round 与尚未创建的 Review 使用创建前最后一次成功保存的 Binding。View 中更新 Binding 不使用 Settings operation token，但仍要求同源 JSON 请求。
 - Runner 在 `run report` 前应阅读 CLI 输出的权限说明；成功或拒绝结果中的权限、来源和自然语言说明均来自 Run 启动时保存的控制平面快照。
-- 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，应先阅读摘要和 blocking 意见，再显式执行 `memsphere run review vote`。Runner 拥有最终决定权；建议意见和 blocking 严重级别不会形成额外否决权。需要留下审计记录时，可在投票前使用 `memsphere run review resolve` 记录意见的接受、延期或驳回原因。
-- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 在当前 Workspace/worktree 中使用 PATH 注入的受限 `memsphere-review` 会话命令，命令自动绑定当前 Run 与 Assignment；ChangeSet Run 的 `memory list/read` 还会自动绑定该 Run 的冻结 Memory 快照。Reviewer 直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket，也不依赖某一种 shell 的环境变量语法。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-file`，历史 `--body-stdin` 仍兼容。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。Agent 失败时可用 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>` 显式重试。
+- 确定性校验通过后，Run 会返回稳定的 `review_id` 和 `memsphere run review wait --review <review_id>`；Review 通过前当前 Action 不推进。Review Submission 自动冻结当前候选之前已经上报的全部 Artifact，Reviewer 根据当前 Artifact 与要求按需追溯。全部评审意见收齐后，如 CLI 提示等待 Runner 投票，应先阅读摘要和 blocking 意见，再显式执行 `memsphere run review vote`。Runner 对当前产物的接纳或修订拥有最终决定权；建议意见和 blocking 严重级别不会形成额外否决权。该决定仍须遵守 Human 已确认范围和适用规则；Reviewer 的意见和通过票不是新增操作授权，也不能豁免仓库规则。应分别判断问题是否成立及修复方式是否合规，报告有误时修正报告，不为维护其表述扩大提交范围。需要留下审计记录时，可在投票前使用 `memsphere run review resolve` 记录意见的接受、延期或驳回原因。
+- 绑定到当前 Slot 的 Agent Actor 会由 Memsphere 通过 ACP 自动启动。初始 Prompt 会给出精炼的 Review contract 和前序 Artifact 索引；Agent Reviewer 在当前 Workspace/worktree 中使用 PATH 注入的受限 `memsphere-review` 会话命令，命令自动绑定当前 Run 与 Assignment；ChangeSet Run 的 `memory list/read` 还会自动绑定该 Run 的冻结 Memory 快照。Reviewer 直接通过 Store 操作自己的 Assignment，不创建或监听 Review bridge/socket，也不依赖某一种 shell 的环境变量语法。`run review comment` 必须声明 severity；短意见使用 `--body`，多行 Markdown 使用 `--body-file`，历史 `--body-stdin` 仍兼容。提交摘要可使用 `--summary-file`。普通 ACP 文本回复不构成 Comment 或 Vote。
 - Human 使用 View 中的大尺寸 Artifact Review 浮窗操作本人 Assignment：按 Round 查看当时的不可变 Submission、正式 Comment、Vote、Result 与 Revision Summary，在当前轮添加整体或定位 Comment、选择 Vote 并 Submit。历史 Round 只读，完成后的 Review 仍可从对应 Run 步骤重新打开。 切换材料时右侧显示所选材料的评审：前序产物只读展示接受该冻结快照的记录，冻结契约与无对应记录或关联歧义的材料显示空状态；切回当前产物保留未提交的本地意见。
 - Review 的下一步输出若列出待提交 Human Assignment，Runner 应立即使用 Run 冻结的语言向相应 Human 询问三种正式投票之一：通过、要求修改或弃权。通过的 Comment 可选；要求修改必须收集至少一条修改意见；弃权必须收集至少一条原因说明。Agent Reviewer 仍在后台执行时可以并行询问 Human，不必先反复 wait；只有不存在待提交 Human、仍有 Agent Reviewer 未完成时才继续执行 `memsphere run review wait`。
 - CLI 已明确当前 Review、Round 和 Runner 代提交语境时，Human 使用“我投通过”“我投要求修改”“我投弃权”“请提交……”等确定的执行性表达，且 Vote、票型要求的 Comments、引用意见和目标均完整无歧义，该表达同时构成本次正式投票决定与 Runner 代提交授权；直接提交并在 authorization note 中记录依据，不得再询问一次同义确认。普通讨论、提出问题、“倾向于”“可以考虑”等非确定表达、沉默或只说“继续”都不构成授权。目标不明确、必需 Comment 缺失、引用意见无法唯一确定或 payload 仍需补全时，才完整复述 Vote、Comments 与可选 Summary 并取得确认。提交前仍须确认目标属于当前对话关联 Run、Round 仍为 current、Human Draft 无业务内容，再把 Comments 写成严格 JSON array（`approve` 无意见也写 `[]`），执行 `memsphere run review submit-for-human --run <run_id> --review <review_id> --round <round_id> --assignment <human_actor_or_assignment_id> --vote <approve|request_changes|abstain> --comments-file <path> --authorization-note-file <path> [--summary-file <path>]`。命令会同时检查 Human 与 Runner 权限并记录受托 provenance；冲突时不得覆盖 Draft 或既有 Opinion。成功后向 Human 回报 Vote、Comment 数和授权说明，并继续执行 CLI 返回的下一动作；若进入 `awaiting_runner_vote`，仍须另行阅读全部意见并执行 Runner 最终票。
@@ -476,7 +478,7 @@ report 成功后会先返回本次 Run 与 Artifact 的上报回执。如果触�
 memsphere run review wait --review <Review ID>
 ```
 
-wait 如果显示 Agent Reviewer 失败，当前轮次仍未决，Runner 不得绕过或自行代投。把 View 中显示的 Provider、Attempt 和错误信息告知 human，等待 human 在 View 中执行重试，然后继续使用同一个 `review_id` 等待。
+wait 如果显示 Agent Reviewer 失败，当前轮次仍未决，Runner 不得绕过或自行代投。首次失败时，由 Runner 主动执行一次 `memsphere run review retry --review <id> --assignment <actor-or-assignment-id>`，复用当前 Review、Round 和 Assignment，再使用同一个 `review_id` 等待。重试后仍失败时，将 Provider、Attempt 和错误信息告知 Human，询问是否授权继续重试；获得授权后仍由 Runner 执行重试，未授权不得继续。授权未指定次数时只重试一次，再失败须重新请求授权。Human 只需决定是否继续重试，无需在 View 中操作。
 
 如果 wait 返回 `awaiting_runner_vote`，当前执行本 Run 的 Agent 就是 Runner；先阅读全部参与者的 Comment 和 Vote，再由自己明确决定接纳或修改。接纳才会推进 Run：
 

@@ -31,6 +31,7 @@ const zh: Readonly<Record<string, string>> = Object.freeze({
   run: "运行", running: "运行中", done: "已完成", abandoned: "已废弃",
   loading: "加载中…", empty: "当前状态下没有 Run。", choose: "选择一个 Run 查看详情。",
   retry: "重试", refresh: "刷新", archive: "归档", abandon: "废弃", review: "产物评审", jumpCurrent: "跳到当前步骤",
+  finish: "结束运行", finishConfirm: "以当前成果结束这个 Run？结束后产物与评审记录将保持只读。", restore: "恢复归档", archived: "已归档",
   archiveConfirm: "确认归档这个 Run？", abandonConfirm: "确认废弃这个 Run？",
   artifact: "产物", flow: "执行流程", current: "当前步骤", notStarted: "未开始",
   completed: "已完成", updated: "更新时间", procedure: "流程", events: "产物数",
@@ -63,6 +64,7 @@ const en: Readonly<Record<string, string>> = Object.freeze({
   run: "Runs", running: "Running", done: "Done", abandoned: "Abandoned",
   loading: "Loading…", empty: "No runs in this status.", choose: "Choose a run to inspect.",
   retry: "Retry", refresh: "Refresh", archive: "Archive", abandon: "Abandon", review: "Artifact review", jumpCurrent: "Jump to current step",
+  finish: "Finish run", finishConfirm: "Finish this run with its current outputs? Artifacts and reviews will become read-only.", restore: "Restore", archived: "Archived",
   archiveConfirm: "Archive this run?", abandonConfirm: "Abandon this run?",
   artifact: "Artifact", flow: "Flow", current: "Current step", notStarted: "Not started",
   completed: "Completed", updated: "Updated", procedure: "Procedure", events: "Artifacts",
@@ -158,8 +160,8 @@ export default defineViewPlugin<RunConfig>({
         label: { text: tr(config, "run") },
         icon: { kind: "system", name: "play-circle" },
         async search({ query, signal }) {
-          const groups = await Promise.all(["running", "done", "abandoned"].map(async status => {
-            const response = await fetch(projectApiUrl(config, `/api/runs?${new URLSearchParams({ representation: "summary", status })}`), { signal });
+          const groups = await Promise.all(["running", "done", "abandoned", "archived"].map(async status => {
+            const response = await fetch(projectApiUrl(config, `/api/runs?${new URLSearchParams({ representation: "summary", ...(status === "archived" ? { archived: "true" } : { status }) })}`), { signal });
             if (!response.ok) throw new Error(await response.text());
             return (await response.json() as { runs?: Json[] }).runs ?? [];
           }));
@@ -309,7 +311,7 @@ function registerRunSecondary(
     value: {
       title: { text: tr(config, "run") },
       icon: { kind: "system", name: "play-circle" },
-      items: ["running", "done", "abandoned"].map(status => ({
+      items: ["running", "done", "abandoned", "archived"].map(status => ({
         id: status,
         label: { text: tr(config, status) },
         icon: { kind: "system" as const, name: status === "running" ? "play-circle" : status === "done" ? "check-circle" : "archive" },
@@ -355,7 +357,7 @@ function createRunSecondaryPublisher(ctx: ViewPluginContext, config: Readonly<Ru
       value: {
         title: { text: tr(config, "run") },
         icon: { kind: "system", name: "play-circle" },
-        items: ["running", "done", "abandoned"].map(status => ({
+        items: ["running", "done", "abandoned", "archived"].map(status => ({
           id: status,
           label: { text: tr(config, status) },
           icon: { kind: "system" as const, name: status === "running" ? "play-circle" : status === "done" ? "check-circle" : "archive" },
@@ -569,7 +571,7 @@ class RunApplication {
   get location(): RouteLocation { return this.#route; }
   setRenderContext(context: ViewRenderContext): void { this.#renderContext = context; }
   secondaryBadges(): Readonly<Record<string, number>> {
-    return Object.fromEntries(["running", "done", "abandoned"].map(status => [status, this.#runs.filter(run => !run.archived && run.status === status).length]));
+    return Object.fromEntries(["running", "done", "abandoned", "archived"].map(status => [status, this.#runs.filter(run => status === "archived" ? run.archived : !run.archived && run.status === status).length]));
   }
   headerTitle(): HeaderTitleDescriptor {
     if (!this.#detail) return { title: { text: tr(this.#config,"run") } };
@@ -581,8 +583,15 @@ class RunApplication {
   }
   headerActions(): readonly PublishedRunHeaderAction[] {
     const run = this.#detail;
-    if (!run || run.representation === "context-control" || this.#route.routeKey?.endsWith("artifact-review")) return [];
+    if (!run || this.#route.routeKey?.endsWith("artifact-review")) return [];
+    if (run.representation === "context-control") {
+      const action = (id: string, runAction: () => Promise<void>): PublishedRunHeaderAction => ({ id, order: 200, stateKey: `${id}:${run.id}:${run.status}:${run.archived}`, value: { label: { text: tr(this.#config, id) }, run: runAction } });
+      if (run.archived) return [action("restore", () => this.#restore(run))];
+      return run.status === "running" ? [action("finish", () => this.#finish(run)), action("abandon", () => this.#abandon(run))] : [action("archive", () => this.#archive(run))];
+    }
     const actions: PublishedRunHeaderAction[] = [];
+    if (run.archived) return [{ id: "restore", order: 200, stateKey: `restore:${run.id}`, value: { label: { text: tr(this.#config, "restore") }, run: () => this.#restore(run) } }];
+    if (run.readOnly) return [];
     if (currentRunStep(run)) {
       actions.push({
         id: "jump-current",
@@ -647,7 +656,7 @@ class RunApplication {
       return;
     }
     const summary = this.#runs.find(run => run.id === runId);
-    if (summary?.status) this.#status = summary.status;
+    if (summary?.status) this.#status = summary.archived ? "archived" : summary.status;
     if (this.#detail?.id !== runId || this.#detailErrorRunId === runId) {
       try {
         const payload = await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
@@ -695,7 +704,7 @@ class RunApplication {
       try {
         const detailPayload = await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
         prefetchedDetail = this.#rememberRun(detailPayload.run);
-        if (prefetchedDetail?.status) this.#status = prefetchedDetail.status;
+        if (prefetchedDetail?.status) this.#status = prefetchedDetail.archived && (!this.#route.projected || this.#status === "archived") ? "archived" : prefetchedDetail.status;
         this.#detail = prefetchedDetail;
         this.#detailError = "";
         this.#detailErrorRunId = "";
@@ -706,7 +715,7 @@ class RunApplication {
       }
     }
     const requestedStatus = this.#status;
-    const query = new URLSearchParams({ representation: "summary", status: requestedStatus });
+    const query = new URLSearchParams({ representation: "summary", ...(requestedStatus === "archived" ? { archived: "true" } : { status: requestedStatus }) });
     const payload = await this.#request(`/api/runs?${query}`);
     if (requestedStatus !== this.#status) return undefined;
     const nextRuns = payload.runs || [];
@@ -718,10 +727,11 @@ class RunApplication {
     this.#runListVersion = nextListVersion;
     this.#runs = nextRuns;
     const selected = runId ? this.#runs.find(run => run.id === runId) : undefined;
-    if (options.adoptStatus && selected?.status) this.#status = selected.status;
-    const visible = (run: Json | undefined): boolean => Boolean(run && run.status === this.#status && !run.archived && !run.readOnly);
+    if (options.adoptStatus && selected?.status) this.#status = selected.archived ? "archived" : selected.status;
+    const visible = (run: Json | undefined): boolean => Boolean(run && (this.#status === "archived" ? run.archived : run.status === this.#status && !run.archived));
     let targetId = runId;
-    if (options.replaceMoved && !visible(selected)) targetId = undefined;
+    // An archived Run opened by its stable URL remains inspectable across polling.
+    if (options.replaceMoved && !visible(selected) && !(this.#detail?.id === runId && this.#detail?.archived)) targetId = undefined;
     if (!targetId) {
       this.#lastLoadChanged = listChanged || this.#detail !== null || Boolean(this.#detailError);
       this.#detail=null;this.#detailError="";this.#detailErrorRunId="";return undefined;
@@ -733,8 +743,9 @@ class RunApplication {
     if (options.skipUnchanged
       && this.#detail?.id === targetId
       && !this.#detailError
-      && selected?.updatedAt === this.#detail.updatedAt
-      && Number(selected?.eventCount ?? 0) === (Array.isArray(this.#detail.events) ? this.#detail.events.length : 0)) {
+      && (this.#detail.representation === "context-control"
+        ? selected?.contextRevision === this.#detail.contextRevision
+        : selected?.updatedAt === this.#detail.updatedAt && Number(selected?.eventCount ?? 0) === (Array.isArray(this.#detail.events) ? this.#detail.events.length : 0))) {
       this.#lastLoadChanged = listChanged;
       return targetId;
     }
@@ -779,11 +790,11 @@ class RunApplication {
         this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase);
         this.#contextGraphRun = this.#detail.id;
       }
-      this.#contextGraph.update(this.#detail.context);
       if (!this.#detailRoot.contains(this.#contextGraph.element)) {
         for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
         const main = createPageLayout("run-workspace"); main.append(this.#contextGraph.element); this.#detailRoot.append(main);
       }
+      this.#contextGraph.update(this.#detail.context);
       return;
     }
     this.#contextGraph?.dispose(); this.#contextGraph = undefined; this.#contextGraphRun = "";
@@ -795,7 +806,7 @@ class RunApplication {
     if(this.#status===status)return;
     await this.#navigate(this.#routes.index.to(undefined, { query: status === "running" ? {} : { status } }));
   }
-  #visible(): Json[] { return this.#runs.filter(run=>!run.archived&&run.status===this.#status&&(!run.readOnly||run.id===this.#detail?.id)); }
+  #visible(): Json[] { return this.#runs.filter(run=>(this.#status === "archived" ? run.archived : !run.archived && run.status === this.#status)); }
   contentListDescriptor(): ContentListDescriptor {
     const runs = this.#visible();
     return {
@@ -824,7 +835,7 @@ class RunApplication {
             icon: { kind: "system" as const, name: run.status === "running" ? "play-circle" : run.status === "done" ? "check-circle" : "archive" },
             selected: id === this.#detail?.id,
             route: this.#routes.detail.to({ runId: id }, { query: this.#status === "running" ? {} : { status: this.#status } }),
-            trailingActions: run.readOnly || run.representation === "context-control" ? undefined : [{
+            trailingActions: run.readOnly ? undefined : [{
               label: { text: tr(this.#config, destructive ? "abandon" : "archive") },
               icon: { kind: "system" as const, name: "archive" },
               run: () => destructive ? this.#abandon(run) : this.#archive(run)
@@ -885,7 +896,29 @@ class RunApplication {
     detail.querySelector(".run-detail-content")?.dispatchEvent(new Event("disclosure-state-restored"));
     return detail;
   }
-  async #archive(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"archive")},description:{text:tr(this.#config,"archiveConfirm")},confirmLabel:{text:tr(this.#config,"archive")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}}))return;this.#busy=true;try{await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}`,{method:"POST"});await this.#refresh();}finally{this.#busy=false;}}
+  async #finish(run: Json): Promise<void> {
+    const payload = await this.#request(`/api/runs/${encodeURIComponent(run.id)}`);
+    const context = payload.run.context;
+    const artifactIds: string[] = [...context.outputArtifactIds];
+    const names = artifactIds.map(id => context.artifacts.find((a: Json) => a.id === id)?.name ?? id);
+    const outputs = names.length ? `${names.length}\n${names.join("\n")}` : (this.#config.locale?.startsWith("en") ? "No deliverables" : "无交付成果");
+    if (!await this.#ui.confirm({ title: { text: tr(this.#config, "finish") }, description: { text: `${tr(this.#config, "finishConfirm")}\n\n${outputs}` }, confirmLabel: { text: tr(this.#config, "finish") }, cancelLabel: { text: tr(this.#config, "cancel") }, closeLabel: { text: tr(this.#config, "close") } })) return;
+    this.#busy = true;
+    try {
+      await this.#request(`/api/runs/${encodeURIComponent(run.id)}/finish`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ artifactIds }) });
+      await this.#navigate(this.#routes.detail.to({ runId: run.id }, { query: { status: "done" } }));
+    } finally { this.#busy = false; }
+  }
+  async #restore(run: Json): Promise<void> {
+    this.#busy = true;
+    try {
+      const payload = await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}/restore`, { method: "POST" });
+      this.#detail = this.#rememberRun(payload.run);
+      await this.#navigate(this.#routes.detail.to({ runId: run.id }, { query: { status: run.status } }));
+      await this.#refresh();
+    } finally { this.#busy = false; }
+  }
+  async #archive(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"archive")},description:{text:tr(this.#config,"archiveConfirm")},confirmLabel:{text:tr(this.#config,"archive")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}}))return;this.#busy=true;try{await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}`,{method:"POST"});if(run.representation === "context-control")await this.#navigate(this.#routes.index.to(undefined,{query:{status:this.#status}}));else await this.#refresh();}finally{this.#busy=false;}}
   async #abandon(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"abandon")},description:{text:tr(this.#config,"abandonConfirm")},confirmLabel:{text:tr(this.#config,"abandon")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")},tone:"danger"}))return;this.#busy=true;try{await this.#request(`/api/runs/${encodeURIComponent(run.id)}/abandon`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});await this.#refresh();}finally{this.#busy=false;}}
   async #openReview(runId:string,reviewId:string):Promise<void>{
     this.#busy=true;
@@ -1084,7 +1117,7 @@ class RunApplication {
 
 function tr(config: Readonly<RunConfig>, key: string): string { const candidate=config.messages?.[key];return typeof candidate==="string"?candidate:((config.locale||document.documentElement.lang).startsWith("en")?en:zh)[key]||key; }
 function projectApiUrl(config: Readonly<RunConfig>, path: string): string { return path.startsWith("/api/") && config.projectApiBase ? `${config.projectApiBase}${path.slice(4)}` : path; }
-function normalizedRunStatus(value: unknown): string { return ["running", "done", "abandoned"].includes(String(value)) ? String(value) : "running"; }
+function normalizedRunStatus(value: unknown): string { return ["running", "done", "abandoned", "archived"].includes(String(value)) ? String(value) : "running"; }
 function displayName(run:Json):string{return String(run.name||run.procedureName||run.id||"");}function shortId(id:string):string{return String(id||"").replace(/^run-/,"").slice(0,18);}
 function formatTime(value:unknown):string{if(!value)return "—";const date=new Date(String(value));return Number.isNaN(date.valueOf())?String(value):date.toLocaleString();}
 function pill(text:string,kind=""):HTMLElement{const span=document.createElement("span");span.className=`run-pill ${kind}`;span.textContent=text;return span;}

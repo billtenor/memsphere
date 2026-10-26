@@ -18,10 +18,12 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     "reserved-models",
     "LICENSE",
     "NOTICE",
+    "ELK-LICENSE.md",
     "README.md",
     "README.en.md",
     "THIRD_PARTY_NOTICES.md"
   ]);
+  assert.match(await readFile("ELK-LICENSE.md", "utf8"), /Eclipse Public License - v 2\.0/);
   assert.equal(packageJson.scripts?.prepack, "npm run build");
   assert.equal(packageJson.scripts?.prepublishOnly, "npm test");
 

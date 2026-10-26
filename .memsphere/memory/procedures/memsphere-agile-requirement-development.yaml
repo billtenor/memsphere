@@ -7,6 +7,7 @@ defines:
   - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证、验收、PR 提交、全部适用 CI 通过、human 合入确认及本地开发分支清理。
 asserts:
   - 当前迭代范围变化时，必须先更新需求契约并取得 human 确认。
+  - 评审意见必须在 Human 已确认范围和适用仓库规则内处置；Runner 的最终决定权不构成扩大操作授权、豁免规则或改变 Git 提交边界的依据。
 goals:
   - 确认当前迭代的范围、交付物和验收标准。
   - 按仓库规范完成实现和验证。
@@ -96,9 +97,9 @@ flow:
     action: 复核实际改动、验证结果和验收结论，形成交付报告。
     actor: agent
     asserts:
-      - 读取适用的交付规范 Statement 记忆；未找到则按无额外规范继续。
+      - !ref
+        target: statements/memsphere-repository-delivery-rules
       - 报告必须包含交付内容、验证结果、验收结论、后续范围和残留问题。
-      - 报告前必须检查 Memory 差异；存在差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口，普通 memsphere validate 不能代替变更级校验。
     artifact: !artifact
       name: 敏捷需求开发交付报告
       format: markdown
@@ -109,9 +110,10 @@ flow:
     action: 按当前迭代范围检查改动并创建 Git commit。
     actor: agent
     asserts:
-      - 读取适用的 Git 规范 Statement 记忆；未找到则继续。
+      - !ref
+        target: statements/memsphere-repository-git-rules
       - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
-      - commit 前必须确认应交付的实现、测试和文档改动已完整纳入，并记录 commit SHA。
+      - commit 前必须确认应交付的实现、测试和必要文档改动已完整纳入，并记录 commit SHA。
       - commit 前必须检查 Memory 差异；存在差异时重新执行 memsphere memory change validate [change-id] 并确认输出匹配当前内容，不得使用普通 memsphere validate 或过期 checkpoint 代替。
     artifact: !artifact
       name: 本轮 Commit 结果
