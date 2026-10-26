@@ -15,6 +15,7 @@ import { resolveProjectContext, type ResolvedProject, type ProjectContext } from
 import { resolveWorkspaceIdentity, type WorkspaceIdentity } from "../project/workspace.js";
 import { projectConfigSchema } from "../project/model.js";
 import { GitRevisionMemoryProvider } from "./git-provider.js";
+import { systemMemoryRemovalDigest } from "../reserved/store.js";
 import { guardAppMemoryTargets } from "../app/memory-guard.js";
 import { appOwnershipSchema, captureAppOwnership, type AppOwnership } from "../app/ownership.js";
 import {
@@ -143,7 +144,8 @@ export const memoryChangeSetSchema = z.object({
     targets: z.array(z.object({
       reference: z.string().min(1), path: z.string().refine(isSafeMemoryPath),
       operation: z.enum(["create", "update", "delete"]),
-      digest: z.string().optional()
+      digest: z.string().optional(),
+      approvedContentDigest: z.string().regex(/^[0-9a-f]{64}$/).optional()
     }).strict()).min(1)
   }).strict().optional(),
   app_install: z.object({ appId: z.string(), operationId: z.string(), packageDigest: z.string() }).strict().optional(),
@@ -164,6 +166,9 @@ export const memoryChangeSetSchema = z.object({
       if ((target.operation !== "delete") !== Boolean(target.digest)) {
         context.addIssue({ code: z.ZodIssueCode.custom, path: ["system_upgrade", "targets"], message: "system upgrade content digest must match operation" });
       }
+      if (target.operation !== "delete" && target.approvedContentDigest) context.addIssue({
+        code: z.ZodIssueCode.custom, path: ["system_upgrade", "targets"], message: "only delete targets may carry an approved content digest"
+      });
     }
   }
   if (change.status !== "abandoned" && change.failure) {
@@ -546,7 +551,7 @@ async function removeCachedMemoryChangePreview(entry: CachedMemoryChangePreview)
 }
 
 export type SystemUpgradeMemoryTarget = {
-  reference: string; path: string; operation: "create" | "update" | "delete"; content?: string;
+  reference: string; path: string; operation: "create" | "update" | "delete"; content?: string; approvedContentDigest?: string;
 };
 
 /** Preflight before any model or Memory write. Branch preparation belongs to the Agent. */
@@ -577,10 +582,12 @@ async function assertSystemUpgradeGitBase(context: ProjectContext, base: string,
   const branch = await gitOutput(["symbolic-ref", "--quiet", "HEAD"], context.workspace.path).catch(() => undefined);
   if (!branch || branch === "refs/heads/master") throw new Error("System upgrade requires a dedicated branch/worktree, not master or detached HEAD");
   if (expectedBranch && branch !== expectedBranch) throw new Error("System upgrade belongs to another branch");
-  if (!await gitOutput(["rev-parse", "--verify", "refs/heads/master"], context.workspace.path).catch(() => undefined)) {
+  const master = await gitOutput(["rev-parse", "--verify", "refs/heads/master"], context.workspace.path).catch(() => undefined);
+  if (!master) {
     throw new Error("System upgrade integration ref refs/heads/master is missing");
   }
   if (await gitOutput(["rev-parse", "HEAD"], context.workspace.path) !== base) throw new Error("System upgrade Git base changed; prepare a fresh upgrade branch or finish integration");
+  if (master !== base) throw new Error("System upgrade integration ref changed; prepare a fresh upgrade branch before deleting System Memory");
   return branch;
 }
 
@@ -593,12 +600,18 @@ function assertSystemUpgradeOwner(change: MemoryChangeSet, context: ProjectConte
 function systemUpgradeFrozenTargets(targets: SystemUpgradeMemoryTarget[]): NonNullable<MemoryChangeSet["system_upgrade"]>["targets"] {
   const seen = new Set<string>();
   return targets.map(target => {
-    assertSafeCreatePath(target.reference, target.path);
+    if (target.operation === "delete") {
+      if (!isSafeMemoryPath(target.path) || !target.reference.startsWith(`${target.path.split("/", 1)[0]}/`)) {
+        throw new Error(`Invalid historical system upgrade removal target: ${target.path}`);
+      }
+    } else assertSafeCreatePath(target.reference, target.path);
     if (seen.has(target.path)) throw new Error(`Duplicate system upgrade path: ${target.path}`);
     seen.add(target.path);
     if (target.operation !== "delete" && target.content === undefined) throw new Error(`Missing target content: ${target.path}`);
     return { reference: target.reference, path: target.path, operation: target.operation,
-      ...(target.operation === "delete" ? {} : { digest: createHash("sha256").update(target.content!).digest("hex") }) };
+      ...(target.operation === "delete"
+        ? (target.approvedContentDigest ? { approvedContentDigest: target.approvedContentDigest } : {})
+        : { digest: createHash("sha256").update(target.content!).digest("hex") }) };
   }).sort((a, b) => a.path.localeCompare(b.path));
 }
 
@@ -609,6 +622,7 @@ export async function createSystemUpgradeMemoryChange(input: {
   const { primary: project, workspace } = context;
   return withFileLock(memoryMutationLock(project), async () => {
     if (!targets.length) throw new Error("Cannot create an empty system_upgrade ChangeSet");
+    if (project.config.store.type === "managed") await assertManagedHealthy(project);
     const base = project.config.store.type === "managed" ? project.config.store.published_revision
       : await gitOutput(["rev-parse", "HEAD"], workspace.path);
     const branch = project.config.store.type === "embedded" ? await assertSystemUpgradeGitBase(context, base) : undefined;
@@ -624,21 +638,32 @@ export async function createSystemUpgradeMemoryChange(input: {
       memory_path: project.config.store.memory_path
     };
     const candidateRoot = project.config.store.type === "managed" ? workspaceCandidateRoot(workspace.path, change.id) : project.memoryRoot;
-    if (project.config.store.type === "managed") await mkdir(candidateRoot, { recursive: true });
     for (const target of targets) {
+      if (target.operation === "delete" && target.approvedContentDigest) {
+        const currentSource = project.config.store.type === "embedded"
+          ? Buffer.from(await gitOutputRaw(["show", `${base}:${embeddedRepositoryPath(project.config.store.memory_path, target.path)}`], workspace.path), "utf8")
+          : await readFile(join(project.memoryRoot, target.path));
+        if (systemMemoryRemovalDigest(currentSource) !== target.approvedContentDigest) {
+          throw new Error(`System upgrade removal content changed before ChangeSet creation: ${target.reference}`);
+        }
+      }
       const baseDigest = project.config.store.type === "embedded"
         ? await gitOutput(["rev-parse", `${base}:${embeddedRepositoryPath(project.config.store.memory_path, target.path)}`], workspace.path).catch(() => undefined)
         : await gitBlobDigest(project.memoryRoot, target.path).catch(() => undefined);
       if ((target.operation === "create") !== !baseDigest) throw new Error(`System upgrade operation does not match baseline: ${target.path}`);
       change.targets.push({ reference: target.reference, path: target.path, operation: target.operation,
         added_revision: base, ...(baseDigest ? { base_digest: baseDigest } : {}) });
-      if (project.config.store.type === "managed" && target.operation !== "delete") {
-        await mkdir(dirname(join(candidateRoot, target.path)), { recursive: true });
-        await writeFile(join(candidateRoot, target.path), target.content!, "utf8");
-      }
     }
     change.targets.sort((a, b) => a.path.localeCompare(b.path));
     try {
+      if (project.config.store.type === "managed") {
+        await mkdir(candidateRoot, { recursive: true });
+        for (const target of targets) {
+          if (target.operation === "delete") continue;
+          await mkdir(dirname(join(candidateRoot, target.path)), { recursive: true });
+          await writeFile(join(candidateRoot, target.path), target.content!, "utf8");
+        }
+      }
       await writeChange(project, change);
     } catch (error) {
       // The ID has not been returned or shared. Remove a partially persisted new
@@ -1016,7 +1041,7 @@ export async function editMemoriesByIdentity(input: {
 
 /** Internal-only deletion entrypoint for a caller that already verified historical path and canonical identity. */
 export async function deleteMemoriesByIdentity(input: {
-  targets: Array<{ reference: string; path: string; baseDigest: string }>;
+  targets: Array<{ reference: string; path: string; baseDigest: string; approvedContentDigest?: string }>;
   changeId?: string;
   onChangeCreated?: (created: { change: MemoryChangeSet; candidateRoot: string }) => void;
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
@@ -1041,6 +1066,11 @@ export async function deleteMemoriesByIdentity(input: {
       const currentDigest = await gitBlobDigest(context.primary.memoryRoot, target.path);
       if (currentDigest !== target.baseDigest) {
         throw new Error(`historical Memory identity changed before deletion: ${target.reference}`);
+      }
+      if (target.approvedContentDigest) {
+        if (systemMemoryRemovalDigest(await readFile(source)) !== target.approvedContentDigest) {
+          throw new Error(`historical Memory content changed before deletion: ${target.reference}`);
+        }
       }
       targets.push({
         operation: "delete",

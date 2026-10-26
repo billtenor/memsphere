@@ -13,7 +13,8 @@ import {
   readBundledMarketMemories,
   readReservedMemoryManifest,
   reservedMemoryManifestSchema,
-  reservedSystemMemoryRemovalTombstones
+  reservedSystemMemoryRemovalTombstones,
+  systemMemoryRemovalDigest
 } from "../src/reserved/store.js";
 
 async function withTempDir(fn: (dir: string) => Promise<void>): Promise<void> {
@@ -102,10 +103,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
     "memsphere-tutorial-chapter-03",
     "memsphere 教学流程-第三章评审体验",
     "memsphere-tutorial-chapter-03-review-experience",
-    "memsphere 通用流程",
-    "通用流程",
-    "兜底流程",
-    "memsphere-general-task-execution"
+    "memsphere-exploration-artifact-rules"
   ]) {
     assert(names.has(expected), `missing reserved memory: ${expected}`);
   }
@@ -150,7 +148,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   }
   assert(files.every((file) => file.entity.syntax === currentMemorySyntax));
   assert(files.every((file) => file.entity.defines.every((definition) => typeof definition === "string")));
-  assert.equal(manifest.version, 4);
+  assert.equal(manifest.version, 5);
   assert.equal("memory_syntax" in manifest ? manifest.memory_syntax : undefined, currentMemorySyntax);
   assert.equal(manifest.system_memory.install.length, 28);
   assert(manifest.system_memory.install.includes("concepts/memsphere-app.yaml"));
@@ -160,7 +158,7 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
   assert(systemMemories.every((memory) => memory.names[0] === basename(memory.path, ".yaml")));
   assert(systemMemories.every((memory) => memory.reference === `${memory.kind}/${memory.names[0]}`));
   assert(systemMemories.every((memory) => memory.names.length > 0));
-  assert.deepEqual(reservedSystemMemoryRemovalTombstones(manifest), []);
+  assert.equal(reservedSystemMemoryRemovalTombstones(manifest).length, 2);
 });
 
 test("bundled Market manifest exposes every complete source", async () => {
@@ -267,7 +265,8 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     assert.match(memory, /独立的草稿、Revision、校验和保存生命周期/);
     assert.match(memory, /全部已注册 Project/);
     assert.match(memory, /memsphere project repair \[name\]/);
-    assert.match(memory, /历史路径与 canonical identity 同时匹配/);
+    assert.match(memory, /历史路径、canonical identity 与已发行原文摘要同时匹配/);
+    assert.match(memory, /manifest v5/);
     assert.match(memory, /Embedded repair 使用当前 Git worktree/);
     assert.match(memory, /不 commit、push 或使用 Managed publish/);
     assert.match(memory, /language 同时选择 Memsphere 面向 Agent 的工作语言和 View 固定界面语言/);
@@ -278,14 +277,9 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     assert.match(memory, /Memory DSL 字段在中文标签与 YAML 原名之间的展示切换是另一项独立偏好/);
     assert.match(memory, /修改 View host 或 port 仍需执行 memsphere view restart/);
   }
-  assert.match(skill, /左侧分组导航直接进入 Memsphere 或当前 Project 设置/);
-  assert.match(skill, /右侧只展示当前配置内容/);
-  assert.match(skill, /切换 Project 不清除全局草稿/);
-  assert.match(skill, /任一已注册 Project/);
-  assert.match(skill, /memsphere project repair \[project-name\]/);
-  assert.match(skill, /Embedded repair 使用当前 Git worktree/);
-  assert.match(skill, /固定界面文案通过 zh-CN\/en 语言资源/);
-  assert.match(skill, /成功保存 `language` 后下一次加载立即使用新界面语言/);
+  assert.match(skill, /memsphere model\/data\/view\/project --help/);
+  assert.match(skill, /project repair/);
+  assert.match(skill, /Mounted Project 只读/);
   assert.doesNotMatch(skill, /project reinitialize/);
 });
 
@@ -361,6 +355,25 @@ test("legacy manifests remain readable but cannot authorize identity-based remov
     });
     assert.deepEqual(reservedSystemMemoryRemovalTombstones(parsed), []);
   }
+});
+
+test("manifest v5 removal matches bind identity to an issued content digest", () => {
+  const match = { reference: "procedures/legacy", sha256: "a".repeat(64) };
+  const base = {
+    version: 5, memory_syntax: currentMemorySyntax,
+    system_memory: { install: [], remove: [{ path: "procedures/legacy.yaml", matches: [match] }] },
+    market_memory: { install: [] }
+  };
+  assert.equal(reservedMemoryManifestSchema.parse(base).version, 5);
+  assert.equal(reservedSystemMemoryRemovalTombstones(reservedMemoryManifestSchema.parse(base))[0]!.matches[0]!.sha256, match.sha256);
+  assert.equal(reservedMemoryManifestSchema.safeParse({ ...base, system_memory: { install: [], remove: [{ path: "procedures/legacy.yaml", matches: [match, match] }] } }).success, false);
+  assert.equal(reservedMemoryManifestSchema.safeParse({ ...base, system_memory: { install: [], remove: [{ path: "procedures/legacy.yaml", matches: [{ ...match, sha256: "bad" }] }] } }).success, false);
+});
+
+test("removal digest normalizes CRLF without changing other bytes", () => {
+  assert.equal(systemMemoryRemovalDigest(Buffer.from("a\r\nb\n")), systemMemoryRemovalDigest(Buffer.from("a\nb\n")));
+  assert.notEqual(systemMemoryRemovalDigest(Buffer.from([0xff])), systemMemoryRemovalDigest(Buffer.from("\ufffd")));
+  assert.throws(() => systemMemoryRemovalDigest(Buffer.from("a\rb")), /lone CR/);
 });
 
 test("manifest requires install sources to be regular YAML files but allows removed sources to be absent", async () => {

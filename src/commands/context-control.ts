@@ -152,34 +152,36 @@ export function registerExplorationCommands(run: import("commander").Command) {
   const scoped = (c: import("commander").Command) => output(c.requiredOption("--run <id>"));
   output(find(run, "start"));
   output(find(run, "report"))
-    .option("--name <name>").option("--file <path>", "Structured report input")
-    .option("--content-type <mime>").option("--revised-from <id>")
+    .option("--name <name>", "free exploration Artifact name")
+    .option("--file <path>", "free exploration structured report; exclusive with --artifact/--artifact-file")
+    .option("--content-type <mime>", "free exploration text content type")
+    .option("--revised-from <id>", "free exploration Artifact ID being revised")
     .option("--depends-on <selector>", "artifact:ID, external:ID or tag:NAME", repeated)
     .option("--tag <tag>", "Run-scoped Artifact tag", repeated);
   output(find(run, "status")); output(find(run, "abandon")); find(run, "show").option("--root <id>");
   const artifact = find(run, "artifact");
   find(artifact, "show").option("--artifact <id>").option("--out <path>", "Exclusive body output file");
-  scoped(artifact.command("tag").requiredOption("--artifact <id>").option("--tag <tag>", "Tag", repeated))
+  scoped(artifact.command("tag").description("Add tags to a free exploration Artifact.").requiredOption("--artifact <id>").option("--tag <tag>", "Tag", repeated))
     .action(o => contextOnlyCommand("artifact-tag", o));
-  scoped(artifact.command("impact").requiredOption("--artifact <id>"))
+  scoped(artifact.command("impact").description("Show free exploration Artifact dependents and output impact.").requiredOption("--artifact <id>"))
     .action(o => contextOnlyCommand("artifact-impact", o));
-  const outputs = run.command("outputs").description("Manage the current output roots");
-  scoped(outputs.command("list")).action(o => contextOnlyCommand("outputs-list", o));
-  scoped(outputs.command("update").option("--add <id>", "Add an output", repeated).option("--remove <id>", "Remove an output", repeated)).action(o => contextOnlyCommand("outputs-update", o));
-  const external = run.command("external");
-  scoped(external.command("add").option("--source <text>").option("--content <text>").option("--content-type <mime>").option("--file <path>"))
+  const outputs = run.command("outputs").description("Inspect or adjust free exploration output roots.");
+  scoped(outputs.command("list").description("List current free exploration output roots.")).action(o => contextOnlyCommand("outputs-list", o));
+  scoped(outputs.command("update").description("Add or remove free exploration output roots.").option("--add <id>", "Add an output", repeated).option("--remove <id>", "Remove an output", repeated)).action(o => contextOnlyCommand("outputs-update", o));
+  const external = run.command("external").description("Record or read free exploration source material.");
+  scoped(external.command("add").description("Add source material; use --source/--content or structured --file.").option("--source <text>").option("--content <text>").option("--content-type <mime>").option("--file <path>"))
     .action(o => contextOnlyCommand("external-add", o));
-  scoped(external.command("show").requiredOption("--external <id>").option("--out <path>", "Write original content to a new file"))
+  scoped(external.command("show").description("Preview an External; --out writes its complete original content.").requiredOption("--external <id>").option("--out <path>", "Write original content to a new file"))
     .action(o => contextOnlyCommand("external-show", o));
   const review = find(run, "review");
-  scoped(review.command("create").requiredOption("--artifact <id>").requiredOption("--reviewer <source>", "human or agent")
+  scoped(review.command("create").description("Record light feedback on a free exploration Artifact; no formal gate.").requiredOption("--artifact <id>").requiredOption("--reviewer <source>", "human or agent")
     .option("--comment <text>", "Comment, repeatable", repeated).option("--comment-file <path>"))
     .action(o => contextOnlyCommand("review-create", o));
-  scoped(review.command("list").requiredOption("--artifact <id>"))
+  scoped(review.command("list").description("List light feedback for a free exploration Artifact.").requiredOption("--artifact <id>"))
     .action(o => contextOnlyCommand("review-list", o));
-  scoped(review.command("show").requiredOption("--review <id>"))
+  scoped(review.command("show").description("Show one light free exploration Review.").requiredOption("--review <id>"))
     .action(o => contextOnlyCommand("review-show", o));
-  scoped(run.command("finish").option("--artifact <id>", "Final Artifact, repeatable", repeated))
+  scoped(run.command("finish").description("Finish free exploration with current output roots or selected Artifacts.").option("--artifact <id>", "Final Artifact, repeatable", repeated))
     .action(o => contextOnlyCommand("finish", o));
 }
 

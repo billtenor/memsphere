@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -9,6 +9,7 @@ import { resolveProjectContext } from "../src/project/resolver.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { managedProjectFixture } from "./helpers/project.js";
 import * as changes from "../src/memory/changeset.js";
+import { systemMemoryRemovalDigest } from "../src/reserved/store.js";
 
 const reference = "concepts/shared";
 const path = "concepts/shared.yaml";
@@ -160,6 +161,17 @@ test("Dedicated intent and metadata must be paired", () => {
   assert.throws(() => changes.memoryChangeSetSchema.parse({ ...base, intent: "system_upgrade" }), /must be paired/);
 });
 
+test("System upgrade metadata reads old delete targets and freezes new approved digests", () => {
+  const base = { format_version: 1, id: "change-test", project: "test", workspace_key: "workspace", base_revision: "base", status: "active",
+    created_at: new Date().toISOString(), updated_at: new Date().toISOString(), store_type: "managed", targets: [], intent: "system_upgrade" };
+  const target = { reference: "procedures/legacy", path: "procedures/legacy.yaml", operation: "delete" };
+  const metadata = { source_digest: "old-bundle", instance_key: "workspace", targets: [target] };
+  assert.equal(changes.memoryChangeSetSchema.parse({ ...base, system_upgrade: metadata }).system_upgrade?.targets[0]?.approvedContentDigest, undefined);
+  const digest = "a".repeat(64);
+  assert.equal(changes.memoryChangeSetSchema.parse({ ...base, system_upgrade: { ...metadata, targets: [{ ...target, approvedContentDigest: digest }] } }).system_upgrade?.targets[0]?.approvedContentDigest, digest);
+  assert.throws(() => changes.memoryChangeSetSchema.parse({ ...base, system_upgrade: { ...metadata, targets: [{ ...target, approvedContentDigest: "invalid" }] } }));
+});
+
 test("Embedded preparation rejects original workspace, detached HEAD, dirty Memory and missing master before writes", async () => fixture("embedded", async (main, linked) => {
   await assert.rejects(changes.assertSystemUpgradeWorkspace(await resolveProjectContext()), /separate linked worktree/);
   process.chdir(linked);
@@ -210,4 +222,85 @@ test("Managed dedicated publication validates frozen content, preserves failed e
   assert.equal(published.checkpoint?.valid, true);
   assert.equal(await readFile(join(context.primary.memoryRoot, path), "utf8"), content);
   await assert.rejects(changes.validateSystemUpgradeRetry({ context, changeId: change.id, targets, sourceDigest: "bundle-v1" }), /already completed/);
+}));
+
+test("Managed repair deletion rejects a content change between planning and ChangeSet creation", async () => fixture("managed", async (_main, linked) => {
+  process.chdir(linked);
+  const context = await resolveProjectContext();
+  const source = join(context.primary.memoryRoot, path);
+  const approvedContentDigest = systemMemoryRemovalDigest(Buffer.from(baseline));
+  const custom = `${baseline}# user customization\n`;
+  await writeFile(source, custom);
+  await runGit(["add", path], { cwd: context.primary.memoryRoot });
+  await runGit(["commit", "-m", "user customized target"], { cwd: context.primary.memoryRoot });
+  const configPath = context.primary.paths.configPath;
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.store.published_revision = await gitOutput(["rev-parse", "HEAD"], context.primary.memoryRoot);
+  await writeFile(configPath, JSON.stringify(config));
+  const currentDigest = await gitOutput(["hash-object", source], context.primary.memoryRoot);
+  const changesBefore = await readdir(context.primary.paths.changesRoot);
+  await assert.rejects(changes.deleteMemoriesByIdentity({
+    targets: [{ reference, path, baseDigest: currentDigest, approvedContentDigest }]
+  }), /content changed before deletion/);
+  assert.equal(await readFile(source, "utf8"), custom);
+  assert.deepEqual(await readdir(context.primary.paths.changesRoot), changesBefore);
+}));
+
+test("Managed system upgrade preserves a customized target after its frozen base becomes stale", async () => fixture("managed", async (_main, linked) => {
+  process.chdir(linked);
+  const context = await resolveProjectContext();
+  await changes.assertSystemUpgradeWorkspace(context);
+  const target: changes.SystemUpgradeMemoryTarget = { reference, path, operation: "delete", approvedContentDigest: systemMemoryRemovalDigest(Buffer.from(baseline)) };
+  const { change } = await changes.createSystemUpgradeMemoryChange({ context, targets: [target], sourceDigest: "bundle-v1" });
+  assert.deepEqual((await changes.validateMemoryChange(change.id)).issues, []);
+  const source = join(context.primary.memoryRoot, path);
+  const custom = `${baseline}# user customization\n`;
+  await writeFile(source, custom);
+  await runGit(["add", path], { cwd: context.primary.memoryRoot });
+  await runGit(["commit", "-m", "user customized target"], { cwd: context.primary.memoryRoot });
+  const configPath = context.primary.paths.configPath;
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.store.published_revision = await gitOutput(["rev-parse", "HEAD"], context.primary.memoryRoot);
+  await writeFile(configPath, JSON.stringify(config));
+  await assert.rejects(changes.publishSystemUpgradeMemoryChange(change.id, { context }));
+  await assert.rejects(changes.validateSystemUpgradeRetry({ context, changeId: change.id, targets: [target], sourceDigest: "bundle-v1" }));
+  assert.equal(await readFile(source, "utf8"), custom);
+  assert.equal((await changes.readMemoryChange({ project: "test", changeId: change.id })).status, "active");
+  await changes.abandonMemoryChange({ project: "test", home: context.home, changeId: change.id });
+  const changesBefore = await readdir(context.primary.paths.changesRoot);
+  const candidateDirectory = join(linked, ".memsphere-work/changes");
+  const candidatesBefore = await readdir(candidateDirectory).catch(() => []);
+  await assert.rejects(changes.createSystemUpgradeMemoryChange({ context: await resolveProjectContext(), targets: [target], sourceDigest: "bundle-v1" }), /content changed before ChangeSet creation/);
+  assert.deepEqual(await readdir(context.primary.paths.changesRoot), changesBefore);
+  assert.deepEqual(await readdir(candidateDirectory).catch(() => []), candidatesBefore);
+  await writeFile(source, baseline);
+  await runGit(["add", path], { cwd: context.primary.memoryRoot });
+  await runGit(["commit", "-m", "restore issued original"], { cwd: context.primary.memoryRoot });
+  config.store.published_revision = await gitOutput(["rev-parse", "HEAD"], context.primary.memoryRoot);
+  await writeFile(configPath, JSON.stringify(config));
+  const retry = await changes.createSystemUpgradeMemoryChange({ context: await resolveProjectContext(), targets: [target], sourceDigest: "bundle-v1" });
+  assert.equal(retry.change.status, "active");
+}));
+
+test("Embedded system upgrade rejects a stale master before deleting a user-customized target", async () => fixture("embedded", async (main, linked) => {
+  const custom = `${baseline}# user customization\n`;
+  await writeFile(join(main, ".memsphere/memory", path), custom);
+  await runGit(["add", ".memsphere/memory"], { cwd: main });
+  await runGit(["commit", "-m", "user customized target"], { cwd: main });
+  process.chdir(linked);
+  const context = await resolveProjectContext();
+  const source = join(context.primary.memoryRoot, path);
+  await rm(source);
+  const target: changes.SystemUpgradeMemoryTarget = { reference, path, operation: "delete", approvedContentDigest: systemMemoryRemovalDigest(Buffer.from(baseline)) };
+  const changesBefore = await readdir(context.primary.paths.changesRoot);
+  await assert.rejects(changes.createSystemUpgradeMemoryChange({ context, targets: [target], sourceDigest: "bundle-v1" }));
+  assert.deepEqual(await readdir(context.primary.paths.changesRoot), changesBefore);
+  assert.equal(await readFile(join(main, ".memsphere/memory", path), "utf8"), custom);
+  await writeFile(join(main, ".memsphere/memory", path), baseline);
+  await runGit(["add", ".memsphere/memory"], { cwd: main });
+  await runGit(["commit", "-m", "restore issued original"], { cwd: main });
+  await runGit(["reset", "--hard", "master"], { cwd: linked });
+  await rm(source);
+  const retry = await changes.createSystemUpgradeMemoryChange({ context: await resolveProjectContext(), targets: [target], sourceDigest: "bundle-v1" });
+  assert.equal(retry.change.status, "active");
 }));

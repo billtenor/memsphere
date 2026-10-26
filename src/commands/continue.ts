@@ -16,7 +16,7 @@ const operations: Array<[string[], string, string[]]> = [
 ];
 /** Shares native option parsers and the same business handler; never shells out to another CLI. */
 export function registerContinueCommand(program: Command, nativeRun: Command) {
-  const continuation = program.command("continue <context-id> [command...]").description("Continue a stateful command group using its existing context ID").helpOption(false).allowUnknownOption();
+  const continuation = program.command("continue <context-id> [command...]").description("Continue production in an existing free exploration Run; use native run commands to read it.").helpOption(false).allowUnknownOption();
   const router = new Command("continue").helpOption(false);
   const help = async (target: Command) => {
     const context = await load();

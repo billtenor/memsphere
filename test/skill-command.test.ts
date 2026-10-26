@@ -17,73 +17,28 @@ test("skill init installs only the unified memsphere skill", async () => {
 
     const source = (await readFile(join(dir, "memsphere", "SKILL.md"), "utf8")).replace(/\r\n/g, "\n");
     assert.match(source, /^---\nname: memsphere\n/);
-    assert.match(source, /AI 时代个性化软件的运行环境/);
-    assert.match(source, /Memsphere 不是 Agent/);
-    assert.match(source, /当前版本提供 Project App 安装/);
+    assert.equal(source, await readFile(join(process.cwd(), "src/skills/memsphere/SKILL.md"), "utf8"));
     assert.match(source, /memsphere memory list/);
     assert.match(source, /memsphere memory read/);
     assert.match(source, /memsphere run start/);
-    assert.match(source, /memsphere run status --run <Run ID>/);
-    assert.match(source, /Procedure 中的 `!call` 由当前 Run 负责推进，不另起 Run/);
-    assert.match(source, /memsphere run start "<Procedure 名称>" --name "<本次 Run 名称>"/);
-    assert.match(source, /memsphere run start --file "<Procedure YAML 路径>" --name "<本次 Run 名称>"/);
-    assert.match(source, /memsphere run repeat/);
-    assert.match(source, /“我投通过”.*同时构成本次正式投票决定与 Runner 代提交授权/);
-    assert.match(source, /不得再询问一次同义确认/);
-    assert.match(source, /目标不明确、必需 Comment 缺失.*才完整复述/s);
-    assert.doesNotMatch(source, /--output yaml/);
-    assert.doesNotMatch(source, /\.memsphere\/memory\/concepts/);
+    assert.match(source, /自由探索/);
+    assert.match(source, /\*\*Artifact（产物）\*\*/);
+    assert.match(source, /memory change validate/);
+    assert(source.split("\n").length < 100);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("unified skill and reserved memories keep the same bootstrap contract", async () => {
+test("skill route and Artifact meaning agree with reserved Memory", async () => {
   const skill = await readFile(join(process.cwd(), "src", "skills", "memsphere", "SKILL.md"), "utf8");
   const reserved = JSON.stringify((await readAllMemoryFiles(bundledSystemMemoryRoot())).map((file) => file.entity));
 
-  for (const signal of [
-    "memsphere memory list",
-    "memsphere memory read",
-    "--node",
-    "node_ref",
-    "context",
-    "fragment",
-    "condition_artifact",
-    "memsphere project bind",
-    "memsphere run start",
-    "--name",
-    "memsphere-general-task-execution"
-  ]) {
-    assert.match(skill, new RegExp(signal));
-    assert.match(reserved, new RegExp(signal));
-  }
-
-  // Operational Run instructions belong to the Skill. Concept defines are now
-  // definition-only text and no longer embed a Statement copy of this manual.
-  for (const signal of [
-    "memsphere run report",
-    "--artifact-file",
-    "流程规则",
-    "Actor",
-    "Ask human to do",
-    "Suggests",
-    "Then"
-  ]) {
-    assert.match(skill, new RegExp(signal));
-  }
-  assert.doesNotMatch(skill, /`Procedure Asserts`|`Asserts`/);
-
-  for (const obsolete of [
-    "不得使用 find",
-    "不得直接读取 Memory Store 文件",
-    "按需导入",
-    "Agent 必须完整读取目标 Memory",
-    "必须先选择并完整读取适用的 Procedure"
-  ]) {
-    assert.doesNotMatch(skill, new RegExp(obsolete));
-    assert.doesNotMatch(reserved, new RegExp(obsolete));
-  }
+  assert.match(skill, /有适用 Procedure 时/);
+  assert.match(skill, /没有适用 Procedure 时/);
+  assert.match(reserved, /否则启动自由探索 Run/);
+  assert.match(reserved, /可独立阅读或使用/);
+  assert.doesNotMatch(skill, /always start.*Procedure/i);
 });
 
 

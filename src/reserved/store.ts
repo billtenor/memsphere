@@ -105,9 +105,45 @@ const identityRemovalSchema = z.array(removalTombstoneSchema).superRefine((tombs
   }
 });
 
+const sha256Schema = z.string().regex(/^[0-9a-f]{64}$/);
+const contentRemovalTombstoneSchema = z.object({
+  path: memoryPathSchema,
+  matches: z.array(z.object({
+    reference: memoryIdentityReferenceSchema,
+    sha256: sha256Schema
+  }).strict()).min(1).superRefine((matches, context) => {
+    const seen = new Set<string>();
+    for (const [index, match] of matches.entries()) {
+      const key = `${match.reference}:${match.sha256}`;
+      if (seen.has(key)) context.addIssue({ code: z.ZodIssueCode.custom, path: [index], message: `duplicate removal match: ${key}` });
+      seen.add(key);
+    }
+  })
+}).strict().superRefine((tombstone, context) => {
+  const kind = tombstone.path.split("/", 1)[0];
+  for (const [index, match] of tombstone.matches.entries()) {
+    if (!match.reference.startsWith(`${kind}/`)) context.addIssue({
+      code: z.ZodIssueCode.custom, path: ["matches", index, "reference"],
+      message: `Memory reference kind does not match tombstone path: ${match.reference}`
+    });
+  }
+});
+const contentRemovalSchema = z.array(contentRemovalTombstoneSchema).superRefine((tombstones, context) => {
+  const seen = new Set<string>();
+  for (const [index, tombstone] of tombstones.entries()) {
+    if (seen.has(tombstone.path)) context.addIssue({ code: z.ZodIssueCode.custom, path: [index, "path"], message: `duplicate removal tombstone path: ${tombstone.path}` });
+    seen.add(tombstone.path);
+  }
+});
+
 const identityManifestSystemMemorySchema = z.object({
   install: uniqueMemoryPathsSchema,
   remove: identityRemovalSchema
+}).strict();
+
+const contentManifestSystemMemorySchema = z.object({
+  install: uniqueMemoryPathsSchema,
+  remove: contentRemovalSchema
 }).strict();
 
 const marketMemorySchema = z.object({
@@ -134,10 +170,16 @@ export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
     memory_syntax: z.literal(currentMemorySyntax),
     system_memory: identityManifestSystemMemorySchema,
     market_memory: marketMemorySchema
+  }).strict(),
+  z.object({
+    version: z.literal(5),
+    memory_syntax: z.literal(currentMemorySyntax),
+    system_memory: contentManifestSystemMemorySchema,
+    market_memory: marketMemorySchema
   }).strict()
 ]).superRefine((manifest, context) => {
   const install = new Set(manifest.system_memory.install);
-  const removePaths = manifest.version === 3 || manifest.version === 4
+  const removePaths = manifest.version === 3 || manifest.version === 4 || manifest.version === 5
     ? manifest.system_memory.remove.map((tombstone) => tombstone.path)
     : manifest.system_memory.remove;
   for (const [index, path] of removePaths.entries()) {
@@ -149,7 +191,7 @@ export const reservedMemoryManifestSchema = z.discriminatedUnion("version", [
       });
     }
   }
-  if (manifest.version === 4) {
+  if (manifest.version === 4 || manifest.version === 5) {
     for (const [index, path] of manifest.market_memory.install.entries()) {
       if (!install.has(path)) continue;
       context.addIssue({
@@ -165,16 +207,32 @@ export type ReservedMemoryManifest = z.infer<typeof reservedMemoryManifestSchema
 
 export type ReservedSystemMemoryRemovalTombstone = {
   path: string;
-  references: string[];
+  matches: { reference: string; sha256?: string }[];
 };
+
+/** Normalize only checkout line endings; other byte changes remain conflicts. */
+export function systemMemoryRemovalDigest(source: Buffer): string {
+  const normalized: number[] = [];
+  for (let index = 0; index < source.length; index++) {
+    const byte = source[index]!;
+    if (byte === 13) {
+      if (source[index + 1] !== 10) throw new Error("System Memory removal source contains an unsupported lone CR");
+      continue;
+    }
+    normalized.push(byte);
+  }
+  return createHash("sha256").update(Buffer.from(normalized)).digest("hex");
+}
 
 export function reservedSystemMemoryRemovalTombstones(
   manifest: ReservedMemoryManifest
 ): ReservedSystemMemoryRemovalTombstone[] {
-  if (manifest.version !== 3 && manifest.version !== 4) return [];
+  if (manifest.version !== 3 && manifest.version !== 4 && manifest.version !== 5) return [];
   return manifest.system_memory.remove.map((tombstone) => ({
     path: tombstone.path,
-    references: [...tombstone.references]
+    matches: manifest.version === 5
+      ? (tombstone as z.infer<typeof contentRemovalTombstoneSchema>).matches.map(match => ({ ...match }))
+      : (tombstone as z.infer<typeof removalTombstoneSchema>).references.map(reference => ({ reference }))
   }));
 }
 
@@ -215,7 +273,7 @@ export async function readReservedMemoryManifest(sourceRoot = bundledReservedMem
 
   const sourceEntries = [
     ...manifest.system_memory.install.map((path) => ({ path, sourceType: "system" as const })),
-    ...(manifest.version === 4
+    ...((manifest.version === 4 || manifest.version === 5)
       ? manifest.market_memory.install.map((path) => ({ path, sourceType: "official" as const }))
       : [])
   ];
@@ -235,7 +293,7 @@ export async function readReservedMemoryManifest(sourceRoot = bundledReservedMem
     }
   }
 
-  if (manifest.version === 4) {
+  if (manifest.version === 4 || manifest.version === 5) {
     const identities = new Map<string, string>();
     const bundled = new Map<string, Awaited<ReturnType<typeof readMemoryFile>>>();
     const canonicalReferences = new Set<string>();
@@ -290,7 +348,7 @@ export async function readBundledMarketMemories(
   sourceRoot = bundledReservedMemoryRoot()
 ): Promise<BundledMarketMemoryDescriptor[]> {
   const manifest = await readReservedMemoryManifest(sourceRoot);
-  if (manifest.version !== 4) return [];
+  if (manifest.version !== 4 && manifest.version !== 5) return [];
   const memorySourceRoot = officialMemorySourceRoot(sourceRoot);
   return Promise.all(manifest.market_memory.install.map(async (path) => {
     const kind = path.split("/", 1)[0];
@@ -312,7 +370,7 @@ export async function readBundledMarketMemories(
 }
 
 function systemMemorySourceRoot(sourceRoot: string, manifest: ReservedMemoryManifest): string {
-  return manifest.version === 4 ? join(sourceRoot, systemMemoryDirectoryName) : sourceRoot;
+  return manifest.version >= 4 ? join(sourceRoot, systemMemoryDirectoryName) : sourceRoot;
 }
 
 function officialMemorySourceRoot(sourceRoot: string): string {

@@ -161,8 +161,8 @@ project.command("repair")
 Safety and behavior:
   Repairs only bundled System Memory in the selected Project; user Memory is not
   modified, and Mounted Projects remain read-only catalog sources.
-  Deprecated bundled entries are deleted only when a manifest v3 tombstone matches
-  both their historical path and canonical identity.
+  Deprecated bundled entries are deleted only when a manifest tombstone matches
+  their historical path, canonical identity, and (for v5) issued content digest.
   Managed repair validates and publishes through a controlled ChangeSet. Embedded
   repair validates the complete candidate, then writes only the System Memory diff
   to the current Git worktree without committing or pushing it. Dirty repair targets
@@ -340,21 +340,21 @@ skill.command("upgrade")
 
 const run = program
   .command("run")
-  .description("Execute a procedure with step-gated progress reporting.");
+  .description("Run a Procedure or free exploration task; inspect and manage its results.");
 
 run
   .command("start")
-  .description("Start a run from a procedure.")
-  .argument("[procedure-name]", "procedure primary name or alias")
+  .description("Start a Procedure Run with a name/file, or free exploration without either.")
+  .argument("[procedure-name]", "Procedure primary name or alias; omit for free exploration")
   .requiredOption("--name <name>", "name for this run")
-  .option("--file <path>", "start from a Procedure YAML file without installing it")
-  .option("--change <id>", "start from the validated candidate Memory in an active ChangeSet")
-  .option("--review-config <path>", "bind Review Slots to Actors and select Decision Policies")
+  .option("--file <path>", "Procedure YAML file instead of a procedure name")
+  .option("--change <id>", "Procedure only: validated candidate Memory in an active ChangeSet")
+  .option("--review-config <path>", "Procedure only: bind formal Review Slots")
   .action((procedureName, options) => runStartCommand(procedureName, options));
 
 run
   .command("report")
-  .description("Report the current step artifact and advance the run.")
+  .description("Report a Procedure step Artifact or a complete free exploration Artifact.")
   .requiredOption("--run <id>", "run id")
   .option("--artifact <value>", "artifact value")
   .option("--artifact-file <path>", "read artifact value from file")
@@ -374,7 +374,7 @@ run
 
 run
   .command("show")
-  .description("Show a concise Run outline with its steps and Artifact summaries.")
+  .description("Show a Procedure outline or free exploration Artifact graph summary.")
   .requiredOption("--run <id>", "run id")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runShowCommand);
@@ -420,11 +420,11 @@ runStep
 
 const runArtifact = run
   .command("artifact")
-  .description("Inspect a reported or reviewed Artifact.");
+  .description("Inspect a Procedure or free exploration Artifact.");
 
 runArtifact
   .command("show")
-  .description("Show a reported or reviewed Artifact value.")
+  .description("Show an Artifact; use --step for Procedure or --artifact for free exploration.")
   .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
   .option("--run <id>", "run id")
   .option("--step <ref>", "step ref from run show")
@@ -466,7 +466,7 @@ runSchema
 
 const runReview = run
   .command("review")
-  .description("Wait for and decide an Artifact Review.");
+  .description("Manage formal Procedure Review or light free exploration feedback.");
 
 runReview
   .command("wait")
@@ -598,7 +598,7 @@ run
 
 run
   .command("status")
-  .description("Show run status or list recent runs.")
+  .description("Show either Run mode's status or list recent Runs.")
   .option("--run <id>", "run id")
   .action(runStatusCommand);
 
