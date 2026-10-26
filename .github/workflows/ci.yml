@@ -51,6 +51,7 @@ jobs:
     timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json

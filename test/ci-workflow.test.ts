@@ -72,6 +72,7 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.deepEqual(workflow.on.push.branches, ["master"]);
   assert.equal(workflow.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
   assert.equal(workflow.jobs.test.strategy.matrix, "${{ fromJSON(needs.plan.outputs.matrix) }}");
+  assert.equal(workflow.jobs.test.strategy["max-parallel"], 4);
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").run, 'node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"');
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").env.CI_PROFILE, "${{ inputs.profile || 'default' }}");
   assert.equal(workflow.jobs.budget, undefined, "queueing is not a failure");
