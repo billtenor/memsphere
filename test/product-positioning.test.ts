@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
+import { flattenEffectiveRules, resolveRuleParts } from "../src/memory/rules.js";
+import { readMemoryFile } from "../src/memory/store.js";
 import { readReservedMemoryManifest } from "../src/reserved/store.js";
 
 const root = process.cwd();
@@ -74,8 +76,21 @@ test("Skill and project delivery memories enforce the Memory ChangeSet gate", as
     assert.match(source, /memsphere memory change validate \[change-id\]/);
     assert.match(source, /不能(?:代替|满足)/);
   }
-  for (const signal of ["功能实现摘要", "初始验证报告", "报告前必须检查 Memory 差异", "commit 前必须检查 Memory 差异"]) {
+  for (const signal of ["功能实现摘要", "初始验证报告", "commit 前必须检查 Memory 差异"]) {
     assert.match(agile, new RegExp(signal));
+  }
+  const { entity: procedure } = await readMemoryFile("procedures", join(projectMemoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"));
+  assert(procedure.tag === "!procedure");
+  const report = procedure.flow.find((node) => node.tag === "!action" && node.artifact.name === "敏捷需求开发交付报告");
+  assert(report?.tag === "!action");
+  const effective = await resolveRuleParts("asserts", report.asserts, async (target) => {
+    const { entity } = await readMemoryFile("statements", join(projectMemoryRoot, `${target}.yaml`));
+    assert(entity.tag === "!statement");
+    return entity;
+  });
+  const reportRules = flattenEffectiveRules(effective).map((rule) => rule.text).join("\n");
+  for (const signal of ["Memory 差异", "memsphere memory change validate", "ChangeSet ID", "校验状态", "View 入口", "不能代替"]) {
+    assert.match(reportRules, new RegExp(signal));
   }
   for (const evidence of ["ChangeSet ID", "校验状态", "View 入口"]) {
     assert.match(skill, new RegExp(evidence));

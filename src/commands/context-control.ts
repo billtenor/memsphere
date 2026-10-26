@@ -1,4 +1,5 @@
-import { openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, type CommandStateRow } from "../home/command-state-store.js";
+import { closeRunCommandStates, openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, type CommandStateRow } from "../home/command-state-store.js";
+import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { Option } from "commander";
 import { readConfig } from "../config.js";
@@ -114,16 +115,13 @@ export async function tryContextCommand(operation: string, options: object): Pro
     const snap = await s.snapshot(runId);
     if (operation === "review-list") result = snap.reviews.filter(r => r.artifactId === requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"));
     else { result = snap.reviews.find(r => r.id === requireOption(o.review, "--review")); if (!result) throw failure("NOT_FOUND", "Review not found"); }
-  } else if (operation === "finish") result = await s.finish(runId, Array.isArray(o.artifact) ? o.artifact : o.artifact ? [o.artifact] : []);
+  } else if (operation === "finish") result = await s.finish(runId, Array.isArray(o.artifact) ? o.artifact : o.artifact ? [o.artifact] : undefined);
   else if (operation === "abandon") {
     if (o.reason !== undefined && o.reasonFile) throw failure("INVALID_ARGUMENT", "Use reason or reason-file");
     result = await s.abandon(runId, o.reasonFile ? await readFile(o.reasonFile, "utf8") : o.reason);
   } else throw failure("INVALID_ARGUMENT", `Unknown context control operation: ${operation}`);
   if (operation === "finish" || operation === "abandon") {
-    const warnings: string[] = [];
-    try { for (const row of await findCommandStates(config.project!.name, runId)) if (row.value.status === "active") {
-      try { await updateCommandState(row, { ...row.value, status: "closed" }); } catch { warnings.push(`Run ended; CommandState ${row.value.id} could not be closed`); }
-    } } catch { warnings.push("Run ended; command-state lookup failed"); }
+    const warnings = await closeRunCommandStates(config.project!.name, runId, config.homeRoot);
     if (warnings.length) result = { ...(result as object), warnings };
   }
   emitCommandResult(result, o.output); return true;
@@ -188,9 +186,9 @@ export function registerExplorationCommands(run: import("commander").Command) {
 export async function contextRunList(options: object): Promise<boolean> {
   const o = options as Options; const config = await readConfig(); const service = await openContextControl(config.scopeRoot);
   if (!service) return false;
-  const [legacy, current] = await Promise.all([listRuns(config.runsRoot), service.listRuns()]);
-  if (current.some(run => legacy.some(old => old.id === run.id))) throw failure("AMBIGUOUS_RUN", "Run ID exists in both storage sources");
-  const runs = [...legacy.map(r => ({ id: r.id, name: r.name, status: r.status, createdAt: r.createdAt, source: "flow" })), ...current.map(r => ({ ...r, source: "context-control" }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const [legacy, archived, current] = await Promise.all([listRuns(config.runsRoot), listRuns(join(config.archiveRoot, "runs")), service.listRuns()]);
+  if (current.some(run => [...legacy, ...archived].some(old => old.id === run.id))) throw failure("AMBIGUOUS_RUN", "Run ID exists in both storage sources");
+  const runs = [...legacy.map(r => ({ id: r.id, name: r.name, status: r.status, createdAt: r.createdAt, source: "flow" })), ...current.filter(r => !r.archived).map(r => ({ ...r, source: "context-control" }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (o.output === "json") emitCommandResult({ runs }, "json");
   else for (const run of runs) console.log(`${run.id} ${run.status} ${run.name ?? ""}`);
   return true;

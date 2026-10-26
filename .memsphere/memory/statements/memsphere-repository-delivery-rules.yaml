@@ -10,3 +10,5 @@ asserts:
   - 需求完成实现、测试和验收后，必须在 change.md 中记录验收结果，移除 active status，并写入 completed_at。
   - 必须将需求目录从 changes/active/<change-id>/ 移动到 changes/archive/completed/<change-id>/；归档目标已存在时不得覆盖。
   - 状态更新与目录归档完成前，不得将该需求视为已经完整交付。
+  - 需求目录归档用于记录需求、设计和交付结论，不代表目录内全部文件都应进入 Git；单次运行的原始验收附件与代码提交分开管理，报告应明确证据实际留存位置及其是否随代码交付。
+  - 证据已提交评审、被报告引用或需要留存，均不等于必须提交到代码仓库；Git 交付范围与提交前检查遵循 memsphere-repository-git-rules。

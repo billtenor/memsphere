@@ -1,0 +1,14 @@
+!statement
+syntax: memsphere-20260721-stable
+names:
+  - memsphere-repository-git-rules
+  - memsphere 代码仓库 Git 提交规范
+defines:
+  - 约束 memsphere 仓库的 Git 提交范围、忽略规则和提交前检查。
+asserts:
+  - Git 提交只包含已确认交付范围内的实现、可长期复用的测试及其 fixture、必要文档和产品资源；文件由本轮产生、内容无敏感信息或操作可逆，均不能单独作为纳入提交的依据。
+  - 单次运行的日志、截图、录屏、临时测试输出和其他验收原始证据用于 Run 评审或验收留存，不属于代码提交；不得仅因报告引用、证据完整性要求或 Reviewer 意见而加入 Git。
+  - 被 Git 忽略规则命中的文件不得强行暂存或提交；禁止使用 git add -f、git add --force 或等效手段，也不得仅为纳入这些文件而修改忽略规则绕过约束。
+  - 创建 commit 前必须逐项核对暂存清单的用途和已确认范围，并对新增暂存文件执行忽略规则检查；检查必须覆盖已经进入 index 的新文件，例如对 git diff --cached --name-only --diff-filter=A 列出的路径使用 git check-ignore --no-index --stdin。
+  - 检查发现不应提交或命中忽略规则的文件时，必须从暂存移除并保留本地内容；不得以强制添加消除检查结果，不得把未通过检查的暂存内容提交。
+  - 报告对证据位置、归档范围或交付内容的表述不准确时，应修正报告并保留真实验收记录，不得为兑现错误表述而扩大 Git 提交范围或绕过仓库规则。

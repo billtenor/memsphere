@@ -16,6 +16,7 @@ summary; the license distributed with each package is authoritative.
 | `ajv` | 8.20.0 | MIT | [ajv-validator/ajv](https://github.com/ajv-validator/ajv) |
 | `commander` | 12.1.0 | MIT | [tj/commander.js](https://github.com/tj/commander.js) |
 | `cross-spawn` | 7.0.6 | MIT | [moxystudio/node-cross-spawn](https://github.com/moxystudio/node-cross-spawn) |
+| `elkjs` | 0.12.0 | EPL-2.0 (selected distribution license) | [kieler/elkjs](https://github.com/kieler/elkjs) |
 | `fs-native-extensions` | 1.5.1 | Apache-2.0 | [holepunchto/fs-native-extensions](https://github.com/holepunchto/fs-native-extensions) |
 | `handlebars` | 4.7.9 | MIT | [handlebars-lang/handlebars.js](https://github.com/handlebars-lang/handlebars.js) |
 | `jsonpath-rfc9535` | 1.3.0 | Apache-2.0 | [P0lip/jsonpath-rfc9535](https://github.com/P0lip/jsonpath-rfc9535) |
@@ -69,3 +70,7 @@ Development-only packages are not installed as dependencies of the published
 Memsphere package. Their versions and licenses remain recorded in
 `package-lock.json`, and each installed package includes its authoritative
 license file.
+
+## Bundled layout engine
+
+The Run browser bundle includes unmodified ELK.js 0.12.0 (Copyright Eclipse ELK contributors and TypeFox). Distributed here under EPL-2.0; see `ELK-LICENSE.md`. Upstream source and original notices: https://github.com/kieler/elkjs (published source package: https://www.npmjs.com/package/elkjs/v/0.12.0). Memsphere’s own code remains Apache-2.0.

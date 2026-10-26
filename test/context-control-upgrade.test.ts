@@ -8,6 +8,18 @@ import { textContent } from "../src/context_control/types.js";
 import { upgradeContextControlOutputs } from "../src/project/context-control-upgrade.js";
 import { withProjectModelWrite } from "../src/project/model-operation.js";
 
+test("adding archive metadata upgrades the known Run definition without rewriting Run records", async t => {
+  const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!, run = await s.start("保留版本");
+  const schemaPath = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
+  const old = JSON.parse(await readFile(schemaPath, "utf8")); delete old.properties.archived;
+  await writeFile(schemaPath, JSON.stringify(old));
+  const before = await s.stores.run.get({}, run.id);
+  assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.run.get({}, run.id), before);
+  await reopened.finish(run.id); assert.ok((await reopened.archive(run.id)).archived);
+});
+
 async function oldFixture(t: test.TestContext) {
   const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!;
   const running = await s.start("running"), done = await s.start("done"), abandoned = await s.start("abandoned");
@@ -104,4 +116,25 @@ test("upgrading an interrupted stored-output report completes its original roots
   const service = (await openContextControl(f.root))!;
   assert.deepEqual(await service.outputs(f.running.id), [f.b.id]);
   assert.equal((await service.findRun(f.running.id))!.outputOverrides, undefined);
+});
+
+test("known archivedAt candidate converts only archived rows and preserves untouched revisions", async t => {
+  const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!;
+  const active = await s.start("active"), ended = await s.start("archived"); await s.finish(ended.id);
+  const path = join(f.root, "data/context_control/runs", `${ended.id}.json`);
+  const row = JSON.parse(await readFile(path, "utf8")); row.value.archivedAt = "2026-10-25T00:00:00.000Z";
+  await writeFile(path, JSON.stringify(row));
+  const activeBefore = await s.stores.run.get({}, active.id);
+  const schema = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
+  const oldSchema = await readFile(new URL("./fixtures/context-control-run-archived-at.json", import.meta.url), "utf8"); await writeFile(schema, oldSchema);
+  await assert.rejects(withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root, { afterFile: async index => { if (index === 1) throw Error("interrupted candidate conversion"); } })), /interrupted/);
+  assert.equal(await readFile(schema, "utf8"), oldSchema);
+  assert.deepEqual(JSON.parse(await readFile(path, "utf8")), row);
+  const result = await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)); assert.equal(result?.records, 1);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.run.get({}, active.id), activeBefore);
+  const migrated = await reopened.stores.run.get({}, ended.id);
+  assert.equal(migrated!.value.archived, true); assert.equal(migrated!.value.archivedAt, undefined);
+  assert.equal(migrated!.revision, row.revision + 1); assert.equal(migrated!.createdAt, row.createdAt);
+  assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
 });

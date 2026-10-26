@@ -44,6 +44,10 @@ flow:
         assert.doesNotMatch(body, /禁止泄露的新来源正文|旧来源正文/);
         assert.equal(response.headers.get("content-disposition"), null);
       }
+      const summary = await fetch(`${base.slice(0, base.lastIndexOf("/"))}?representation=summary&archived=true`);
+      assert.equal(summary.status, 500);
+      const archiveBase = base.replace("/runs/", "/archive/runs/");
+      for (const suffix of ["", "/restore"]) assert.equal((await fetch(`${archiveBase}${suffix}`, {method:"POST"})).status, 500);
       if (!archived) {
         const response = await fetch(`${base}/abandon`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
         assert.equal(response.status, 500);
@@ -59,3 +63,31 @@ flow:
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
   });
 }
+
+
+test("the existing Run endpoint discovers and restores archived legacy evidence", async t => {
+  const f = await businessFixture(t, {}), config = await readProjectConfig("test-project", f.home);
+  await mkdir(join(config.memoryRoot, "procedures"), { recursive: true });
+  await writeFile(join(config.memoryRoot, "procedures", "archive-source.yaml"), withCurrentMemorySyntax(`!procedure
+name: archive-source
+flow:
+  - !action
+    action: Produce a result.
+    artifact: !artifact
+      name: result
+      format: markdown
+`));
+  const run = await startRun({name:"旧流程归档",memoryRoot:config.memoryRoot,runsRoot:config.runsRoot,procedureName:"archive-source"});
+  await reportRun({runsRoot:config.runsRoot,runId:run.id,artifact:{kind:"inline",value:"原始正文"}});
+  const server=createViewServer(config); await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
+  const api=`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/test-project`;
+  try {
+    assert.equal((await fetch(`${api}/archive/runs/${run.id}`,{method:"POST"})).status,200);
+    const list=await (await fetch(`${api}/runs?representation=summary&archived=true`)).json();
+    assert.equal(list.runs[0].id,run.id); assert.equal(list.runs[0].archived,true);
+    const response=await fetch(`${api}/runs/${run.id}`); const detail=await response.json(); assert.equal(response.status,200,JSON.stringify(detail)); assert.equal(detail.run.readOnly,true); assert.equal(detail.run.archived,true);
+    assert.equal((await fetch(`${api}/archive/runs/${run.id}/restore`,{method:"POST"})).status,200);
+    const restored=await readRun(config.runsRoot,run.id); assert.equal(restored.status,"done");
+    assert.equal((await (await fetch(`${api}/runs?representation=summary&archived=true`)).json()).runs.length,0);
+  } finally { await new Promise<void>(resolve=>server.close(()=>resolve())); }
+});
