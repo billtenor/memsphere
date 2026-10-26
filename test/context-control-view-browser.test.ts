@@ -8,6 +8,82 @@ import { textContent } from "../src/context_control/types.js";
 import { readProjectConfig } from "../src/config.js";
 import { openCommandStates } from "../src/home/command-state-store.js";
 import { createViewServer } from "../src/commands/view.js";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { startRun, reportRun } from "../src/run/store.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
+
+test("Run list shares the Home query, omits unknown counts, and refreshes selected exploration details", { timeout: 60000 }, async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!, run = await service.start("list and detail");
+  const first = (await service.report(run.id, { name: "first result", content: textContent("first body") })).artifact;
+  const config = await readProjectConfig("test-project", f.home);
+  await mkdir(join(config.memoryRoot, "procedures"), { recursive: true });
+  await writeFile(join(config.memoryRoot, "procedures/counts.yaml"), withCurrentMemorySyntax(`!procedure
+name: counts
+flow:
+  - !action
+    action: first
+    artifact: !artifact
+      name: first
+  - !action
+    action: second
+    artifact: !artifact
+      name: second
+`));
+  const legacyOptions = { memoryRoot: config.memoryRoot, runsRoot: config.runsRoot, procedureName: "counts" };
+  const zero = await startRun({ ...legacyOptions, name: "known zero" }), one = await startRun({ ...legacyOptions, name: "known one" });
+  await reportRun({ runsRoot: config.runsRoot, runId: one.id, artifact: { kind: "inline", value: "complete" } });
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, browser = await browserScope();
+  try {
+    const page = await browser.newPage(); let summaries = 0;
+    page.on("request", r => { const u = new URL(r.url()); if (u.pathname.endsWith("/runs") && u.searchParams.get("representation") === "summary") summaries++; });
+    await page.goto(`${origin}/projects/test-project/tasks`);
+    const row = page.locator(`[data-item-id="${run.id}"]`);
+    try { await row.waitFor({ state: "visible" }); }
+    catch (error) { t.diagnostic((await page.locator("body").innerText()).slice(0, 5000)); throw error; }
+    assert.equal(summaries, 1);
+    assert.doesNotMatch(await row.innerText(), /·\s*0/);
+    assert.match(await page.locator(`[data-item-id="${zero.id}"]`).innerText(), /·\s*0/);
+    assert.match(await page.locator(`[data-item-id="${one.id}"]`).innerText(), /·\s*1/);
+    await row.click();
+    await page.getByRole("button", { name: /first result/ }).waitFor();
+    const second = (await service.report(run.id, { name: "new result", content: textContent("new body"), dependencies: [{ kind: "artifact", id: first.id }] })).artifact;
+    await service.review(run.id, second.id, "human", ["latest opinion"]);
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    const newNode = page.getByRole("button", { name: /new result/ });
+    await newNode.waitFor(); await newNode.click();
+    await page.getByRole("dialog").getByText("new body", { exact: true }).waitFor();
+    await page.getByRole("dialog").getByText("latest opinion", { exact: true }).waitFor();
+  } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test("a delayed terminal list cannot replace the latest running selection", { timeout: 60000 }, async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const running = await service.start("current running"), terminal = await service.start("terminal result");
+  await service.finish(terminal.id);
+  const server = createViewServer(await readProjectConfig("test-project", f.home));
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, browser = await browserScope();
+  let release!: () => void, arrive!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { arrive = resolve; });
+  try {
+    const page = await browser.newPage();
+    await page.route("**/runs?representation=summary&status=done", async route => { arrive(); await held; await route.continue(); });
+    await page.goto(`${origin}/projects/test-project/tasks`);
+    await page.locator(`[data-item-id="${running.id}"]`).waitFor();
+    await page.getByRole("button", { name: "已完成", exact: true }).click();
+    await entered;
+    await page.getByRole("button", { name: "运行中", exact: true }).click();
+    const returned = page.waitForResponse(r => new URL(r.url()).searchParams.get("status") === "done");
+    release(); await returned;
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await page.locator(`[data-item-id="${running.id}"]`).waitFor({ state: "visible" });
+    assert.equal(await page.locator(`[data-item-id="${terminal.id}"]`).count(), 0);
+    assert.equal(new URL(page.url()).searchParams.has("status"), false);
+  } finally { release(); await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
 
 test("Run header finishes exploration, archives it, and restores it without reopening production", { timeout: 60000 }, async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!, run = await service.start("页面结束归档");
