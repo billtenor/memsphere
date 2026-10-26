@@ -152,19 +152,37 @@ jobs:
           path: ci-results
           if-no-files-found: error
 
+  all-tests:
+    name: Complete npm test
+    if: needs.plan.outputs.profile == 'full'
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npm test
+
   full-result:
     name: Full cross-platform regression
     runs-on: ubuntu-24.04
-    needs: [plan, test, windows-package-smoke]
+    needs: [plan, test, windows-package-smoke, all-tests]
     if: always() && needs.plan.outputs.profile == 'full'
     timeout-minutes: 5
     steps:
       - env:
           TEST_RESULT: ${{ needs.test.result }}
           PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
+          ALL_TESTS_RESULT: ${{ needs.all-tests.result }}
         run: |
           test "$TEST_RESULT" = success
           test "$PACKAGE_RESULT" = success
+          test "$ALL_TESTS_RESULT" = success
 
   full-health-bootstrap:
     name: First-install merge gate publisher
