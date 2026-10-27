@@ -1,0 +1,49 @@
+---
+id: 20261026-exploration-skill-alignment
+type: improvement
+created: 2026-10-26
+completed_at: 2026-10-27
+run_id: run-20261026-123018z-12ac8722
+---
+
+# 自由探索 Run 的 Skill 与 CLI Help 完整迭代
+
+## 目标与范围
+
+自由探索已交付后，Skill 仍强制 Procedure 及通用任务兜底，且部分 Help 未表达两种 Run。更新单文件 Skill、相关 Help 和必要 System Memory；Agent 有适用 Procedure 时执行，否则在目标与语义对齐后自由探索，已有任务继续原 Run。
+
+产品负责人强调简洁但不丢能力。先逐段盘点旧版，再保留每类任务的入口、顺序、完成条件与关键边界；盘点及取舍见 [capability-inventory.md](capability-inventory.md)。升级、Memory 读写与发布、ChangeSet Comment、App/CLI、模型数据、Schema/Review、人机协作、配置/View 和迁移均保留直接指导。保持单文件，不设行数配额，不拆引用文件；领域定义和参数细节才按需读取明确的 Memory/Help。
+
+Artifact 是围绕明确目的组织、可独立使用且值得后续引用/评审/修订/交付保留的结果。按实际用途和使用边界组织，合并同一用途的零碎讨论，不按消息、文件或保存次数机械上报；有用途的阶段结果可保留。目标与语义对齐环节不另设 Artifact 特别指令。
+
+删除系统预置通用任务 Procedure，升级/repair 仅删除路径、canonical identity 和已知原版摘要均匹配的旧预置；自定义内容保留并报告冲突，历史 Run 冻结快照保留。同步 Memory 创建、Store 边界和 Comment finish 的文档/Help；不新增运行时或语法能力。
+
+## 实现与兼容性
+
+- Skill 更新于 src/skills/memsphere，安装与升级目标、覆盖选项保持兼容。
+- CLI Help 区分 Procedure 与自由探索、Continue 的范围、Memory 创建/删除/改名和 Comment finish。
+- v5 manifest 记录 11 个历史原版摘要，受控 Managed/Embedded 升级与 repair 保护自定义内容和竞态。
+- 新增 Artifact 规则及一致的开发 Project 副本；Comment 处理流程说明与现有“全部 processing、整批单 reason”接口一致。混合处理结论无法分批 finish 时保留现场并请 Human 决定，不改运行时掩盖限制。
+- 增加真实 Agent 场景及可重放 prepare/run/check，评分检查实际数据、命令和所用 Skill 的 SHA256；full CI 增加原样 npm test 作业，矩阵并行上限为 4。
+
+## 向前兼容
+
+结论：需要向前兼容。
+
+调查时没有名称含 stable 的 Tag，因此无可列举的稳定 checkpoint。保持已交付命令、模型数据、Skill 安装位置/覆盖参数、Procedure Review 和历史冻结 Run 语义；明确移除的通用预置不再作为新任务兜底。没有批量修改其他真实 Project。
+
+## 验收结果
+
+- 需求契约第 2 轮获产品负责人通过；方案经过技术评审。第一次交付反馈后，按产品负责人授权完整重盘能力并修订。
+- 补充能力技术 Review review-20261027-031049z-f1123b72 第 2 轮 round-20261027-034409z-d35cadcb：研发、测试、架构三席通过、阻塞零，Runner 通过，审查 Run run-20261027-030458z-4a422c82 完成。
+- 产品交付 Review review-20261026-171424z-059c4535：旧稿第 1 轮正式要求修改；修订第 2 轮 round-20261027-042101z-1661440f 产品负责人明确“我投通过”，Runner 已接纳。
+- 实现提交 eaca5a7 的结构校验、typecheck、build、23 项受影响回归、七项最终 Skill 同字节 Agent 回放和 Store 校验通过。其 full CI [40444768873](https://github.com/billtenor/memsphere/actions/runs/40444768873) 原样 npm test 164 文件零失败；全部平台、打包 Shell、汇总及 merge gate 通过。归档文档后最新 PR HEAD 的检查由关联 Run 继续核对。
+- 最终 Memory ChangeSet change-20261027-032746682z-361a8d08：valid=true、零问题，基线 ec9ff27，校验后 Memory 内容未变；View http://0.0.0.0:30000/projects/memsphere/changes/change-20261027-032746682z-361a8d08。此前预置删除保留原 ChangeSet 验证证据。
+
+## 残留问题与交付边界
+
+测试与架构建议继续把升级恢复、Schema 收尾、正式 Review/Human 代投、迁移和 View 等规划型检查转成最终字节可重放场景，已记录 accepted-followup，不影响本轮静态/实现核对通过；没有声称所有路径均完成最终字节 Agent 重跑。App trial 沙盒内版本探测返回 unknown 时如实报告，没有宣称全项 available。
+
+代码与必要文档交付到 [PR #116](https://github.com/billtenor/memsphere/pull/116)。产品验收已完成，需求目录已归档；原敏捷 Run 继续 Commit/PR/CI、等待 Human 合入及结果确认，不能把本记录的 completed_at 当成 PR 已合入或整个 Run 已结束。Agent 不自行合入或启用自动合入。
+
+Git 仅纳入本 change.md 与能力盘点，其他需求讨论、方案及单次验收附件保留在本地同目录与 Run，不因归档自动纳入 Git。原始 Agent/浏览器/测试证据在 Run 和 /tmp/memsphere-capability-evals、/tmp/memsphere-skill-iteration 及各临时 trial，不随代码提交；可重放脚本与场景说明在 evals/exploration-skill。既有 .playwright/ 不属于本轮交付。
