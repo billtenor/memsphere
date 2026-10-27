@@ -4,9 +4,16 @@ import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { failure } from "../context_control/service.js";
 import { contextOnlyCommand, type Options } from "./context-control.js";
+import { isGraphRun } from "../context_control/graph-runtime.js";
+import { graphReviewHandle } from "../context_control/review-repository.js";
 
 const operations: Array<[string[], string, string[]]> = [
-  [["report"], "report", ["name", "artifact", "artifactFile", "file", "contentType", "revisedFrom", "dependsOn", "tag", "output"]],
+  [["review", "wait"], "review-wait", []],
+  [["review", "vote"], "review-vote", ["vote", "comment", "commentFile"]],
+  [["review", "resolve"], "review-resolve", ["comment", "disposition", "note", "noteFile", "validationSummary", "validationSummaryFile", "output"]],
+  [["review", "submit-for-human"], "review-submit-for-human", ["assignment", "vote", "commentsFile", "summary", "summaryFile", "authorizationNote", "authorizationNoteFile", "output"]],
+  [["review", "retry"], "review-retry", ["assignment", "output"]],
+  [["report"], "report", ["name", "artifact", "artifactFile", "file", "contentType", "revisedFrom", "dependsOn", "tag", "output", "revisionSummary", "revisionSummaryFile"]],
   [["review", "create"], "review-create", ["artifact", "reviewer", "comment", "commentFile", "output"]],
   [["external", "add"], "external-add", ["source", "content", "contentType", "file", "output"]],
   [["artifact", "tag"], "artifact-tag", ["artifact", "tag", "output"]],
@@ -21,8 +28,9 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
   const help = async (target: Command) => {
     const context = await load();
     console.log(`contextId: ${context.id}\ncommandGroup: ${context.commandGroup}\nproject: ${context.parameters.project}\nrun: ${context.groupId}`);
+    if (context.parameters.step) console.log(`step: ${context.parameters.step}`);
     if (!context.available) { console.log(`No further transitions (${context.runStatus}). Use ordinary run status/show commands.`); return; }
-    console.log(target === router ? "Available: report, review create, external add, artifact tag, outputs update, finish, abandon\nContent, Artifact IDs, comments and dependencies remain explicit.\nUse: memsphere continue <context-id> <command> --help" : target.helpInformation());
+    console.log(target === router ? context.parameters.step ? "Available: report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <context-id> <command> --help" : "Available: report, review create, external add, artifact tag, outputs update, finish, abandon\nContent, Artifact IDs, comments and dependencies remain explicit.\nUse: memsphere continue <context-id> <command> --help" : target.helpInformation());
   };
   const load = async () => {
     const id = continuation.processedArgs[0] as string;
@@ -35,8 +43,12 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     const config = await readConfig();
     const service = await openContextControl(config.scopeRoot);
     const run = service && await service.findRun(row.value.groupId);
-    if (!run) throw failure("NOT_FOUND", "CommandState does not refer to a free exploration Run");
-    return { ...row.value, runStatus: run.status, available: row.value.status === "active" && run.status === "running" };
+    if (!run) throw failure("NOT_FOUND", "CommandState does not refer to a model-backed Run");
+    const stepId = row.value.parameters.step;
+    if (isGraphRun(run) !== Boolean(stepId)) throw failure("INVALID_STATE", "Graph CommandState requires a fixed Step binding");
+    const step = stepId ? (await service!.snapshot(run.id)).steps.find(s => s.id === stepId) : undefined;
+    if (stepId && !step) throw failure("NOT_FOUND", "CommandState Step not found");
+    return { ...row.value, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: step?.status ?? run.status, available: row.value.status === "active" && run.status === "running" && step?.status !== "done" };
   };
   continuation.action(async () => {
     const tail = continuation.args.slice(1);
@@ -65,7 +77,20 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       if (options.help) { await help(target); return; }
       const context = await load();
       if (!context.available) throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
-      await contextOnlyCommand(operation, { ...options, run: context.groupId, contextId: context.id });
+      if (operation.startsWith("review-") && ["review-wait", "review-vote", "review-retry", "review-resolve", "review-submit-for-human"].includes(operation)) {
+        const stepId = context.parameters.step;
+        if (!stepId || !context.roundId) throw failure("INVALID_ARGUMENT", "This command requires a graph Step Review");
+        const commands = await import("./run.js");
+        const review = graphReviewHandle(context.groupId, stepId);
+        if (operation === "review-wait") await commands.runReviewWaitCommand({ review });
+        else if (operation === "review-vote") await commands.runReviewVoteCommand({ ...options, review, round: context.roundId } as Parameters<typeof commands.runReviewVoteCommand>[0]);
+        else if (operation === "review-retry") await commands.runReviewRetryCommand({ ...options, review });
+        else if (operation === "review-resolve") await commands.runReviewResolveCommand({ ...options, review, round: context.roundId } as Parameters<typeof commands.runReviewResolveCommand>[0]);
+        else await commands.runReviewSubmitForHumanCommand({ ...options, run: context.groupId, review, round: context.roundId } as Parameters<typeof commands.runReviewSubmitForHumanCommand>[0]);
+        return;
+      }
+      if (context.parameters.step && operation !== "report") throw failure("INVALID_ARGUMENT", "Use the Step report or review commands shown by its current prompt");
+      await contextOnlyCommand(operation, { ...options, run: context.groupId, ...(context.parameters.step ? { step: context.parameters.step } : {}), contextId: context.id });
     });
   }
 }

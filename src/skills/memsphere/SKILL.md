@@ -80,9 +80,23 @@ memsphere data store remove orders
 
 所有 list 命令都支持 `--limit <n>`、`--cursor <token>`：默认 100、最多 1000，先筛选再分页，响应使用 `items` 和可选 `nextCursor`。需要完整列表时，把返回的 nextCursor 原样传给同一查询继续读取，直到不再返回；不要把第一页当作全部结果。可更改 limit/output，不能更改 Project、Store 或筛选条件后复用 cursor，分页不承诺并发修改期间的快照。新增模型、数据和 data store 命令默认 `--output text`，成功用 YAML 键值、缩进和列表展示完整结果，包括嵌套值和 nextCursor；失败只在 stderr 显示文本说明。使用 `--output json` 时，成功只在 stdout 输出一个 JSON，失败只在 stderr 输出 `{ "error": { "code": "...", "message": "...", "details": ... } }` 并以非零状态退出。原始导出正文不经过回执格式转换。
 
+## graph 流程执行
+
+新 Procedure 可声明 `syntax: memsphere-20261027-stable`、`mode: graph` 和 `actions`；省略 mode 仍为 flow。先按正常 Procedure 入口读取并启动，不向启动命令传结构化业务 input；由入口 Action 准备业务材料。
+
+依赖满足时 Memsphere 立即创建 pending Step。只有一个可执行 Step 时自动 enter；多个时先读返回的概述列表，再执行 `memsphere run step enter --run R --step S`。enter 首次将该实例转为 running，重复 enter 复用同一实例、开始时间和 Continue 上下文；`run step show --run R --step S` 只读。
+
+进入后只完成当前 Step。使用返回的 `memsphere continue C report --artifact-file <file>` 上报，原生入口必须显式带 `--run R --step S`。C 固定 Project、Run、Step；不会随工作进度改绑到后继实例。评审时按提示执行 `continue C review wait`，阅读全部正式意见后执行 `continue C review vote --vote approve` 或附修改理由的 request_changes；Agent Reviewer 失败时遵守下文显式 retry 规则，可使用 `continue C review retry --assignment <actor>`。意见处置使用 `continue C review resolve --comment <id> --disposition <value> --note <text>`（accepted-fixed 另需验证摘要）；取得本人明确授权后可使用 `continue C review submit-for-human --assignment <actor> --vote <value> --comments-file <file> --authorization-note <text>`。这些入口自动固定当前 Run/Step/轮次，不允许传参改绑，沿用原生命令全部权限与受托审计。
+
+要求修改后在同一 Step 提交新 Artifact，必须附 `--revision-summary` 或 `--revision-summary-file`；保留旧候选与轮次。完成该 Step 后才返回新的可执行 Step 列表。跨 Step 并发由宿主 Agent 框架组织，不要求 Memsphere 调度 Agent。Human Action 必须先等待 Human 实际完成，Runner 再向同一 Step 提交，不能把 Human Review 的投票当成生产结果。
+
+collect Action 由命令自动完成，Agent 不执行 enter/report；结果是按 Step 创建序固定的具体 Artifact 引用数组，空数组保留，无额外聚合 Artifact 或 Review。普通依赖只传本次正式采用的产物；when 使用 JSONata 且严格返回 boolean，不提供全局业务 State。原始 MIME 解码、现有模型校验或求值失败应按错误修复，不能当作 false 跳过。
+
+`run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store，但自由探索仍在 report 完整成果时才创建 Step。
+
 ## 自由探索上下文
 
-没有预定义 Procedure 时，使用 `memsphere run start --name "任务名称" --output json`，回执返回 Run ID 和前文 contextId。前文自动创建，跨 Shell 显式传同一 C；`run status --run R` 找回已有 ID。全局 Continue 本轮仅支持自由探索，旧流程、ChangeSet 和 ACP 保持原入口。
+没有预定义 Procedure 时，使用 `memsphere run start --name "任务名称" --output json`，回执返回 Run ID 和前文 contextId。前文自动创建，跨 Shell 显式传同一 C；`run status --run R` 找回已有 ID。Continue 支持自由探索的 Run 上下文和 graph 的固定 Step 上下文；旧 flow 保持原入口。
 
 ```bash
 memsphere continue C --help

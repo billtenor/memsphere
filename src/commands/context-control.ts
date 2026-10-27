@@ -9,6 +9,7 @@ import { failure } from "../context_control/service.js";
 import { textContent, type Body, type ReportInput } from "../context_control/types.js";
 import { downstream, scopedSnapshot } from "../context_control/graph.js";
 import { emitCommandResult } from "./cli-errors.js";
+import { graphCommand } from "./procedure-graph.js";
 
 export type Options = { contextId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
@@ -35,6 +36,7 @@ async function reportInput(o: Options): Promise<ReportInput> {
 /** Return false only for a proven legacy Run, never for a failed new Store. */
 export async function tryContextCommand(operation: string, options: object): Promise<boolean> {
   const o = options as Options;
+  if (await graphCommand(operation, o)) return true;
   const newFlags = [o.target, o.for, o.out, o.root, o.revisedFrom, o.file].some(v => v !== undefined) || !!o.dependsOn?.length || !!o.tag?.length || operation === "artifact-show" && o.artifact !== undefined;
   if (!o.run) { if (newFlags) throw failure("INVALID_ARGUMENT", "Free exploration options require --run"); return false; }
   const config = await readConfig();
@@ -186,9 +188,9 @@ export function registerExplorationCommands(run: import("commander").Command) {
 export async function contextRunList(options: object): Promise<boolean> {
   const o = options as Options; const config = await readConfig(); const service = await openContextControl(config.scopeRoot);
   if (!service) return false;
-  const [legacy, archived, current] = await Promise.all([listRuns(config.runsRoot), listRuns(join(config.archiveRoot, "runs")), service.listRuns()]);
-  if (current.some(run => [...legacy, ...archived].some(old => old.id === run.id))) throw failure("AMBIGUOUS_RUN", "Run ID exists in both storage sources");
-  const runs = [...legacy.map(r => ({ id: r.id, name: r.name, status: r.status, createdAt: r.createdAt, source: "flow" })), ...current.filter(r => !r.archived).map(r => ({ ...r, source: "context-control" }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const [legacy, archived, current] = await Promise.all([listRuns(config.runsRoot), listRuns(join(config.archiveRoot, "runs")), service.listRunEntries()]);
+  if (current.some(entry => [...legacy, ...archived].some(old => old.id === entry.id))) throw failure("AMBIGUOUS_RUN", "Run ID exists in both storage sources");
+  const runs = [...legacy.map(r => ({ id: r.id, name: r.name, status: r.status, createdAt: r.createdAt, source: "flow" })), ...current.filter(e => !e.run?.archived).map(e => ({ ...(e.run ?? { id: e.id, name: e.id, status: "unavailable", createdAt: "" }), ...(e.error ? { error: e.error } : {}), source: "context-control" }))].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   if (o.output === "json") emitCommandResult({ runs }, "json");
   else for (const run of runs) console.log(`${run.id} ${run.status} ${run.name ?? ""}`);
   return true;

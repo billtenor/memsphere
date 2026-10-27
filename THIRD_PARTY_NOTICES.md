@@ -19,6 +19,7 @@ summary; the license distributed with each package is authoritative.
 | `elkjs` | 0.12.0 | EPL-2.0 (selected distribution license) | [kieler/elkjs](https://github.com/kieler/elkjs) |
 | `fs-native-extensions` | 1.5.1 | Apache-2.0 | [holepunchto/fs-native-extensions](https://github.com/holepunchto/fs-native-extensions) |
 | `handlebars` | 4.7.9 | MIT | [handlebars-lang/handlebars.js](https://github.com/handlebars-lang/handlebars.js) |
+| `jsonata` | 2.2.2 | MIT | [jsonata-js/jsonata](https://github.com/jsonata-js/jsonata) |
 | `jsonpath-rfc9535` | 1.3.0 | Apache-2.0 | [P0lip/jsonpath-rfc9535](https://github.com/P0lip/jsonpath-rfc9535) |
 | `markdown-it` | 14.3.0 | MIT | [markdown-it/markdown-it](https://github.com/markdown-it/markdown-it) |
 | `postcss` | 8.5.28 | MIT | [postcss/postcss](https://github.com/postcss/postcss) |

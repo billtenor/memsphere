@@ -32,9 +32,9 @@ export async function requireCommandState(id: string, home?: string): Promise<Co
   if (!state || Object.keys(state).some(k => !["lastArtifactId", "reads"].includes(k)) || state.lastArtifactId !== undefined && typeof state.lastArtifactId !== "string" || state.reads !== undefined && (typeof state.reads !== "object" || state.reads === null || Array.isArray(state.reads) || Object.entries(state.reads).some(([key, value]) => !/^(artifact|external):.+/.test(key) || !value || typeof value.readAt !== "string"))) throw failure("INVALID_STATE", "Invalid run command state");
   return row;
 }
-export async function createCommandState(project: string, runId: string) {
+export async function createCommandState(project: string, runId: string, stepId?: string) {
   const store = (await openCommandStates(true))!;
-  const value: CommandState = { id: `context-${randomUUID()}`, commandGroup: "run", groupId: runId, status: "active", parameters: { project }, state: { reads: {} } };
+  const value: CommandState = { id: `context-${randomUUID()}`, commandGroup: "run", groupId: runId, status: "active", parameters: { project, ...(stepId ? { step: stepId } : {}) }, state: { reads: {} } };
   await store.create({}, value.id, value); return value;
 }
 export async function findCommandStates(project: string, runId: string, home?: string): Promise<CommandStateRow[]> {

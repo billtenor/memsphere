@@ -1,5 +1,5 @@
 !procedure
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-changeset-comment-processing
   - memsphere ChangeSet Comment 处理流程

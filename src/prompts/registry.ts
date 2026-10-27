@@ -312,6 +312,9 @@ const schemaOverviewSchema = z.object({
 }).strict();
 
 const definitions = {
+  "run.graph-selection": { path: "run/graph-selection.hbs", schema: z.object({ runId: z.string(), steps: z.array(z.object({ id: z.string(), description: z.string(), actor: z.string(), artifact: z.string() }).strict()), command: z.string() }).strict(), audience: "runner", purpose: "next_action" },
+  "run.graph-waiting": { path: "run/graph-waiting.hbs", schema: z.object({ runId: z.string(), message: z.string(), command: z.string() }).strict(), audience: "runner", purpose: "next_action" },
+  "run.graph-step": { path: "run/graph-step.hbs", schema: z.object({ runId: z.string(), stepId: z.string(), instruction: z.string(), human: z.boolean(), rules: z.string(), materials: z.string(), artifact: z.string(), command: z.string() }).strict(), audience: "runner", purpose: "instruction" },
   "acp.artifact-review.initial": {
     path: "acp-review/initial.hbs",
     audience: "acp_reviewer",

@@ -17,6 +17,11 @@ const previous = {
   run: ["7d0612cb7ece147e5475fba998cabd5fb35f6f58a315db4c8ac4014e247990a3", "e8766633d676456f375c3bca66ab43d7ce02917d0d49ff3aafa193b9e201bc02"],
   artifact: ["fd4b6bcad2dc712fe0e99d0c8a92fc2bd98acabf3e7ea62c2c8f90e9cbadc9b5", "f029c436c88238c2f3df3faf804a65c2725e1d99758eb8fbd93384c37ec74c9c"]
 };
+// Known pre-graph release and the locally installed graph review candidates.
+const beforeGraph = {
+  run: ["594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
+  step: ["a8bcdf5da03ef45a813c4d956c545067686e49cee99047426fb0a3c4fa63eecd", "9a39b10e98c9d5a3f2d48d4caf8dad5f18e0b1b04cebd45ab8014ffecf295a9a", "43f43c0a5470b3f07f43702a9ac7c6d83a23a7678230a8a2816b989e5ded1053", "7dc7c88dd1d0908628385179c460c523e9ee4ca184156238fd665242c077056c"]
+};
 /** Caller owns the Project settings lock. This is one known release conversion, not generic schema migration. */
 export function upgradeContextControlOutputs(root: string, hooks: ModelOperationHooks = {}) {
   return underContextControlAccess(root, async () => {
@@ -27,9 +32,16 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
     const changes: Array<{ path: string; before: Buffer | undefined; after: Buffer }> = [];
     const paths = await validateModelStoragePaths({ root, ...config });
     let oldRun = false, oldArchive = false;
+    const additive = [] as typeof assets;
     for (const asset of assets) {
       const installed = await host.definition(asset.id);
       if (isDeepStrictEqual(installed.definition, asset.definition)) continue;
+      if (asset.entity in beforeGraph && beforeGraph[asset.entity as keyof typeof beforeGraph].includes(definitionHash(installed.definition))) {
+        additive.push(asset);
+        const path = join(paths.modelsDirectory, asset.id);
+        changes.push({ path, before: await optionalFileBytes(path), after: Buffer.from(asset.source) });
+        continue;
+      }
       const archiveCandidate = asset.entity === "run" && definitionHash(installed.definition) === "a40aab6755c9b48e29a453125d71f96c5bea758552d46e3ab761003550b814a7";
       if (archiveCandidate) oldArchive = true;
       const archiveCompatible = asset.entity === "run" && definitionHash(installed.definition) === "afbb72e1e4ad2a4f66b39d0f1a2ccd10d26a5b9dab668cc62cfefd0e8fe8b396";
@@ -39,6 +51,23 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
       changes.push({ path, before: await optionalFileBytes(path), after: Buffer.from(asset.source) });
     }
     if (!changes.length) return { changed: false, records: 0 };
+    // Publish definitions only after every existing record satisfies the new model.
+    // In particular, unsupported historical Step states are never silently renamed.
+    for (const asset of additive) {
+      const opened = await openBusinessStore({}, root, storeId(asset.entity));
+      if (opened.store.kind !== "ValueStore") throw failure("STORE_INCOMPATIBLE", `Expected ValueStore: ${asset.id}`);
+      const { runtime } = await checkModelDefinition({}, { modelRef: asset.id, definition: asset.definition, source: asset.source });
+      let cursor: string | undefined;
+      do {
+        const page = await opened.store.list({}, { limit: 1000, cursor });
+        for (const item of page.items) {
+          const row = await opened.store.get({}, item.id);
+          if (!row) throw failure("NOT_FOUND", `Record disappeared: ${item.id}`);
+          runtime!.reflect(row.value);
+        }
+        cursor = page.nextCursor;
+      } while (cursor);
+    }
     let count = 0;
     if (oldRun || oldArchive) {
       // Redo only completes pending Steps, without mutating old or new Run records.

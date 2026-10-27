@@ -1,5 +1,5 @@
 !statement
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-procedure-writing-rules
   - 流程记忆撰写规范
@@ -113,3 +113,9 @@ sections:
       - 对照业务要求检查流程的触发条件、处理路径和完成条件。
     asserts:
       - 撰写和评审时必须逐项核对每条业务要求的触发条件、必要输入、处理路径和完成条件。业务中分别描述的执行结果、验证结果或审批状态不得未经依据合并成一个判断；每个失败或未满足状态都必须能进入要求的处理路径，退出条件必须同时满足全部交付前提。此检查保留完整业务含义，不在多个字段重复声明同一要求。
+
+  - !statement
+    names: [graph 字段职责]
+    asserts:
+      - graph 使用 description 承载普通 Action 的工作说明，artifact.model/payload 承载机器契约，asserts/suggests 仅补充尚未表达的强制或建议要求，仍遵守本文语义去重与作用域规则。
+      - graph dependencies 只表达触发来源与条件；不要在 description 模拟调度，不要求 Agent 手动执行 collect，不添加启动业务 input。

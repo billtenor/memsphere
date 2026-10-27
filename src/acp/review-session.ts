@@ -15,7 +15,7 @@ import {
   submitArtifactReviewAgentAssignment,
   type ArtifactReviewAgentContext,
   type RunEvent
-} from "../run/store.js";
+} from "../context_control/review-repository.js";
 import { buildAgentReviewContract } from "./review-contract.js";
 
 type BoundAgentReviewSession = {

@@ -288,6 +288,8 @@ export type RunBindingChange = {
 };
 
 export type RunState = {
+  /** Transient application projection for a model-backed Run; never persisted by the flow writer. */
+  frozenMemoryRunId?: string;
   modelProjectRoot?: string;
   modelTargets?: Record<string, ModelArtifactTarget>;
   contractVersion: 1 | 2 | 3;
@@ -3514,7 +3516,7 @@ function collectCallTargets(steps: readonly RunStep[]): string[] {
   return [...new Set(targets)];
 }
 
-function buildRunReviewPreflight(
+export function buildRunReviewPreflight(
   procedureSnapshots: Record<string, RunProcedureTemplate>,
   snapshot: ControlPlaneSnapshot | undefined
 ): RunReviewPreflight {
@@ -3561,7 +3563,7 @@ function buildRunReviewPreflight(
   };
 }
 
-function validateRunReviewConfiguration(
+export function validateRunReviewConfiguration(
   preflight: RunReviewPreflight,
   configuration: RunReviewConfiguration | undefined,
   snapshot: ControlPlaneSnapshot | undefined
@@ -3877,6 +3879,7 @@ async function compileProcedureSteps(
   memoryRoot: string,
   lookup?: RunMemoryLookup
 ): Promise<RunStep[]> {
+  if (procedure.mode === "graph") throw new Error("Graph Procedures require the model-backed graph executor");
   return compileFlowSteps(procedure.flow, "flow", memoryRoot, lookup);
 }
 

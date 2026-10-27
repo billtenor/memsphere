@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-framework
   - Memsphere
@@ -58,3 +58,4 @@ defines:
   - filesystem JSON ValueStore 的 data_id 支持可移植的分层相对路径，a/b 映射到 a/b.json，列表和通用 data 操作使用完整 ID；旧扁平键及删除版本高水位保留。读取缺失数据不创建父目录，路径穿越、大小写别名和符号链接父目录拒绝。
   - 上下文控制自由探索使用已注册的五个项目模型及业务 Store，发行资产在 reserved-models/context-control，首次自由探索启动装配，不把它们新增为系统只读模型。旧流程存储保留；领域数据不依赖文件路径，前端仍扩展现有 Run 模块。
   - 全局 continue 通过 Home CommandState 承接有状态命令组，本轮仅支持自由探索 Run；旧 Procedure、Schema、正式 Review 和 ChangeSet 保留原入口。成果从产物图推导，Run 只保存 outputOverrides 人工增删；report 和 redo 不更新 Run。已知旧记录通过 project models initialize 的受限升级执行，五个项目模型与 Home 模型分别装载。
+  - Procedure 的 flow 与 graph 并行执行；graph 使用上下文控制模型 Store 和固定依赖材料，不接管宿主 Agent 框架的跨 Step 并发，也不提供启动时业务 State。

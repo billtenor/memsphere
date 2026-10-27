@@ -481,3 +481,18 @@ memsphere skill upgrade --global
 There are three upgrade paths: Project runtime resources (`project upgrade`), Agent Skill (`skill upgrade`, with default/global/directory targets), and the CLI itself (npm or source checkout, according to its installation). The complete Agent assistance instructions are maintained in `src/skills/memsphere/SKILL.md`. CLI upgrades supply the resources that subsequent Skill and Project upgrades install; View restart and old-format migration are conditional steps.
 
 Managed System Memory changes are validated and published through a dedicated ChangeSet. Embedded upgrades use a separate branch/worktree based on `master`, create a dedicated System-only ChangeSet, and leave Git commit/push/merge to the authorized Agent/user workflow. Preparation success is `integrationStatus=pending`; make a separate System Memory commit, review and merge into `master` to complete the ChangeSet. Existing user diffs and collaborative ChangeSets are not reused. Non-master integration targets are currently unsupported. `project repair` and `project models initialize` retain their single-purpose behavior. Upgrading models does not migrate frozen Run history.
+
+### Dependency graph procedures
+
+`memsphere-20261027-stable` adds `mode: graph`, with `actions`, `!dependency`, optional JSONata `when`, cycles and automatic `collect`. Existing flow and free exploration retain their execution semantics.
+
+```bash
+memsphere run start --file graph.yaml --name "Business analysis"
+memsphere run step enter --run R --step S  # choose when multiple Steps are ready
+memsphere continue C report --artifact-file result.json
+memsphere continue C review wait
+memsphere continue C review vote --vote approve
+memsphere run finish --run R
+```
+
+Dependencies create pending Step instances before production. Enter is idempotent; Continue stays bound to one Step until completion. Formal reviews also support `continue C review resolve` and `continue C review submit-for-human`, with the native commands’ explicit authorization, options and permission checks. An entry Action prepares business materials; startup accepts no structured business input. Graph runs use model Stores; existing Projects explicitly upgrade with `project models initialize` when prompted. See the [graph syntax and examples](docs/procedure-graph-syntax.md) for model/payload contracts.

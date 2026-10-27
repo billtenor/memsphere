@@ -11,7 +11,7 @@ import { withProjectModelWrite } from "../src/project/model-operation.js";
 test("adding archive metadata upgrades the known Run definition without rewriting Run records", async t => {
   const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!, run = await s.start("保留版本");
   const schemaPath = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
-  const old = JSON.parse(await readFile(schemaPath, "utf8")); delete old.properties.archived;
+  const old = JSON.parse(await readFile(new URL("./fixtures/context-control-run-before-graph.json", import.meta.url), "utf8")); delete old.properties.archived;
   await writeFile(schemaPath, JSON.stringify(old));
   const before = await s.stores.run.get({}, run.id);
   assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
@@ -137,4 +137,18 @@ test("known archivedAt candidate converts only archived rows and preserves untou
   assert.equal(migrated!.value.archived, true); assert.equal(migrated!.value.archivedAt, undefined);
   assert.equal(migrated!.revision, row.revision + 1); assert.equal(migrated!.createdAt, row.createdAt);
   assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
+});
+
+test("graph model upgrade preserves existing records and revisions", async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const run = await service.start("existing exploration");
+  const report = await service.report(run.id, { name: "Existing artifact", content: textContent("keep me") });
+  const beforeRun = await service.stores.run.get({}, run.id);
+  const beforeStep = await service.stores.step.get({}, `${run.id}/${report.step.id}`);
+  for (const entity of ["run", "step"]) await writeFile(join(f.root, `models/json-schema/draft-07/memsphere/context_control/${entity}.json`), await readFile(new URL(`./fixtures/context-control-${entity}-before-graph.json`, import.meta.url), "utf8"));
+  assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.run.get({}, run.id), beforeRun);
+  assert.deepEqual(await reopened.stores.step.get({}, `${run.id}/${report.step.id}`), beforeStep);
+  assert.deepEqual(await reopened.outputs(run.id), [report.artifact.id]);
 });

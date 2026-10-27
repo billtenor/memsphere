@@ -1,0 +1,17 @@
+Run {{runId}}
+Step {{stepId}}
+
+{{#if human}}请 Human 执行并等待其结果：{{else}}请执行：{{/if}}
+{{instruction}}
+
+规则与建议：
+{{rules}}
+
+输入材料与读取命令（按需执行）：
+{{materials}}
+
+产物契约：
+{{artifact}}
+
+只完成当前 Step，直到提交、评审和必要修订全部完成。
+下一步：{{command}}

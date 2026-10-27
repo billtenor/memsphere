@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-procedure
   - Procedure
@@ -21,3 +21,6 @@ defines:
   - 模型 Artifact 仍完整保存不可变提交快照，用于 Review、历史查看和追溯；接受后另行将同一模型值整条 upsert 到业务 Store，成功才推进。业务记录后续更新不改变历史快照；Store revision 不是历史内容读取能力，Artifact 不仅保存业务引用。写入后 Run 保存失败时同 ID redo，允许 revision 增长；取消、删除、归档或恢复 Run 不联动删除或重写业务数据。
   - 模型 Artifact 可通过 run report --write-options 内联 JSON 对象（可选 data_id 字段） 选择稳定业务 ID，仅适用于绑定业务 Store 的普通模型产物（空对象也受此限制）；仅接受 JSON 对象与当前支持的 data_id 字段，不支持文件引用，未知字段或非字符串值拒绝；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则（含 .json 后缀长度），不修剪或编码。省略时按 Run ID 与 stepExecutionId 生成。首个通过格式及模型校验的候选在评审或业务写入前持久化目标，重试/评审修订省略时继承、同 ID 可重交、不同 ID 拒绝；校验失败尚未冻结目标。不同步骤、循环或 Run 可显式选择同一 ID，执行身份和历史快照仍独立。候选 modelTarget、评审材料和接受 modelData 回执记录业务 ID，接受只写已评审目标；旧记录未含目标字段时按原生成规则处理。写入为无条件整条原子 upsert，最后成功写入覆盖，不合并字段，无 expected-revision 或 CAS，写入后 Run 保存失败以同 ID redo。
   - 不指定 Procedure 的 run start 是自由探索入口，使用上下文控制模型和产物依赖图，不执行本 Memory 的 flow，也不改变旧流程执行的 Artifact、Schema 或正式 Review 协议；具体动线见 memsphere-run。
+  - "新 syntax memsphere-20261027-stable 支持 mode: graph，以 actions 定义带依赖的生产图；mode 缺省为 flow。两种执行实现并行保留，完整 graph 关键字规则见 memsphere-yaml-syntax-rules。"
+  - graph Action 的 description 描述工作，dependencies 决定触发；普通 artifact 使用 model/payload 契约，collect 是 Runtime 自动收集引用的节点。启动没有结构化业务 input，入口 Action 自行准备业务材料。
+  - graph Run 使用上下文控制模型 Store；旧 flow 的存储和执行保持原协议，自由探索仍在 report 完整成果时才创建 Step。

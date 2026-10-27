@@ -356,6 +356,7 @@ run
   .command("report")
   .description("Report the current step artifact and advance the run.")
   .requiredOption("--run <id>", "run id")
+  .option("--step <id>", "graph Step instance id")
   .option("--artifact <value>", "artifact value")
   .option("--artifact-file <path>", "read artifact value from file")
   .option("--write-options <json>", "inline JSON write options for a model Artifact (data_id)")
@@ -409,6 +410,12 @@ run
 const runStep = run
   .command("step")
   .description("Inspect one Run step.");
+
+runStep.command("enter")
+  .description("Enter a graph Step instance and return its execution prompt.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--step <id>", "Step instance id")
+  .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("enter", options)) throw new Error("enter requires a graph Run"); });
 
 runStep
   .command("show")

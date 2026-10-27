@@ -5,6 +5,10 @@ export const contextControlStyles = `
   font:14px/1.6 var(--mem-view-font-sans);
 }
 .cc-exploration * { box-sizing:border-box; }
+.cc-work { min-width:0; margin-bottom:24px; }
+.cc-work-step { margin:8px 0; padding:12px; border:1px solid var(--mem-view-color-border); border-radius:8px; }
+.cc-work summary { cursor:pointer; overflow-wrap:anywhere; }
+.cc-work pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
 .cc-toolbar { display:flex; align-items:center; gap:10px; }

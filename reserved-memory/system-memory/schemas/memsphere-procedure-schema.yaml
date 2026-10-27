@@ -1,5 +1,5 @@
 !schema
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-procedure-schema
   - Procedure Schema
@@ -8,14 +8,14 @@ defines:
   - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
   - Procedure 的 name/names 标识可复用的流程定义；单次执行的 Run 名称不属于 Memory YAML，通过 run start --name 提供。
 asserts:
-  - 根节点必须使用 !procedure 标签，只允许 syntax、name/names、defines、asserts、goals 和 flow 字段。
-  - "syntax 必须填写 memsphere-20260721-stable。"
+  - 根节点必须使用 !procedure 标签，flow 模式只允许 syntax、name/names、defines、asserts、goals、mode 和 flow；graph 模式以 actions 代替 flow，禁止两者混用。
+  - "新 graph 必须填写 memsphere-20261027-stable；旧稳定版本按其原 flow 语义保留。"
   - name 与 names 必须且只能使用一个；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。
   - defines 必须是由非空字符串组成的非空数组，不允许 !ref 或匿名结构。
   - Procedure.asserts 可以包含非空字符串或指向 Statement 的 !ref，引用只投影目标的有效规则。
   - Procedure.asserts 如出现，其中每一项都在整个 Procedure 及其调用链执行期间持续生效。
   - flow 的每个成员必须使用 !action、!if、!while 或 !call tag，并满足对应节点规则。
-  - "!action 只允许 action、actor、asserts、suggests 和 artifact；artifact 必须使用 !artifact tag，并只允许 name、type、format、schema、review、final、store 和 model。"
+  - "flow 的 !action 只允许 action、actor、asserts、suggests 和 artifact；artifact 必须使用 !artifact tag，并只允许 name、type、format、schema、review、final、store 和 model。"
   - Artifact.review 如出现，必须是非空且成员不重复的 Reviewer Slot 名称数组；Slot 应使用评审人称呼，Actor Binding 与 Decision Policy 在创建 Run 时配置。
   - Artifact export 和中间状态属于 Run 运行时能力；模型产物通过 store 声明业务 Store，不声明 create/update 或数据 ID，正式上报复用模型 Runtime 校验。
   - 创建 Run 时必须为全部可达 Review scope 选择 Decision Policy，并为每个 Slot 配置 Actor Binding 或显式 skip；全部 Slot 都显式 skip 时不要求 Control Plane，任一 Slot 绑定 Actor 时必须配置 Control Plane。
@@ -27,6 +27,8 @@ asserts:
   - store/model 只允许普通 Action 的 Artifact，不允许 condition 或 Schema 字段；model 单独出现、不支持的格式及 Store 能力必须拒绝。
   - 模型 Artifact 可通过 run report --write-options 内联 JSON 对象（可选 data_id 字段） 选择稳定业务 ID，仅适用于绑定业务 Store 的普通模型产物（空对象也受此限制）；仅接受 JSON 对象与当前支持的 data_id 字段，不支持文件引用，未知字段或非字符串值拒绝；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则（含 .json 后缀长度），不修剪或编码。省略时按 Run ID 与 stepExecutionId 生成。首个通过格式及模型校验的候选在评审或业务写入前持久化目标，重试/评审修订省略时继承、同 ID 可重交、不同 ID 拒绝；校验失败尚未冻结目标。不同步骤、循环或 Run 可显式选择同一 ID，执行身份和历史快照仍独立。候选 modelTarget、评审材料和接受 modelData 回执记录业务 ID，接受只写已评审目标；旧记录未含目标字段时按原生成规则处理。写入为无条件整条原子 upsert，最后成功写入覆盖，不合并字段，无 expected-revision 或 CAS，写入后 Run 保存失败以同 ID redo。
   - 自由探索 CLI 不创建 Procedure Memory；continue、outputs 与上下文控制模型字段不是本 Schema 的 YAML 字段，不改变既有 Action/Artifact 的 type、format、schema 定义。
+  - graph Action 使用 id、description、dependencies 和 artifact 或 collect；字段互斥、JSONata、model/payload、START 与来源规则由 memsphere-yaml-syntax-rules 的 graph 流程专节定义。
+  - mode 缺省为 flow；graph actions 必须非空，defines 仍是非空字符串数组，不提供启动业务 input。
 fields:
   - !schema
     name: syntax
@@ -81,3 +83,17 @@ fields:
       type: object
     defines:
       - 由 Action、If、While 或 Call 组成的有序执行流程；Action Artifact 可以通过 review 声明 Reviewer Slot。
+  - !schema
+    name: mode
+    optional: true
+    type: string
+    defines:
+      - 新版本支持 flow 与 graph，缺省为 flow。
+  - !schema
+    name: actions
+    optional: true
+    type: array
+    item: !schema
+      type: object
+    defines:
+      - graph 必填的非空 Action 数组；每项使用 !action，包含稳定 id、description、非空 !dependency 数组和普通 artifact 或自动 collect。

@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-artifact-review
   - Artifact Review
@@ -13,3 +13,5 @@ defines:
   - Human 委托 Runner 提交的评审仍归属于 Human；Runner 是该次提交的受托执行者。
   - Artifact Review Comment 与用于修改长期 Memory 的 ChangeSet Comment 是两种不同对象。
   - 自由探索中的轻量 Review 是产物的评论记录，不具有正式评审的 Round、Assignment 和 Vote，也不构成产物接纳门禁。
+  - graph 正式评审把不可变产物与参与名单固定在 Step.reviewRounds，每位 Actor 每轮独立保存个人 Review；Runner 的正式决定同样为个人 Review。对外通过临时投影复用评审协议、ACP 和 View，不在新 Run 持久化旧 artifactReviews。
+  - graph 候选尚未通过评审时不会成为下游材料或 collect 成员；Agent Reviewer 失败保留未决状态，显式 retry 同轮同人新建 attempt，旧 attempt 失效。修订复用 Step 并创建新 Artifact 和轮次。

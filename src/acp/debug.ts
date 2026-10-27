@@ -3,7 +3,7 @@ import { delimiter, join } from "node:path";
 import { artifactReviewAssignmentId, type ArtifactReview, type ArtifactReviewRound } from "../artifact-review.js";
 import type { MemsphereConfig } from "../config.js";
 import { resolveWorkspaceIdentity } from "../project/workspace.js";
-import type { ArtifactReviewAgentContext, RunState } from "../run/store.js";
+import type { ArtifactReviewAgentContext, RunState } from "../context_control/review-repository.js";
 import { agentReviewCliSource, currentCliRuntimeDescriptor } from "./cli-runtime.js";
 import { buildArtifactReviewerPrompt } from "./prompt.js";
 import { getAgentReviewProvider } from "./provider.js";
@@ -52,7 +52,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
     const assignmentId = artifactReviewAssignmentId(assignment);
     const sessionEnv = {
       MEMSPHERE_REVIEW_RUN_ID: input.run.id,
-      ...(input.run.memorySnapshot ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: input.run.id } : {}),
+      ...((input.run.memorySnapshot || input.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: input.run.id } : {}),
       MEMSPHERE_REVIEW_ASSIGNMENT_ID: assignmentId,
       MEMSPHERE_CONFIG_PATH: input.config.configPath,
       MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,

@@ -198,6 +198,9 @@ async function resolveEffectiveRuleLocations(
 export async function createMemoryCommandCatalog(runId?: string): Promise<MemoryCatalog> {
   if (!runId) return createMemoryCatalog();
   const config = await readConfig();
+  const service = await (await import("../project/context-control.js")).openContextControl(config.scopeRoot);
+  const graph = service && await service.findRun(runId);
+  if (graph && (await import("../context_control/graph-runtime.js")).isGraphRun(graph)) return (await import("../context_control/memory-provider.js")).graphMemoryCatalog(graph);
   const run = await readRun(config.runsRoot, runId);
   if (!run.memorySource || !run.memorySnapshot) {
     throw new Error(`Run ${runId} does not have a frozen ChangeSet Memory snapshot`);

@@ -109,12 +109,41 @@ export type WhileNode = {
 
 export type FlowNode = ActionNode | IfNode | WhileNode | CallNode;
 
-export type ProcedureNode = CommonMemoryNode & {
+export type ProcedureBase = CommonMemoryNode & {
   tag: "!procedure";
   asserts?: RulePart[];
   goals: string[];
-  flow: FlowNode[];
 };
+
+export type FlowProcedureNode = ProcedureBase & {
+  mode?: "flow";
+  flow: FlowNode[];
+  actions?: never;
+};
+
+export type GraphDependency = { tag: "!dependency"; from: string | string[]; when?: string };
+export type GraphArtifactSpec = {
+  name: string;
+  asserts?: RulePart[];
+  suggests?: RulePart[];
+  model: { definedBy: string; definition: string };
+  payload: { contentType: string };
+  review?: string[];
+};
+export type GraphAction = {
+  tag: "!action";
+  id: string;
+  description: string;
+  dependencies: GraphDependency[];
+  asserts?: RulePart[];
+  suggests?: RulePart[];
+} & (
+  | { actor?: StepActor; artifact: GraphArtifactSpec; collect?: never }
+  | { collect: string[]; actor?: never; artifact?: never }
+);
+export type GraphProcedureNode = ProcedureBase & { mode: "graph"; actions: GraphAction[]; flow?: never };
+export type ProcedureNode = FlowProcedureNode | GraphProcedureNode;
+export type GraphProcedureMemory = GraphProcedureNode & VersionedMemory;
 
 export type VersionedMemory = {
   syntax: MemorySyntaxVersion;

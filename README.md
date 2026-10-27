@@ -483,3 +483,18 @@ memsphere skill upgrade --global
 升级分为项目运行资源（project upgrade）、Agent Skill（skill upgrade，支持默认/global/directory 位置）和 CLI 本身（按实际 npm 或源码安装来源更新）。完整 Agent 协助指引集中在 `src/skills/memsphere/SKILL.md`；整体升级先更新 CLI 资源来源，再更新 Skill 和目标项目，按需要重启 View 或处理明确确认的旧格式迁移。
 
 Managed 系统记忆升级使用专用 ChangeSet 校验并发布。Embedded 在基于 master 的独立升级分支/worktree 运行，生成仅含 System 升级目标的专用 ChangeSet；命令不 commit/push/merge。integrationStatus=pending 表示升级差异已准备，Agent 按授权形成系统记忆单独 commit，审阅并合入 master 后 ChangeSet 才完成。原用户差异和协作记录不复用，其他集成分支本轮暂不支持。project repair 和 project models initialize 保留原单项用途；模型升级不迁移冻结 Run 历史。
+
+### 依赖图流程
+
+`memsphere-20261027-stable` 增加 `mode: graph`，用 `actions`、`!dependency` 和可选 JSONata `when` 定义固定生产图，支持循环与自动 `collect`。旧 `flow` 和自由探索保留各自语义。
+
+```bash
+memsphere run start --file graph.yaml --name "业务分析"
+memsphere run step enter --run R --step S  # 多个待执行实例时选择
+memsphere continue C report --artifact-file result.json
+memsphere continue C review wait
+memsphere continue C review vote --vote approve
+memsphere run finish --run R
+```
+
+Step 在依赖满足时提前创建，enter 幂等，Continue 固定同一 Step 至完成。正式评审还支持 `continue C review resolve` 处置意见和 `continue C review submit-for-human` 记录已明确授权的 Human 票，参数与权限沿用对应原生命令。入口 Action 负责准备业务材料，启动不接收结构化业务 input。graph 使用模型 Store；已有 Project 按提示显式 `project models initialize` 升级。完整语法、model/payload 契约与示例见 [graph 流程](docs/procedure-graph-syntax.md)。

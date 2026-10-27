@@ -132,7 +132,7 @@
     "frames": {
       "type": "array",
       "title": "调用栈",
-      "description": "本 Run 的流程级执行栈，按外层到内层排列，最后一项为当前活动帧。执行 flow 流程时保存，全部调用结束后为空数组；没有流程执行栈时省略。每项用 type 标识类型并保存对应状态，流程定义从完整 memorySnapshot 解析。 每个执行帧的 id 在本 Run 的 frames 内唯一。",
+      "description": "按 type 精确匹配唯一载荷；由 context_control 模型业务校验拒绝缺失、错配或多载荷，不扩展通用 JSON Schema Runtime。",
       "items": {
         "type": "object",
         "title": "执行帧",
@@ -148,19 +148,22 @@
             "title": "帧类型",
             "description": "当前支持 procedure，表示一次流程调用。",
             "enum": [
-              "procedure"
+              "procedure",
+              "graph"
             ]
           },
           "procedureFrame": {
             "$ref": "#/definitions/ProcedureFrame",
             "title": "流程帧状态",
             "description": "type=procedure 时必须填写，保存流程记忆引用、展开序列、当前位置及可选返回位置。"
+          },
+          "graphFrame": {
+            "$ref": "#/definitions/GraphFrame"
           }
         },
         "required": [
           "id",
-          "type",
-          "procedureFrame"
+          "type"
         ],
         "additionalProperties": false
       }
@@ -203,6 +206,39 @@
       "type": "boolean",
       "title": "已归档",
       "description": "true 表示已归档；false 或未填写表示未归档。仅终态 Run 可归档，恢复归档保持原终态，数据保留在原 Store。"
+    },
+    "memorySource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "changeset"
+        },
+        "project": {
+          "type": "string",
+          "minLength": 1
+        },
+        "changeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checkpointDigest": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseRevision": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "project",
+        "changeId",
+        "checkpointDigest",
+        "baseRevision"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -300,6 +336,38 @@
                 "required": [
                   "contentType",
                   "content"
+                ],
+                "additionalProperties": false
+              },
+              "app": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "version": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "assetKey": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "packageDigest": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "id",
+                  "version",
+                  "assetKey",
+                  "enabled",
+                  "packageDigest"
                 ],
                 "additionalProperties": false
               }
@@ -682,6 +750,300 @@
         "memoryRef",
         "sequence",
         "index"
+      ],
+      "additionalProperties": false
+    },
+    "GraphInitId": {
+      "type": "string",
+      "title": "标识",
+      "description": "对象或定义的稳定标识。",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "GraphInitInputRef": {
+      "type": "object",
+      "title": "输入引用",
+      "description": "本次执行实际绑定的输入；Artifact 必须已提交，External 必须固定，均属于本 Run。",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "title": "输入类型",
+          "description": "输入来自 Artifact 或 External。",
+          "minLength": 1,
+          "enum": [
+            "artifact",
+            "external"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/GraphInitId",
+          "title": "输入标识",
+          "description": "对应 Artifact 或 External 的标识。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "GraphInitTimestamp": {
+      "type": "string",
+      "title": "时间",
+      "description": "带时区的 RFC 3339 时间。",
+      "minLength": 1,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "GraphPendingStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/GraphInitId",
+          "title": "步骤标识",
+          "description": "一次 Action 执行的稳定标识；循环或再次触发创建新 Step，同次执行的修订和重试保留此标识。"
+        },
+        "runId": {
+          "$ref": "#/definitions/GraphInitId",
+          "title": "所属运行",
+          "description": "本步骤所属的 Run。"
+        },
+        "source": {
+          "type": "object",
+          "title": "步骤来源",
+          "description": "在 Run.memorySnapshot 中定位 Action。flow 使用 nodePath，graph 使用 actionId，两者只填一个。有来源时从快照解析定义；自由探索省略 source，直接保存工作指令及适用的产物和评审要求。",
+          "properties": {
+            "memoryRef": {
+              "type": "string",
+              "title": "记忆引用",
+              "description": "Run.memorySnapshot.memories 中对应流程记忆的逻辑引用。",
+              "minLength": 1
+            },
+            "nodePath": {
+              "type": "string",
+              "title": "节点路径",
+              "description": "flow 模式下 Action 在记忆定义中的节点路径；循环和重复调用共享此路径。",
+              "minLength": 1
+            },
+            "actionId": {
+              "type": "string",
+              "title": "Action 标识",
+              "description": "graph 模式下 Action 定义的 id；同一 Action 多次执行由 Step.id 区分。",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "memoryRef"
+          ],
+          "additionalProperties": false
+        },
+        "inputs": {
+          "type": "object",
+          "title": "执行输入",
+          "description": "执行开始前固定的输入引用。graph 的键为上游产物 Action.id，聚合输入按原生产 Action 分组；自由探索使用输入名称。每组始终为数组，顺序固定，同组引用不重复；启动后不随上游新产物变化。产物实际依赖仍由 Artifact.dependencies 表达。",
+          "additionalProperties": {
+            "type": "array",
+            "title": "一组输入",
+            "description": "供本次 Action 使用的固定输入引用。",
+            "items": {
+              "$ref": "#/definitions/GraphInitInputRef",
+              "title": "输入",
+              "description": "一份固定输入。"
+            }
+          }
+        },
+        "createdAt": {
+          "$ref": "#/definitions/GraphInitTimestamp",
+          "title": "创建时间",
+          "description": "本次实际步骤创建的时间。"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "runId",
+        "source",
+        "inputs",
+        "createdAt",
+        "status"
+      ],
+      "additionalProperties": false
+    },
+    "GraphInputInputRef": {
+      "type": "object",
+      "title": "输入引用",
+      "description": "本次执行实际绑定的输入；Artifact 必须已提交，External 必须固定，均属于本 Run。",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "title": "输入类型",
+          "description": "输入来自 Artifact 或 External。",
+          "minLength": 1,
+          "enum": [
+            "artifact",
+            "external"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/GraphInputId",
+          "title": "输入标识",
+          "description": "对应 Artifact 或 External 的标识。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "GraphInputId": {
+      "type": "string",
+      "title": "标识",
+      "description": "对象或定义的稳定标识。",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "GraphInputs": {
+      "type": "object",
+      "title": "执行输入",
+      "description": "执行开始前固定的输入引用。graph 的键为上游产物 Action.id，聚合输入按原生产 Action 分组；自由探索使用输入名称。每组始终为数组，顺序固定，同组引用不重复；启动后不随上游新产物变化。产物实际依赖仍由 Artifact.dependencies 表达。",
+      "additionalProperties": {
+        "type": "array",
+        "title": "一组输入",
+        "description": "供本次 Action 使用的固定输入引用。",
+        "items": {
+          "$ref": "#/definitions/GraphInputInputRef",
+          "title": "输入",
+          "description": "一份固定输入。"
+        }
+      }
+    },
+    "GraphFrame": {
+      "type": "object",
+      "properties": {
+        "memoryRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "triggers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "actionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dependencyIndex": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "stepId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "inputs": {
+                "$ref": "#/definitions/GraphInputs"
+              }
+            },
+            "required": [
+              "id",
+              "actionId",
+              "dependencyIndex"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "pendingSteps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GraphPendingStep"
+          }
+        },
+        "joins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "actionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dependencyIndex": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "arrivals": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "artifact",
+                        "collect",
+                        "start"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "actionId",
+              "dependencyIndex",
+              "arrivals"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "processedStepIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        },
+        "nextCompletionSequence": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "memoryRef",
+        "triggers",
+        "pendingSteps",
+        "joins",
+        "processedStepIds",
+        "nextCompletionSequence"
       ],
       "additionalProperties": false
     }

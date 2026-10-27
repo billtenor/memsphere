@@ -1,16 +1,16 @@
 !statement
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-yaml-syntax-rules
   - Memsphere YAML 语法规则
 defines:
   - 定义 memsphere Memory YAML DSL 的节点、字段、缺省值、组合约束和树状关系，作为语法设计与实现的一致性基线。
-  - 本记忆描述当前稳定版本 memsphere-20260721-stable 支持的 Memsphere YAML 语法。
+  - 本记忆描述当前稳定版本 memsphere-20261027-stable 及保留的 memsphere-20260721-stable flow 语法。
 asserts:
   - memory list 的 JSON/YAML 响应使用 items 和可选 nextCursor，它们是 CLI 分页字段，不是 Memory YAML DSL 关键字；翻页不改变 Memory 声明、Node 顺序或 node_ref，不能把分页响应当作完整 Memory 文档校验。
   - 语法实现、Reserved Memory、技能文档、迁移工具和示例必须以本规则树中评审通过的规则为共同依据。
   - App 归属、安装状态及 ChangeSet 归属附件是宿主元数据，不是 Memory YAML 关键字；本次 App 整合不增加 YAML 字段或改变 syntax。
-  - 上下文控制的 Run/Step/Artifact/External/Review JSON 模型及自由探索 CLI（continue、outputs、report、tags、dependencies）不属于 Memory YAML DSL，本次不增加 syntax 关键字，也不引入 graph/foreach 编排。
+  - 上下文控制的 Run/Step/Artifact/External/Review JSON 模型及自由探索 CLI（continue、outputs、report、tags、dependencies）不属于 Memory YAML DSL，这些运行时字段不作为 YAML 关键字；graph 编排仅使用下文独立定义的 mode、actions 和依赖结构，不提供 foreach。
 sections:
   - !statement
     names:
@@ -21,7 +21,7 @@ sections:
           - 语法版本
         defines:
           - 每份顶层 Memory 使用 syntax 声明其 Memsphere YAML 语法版本；版本标识采用 memsphere-YYYYMMDD-draft 或 memsphere-YYYYMMDD-stable 格式。
-          - start 是历史未版本化 Memory 的缺省迁移起点，不是正式发布版本；当前正式版本是 memsphere-20260721-stable。
+          - start 是历史未版本化 Memory 的缺省迁移起点，不是正式发布版本；当前正式版本是 memsphere-20261027-stable，旧稳定版本仍按原语义解析。
         asserts:
           - 省略 syntax 时必须按 start 解析，不得按运行时最新版本解释。
           - stable 版本中已经存在的关键字、结构、缺省值和校验语义不得做不兼容修改。
@@ -51,7 +51,7 @@ sections:
         asserts:
           - 每份 Memory YAML 文档必须只包含一个顶层 YAML mapping。
           - 顶层 YAML mapping 必须使用 !concept、!statement、!schema 或 !procedure 中的一个 YAML tag 声明 Memory 类型；!schema.type 和 !artifact.type 仅声明值契约。
-          - "嵌套区块也必须显式写出自己的 YAML tag。例如交付物必须写成 artifact: !artifact，不能只写一个包含 name、type 或 format 的普通 YAML mapping。"
+          - "嵌套区块也必须显式写出自己的 YAML tag。例如 flow 的交付物必须写成 artifact: !artifact；graph 的 artifact 是 model/payload 普通 mapping，按 graph 专节校验。"
           - 未被对应节点语法声明的字段必须被拒绝，不得静默忽略。
 
       - !statement
@@ -984,7 +984,7 @@ sections:
                   format: markdown
             ```
         asserts:
-          - "!procedure 根节点允许 name/names、defines、asserts、goals 和 flow 字段。"
+          - "flow 的 !procedure 根节点允许 syntax、name/names、defines、asserts、goals、可选 mode: flow 和 flow 字段；旧版本不接受 mode。"
           - Procedure.asserts 如出现，必须是由非空字符串或指向 Statement 的 !ref 组成的非空数组，并在当前 Procedure 及其调用链执行期间持续生效。
           - goals 必须是字符串数组，用于声明流程目标。
           - flow 必须是由 !action、!if、!while 或 !call 节点组成的有序数组。
@@ -1124,3 +1124,19 @@ sections:
               - "!call 只允许 target 字段，target 必须是被调用 Procedure 的 canonical name，不接受 alias。"
               - "!call 必须使用 YAML mapping 形式，不支持 YAML scalar 形式的 !call 简写。"
               - "!call 不声明 actor、artifact、format 或分支字段；被调用 Procedure 自行定义执行者和交付物。"
+
+  - !statement
+    names: [graph 流程]
+    defines:
+      - "memsphere-20261027-stable 增加 mode: graph；缺省 mode 仍解释为 flow，旧 memsphere-20260721-stable 不接受 graph 字段。"
+    asserts:
+      - graph 根节点使用 !procedure，只允许 syntax、name/names、defines、goals、asserts、mode、actions；mode 必须是 graph，actions 是非空 !action 数组，禁止 flow。
+      - graph Action 只允许 id、description、dependencies、actor、asserts、suggests、artifact、collect；id 唯一且不能为 START，description 非空。普通 Action 必须声明 artifact；collect 与 artifact、actor 互斥。
+      - dependencies 是非空 !dependency 数组；每条只允许 from 与可选 when。from 为 START/Action ID 或非空无重复的来源数组；字符串是单来源，数组共同等待所有来源。多条 dependency 各自独立触发。同一图至少有一条 START 来源。
+      - when 是 JSONata 表达式字符串，启动前检查语法，触发时严格返回 boolean；false 消费本次触发而不建 Step，解码、模型或求值失败报错且不消费。上下文仅提供 artifacts，不提供全局 State 或启动业务 input。
+      - 普通来源在 artifacts.<Action ID> 下提供本次采用的单个解码值；collect 来源按原生产 Action ID 提供固定数组，空数组保留。同一上下文键冲突明确拒绝。
+      - graph artifact 是普通 mapping，不使用 !artifact tag；只允许 name、model、payload、asserts、suggests、review。model 由 definedBy 和 definition JSON 字符串组成，payload 只声明 contentType；正文在执行时提交，不放在定义里。不存在 type、format、schema、store、final。
+      - Artifact MIME 解码后由现有模型 Runtime 校验；raw.json 校验原始字节，JSON/文本/Markdown/YAML 使用已注册解码规则；未知编码或模型能力明确失败，不扩展 Runtime 语言。
+      - collect 是非空无重复的普通生产 Action ID 数组，不得指向 START 或另一个 collect；由 Memsphere 自动收集已完成且正式接纳的产物引用，按对应 Step 的持久创建顺序排列，不制造聚合 Artifact、不评审、不要求 Agent 执行。
+      - graph 不提供 !if、!while、!call、动态 foreach、子图或启动业务参数；入口 Action 自行收集材料并产出 Artifact，循环由普通依赖表达。
+      - 旧版本到新版本的显式 syntax 迁移只更新版本标识，不把旧 flow 改为 graph，也不强制迁移现有 Memory。
