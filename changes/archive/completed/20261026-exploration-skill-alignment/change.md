@@ -47,3 +47,11 @@ Artifact 是围绕明确目的组织、可独立使用且值得后续引用/评�
 代码与必要文档交付到 [PR #116](https://github.com/billtenor/memsphere/pull/116)。产品验收已完成，需求目录已归档；原敏捷 Run 继续 Commit/PR/CI、等待 Human 合入及结果确认，不能把本记录的 completed_at 当成 PR 已合入或整个 Run 已结束。Agent 不自行合入或启用自动合入。
 
 Git 仅纳入本 change.md 与能力盘点，其他需求讨论、方案及单次验收附件保留在本地同目录与 Run，不因归档自动纳入 Git。原始 Agent/浏览器/测试证据在 Run 和 /tmp/memsphere-capability-evals、/tmp/memsphere-skill-iteration 及各临时 trial，不随代码提交；可重放脚本与场景说明在 evals/exploration-skill。既有 .playwright/ 不属于本轮交付。
+
+## 信息结构补充验收
+
+产品负责人在前稿验收后指出结构像流水账，并指出前言将分页、JSON 回执、原文导出和 stdin 拼在一起。Skill 改为按任务组织，集中相关操作及完成边界；同时拆分混杂段落，通用列表/文件输入规则保持全局作用域，模型市场归模型章节，Procedure 业务数据写入和归档故障保留具名分支导航。仍是单文件，不删除原能力或改变已确认的操作规则。
+
+补充 Run run-20261027-043530z-2c829e71 的技术 Review review-20261027-043601z-95031535 第 3 轮研发、测试、架构均通过且零未处置意见；产品 Review review-20261027-045638z-3dc610f0 第 1 轮 round-20261027-045638z-65b5fe53 获产品负责人明确“我投通过”，Runner 接纳，补充 Run 已完成。结构稿 SHA256 为 80dcb052d524e280a1d2b534fb3db65d6482a051f33d7f24c9f087b87a7fec52。
+
+结构稿通过格式校验、构建、diff 检查与 Skill 安装/产品定位两份回归；配套移除一条只匹配旧标题的断言，所有 Memory 变更级校验和交付证据断言保留。七项同字节 Agent 回放对应此前实现稿，不声称在结构稿字节上重跑。Memory 内容未修改，既有 ChangeSet 校验仍匹配；新提交的远端 CI 继续由主 Run 跟进。

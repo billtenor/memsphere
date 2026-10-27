@@ -73,7 +73,6 @@ test("Skill and project delivery memories enforce the Memory ChangeSet gate", as
     readFile(join(projectMemoryRoot, "procedures", "memsphere-agile-requirement-development.yaml"), "utf8")
   ]);
 
-  assert.match(skill, /## Memory 变更与资源边界/);
   assert.match(skill, /评审、提交或交付前/);
   for (const source of [skill, framework, development, testing, delivery, agile]) {
     assert.match(source, /memsphere memory change validate \[change-id\]/);
