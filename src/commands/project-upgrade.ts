@@ -38,8 +38,11 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
       if (!change.system_upgrade) throw new Error("Expected a dedicated system upgrade ChangeSet");
       const targets: SystemUpgradeMemoryTarget[] = change.system_upgrade.targets.map(target => {
         if (target.operation === "delete") {
-          if (!removals.some(item => item.path === target.path && item.references.includes(target.reference))) throw new Error(`Upgrade removal target is no longer bundled: ${target.reference}`);
-          return { reference: target.reference, path: target.path, operation: "delete" };
+          if (!removals.some(item => item.path === target.path && item.matches.some(match =>
+            match.reference === target.reference && match.sha256 === target.approvedContentDigest))) {
+            throw new Error(`Upgrade removal target is no longer bundled: ${target.reference}`);
+          }
+          return { reference: target.reference, path: target.path, operation: "delete", approvedContentDigest: target.approvedContentDigest };
         }
         const source = catalog.find(item => item.reference === target.reference);
         if (!source) throw new Error(`Upgrade target is no longer bundled: ${target.reference}`);

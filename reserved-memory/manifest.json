@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 5,
   "memory_syntax": "memsphere-20260721-stable",
   "system_memory": {
     "install": [
@@ -21,7 +21,6 @@
       "statements/memsphere-memory-access-rules.yaml",
       "statements/memsphere-yaml-syntax-rules.yaml",
       "statements/memsphere-procedure-writing-rules.yaml",
-      "procedures/memsphere-general-task-execution.yaml",
       "procedures/memsphere-procedure-construction.yaml",
       "procedures/memsphere-changeset-comment-processing.yaml",
       "procedures/memsphere-usage-issue-reporting.yaml",
@@ -30,9 +29,65 @@
       "procedures/memsphere-tutorial-chapter-03.yaml",
       "procedures/memsphere-tutorial-chapter-03-review-experience.yaml",
       "concepts/memsphere-app.yaml",
-      "statements/memsphere-app-usage-rules.yaml"
+      "statements/memsphere-app-usage-rules.yaml",
+      "statements/memsphere-exploration-artifact-rules.yaml"
     ],
-    "remove": []
+    "remove": [
+      {
+        "path": "procedures/general-task-execution.yaml",
+        "matches": [
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "1e75b0e0d85098573e91647714d05cf06a7a63a1cc45b21c5f13f615a2743750"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "4eec14bb03f63aa00127a2f8be4fae0f61c91e2157d4325d4b3ab00a85f71edf"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "9441385ded096dfc83453bf501a2045db2439697e7f40017b5fe3977ed767662"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "9dd4bf24a711a4e0583fc12a055d0a1bb802c83463a9579ea656b3d6c47ef7a6"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "cb766af21e6ff8397fc9b5807403392d08163cfbcda85ae2d94ce7a360eeb1a5"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "dfa7b9d89a6550970d62844d09f271930219f1c079704e88987c092409018611"
+          }
+        ]
+      },
+      {
+        "path": "procedures/memsphere-general-task-execution.yaml",
+        "matches": [
+          {
+            "reference": "procedures/memsphere 通用流程",
+            "sha256": "7e9ed42d626b2169a8ebd0d86ebd88bc2c9063e071ac7b0f8aa97fc150b9c4a4"
+          },
+          {
+            "reference": "procedures/memsphere-general-task-execution",
+            "sha256": "2cfca6f713d106c402bd9ffa7c693129442ac30035529abc1a50ed12e0e6922d"
+          },
+          {
+            "reference": "procedures/memsphere-general-task-execution",
+            "sha256": "47a9f766af8247207fd48ad36ed3688ca0db8aad670d48e211a1d27444d69398"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "02ea5530690b947960561c423b393eda22489cc932abfdf5eb4f2224a2d50c07"
+          },
+          {
+            "reference": "procedures/通用流程",
+            "sha256": "0f4536b2c58f305a4e53bfb8691751324c431727544b0d118ab244c6f3a65da4"
+          }
+        ]
+      }
+    ]
   },
   "market_memory": {
     "install": [

@@ -97,7 +97,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.match(repairHelp.stdout, /Embedded\s+repair validates the complete candidate/);
     assert.match(repairHelp.stdout, /without committing or pushing/);
     assert.match(repairHelp.stdout, /Mounted Projects remain read-only/);
-    assert.match(repairHelp.stdout, /manifest v3 tombstone matches/);
+    assert.match(repairHelp.stdout, /manifest tombstone matches/);
     assert.match(repairHelp.stdout, /If there are no differences, nothing is written/);
     assert.match(repairHelp.stdout, /Explicit \[name\], then global --project, then the current Primary Project/);
 
