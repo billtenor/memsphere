@@ -63,3 +63,7 @@ Human于2026-10-27明确要求先提交PR。仅调整PR提交与产品验收的�
 Human要求体验真实拦截，临时增加仅针对PR118的演示入口，并临时启用独立规则。Actions运行 https://github.com/billtenor/memsphere/actions/runs/40529163520 在演示head b2e3709c642e9c950e03b74673963dcbf6ee61c1 上真实发布CI change guard=failure，列出4个实际受保护文件及指定中文报错。Human随后明确表示验收没问题并要求恢复。产品负责人正式通过票已记入原交付评审。
 
 已恢复规则25963440为演示前disabled，精确User bypass保持不变，删除临时ci-change-guard-demo.yml；正式workflow仍固定从master运行，代码与既有验证版本不变。旧Protect master保持active且无bypass。真实演示失败证据已保留；正式master运行、激活、普通PR success和实际Human bypass合并证据仍在后续步骤取得，不把本次验收当作已合入或已上线。
+
+## 恢复后完整CI的既有Windows问题修复
+
+恢复提交1fd2732的普通CI通过；完整回归40533697453复现master运行40512256758已存在的失败：两个Procedure图测试提取Markdown中YAML示例时只匹配LF，Windows checkout的CRLF导致示例为undefined。仅修正test/procedure-graph-syntax.test.ts与test/procedure-graph-runtime.test.ts的测试输入换行处理，新增LF/CRLF明确覆盖并保留原断言。新增CRLF用例先实际失败，修正后受影响三文件67项全部通过。生产代码、Memory、门禁代码及CI参数/超时/选测标准不变；本地全量和最新head远端完整回归继续跟进，最终结果记录于Run。
