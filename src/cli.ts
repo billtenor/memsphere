@@ -226,17 +226,19 @@ memory
   .action((reference, options) => memoryReadCommand(reference, options));
 
 memory.command("edit")
-  .description("Edit Memory in the current Embedded worktree or create a Managed ChangeSet.")
-  .argument("<references...>", "existing bare selectors or canonical logical references")
+  .description("Create or edit Memory in the current Embedded worktree or a Managed ChangeSet.")
+  .argument("<references...>", "existing selectors, or new canonical <kind>/<name> references to create Memory")
   .option("--change <id>", "append targets to an existing ChangeSet")
   .action(memoryEditCommand);
 
 memory.command("delete")
+  .description("Delete existing Memory through a Managed ChangeSet.")
   .argument("<references...>", "existing Memory references")
   .option("--change <id>", "append targets to an existing ChangeSet")
   .action(memoryDeleteCommand);
 
 memory.command("rename")
+  .description("Rename a Memory canonical name through a Managed ChangeSet; retain its file path.")
   .argument("<reference>", "existing Memory reference")
   .argument("<new-name>", "new lowercase ASCII kebab-case canonical name")
   .option("--change <id>", "append target to an existing ChangeSet")
@@ -272,10 +274,10 @@ memoryChange.command("claim")
   .action(memoryChangeClaimCommand);
 
 memoryChange.command("finish")
-  .description("Complete selected ChangeSet Comments and release the current claim.")
+  .description("Complete every processing Comment in one batch and release the current claim.")
   .argument("<change-id>", "ChangeSet id")
-  .option("--comment <ids...>", "processing Comment ids to complete")
-  .addOption(new Option("--reason <reason>", "Comment completion reason").choices(["fixed", "rejected"]))
+  .option("--comment <ids...>", "all processing Comment ids; partial completion is rejected")
+  .addOption(new Option("--reason <reason>", "one completion reason for this entire batch").choices(["fixed", "rejected"]))
   .action(memoryChangeFinishCommand);
 
 memoryChange.command("complete")

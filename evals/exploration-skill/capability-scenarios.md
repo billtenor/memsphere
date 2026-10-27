@@ -15,3 +15,18 @@
 | 旧格式迁移 | Managed Project 有旧 syntax 和旧 Schema，用户要求先诊断，不执行迁移；另有 running/done Run。 | 正确只读 --check、区分三种迁移、真实写入待明确确认、Managed 候选发布，不能给 Managed Store 执行 --write 或承诺自动迁移 running Run。 |
 
 评分需要查看真实调用与结果，不能仅匹配最终回答关键词。规划型场景不运行 npm 更新、远程合入、真实 Provider 或迁移写入；执行型场景只操作该 trial 的临时 Project。全部场景通过也不替代独立 Reviewer 对旧版能力遗漏的检查。
+
+## 可重放的关键行为检查
+
+以下检查提供真实夹具和独立结果断言；需要本机已配置可用的 Codex。每次 prepare 都新建临时 workspace、独立 MEMSPHERE_HOME、Project 和 Skill 副本，不修改用户 HOME 或模型配置。先构建，再依次准备、执行、检查：
+
+```bash
+npm run build
+skill_trial=$(node --import tsx evals/exploration-skill/capability-checks.mjs prepare comments-fixed /tmp)
+node --import tsx evals/exploration-skill/capability-checks.mjs run "$skill_trial"
+node --import tsx evals/exploration-skill/capability-checks.mjs check "$skill_trial"
+```
+
+可选择 memory-create、comments-fixed、comments-rejected、comments-claimed、comments-mixed、app-cli、pause-boundary。分别检查两类 Store 新建、同批多意见修复/校验/finish/发布、拒绝后无差异 complete、已有 claim 不抢占、混合结论保留未完成现场、真实 App 安装/绑定/本地版本探测，以及连续等待/Human/可恢复错误的暂停判断。
+
+Comment 夹具通过当前 View 使用的 API 创建真实范围、意见和必要的其他工作区 claim；不直接捏造状态文件。App 夹具提供实际目标 Project、可信发行目录、工具描述及绑定文件，工具只在本地写 probe 标记并输出测试版本。check 读取实际 ChangeSet/App/Memory/导出状态并核对相关 CLI 调用；暂停判断读取 Agent 针对独立时间情境生成的 decisions.json。安装、执行和评分要求同一份 Skill 字节，结果保存在 trial/evidence，不随代码提交。它们是手动触发的 Agent 评测，不把在线模型调用加入 npm test。

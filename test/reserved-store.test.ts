@@ -277,7 +277,6 @@ test("framework Memory and Skill describe scoped Settings consistently", async (
     assert.match(memory, /Memory DSL 字段在中文标签与 YAML 原名之间的展示切换是另一项独立偏好/);
     assert.match(memory, /修改 View host 或 port 仍需执行 memsphere view restart/);
   }
-  assert.match(skill, /memsphere model\/data\/view\/project --help/);
   assert.match(skill, /project repair/);
   assert.match(skill, /Mounted Project 只读/);
   assert.doesNotMatch(skill, /project reinitialize/);

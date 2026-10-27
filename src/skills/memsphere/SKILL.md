@@ -50,7 +50,7 @@ memsphere run outputs list --run <id>
 
 Procedure 有 Review Slot 时，首次启动会预检所有 scope、Slot、Actor 和 Policy。保存并调整返回的配置，再以同名和 `--review-config <file>` 启动；每个 Slot 绑定 Actor 或显式 skip，每个 scope 选择 Policy。全部 skip 时可无 Control Plane，否则需 Project 的 `control_plane`。Slot 是流程内评审视角，Actor 是参与者，Runner 是当前执行者；权限来自冻结配置，不能在 Review 配置中临时增加。
 
-执行当前 `Do`、规则和 Artifact 契约，按每次回执的 `Then` 持续推进，不提前执行未返回步骤。`Ask human to do` 必须等待相应 Human 完成，再把其结果作为当前产物上报。可自行修复的错误、字段边界和 Agent Review 等待不是要求用户说“继续”的理由。必要 Human 输入或授权、真正阻塞时暂停，说明 Run ID、停止位置、等待对象和恢复方式；恢复同一 Run。长期等待且无其他工作可推进时可报告等待状态，不跳过门禁。
+执行当前 `Do`、规则和 Artifact 契约，按每次回执的 `Then` 持续推进，不提前执行未返回步骤。`Ask human to do` 必须等待相应 Human 完成，再把其结果作为当前产物上报。只有两种情况可以结束当前回复并暂停：需要 Human 完成步骤、提供必要信息/授权或处理无法自行恢复的事项；或同一阻塞事项实际连续等待超过 5 分钟，且没有其他可推进的工作。轮询不能重置等待计时，5 分钟不是整个 Run 的时限。可自行修复的错误、字段边界、Agent Review 短暂等待和 Runner 自己待投票均不是暂停理由。暂停时说明 Run ID、停止位置、等待对象和恢复方式，恢复同一 Run，不跳过门禁或自动废弃。
 
 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-file <path>`。执行权限被拒绝时，按宿主权限机制用同一命令申请所需访问，不改参数规避检查或直写 Run 存储。
 
@@ -84,7 +84,9 @@ memsphere run report --run <id> --artifact-file <local-copy>
 
 ## Memory 变更与资源边界
 
-编辑现有 Memory 先 `memsphere memory edit <reference>`：Managed 返回 ChangeSet candidate 路径，Embedded 返回当前 worktree 路径。删除/改名使用 `memory delete/rename`；Managed 不直改已发布 Store。新建 Memory 先读取对应 Concept、Schema 和写作规则，在当前 Store 允许的位置形成候选。
+创建或编辑 Memory 先读取对应 Concept、Schema 和写作规则，再 `memsphere memory edit <reference>`：已有内容可用名称或 canonical 引用；创建新 Memory 必须用尚不存在的 `<kind>/<canonical-name>`，命令会生成对应类型模板。Managed 返回 ChangeSet candidate 路径，Embedded 返回当前 worktree 路径，按回执编辑；Managed 不直改已发布 Store。
+
+Managed 删除/改名使用 `memory delete <references...>`、`memory rename <reference> <new-canonical-name>`，需要时用 `--change <id>` 追加同一候选；改 canonical 不自动移动物理文件。当前这两个命令不支持 Embedded：在其有效 worktree 中审阅并删除文件或修改 YAML 的 names，必要的文件移动走正常 Git 操作，然后统一变更级校验与集成。Mounted 不可写。
 
 本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [change-id]`，记录 ChangeSet ID、校验状态和 View 入口；后续再改则重新校验。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet，稀疏 candidate/checkpoint 不是完整 Memory Root，不能拿它调用 `validate --memory-root`。
 
@@ -92,7 +94,9 @@ Managed 通过校验后 `memory publish --change <id>` 发布并完成 ChangeSet
 
 ### 处理修改意见与市场导入
 
-Human 可在 View 的 ChangeSet 中添加 Memory 与 Comment；这些是修改意见，不是 Artifact Review 的 Round/Vote。接手其 ID 时先读 `memsphere-changeset-comment-processing`，在当前 Workspace `memory change claim <id>`。已有 claim 时不抢占，只有 Human 明确要求接手才用 `--force`。按意见修改并 `memory change validate <id>`，再 `memory change finish <id> --comment <comment-id> --reason fixed`；拒绝意见用 rejected 并在对话说明，finish 释放 claim。无实际差异且意见均处理完时可 `memory change complete <id>`，不手改状态绕过冲突。
+Human 可在 View 的 ChangeSet 中添加 Memory 与 Comment；这些是修改意见，不是 Artifact Review 的 Round/Vote。接手其 ID 时先读 `memsphere-changeset-comment-processing`，在当前 Workspace `memory change claim <id>`。已有 claim 时不抢占，只有 Human 明确要求接手才用 `--force`。逐条判断，合理则改候选并 `memory change validate <id>`；不合理则保留原内容并说明理由。
+
+`memory change finish <id> --comment <全部 processing Comment ID...> --reason fixed` 要求当前候选校验通过，并一次完成全部 processing 意见、释放 claim；全部拒绝时使用 rejected，不伪造内容变更。当前 CLI 对整个批次只接受一个 reason，不能分批逐条 finish；若同时有 fixed/rejected 两类结论，保留现场、说明该限制并请 Human 决定，不伪造统一结论或手改状态。无实际差异且意见均完成时可 `memory change complete <id>`；存在实际修改时按 Store 类型发布或集成，不能把 finish 当作发布完成。
 
 View 的记忆市场和模型市场提供精选资源的显式导入；未导入内容不在 Project Catalog 或 Run 内。Memory 导入先形成 `market_import` ChangeSet，检查候选、校验后发布。Embedded 的 market_import/app_install 可用 `memory publish --change <id>` 把候选应用到当前 worktree，之后仍需 Git 集成；该命令不 commit 或 push。导入后的 Memory 可自由修改、重命名并独立演进，不会随系统升级自动覆盖；重新导入须检查差异。模型导入也必须整体满足当前 Runtime，不删规则或部分导入绕过拒绝。
 
