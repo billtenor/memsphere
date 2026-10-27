@@ -1,4 +1,4 @@
 interface:
   display_name: "Memsphere"
-  short_description: "Apply project Memory through Procedure or exploration Runs"
-  default_prompt: "Use memsphere to read relevant Memory, choose an applicable Procedure Run or free exploration Run, and complete the task."
+  short_description: "Operate project Memory, Runs and Memsphere resources"
+  default_prompt: "Use $memsphere to apply project Memory and complete the requested workflow or resource operation."

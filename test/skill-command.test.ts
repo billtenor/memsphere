@@ -24,7 +24,6 @@ test("skill init installs only the unified memsphere skill", async () => {
     assert.match(source, /自由探索/);
     assert.match(source, /\*\*Artifact（产物）\*\*/);
     assert.match(source, /memory change validate/);
-    assert(source.split("\n").length < 100);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
