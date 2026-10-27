@@ -79,7 +79,7 @@ export function testCategory(file, source) {
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
     return /model|settings/.test(name) ? "model-ui" : "review-ui";
   }
-  if (name.startsWith("project-upgrade")) return "project-upgrade";
+  if (name.startsWith("project-upgrade") || name === "legacy-general-task-upgrade.test.ts") return "project-upgrade";
   if (/^(app-install|data-command|model-command|model-market-package|system-model-creation)/.test(name)) return "app-cli";
   if (/cli|windows-prerequisites/.test(name)) return "memory-cli";
   if (/^(project|config|home|git|file-lock)/.test(name)) return "project-core";

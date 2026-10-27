@@ -174,3 +174,10 @@ Human已明确授权第三轮 round-20261027-072752z-1abbd687 的actor5 approve�
 2026-10-27实现验收正式结束：第三轮两条accepted-fixed与完整补充验证已保存；Runner approve后Review/round均passed，当前敏捷Run进入交付报告步骤。产品验收尚未提交，后续Git/CI/Human步骤继续保留。
 
 Human最新执行指令：“请你先提交 commit，合并最新的 master 分支代码”。此指令授权在产品评审尚未投票时提前保存本轮commit并同步master，不构成产品通过票、需求完成或PR合入授权；需求保持accepting，单次证据与.playwright继续排除。
+
+
+## PR CI 调度修正
+
+PR #117 首轮 head d7bfe54 的 Linux Browser/Runtime jobs 被 GitHub 以“The job has exceeded the maximum execution time of 5m0s”取消，已完成文件未见断言失败；其余适用测试/安全/门禁成功。失败与原始日志保留，不计作通过。
+
+在既定CI跟进步骤修正：补齐24个此前未登记的Linux测试耗时（合并后本地全量及首轮CI已完成文件实测），复用既有长任务优先调度；legacy-general-task-upgrade按Managed/Embedded升级契约进入project-upgrade组，脱离Runtime默认回退分组，且增加macOS/Windows升级保护。没有删除/跳过测试，没有增加job、并发或5分钟超时。CI计划/完整覆盖/调度契约6项实际通过；新增测试仍在Linux与full中恰好执行一次。后续以新head全部适用CI结果为准，不复用首轮绿灯。Memory无新增差异。

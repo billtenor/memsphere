@@ -21,6 +21,8 @@ Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集
 
 不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试/打包及Security仅保留GitHub原生job 5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
 
+graph迭代补充新测试的Linux实测耗时，沿用组内长任务优先调度；历史通用流程移除的Managed/Embedded升级测试归入project-upgrade，因此进入Linux项目组及macOS/Windows升级保护。全部文件及断言保留，未增加job、并发或超时时限。补齐耗时来源于合并后完整本地回归及PR #117首轮CI已完成文件，避免新重型用例按缺省2秒排在队尾导致job超时。
+
 ## 合入 master / 发布前完整检查
 
 每次合入master（push master）自动运行full，不再配置每日schedule。GitHub Actions的CI工作流支持手动选择ref和profile（default/full，手动默认full）：

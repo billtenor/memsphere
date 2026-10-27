@@ -32,4 +32,10 @@ test("New project upgrade tests enter their CI suite and remain in aggregate pro
   for (const suite of ["core", "memory-and-projects"]) {
     assert.deepEqual(selectTests(files, sources, {}, suite).sort(), [...files].sort());
   }
+  const historical = "legacy-general-task-upgrade.test.ts";
+  const historicalSources = { [historical]: "" };
+  for (const suite of ["project-upgrade", "platform-upgrades", "platform-and-upgrades", "memory-and-projects"]) {
+    assert.deepEqual(selectTests([historical], historicalSources, {}, suite), [historical]);
+  }
+  assert.deepEqual(selectTests([historical], historicalSources, {}, "runtime-core"), []);
 });
