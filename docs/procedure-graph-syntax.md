@@ -2,7 +2,9 @@
 
 本文整理以 Action 和依赖关系定义 Procedure 的图编排语法。Procedure 通过 `mode` 区分原有的 `flow` 模式和新的 `graph` 模式，两种模式并行保留。下文除模式说明外，均描述 `graph` 模式：Action 描述生产工作、产物和评审要求；依赖关系决定何时执行；聚合 Action 收集具体产物的引用。
 
-状态：设计草案，尚未接入当前解析器与执行器。示例不是当前稳定语法，不可直接交给现有 `run start` 执行。新版本的 `syntax` 标识将在实现时确定，本文示例暂不填写，不复用旧稳定版本号。
+运行语法：`memsphere-20261027-stable`。新建 graph Procedure 必须填写该版本；旧 `memsphere-20260721-stable` 按原 flow 语义保留。完整示例可通过 `run start --file` 执行。
+
+2026-10-27 共同探索调整：不提供启动时结构化业务参数或 Run 级 `input`。入口 Action 收集或读取业务材料并形成 Artifact，后续通过依赖传递。运行时和 CLI 的整合方案见 `changes/archive/completed/20261026-procedure-graph/implementation-plan.md`；以下说明 graph 的语法和执行语义。
 
 本版包括顺序、固定并行、条件分支、循环、汇合和产物聚合。不包括 `forEach`、Send、动态批次、`wait: batch`、`defer`、子图、跨图跳转，以及新增的全局业务 State。
 
@@ -123,7 +125,7 @@ Slot 表达评审视角，具体参与者、权限、是否跳过及决策规则
 
 声明中没有正文，因此没有 `payload.content`。模型定义中的 `type` 是元模型自身的语法，不是恢复旧版 `artifact.type` 字段。
 
-运行时的正文保存于 Artifact 的 `content` 或 `contentRef`。Artifact 的 ID、状态、实际依赖和修订记录不写进 Action 定义。业务存储目标仍由运行配置与 Step 的 `artifactStore` 承担。
+运行时的正文保存于 Artifact 的 `content` 或 `contentRef`。Artifact 的 ID、状态、实际依赖和修订记录不写进 Action 定义。本轮 graph 的模型用于校验正文，接纳后保存到 context_control Artifact Store；不提供向业务 Store 写入的绑定或 `--write-options`。Step 的 `artifactStore` 仍属于既有 flow/模型 Artifact 机制，graph 不设置该字段。
 
 ## Dependency
 
@@ -180,7 +182,7 @@ dependencies:
     from: START
 ```
 
-`START` 在 Run 创建后提供一次入口信号，不是一个真实 Action，也不生产 Artifact。本版将 Run 的初始输入通过求值上下文的 `input` 暴露；它不是持续更新的全局业务 State。入口可使用 `when` 检查该输入。
+`START` 在 Run 创建后提供一次入口信号，不是一个真实 Action，也不生产 Artifact。本版不提供启动时结构化业务参数，入口 Action 自行收集、读取或向 Human 询问材料并产出 Artifact。仅有 START 来源的条件上下文没有上游产物，不提供 Run 级 `input`。
 
 没有显式 `END`。没有后继的 Action 完成，表示该执行路径结束；所有后继条件均不满足时，该路径也结束。Run 正常结束需要所有已启动工作、评审和触发判断处理完，没有待执行任务，也没有尚未满足的部分汇合。
 
@@ -210,7 +212,7 @@ dependencies:
 }
 ```
 
-普通来源的键是 Action ID，值是本次依赖所绑定的产物内容。只暴露当前依赖的直接材料，以及聚合来源展开的成员，不隐式查询全 Run 的最新产物。`input` 表示固定的 Run 初始输入。
+普通来源的键是 Action ID，值是本次依赖所绑定的产物内容。只暴露当前依赖的直接材料，以及聚合来源展开的成员，不隐式查询全 Run 的最新产物，也不注入 Run 级初始 `input`。
 
 包含连字符的 Action ID 使用 JSONata 的反引号字段语法：
 
@@ -298,15 +300,17 @@ dependencies:
 
 | Action ID | 工作 |
 | --- | --- |
+| `prepare` | 收集或读取待分析资料，产出固定资料列表 |
 | `check` | 判断是否还有待分析资料 |
 | `analyze` | 分析一份资料 |
 | `gather` | 收集全部已完成的分析产物引用 |
 | `summarize` | 根据聚合后的分析结果生成总结 |
 
-示例 Run 输入为 `{"materials":["资料甲","资料乙"]}`。输入固定，不建立可变全局 State；剩余资料由每次产物传递。
+示例中 prepare 收集到资料甲、资料乙，提交 `{"remaining":["资料甲","资料乙"]}`。Run 启动命令不携带结构化业务参数；准备好的资料和后续剩余资料都通过不可变 Artifact 传递，不建立可变全局 State。
 
 ```yaml
 !procedure
+syntax: memsphere-20261027-stable
 mode: graph
 names:
   - analyze-materials
@@ -318,15 +322,40 @@ goals:
 
 actions:
   - !action
-    id: check
-    description: |
-      START 触发时，从 input.materials 读取待分析资料。
-      analyze 触发时，从该次分析产物的 remaining 读取剩余资料。
-      原样返回 remaining，并按其是否为空填写 hasMore。
+    id: prepare
+    description: 收集或读取本次待分析资料，按原顺序填写 remaining；没有资料时填写空数组。
     actor: agent
     dependencies:
       - !dependency
         from: START
+    artifact:
+      name: 待分析资料
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: |
+          {
+            "type": "object",
+            "properties": {
+              "remaining": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["remaining"],
+            "additionalProperties": false
+          }
+      payload:
+        contentType: application/json
+
+  - !action
+    id: check
+    description: |
+      从本次 prepare 或 analyze 上游产物的 remaining 读取剩余资料。
+      原样返回 remaining，并按其是否为空填写 hasMore。
+    actor: agent
+    dependencies:
+      - !dependency
+        from: prepare
       - !dependency
         from: analyze
     artifact:
@@ -419,12 +448,12 @@ actions:
 执行关系：
 
 ```text
-START → check
-          ├─ hasMore 为 true  → analyze → check
-          └─ hasMore 为 false → gather  → summarize
+START → prepare → check
+                    ├─ hasMore 为 true  → analyze → check
+                    └─ hasMore 为 false → gather  → summarize
 ```
 
-两份资料对应两次 analyze 执行。只有每次分析完成并通过所需评审，才会继续 check。最后一次 check 退出时，不存在尚未结束的分析分支，gather 可以固定完整集合。初始资料为空时，不执行 analyze，gather 返回 `{"analyze":[]}`，总结仍能执行。
+两份资料对应两次 analyze 执行。只有每次分析完成并通过所需评审，才会继续 check。最后一次 check 退出时，不存在尚未结束的分析分支，gather 可以固定完整集合。prepare 提交空资料数组时，不执行 analyze，gather 返回 `{"analyze":[]}`，总结仍能执行。
 
 该例不承诺任意并行图都能用退出判断证明集合完整；若另有路径还会生产 analyze，必须另行建立正确的完成依赖，不能靠 collect 猜测。
 
@@ -450,13 +479,13 @@ START → check
 | `contentType` | artifact.payload | MIME 类型字符串 |
 | `asserts` / `suggests` | 新增允许在 artifact 中 | 沿用规则数组结构；此处约束产物，Action 层约束过程 |
 
-除 mode 外，上表的新增或调整均作用于 graph 模式，flow 模式保留对应 syntax 版本的既有规则。`!procedure`、`!action`、`actor`、`review`、流程名称、目标和规则引用沿用既有概念。graph 模式的 `artifact` 调整为普通 mapping；旧的 `!artifact` 标签不作为 graph 模式要求。`START`、求值上下文中的 `input` 和 `artifacts` 是约定的值或数据名称，不是新的 YAML 标签。
+除 mode 外，上表的新增或调整均作用于 graph 模式，flow 模式保留对应 syntax 版本的既有规则。`!procedure`、`!action`、`actor`、`review`、流程名称、目标和规则引用沿用既有概念。graph 模式的 `artifact` 调整为普通 mapping；旧的 `!artifact` 标签不作为 graph 模式要求。`START` 与求值上下文中的 `artifacts` 是约定的值或数据名称，不是新的 YAML 标签。
 
 本版不采用 `triggers`、独立 `edges`、`inputs`、`select`、`aggregate` 包装层、`defer`、`forEach` 或 `wait` 字段。条件使用 JSONata，不能混入先前讨论过的 JavaScript 风格 `==`、`&&`、`||`。
 
 ## 实现边界
 
-本次仅整理设计文档，未修改当前稳定 Memory、模型登记、解析器或 Run 执行器。模式兼容规则已确定：省略 mode 的旧流程继续按 flow 执行，不强制迁移为 graph。正式实现前仍需确定支持两种模式的 syntax 版本、版本兼容与可选迁移细节，以及调度完成记录和聚合引用结果的持久化字段。
+graph 使用独立模型 Store 执行；省略 mode 的旧流程继续按 flow 执行，不强制迁移。新 syntax 为 memsphere-20261027-stable，显式迁移仅更新版本标识。Run.frames 的 type: graph 保存调度、汇合与恢复记录，Step 保存固定输入、状态和正式采用的产物；旧 flow 实现与存储继续保留。
 
 Artifact 模型定义及实际内容不可混淆；普通 Action 对应的产物要求可以映射到 Step 的 artifactSpec，review 对应 reviewSlots。图语法中的 dependencies 表达执行触发和材料来源，运行时 Artifact.dependencies 保存实际使用的具体材料 ID，两者不直接复制字段值。
 

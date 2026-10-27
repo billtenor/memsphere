@@ -313,6 +313,8 @@ const memoryStyles = `
   .memory-section.open>.memory-section-header .memory-chevron { transform:rotate(90deg); }
   .memory-node-title { min-width:0; font-size:var(--memory-page-text-section-title); font-weight:650; line-height:var(--memory-page-line-compact); overflow-wrap:anywhere; }
   .memory-section-body { display:none; padding:4px 16px 16px 44px; border-top:1px solid var(--line); }
+  .memory-graph-action-body { padding:12px; }
+  .memory-graph-action-body pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-section.open>.memory-section-body { display:block; }
   .memory-block-title { margin:var(--memory-page-space-section) 0 var(--memory-page-space-line); color:var(--muted); font-size:var(--memory-page-text-section-title); font-weight:650; line-height:var(--memory-page-line-compact); letter-spacing:0; text-transform:none; }
   .memory-collapsible-list>summary { display:flex; width:max-content; max-width:100%; align-items:center; gap:6px; margin:var(--memory-page-space-section) 0 var(--memory-page-space-line); border-radius:5px; padding:2px 4px; color:var(--muted); cursor:pointer; list-style:none; }
@@ -2683,6 +2685,21 @@ function renderProcedure(node: JsonRecord, path: string, t: (key: string) => str
   appendStringList(document, "names", array(node.names), path, comment, t, options.ui);
   for (const key of ["defines", "goals"] as const) appendStringList(document, key, array(node[key]), path, comment, t, options.ui);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, t, comment, options);
+  if (node.mode === "graph") {
+    const graph = el("div", "memory-flow"); graph.dataset.diffPath = `${path}.actions`;
+    array(node.actions).forEach((value, index) => {
+      const action = value as JsonRecord, actionPath = `${path}.actions[${index + 1}]`;
+      const card = el("details", "memory-section"); card.dataset.diffPath = actionPath;
+      card.dataset.disclosureKey = actionPath; card.open = true;
+      card.append(el("summary", "memory-node-title", String(action.description ?? action.id)));
+      const body = el("div", "memory-graph-action-body");
+      body.append(el("div", "memory-pill", String(action.actor ?? (action.collect ? "collect" : "agent"))));
+      for (const key of ["asserts", "suggests"] as const) appendRuleList(body, key, array(action[key]), action.effectiveRules as JsonRecord | undefined, actionPath, t, comment, options);
+      const definition = el("pre", "memory-pre", JSON.stringify({ id: action.id, dependencies: action.dependencies, ...(action.collect ? { collect: action.collect } : { artifact: action.artifact }) }, null, 2));
+      body.append(definition); card.append(body); graph.append(card);
+    });
+    document.append(graph); return document;
+  }
   const steps = array(node.flow);
   if (steps.length) {
     const flowTitle = blockTitle(t("flow")); flowTitle.classList.add("mem-content-flow-title"); document.append(flowTitle);

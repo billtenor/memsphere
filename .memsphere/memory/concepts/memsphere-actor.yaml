@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-actor
   - Actor
@@ -13,3 +13,4 @@ defines:
   - Human 明确要求把指定意见和 Vote 正式提交到本人当前 Artifact Review Assignment 时，Runner 可以作为受托执行者代为提交；CLI 已建立当前代提交语境且 payload 完整无歧义时，Human 的确定性“我投……”表达已经是本次授权，不需要同义二次确认；业务决定仍归 Human Actor，Runner provenance 和授权说明必须单独审计，且不因此成为 Review Actor。
   - Agent Reviewer 只能在自己的 Review Assignment 中读取 Submission、提交 Comment 和 Vote，不能接管 Run 步骤或直接修改 Artifact。
   - Actor 的 name 为选填；省略、空字符串或纯空白时，需要展示名称的位置统一使用 Actor id；有效名称沿用去除首尾空白后的显示行为。Human Actor 禁止配置 system_prompt（含空字符串和纯空白）；设置页不提供此输入，Agent 切为 Human 时删除草稿中的该字段。Agent 可选 system_prompt，显式提供空白字符串无效。新 Project 配置的校验不改写冻结 Run 历史快照。
+  - graph 的 actor 仍仅区分 human 与 agent；进入 Human Step 时完整展示本 Step 工作、材料和产物契约，Runner 等待 Human 结果后向同一 Step report。Human Action 与正式 Review 中的 Human Actor 是不同职责。

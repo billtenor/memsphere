@@ -1,3 +1,5 @@
+import { readRun } from "../run/store.js";
+import { isGraphRun } from "../context_control/graph-runtime.js";
 import { openContextControl } from "../project/context-control.js";
 import { contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
 import { createContextRunReader } from "../project/context-run-summaries.js";
@@ -108,7 +110,6 @@ import {
   listRunSummaries,
   parseRunState,
   readArtifactReviewForActor,
-  readRun,
   retryArtifactReviewAgentAssignment,
   resolveArtifactReviewComment,
   submitArtifactReviewAssignment,
@@ -118,7 +119,7 @@ import {
   type ArtifactReviewContext,
   type RunState,
   type RunStep
-} from "../run/store.js";
+} from "../context_control/review-repository.js";
 import {
   renderViewHostHtml,
   viewRuntimeBundlePath,
@@ -303,7 +304,7 @@ class ViewMemoryCache {
     if (!config.project) return [];
     const root = resolve(config.scopeRoot);
     let read = this.#contextRunReaders.get(root);
-    if (!read) { read = createContextRunReader(root); this.#contextRunReaders.set(root, read); }
+    if (!read) { read = createContextRunReader(root, { isolateCorruptRecords: true }); this.#contextRunReaders.set(root, read); }
     return (await read()).map(contextRunSummary);
   }
 
@@ -1444,7 +1445,7 @@ async function handleRequest(
     const runId = decodeURIComponent(runBindingsMatch[1]);
     try {
       if (request.method === "GET") {
-        sendJson(response, 200, buildRunBindingSnapshot(await readRun(runsRoot, runId)));
+        sendJson(response, 200, contextLocation && isGraphRun(contextLocation.run) ? await contextLocation.service.withGraph(g => g.bindingSnapshot(runId)) : buildRunBindingSnapshot(await readRun(runsRoot, runId)));
         return;
       }
       if (request.method === "POST") {
@@ -1459,6 +1460,11 @@ async function handleRequest(
           ? body.actorIds as string[]
           : undefined;
         const skip = body.skip === true;
+        if (contextLocation && isGraphRun(contextLocation.run)) {
+          if (skip && actorIds?.length) throw new Error("Choose Actors or skip");
+          const snapshot = await contextLocation.service.withGraph(g => g.updateBinding(runId, slot, skip ? { skip: true } : { actorIds: actorIds ?? [] }));
+          sendJson(response, 200, { bindings: snapshot }); return;
+        }
         const result = await updateRunSlotBinding({ runsRoot, runId, slot, actorIds, skip });
         sendJson(response, 200, { change: result.change, bindings: result.snapshot });
         return;
@@ -1511,7 +1517,8 @@ async function handleRequest(
       const runId = decodeURIComponent(directArtifactReviewRoundMatch[1]);
       const reviewId = decodeURIComponent(directArtifactReviewRoundMatch[2]);
       const roundId = decodeURIComponent(directArtifactReviewRoundMatch[3]);
-      const located = await readViewRunById(config, runId);
+      const located = reviewId.startsWith("graph-review-") ? { runsRoot, ...await findArtifactReview({ runsRoot, reviewId }) } : await readViewRunById(config, runId);
+      if (located.run.id !== runId) throw new Error("Run/Review identity mismatch");
       const review = located.run.artifactReviews?.find((candidate) => candidate.id === reviewId);
       if (!review) throw new Error(`Artifact Review not found: ${reviewId}`);
       const round = review.rounds.find((candidate) => candidate.id === roundId);
@@ -2333,6 +2340,7 @@ async function findViewArtifactReview(
   config: MemsphereConfig,
   reviewId: string
 ): Promise<{ runsRoot: string; run: RunState; review: NonNullable<RunState["artifactReviews"]>[number] }> {
+  if (reviewId.startsWith("graph-review-")) return { runsRoot: config.runsRoot, ...await findArtifactReview({ runsRoot: config.runsRoot, reviewId }) };
   const roots = [config.runsRoot, join(config.archiveRoot, "runs")];
   for (const runsRoot of roots) {
     try {
@@ -2991,6 +2999,10 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
 }
 
 function sendArtifactReviewError(response: ServerResponse, error: unknown): void {
+  if (error instanceof Error && "code" in error && ["REVIEW_CONFLICT", "PERMISSION_DENIED", "RUN_FINISHED", "NOT_FOUND"].includes(String(error.code))) {
+    const status = error.code === "REVIEW_CONFLICT" ? 409 : error.code === "NOT_FOUND" ? 404 : 403;
+    sendJson(response, status, { error: error.message, code: error.code }); return;
+  }
   if (error instanceof ArtifactReviewSubmissionConflictError) {
     sendJson(response, 409, {
       error: error.message,

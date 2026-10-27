@@ -803,7 +803,7 @@ class RunApplication {
     if (this.#detail?.representation === "context-control") {
       if (!this.#contextGraph || this.#contextGraphRun !== this.#detail.id) {
         this.#contextGraph?.dispose();
-        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase);
+        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase, (runId, reviewId) => this.#openReview(runId, reviewId));
         this.#contextGraphRun = this.#detail.id;
       }
       if (!this.#detailRoot.contains(this.#contextGraph.element)) {

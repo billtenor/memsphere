@@ -5,13 +5,15 @@ import type { Context } from "../data/api/context.js";
 import type { ValueStore, StoredValue } from "../data/api/value-store.js";
 import type { Entity } from "./model-assets.js";
 import type { Artifact, Body, External, Ref, ReportInput, Review, Run, Snapshot, Step } from "./types.js";
+import { failure } from "./errors.js";
+import { GraphRuntime, isGraphRun } from "./graph-runtime.js";
+export { failure } from "./errors.js";
 
 export type Stores = Record<Entity, ValueStore>;
 export type RunLock = <T>(runId: string, action: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
 export type ContentReader = (ref: { storeId: string; dataId: string }, context: Context) => Promise<{ bytes: Uint8Array; contentType: string }>;
 const now = () => new Date().toISOString();
 const id = (kind: string) => `${kind}-${randomUUID()}`;
-export const failure = (code: string, message: string) => Object.assign(new Error(message), { code });
 const nonblank = (s: string | undefined, label: string): string => { if (typeof s !== "string" || !s.trim()) throw failure("INVALID_ARGUMENT", `${label} must be nonblank`); return s; };
 const tags = (input: string[] = []) => [...new Set(["default", ...input.map(v => nonblank(v, "tag"))])];
 const refKey = (ref: Ref) => `${ref.kind}:${ref.id}`;
@@ -23,6 +25,10 @@ export class ContextControl {
     const active = new AsyncLocalStorage<string>();
     const acquire = lock;
     this.lock = (runId, action, signal) => active.getStore() === runId ? action() : acquire(runId, () => active.run(runId, action), signal);
+  }
+  /** Project access and Run locking remain shared with the existing Stores. */
+  async withGraph<T>(action: (runtime: GraphRuntime) => Promise<T>): Promise<T> {
+    return action(new GraphRuntime(this.stores, this.lock, this.contentReader));
   }
   private key(entity: Entity, runId: string, entityId: string) { return entity === "run" ? entityId : `${runId}/${entityId}`; }
   private async record<T>(entity: Entity, runId: string, entityId: string, context: Context = {}): Promise<(StoredValue & { value: T }) | undefined> {
@@ -65,7 +71,7 @@ export class ContextControl {
     return this.lock(runId, async () => {
       const row = await this.record<Run>("run", runId, runId);
       if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
-      if (row?.value.status === "running") await this.recover(runId);
+      if (row?.value.status === "running" && !isGraphRun(row.value)) await this.recover(runId);
       return (await this.record<Run>("run", runId, runId))?.value;
     });
   }
@@ -73,6 +79,21 @@ export class ContextControl {
     const result: Run[] = [];
     for (const row of await this.list<Run>("run")) { const run = await this.findRun(row.id); if (run) result.push(run); }
     return result;
+  }
+  async listRunEntries(): Promise<Array<{ id: string; run?: Run; error?: string }>> {
+    const entries: Array<{ id: string; run?: Run; error?: string }> = []; let cursor: string | undefined;
+    do {
+      const page = await this.stores.run.list({}, { limit: 1000, cursor });
+      for (const item of page.items) {
+        try {
+          const row = await this.record<Run>("run", item.id, item.id);
+          if (!row) throw failure("NOT_FOUND", "Run disappeared while listing");
+          entries.push({ id: item.id, run: row.value });
+        } catch (error) { entries.push({ id: item.id, error: error instanceof Error ? error.message : String(error) }); }
+      }
+      cursor = page.nextCursor;
+    } while (cursor);
+    return entries;
   }
   async start(name: string, language: Run["language"] = "zh-CN") {
     const run: Run = { id: id("run"), name: nonblank(name, "name"), status: "running", language, createdAt: now() };
@@ -86,6 +107,7 @@ export class ContextControl {
   async snapshot(runId: string): Promise<Snapshot> {
     return this.lock(runId, async () => {
       const run = await this.require<Run>("run", runId, runId);
+      if (isGraphRun(run.value)) return this.withGraph(graph => graph.snapshot(runId));
       if (run.value.status === "running" && run.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
       if (run.value.status === "running") await this.recover(runId);
       return this.snapshotValue(runId);
@@ -106,7 +128,7 @@ export class ContextControl {
   private async complete(runId: string, artifactId: string): Promise<Artifact> {
     const a = (await this.require<Artifact>("artifact", runId, artifactId)).value;
     const step = (await this.require<Step>("step", runId, a.stepId)).value;
-    if (a.status !== "submitted" || step.runId !== runId || step.status !== "done" || step.artifact?.id !== a.id) throw failure("INCOMPLETE_ARTIFACT", `Artifact not completely submitted: ${artifactId}`);
+    if (a.status !== "submitted" || step.runId !== runId || step.status !== "done" || step.artifact?.mode !== "produce" || step.artifact.id !== a.id) throw failure("INCOMPLETE_ARTIFACT", `Artifact not completely submitted: ${artifactId}`);
     return a;
   }
   async body(body: Body, context: Context = {}) {
@@ -139,11 +161,12 @@ export class ContextControl {
   }
   /** Original IDs are the recovery identity. This does not deduplicate new CLI requests. Caller holds Run lock. */
   private async redo(runId: string) {
+    if (isGraphRun((await this.require<Run>("run", runId, runId)).value)) return;
     const artifacts = await this.list<Artifact>("artifact", runId);
     for (const a of artifacts) {
       try {
       let step = await this.record<Step>("step", runId, a.stepId);
-      if (step && (step.value.runId !== runId || step.value.artifact?.id !== a.id)) throw failure("INVALID_STATE", `Conflicting Step for ${a.id}`);
+      if (step && (step.value.runId !== runId || step.value.artifact?.mode !== "produce" || step.value.artifact.id !== a.id)) throw failure("INVALID_STATE", `Conflicting Step for ${a.id}`);
       if (step?.value.status === "done") {
         if (a.status !== "submitted") throw failure("INVALID_STATE", `Completed Step references a draft: ${a.id}`);
         continue;
@@ -202,6 +225,7 @@ export class ContextControl {
     });
   }
   async report(runId: string, input: ReportInput) {
+    if (isGraphRun((await this.require<Run>("run", runId, runId)).value)) throw failure("INVALID_ARGUMENT", "Graph report requires an explicit Step");
     for (const field of ["name", "target", "revisedFrom"] as const) if (input[field] !== undefined) nonblank(input[field], field);
     if (input.dependencies !== undefined && !Array.isArray(input.dependencies) || input.tags !== undefined && !Array.isArray(input.tags)) throw failure("INVALID_ARGUMENT", "dependencies/tags must be arrays");
     await this.body(input);
@@ -243,7 +267,7 @@ export class ContextControl {
     });
   }
   async readArtifact(runId: string, artifactId: string) {
-    return this.lock(runId, async () => { const run = await this.require<Run>("run", runId, runId); if (run.value.status === "running") await this.recover(runId); return this.body(await this.complete(runId, artifactId)); });
+    return this.lock(runId, async () => { const run = await this.require<Run>("run", runId, runId); if (isGraphRun(run.value)) return this.withGraph(g => g.readArtifact(runId, artifactId)); if (run.value.status === "running") await this.recover(runId); return this.body(await this.complete(runId, artifactId)); });
   }
   async readExternal(runId: string, externalId: string) {
     await this.require<Run>("run", runId, runId); const e = (await this.require<External>("external", runId, externalId)).value;
@@ -283,6 +307,14 @@ export class ContextControl {
   async finish(runId: string, artifactIds?: string[]) {
     return this.lock(runId, async () => {
       const row = await this.require<Run>("run", runId, runId);
+      if (isGraphRun(row.value)) return this.withGraph(async graph => {
+        if (artifactIds) {
+          const snapshot = await graph.advance(runId);
+          if (snapshot.steps.some(s => s.status !== "done") || snapshot.run.frames![0].graphFrame.joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
+          await this.updateOutputs(runId, artifactIds, snapshot.outputArtifactIds.filter(id => !artifactIds.includes(id)));
+        }
+        return graph.finish(runId);
+      });
       if (row.value.status === "running") await this.redo(runId);
       const roots = [...new Set(artifactIds ?? (await this.snapshotValue(runId)).outputArtifactIds)].sort();
       if (row.value.status === "done" && JSON.stringify([...(await this.snapshotValue(runId)).outputArtifactIds].sort()) === JSON.stringify(roots)) return row.value;
@@ -293,6 +325,8 @@ export class ContextControl {
     });
   }
   async abandon(runId: string, reason?: string, source: "cli" | "view" = "cli") {
+    const run = await this.require<Run>("run", runId, runId);
+    if (isGraphRun(run.value)) return this.withGraph(g => g.abandon(runId, reason, source));
     return this.write(runId, async () => { const row = await this.require<Run>("run", runId, runId); const value: Run = { ...row.value, status: "abandoned", endedAt: now(), abandonment: { source, ...(reason ? { reason } : {}) } }; await this.update("run", runId, row, value); return value; });
   }
   /** Archiving changes visibility only; all evidence remains in its bound model Stores. */

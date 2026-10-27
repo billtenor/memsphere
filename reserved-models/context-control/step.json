@@ -16,7 +16,7 @@
     "status": {
       "type": "string",
       "title": "执行状态",
-      "description": "pending：待执行；running：执行中；awaiting_review：等待当前轮评审汇聚；done：结果已确定；failed：执行失败、可重试；cancelled：已取消。当前轮根据固定名单和策略汇聚为要求修改时返回 running；全部必需 Review 正式提交并满足通过策略及其他完成条件后才能 done。单人提交或评审 Agent 执行失败不直接决定 Step 状态。",
+      "description": "共享 Step 状态；旧路径保留 failed/cancelled，graph 业务校验仅允许 pending/running/awaiting_review/done。",
       "minLength": 1,
       "enum": [
         "pending",
@@ -144,7 +144,7 @@
     "frames": {
       "type": "array",
       "title": "内部执行栈",
-      "description": "本 Action 内部的执行帧，按外层到内层排列，最后一项为当前活动帧；没有内部执行栈时省略或为空数组。每个帧用 type 标识类型，只填写该类型对应的状态结构。 每个执行帧的 id 在本 Step 的 frames 内唯一。",
+      "description": "按 type 精确匹配唯一载荷；submission 恢复意图只能独占 frames（有且仅一帧），不得重复或与 schema 帧混存。旧 schema 多帧保持。context_control 模型业务 Runtime 拒绝缺失、错配、多载荷及多意图，不扩展通用 JSON Schema Runtime。",
       "items": {
         "type": "object",
         "title": "执行帧",
@@ -158,21 +158,24 @@
           "type": {
             "type": "string",
             "title": "帧类型",
-            "description": "当前支持 schema，表示逐项编写 Schema 产物。",
+            "description": "schema 为既有图式帧，submission 为候选及评审创建的短期恢复材料。按类型只填写对应结构。",
             "enum": [
-              "schema"
+              "schema",
+              "submission"
             ]
           },
           "schemaFrame": {
             "$ref": "#/definitions/SchemaFrame",
             "title": "Schema 帧状态",
             "description": "type=schema 时必须填写，保存本次 Schema 写作的展开序列、位置和选择。"
+          },
+          "submissionFrame": {
+            "$ref": "#/definitions/SubmissionFrame"
           }
         },
         "required": [
           "id",
-          "type",
-          "schemaFrame"
+          "type"
         ],
         "additionalProperties": false
       }
@@ -250,6 +253,11 @@
         ],
         "additionalProperties": false
       }
+    },
+    "completionSequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "graph Step 的持久完成顺序；与 done 原子提交，不能用时间戳或随机 ID 推断。"
     }
   },
   "required": [
@@ -795,6 +803,240 @@
         "updatedAt"
       ],
       "additionalProperties": false
+    },
+    "SubmittedId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "稳定标识。"
+    },
+    "SubmittedContent": {
+      "type": "object",
+      "title": "产物内容",
+      "description": "产物的模型定义和实际内容。",
+      "properties": {
+        "model": {
+          "$ref": "#/definitions/SubmittedArtifactModel",
+          "description": "描述产物结构与要求的模型。",
+          "title": "产物模型"
+        },
+        "payload": {
+          "$ref": "#/definitions/SubmittedPayload",
+          "description": "产物的实际内容及其格式。",
+          "title": "产物内容"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "payload"
+      ]
+    },
+    "SubmittedContentRef": {
+      "type": "object",
+      "title": "内容存储引用",
+      "description": "指向 Store 中一份可读取、不可变的内容。",
+      "properties": {
+        "storeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "保存内容的 Store ID。"
+        },
+        "dataId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容在该 Store 中的 ID。"
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容字节的 SHA-256，以 64 位小写十六进制表示；读取时核对。",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "storeId",
+        "dataId",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedDependencyRef": {
+      "type": "object",
+      "title": "依赖引用",
+      "description": "同一 Run 内已提交的 Artifact 或内容已固定的 External 引用；禁止自依赖，产物依赖图须无环。",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "材料类型：artifact 或 external。",
+          "enum": [
+            "artifact",
+            "external"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "被依赖材料的稳定标识。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedArtifactModel": {
+      "type": "object",
+      "title": "产物模型",
+      "description": "描述内容结构与要求的模型定义。",
+      "properties": {
+        "definedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "解释模型定义的元模型 ID。"
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1,
+          "description": "模型定义的 JSON 文本，由 definedBy 指定的元模型解释。"
+        }
+      },
+      "required": [
+        "definedBy",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedPayload": {
+      "type": "object",
+      "title": "产物内容",
+      "description": "以文本保存的实际内容及其格式。",
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容的 MIME 类型，例如 text/plain、text/markdown 或 application/json。"
+        },
+        "content": {
+          "type": "string",
+          "title": "产物正文",
+          "description": "正文原文，保留换行、排版和注释；空字符串表示空内容。"
+        }
+      },
+      "required": [
+        "contentType",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "SubmissionArtifact": {
+      "type": "object",
+      "title": "Artifact · 产物",
+      "description": "Step 生产的一份产物，保存内容、依赖及所属 Run 内的标签。草稿只保留当前内容；提交后除 tags 外的字段及引用内容固定，修改内容须创建新的 Artifact。",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "产物的稳定标识；草稿更新和提交保持同一 ID，提交后修改内容须创建新 ID，调整 tags 不改变 ID。"
+        },
+        "stepId": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "生产该产物的 Step；所属 Run 和生产者由该 Step 确定。"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "产物名称。"
+        },
+        "status": {
+          "type": "string",
+          "title": "产物状态",
+          "enum": [
+            "draft",
+            "submitted"
+          ],
+          "description": "draft 为草稿，可修改且只保存当前内容；submitted 为已提交，除 tags 外的字段及所引用内容固定。只允许从 draft 变为 submitted，不允许退回草稿。tags 为分类信息，可更新且不影响已固定的依赖。评审结果由 Review 记录，当前成果及最终交付根由完整 Artifact 的依赖、修订关系与 Run.outputOverrides 人工增删共同推导。"
+        },
+        "tags": {
+          "type": "array",
+          "title": "标签",
+          "description": "所属 Run 内生效的产物标签；由 stepId 确定 Run，同名标签不跨 Run 关联。创建时自动包含 default，可添加自定义标签；每份 Artifact 都须保留 default，同一标签不重复。标签可更新，不改变产物 ID、内容或已提交的依赖。按标签上报依赖只在本次提交时展开当前 Run 已提交的匹配产物 ID，后续打标签不会追加历史产物的依赖。",
+          "items": {
+            "type": "string",
+            "title": "标签名称",
+            "description": "所属 Run 内使用的标签名称。",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "content": {
+          "$ref": "#/definitions/SubmittedContent",
+          "description": "直接保存的产物模型和正文，与contentRef互斥；声明无正文draft时可都省略，提交时必须二选一。"
+        },
+        "contentRef": {
+          "$ref": "#/definitions/SubmittedContentRef",
+          "title": "产物内容引用",
+          "description": "固定产物的内容引用，与content互斥；无正文draft可省略，submitted必须提供一个内容入口。"
+        },
+        "dependencies": {
+          "type": "array",
+          "description": "生产这份产物实际使用的材料，可引用同一 Run 中 status=submitted 的 Artifact 或内容已固定的 External；禁止自依赖，依赖图须无环。草稿期间可调整，提交后固定；无依赖时为空数组。 按标签选择依赖时保存展开后的具体 Artifact ID，不保存 tag 引用，也不随标签变化更新。",
+          "items": {
+            "$ref": "#/definitions/SubmittedDependencyRef"
+          },
+          "uniqueItems": true
+        },
+        "revisedFrom": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "本次修订所替代的已提交 Artifact ID，须属于同一 Run，可来自同一 Step 或其他 Step；不得指向自身，修订关系不得成环。"
+        },
+        "revisedSummary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "本次修改的说明，包括已解决和仍未解决的问题。"
+        }
+      },
+      "required": [
+        "id",
+        "stepId",
+        "name",
+        "status",
+        "tags",
+        "dependencies"
+      ],
+      "additionalProperties": false
+    },
+    "SubmissionFrame": {
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/definitions/SubmissionArtifact"
+        },
+        "nextStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_review",
+            "done"
+          ]
+        },
+        "round": {
+          "$ref": "#/definitions/ReviewRound"
+        },
+        "completionSequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endedAt": {
+          "$ref": "#/definitions/Timestamp"
+        }
+      },
+      "required": [
+        "artifact",
+        "nextStatus"
+      ],
+      "additionalProperties": false,
+      "description": "候选恢复意图：awaiting_review 必须且仅能携带 round；done 不得携带 round。完成序号与 endedAt 成对，评审接纳后的完成复用 Step 中已冻结的轮次。业务 Runtime 强制这些判别不变量。"
     }
   },
   "examples": [

@@ -10,7 +10,7 @@ import { readModelOperationStamp } from "./model-operation.js";
 import { createProjectModelHost } from "./models.js";
 
 /** A View-owned reader: cache validated resources, never records or recovery work. */
-export function createContextRunReader(projectRoot: string): () => Promise<Run[]> {
+export function createContextRunReader(projectRoot: string, options: { isolateCorruptRecords?: boolean } = {}): () => Promise<Array<Run & { unavailable?: boolean; error?: string }>> {
   const root = resolve(projectRoot);
   let fingerprint: string | undefined;
   let store: ValueStore | undefined;
@@ -38,17 +38,22 @@ export function createContextRunReader(projectRoot: string): () => Promise<Run[]
       fingerprint = current;
     }
     if (!store) return [];
-    const runs: Run[] = [];
+    const runs: Array<Run & { unavailable?: boolean; error?: string }> = [];
     let cursor: string | undefined;
     do {
       const page = await store.list({}, { limit: 1000, cursor });
       for (const item of page.items) {
-        const row = await store.get({}, item.id);
-        if (!row) continue;
-        const run = row.value as Run;
-        if (run.id !== item.id) throw failure("INVALID_STATE", `Stored identity mismatch: ${item.id}`);
-        if (run.status === "running" && run.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
-        runs.push(run);
+        try {
+          const row = await store.get({}, item.id);
+          if (!row) continue;
+          const run = row.value as Run;
+          if (run.id !== item.id) throw failure("INVALID_STATE", `Stored identity mismatch: ${item.id}`);
+          if (run.status === "running" && run.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
+          runs.push(run);
+        } catch (error) {
+          if (!options.isolateCorruptRecords) throw error;
+          runs.push({ id: item.id, name: item.id, status: "running", createdAt: "", language: "zh-CN", unavailable: true, error: error instanceof Error ? error.message : String(error) });
+        }
       }
       cursor = page.nextCursor;
     } while (cursor);

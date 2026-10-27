@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { graphProcedureSchema } from "./graph-schema.js";
 import { assertModelRef } from "../project/model-registration-contract.js";
 import type { MemoryKind } from "./kinds.js";
 import {
@@ -31,6 +32,7 @@ import {
 import {
   assertMemorySyntaxIdentifier,
   controlPlaneMemorySyntax,
+  graphMemorySyntax,
   firstStableMemorySyntax,
   MemorySyntaxRegistry,
   type MemorySyntaxVersion
@@ -786,7 +788,23 @@ const procedureNodeSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = req
   }).strict())
 );
 
-export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(procedureNodeSchema);
+const controlPlaneProcedureMemorySchema = withRootSyntax(procedureNodeSchema);
+const graphAwareFlowSchema = z.preprocess(normalizeNameShorthand, z.object({
+  tag: z.literal("!procedure"), mode: z.literal("flow").optional(), names: namesSchema,
+  defines: definesSchema, asserts: z.array(rulePartSchema).min(1).optional(), goals: stringArray,
+  flow: z.array(flowNodeSchema).default([])
+}).strict());
+const graphNodeSchema = graphProcedureSchema({ names: namesSchema, rule: rulePartSchema, normalize: normalizeNameShorthand });
+const graphOrFlowSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
+  const graph = value !== null && typeof value === "object" && "mode" in value && value.mode === "graph";
+  const result = (graph ? graphNodeSchema : graphAwareFlowSchema).safeParse(value);
+  if (!result.success) {
+    for (const issue of result.error.issues) context.addIssue({ ...issue, fatal: true });
+    return z.NEVER;
+  }
+  return result.data;
+});
+export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(graphOrFlowSchema));
 
 export {
   definitionPartSchema,
@@ -817,6 +835,7 @@ const legacyMemorySchemas = {
 
 export const memorySyntaxRegistry = new MemorySyntaxRegistry();
 memorySyntaxRegistry.register({ version: firstStableMemorySyntax, schemas: legacyMemorySchemas });
-memorySyntaxRegistry.register({ version: controlPlaneMemorySyntax, schemas: memorySchemas });
+memorySyntaxRegistry.register({ version: controlPlaneMemorySyntax, schemas: { ...memorySchemas, procedures: controlPlaneProcedureMemorySchema } });
+memorySyntaxRegistry.register({ version: graphMemorySyntax, schemas: memorySchemas });
 
 export type { MemoryEntity };

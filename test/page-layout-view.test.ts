@@ -94,19 +94,25 @@ test("official Memory, ChangeSet and Run pages use fluid symmetric gutters acros
       for (const [locale, mode] of [["en", "light"], ["zh-CN", "dark"]] as const) {
         await writeFile(join(home, "config.json"), JSON.stringify({ language: locale, view: { host: "127.0.0.1", port: 0 }, view_packages:{installed:[{path:themeRoot}]}, view_theme: { mode, selected_source:"org.example.layout-theme:gutter" } }));
         const active = await launch();
-        const page = await browser.newPage({ viewport: { width: 2560, height: 1000 } });
         for (const { path, width } of points.filter(point => point.locale === locale && point.mode === mode)) {
-          await page.setViewportSize({ width, height: 1000 });
+          // Geometry samples are independent; close each document before the next sample.
+          const page = await browser.newPage({ viewport: { width, height: 1000 } });
+          const failures: string[] = [];
+          page.on("requestfailed", request => failures.push(`${request.url()} ${request.failure()?.errorText}`));
+          page.on("response", response => { if (response.status() >= 400) void response.text().then(body => failures.push(`${response.status()} ${response.url()} ${body.slice(0, 600)}`)).catch(() => undefined); });
+          try {
           await page.goto(`${active.origin}/projects/layout/${path}`);
-          await page.locator("[data-mem-content-canvas]").waitFor();
+          try { await page.locator("[data-mem-content-canvas]").waitFor(); }
+          catch (cause) { throw new Error(`Content canvas missing: ${locale}/${mode} ${path} at ${width}px\n${(await page.locator("body").innerText()).slice(0, 2000)}\n${failures.slice(-8).join("\n")}`, { cause }); }
           assert.equal(await page.locator(".memory-error, .run-error").count(), 0);
           const box = await geometry(page);
           assert.ok(Math.abs(box.left - box.right) < 1, `${locale} ${path} has symmetric gutters at ${width}`);
           assert.equal(box.padding, width <= 820 ? 12 : mode === "light" ? 40 : 48, "the shared layout consumes the selected Theme padding Token");
           assert.equal(box.overflow || box.hostOverflow, false, `${path} fits at ${width}`);
           if (width === 2560) assert.ok(box.width > 1400, "the page uses the available desktop width");
+          } finally { await page.close(); }
         }
-        await page.setViewportSize({ width: 2560, height: 1000 });
+        const page = await browser.newPage({ viewport: { width: 2560, height: 1000 } });
         await page.goto(`${active.origin}/projects/layout/changes/${changeId}`);
         const collapse = page.locator('[data-view-slot="header.actions"]').getByRole("button", { name: locale === "en" ? "Collapse comments" : "收起意见", exact: true });
         await collapse.click();

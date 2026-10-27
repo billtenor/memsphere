@@ -1,0 +1,1484 @@
+{
+  "type": "object",
+  "title": "Step",
+  "description": "一个 Action 的一次运行实例，保存来源、输入、产物要求、执行进度、各轮评审及意见处理记录、完成结果引用。",
+  "properties": {
+    "id": {
+      "$ref": "#/definitions/Id",
+      "title": "步骤标识",
+      "description": "一次 Action 执行的稳定标识；循环或再次触发创建新 Step，同次执行的修订和重试保留此标识。"
+    },
+    "runId": {
+      "$ref": "#/definitions/Id",
+      "title": "所属运行",
+      "description": "本步骤所属的 Run。"
+    },
+    "status": {
+      "type": "string",
+      "title": "执行状态",
+      "description": "共享 Step 状态；旧路径保留 failed/cancelled，graph 业务校验仅允许 pending/running/awaiting_review/done。",
+      "minLength": 1,
+      "enum": [
+        "pending",
+        "running",
+        "awaiting_review",
+        "done",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "source": {
+      "type": "object",
+      "title": "步骤来源",
+      "description": "在 Run.memorySnapshot 中定位 Action。flow 使用 nodePath，graph 使用 actionId，两者只填一个。有来源时从快照解析定义；自由探索省略 source，直接保存工作指令及适用的产物和评审要求。",
+      "properties": {
+        "memoryRef": {
+          "type": "string",
+          "title": "记忆引用",
+          "description": "Run.memorySnapshot.memories 中对应流程记忆的逻辑引用。",
+          "minLength": 1
+        },
+        "nodePath": {
+          "type": "string",
+          "title": "节点路径",
+          "description": "flow 模式下 Action 在记忆定义中的节点路径；循环和重复调用共享此路径。",
+          "minLength": 1
+        },
+        "actionId": {
+          "type": "string",
+          "title": "Action 标识",
+          "description": "graph 模式下 Action 定义的 id；同一 Action 多次执行由 Step.id 区分。",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "memoryRef"
+      ],
+      "additionalProperties": false
+    },
+    "instruction": {
+      "type": "string",
+      "title": "执行指令",
+      "description": "自由探索步骤需要完成的工作；有 source 时从快照中的 Action 定义读取。",
+      "minLength": 1
+    },
+    "runner": {
+      "type": "string",
+      "title": "执行者",
+      "description": "生产工作由 human 或 agent 执行；有 source 时从快照解析。仅聚合引用的步骤由运行时执行，省略此字段。",
+      "minLength": 1,
+      "enum": [
+        "human",
+        "agent"
+      ]
+    },
+    "inputs": {
+      "type": "object",
+      "title": "执行输入",
+      "description": "执行开始前固定的输入引用。graph 的键为上游产物 Action.id，聚合输入按原生产 Action 分组；自由探索使用输入名称。每组始终为数组，顺序固定，同组引用不重复；启动后不随上游新产物变化。产物实际依赖仍由 Artifact.dependencies 表达。",
+      "additionalProperties": {
+        "type": "array",
+        "title": "一组输入",
+        "description": "供本次 Action 使用的固定输入引用。",
+        "items": {
+          "$ref": "#/definitions/InputRef",
+          "title": "输入",
+          "description": "一份固定输入。"
+        }
+      }
+    },
+    "artifactSpec": {
+      "$ref": "#/definitions/ArtifactSpec",
+      "title": "产物要求",
+      "description": "自由探索生产步骤的产物模型、序列化要求、自然语言要求和建议；有 source 时从快照解析。仅聚合引用的步骤省略。"
+    },
+    "artifactStore": {
+      "type": "object",
+      "title": "产物存储目标",
+      "description": "生产步骤计划写入的业务 Store 和记录；Store 引用 Run.storeConfig，dataId 首次确定后保持不变。仅聚合引用的步骤省略。",
+      "properties": {
+        "storeId": {
+          "type": "string",
+          "title": "Store",
+          "description": "保存产物的业务 Store ID。",
+          "minLength": 1
+        },
+        "dataId": {
+          "type": "string",
+          "title": "业务记录",
+          "description": "保存产物的业务记录 ID；进入评审或执行写入前须确定，确定后保持不变。",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "storeId"
+      ],
+      "additionalProperties": false
+    },
+    "reviewSlots": {
+      "type": "array",
+      "title": "评审要求",
+      "description": "自由探索生产步骤的评审槽位；无需评审时为空数组，有 source 时从快照解析。每轮开启时从 Run.reviewConfig 解析参与者和策略，固定到 reviewRounds；仅聚合引用的步骤省略。",
+      "items": {
+        "$ref": "#/definitions/Id",
+        "title": "标识",
+        "description": "关联记录或定义的标识。"
+      },
+      "uniqueItems": true
+    },
+    "reviewRounds": {
+      "type": "array",
+      "title": "评审轮次",
+      "description": "按开启顺序追加本 Step 的评审轮次及其意见处理总结和细节；未开启评审时省略。同一 Step 同时最多一轮未完成评审，新轮次须在前轮完成或取消后开启。每轮的产物与配置固定，resolutionSummary 和 resolutions 可更新；整轮进度和结论由固定名单及个人 Review 汇聚，不重复保存。",
+      "items": {
+        "$ref": "#/definitions/ReviewRound",
+        "title": "评审轮次",
+        "description": "一轮固定的评审要求。"
+      }
+    },
+    "validation": {
+      "$ref": "#/definitions/Validation",
+      "title": "最近一次校验",
+      "description": "最近一次校验的整体结果和问题；尚未校验时省略。"
+    },
+    "frames": {
+      "type": "array",
+      "title": "内部执行栈",
+      "description": "按 type 精确匹配唯一载荷；由 context_control 模型业务校验拒绝缺失、错配或多载荷，不扩展通用 JSON Schema Runtime。",
+      "items": {
+        "type": "object",
+        "title": "执行帧",
+        "description": "Action 内部的一次执行上下文，外层保存稳定标识和类型，类型专属状态保存在对应结构中。",
+        "properties": {
+          "id": {
+            "$ref": "#/definitions/Id",
+            "title": "执行帧标识",
+            "description": "本执行帧的稳定标识，在所属 Step 的 frames 内唯一；创建后保持不变，不使用数组位置作为身份。不同 Run 或 Step 的执行帧可以使用相同 id，不要求全局唯一。"
+          },
+          "type": {
+            "type": "string",
+            "title": "帧类型",
+            "description": "schema 为既有图式帧，submission 为候选及评审创建的短期恢复材料。按类型只填写对应结构。",
+            "enum": [
+              "schema",
+              "submission"
+            ]
+          },
+          "schemaFrame": {
+            "$ref": "#/definitions/SchemaFrame",
+            "title": "Schema 帧状态",
+            "description": "type=schema 时必须填写，保存本次 Schema 写作的展开序列、位置和选择。"
+          },
+          "submissionFrame": {
+            "$ref": "#/definitions/SubmissionFrame"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "title": "产物结果",
+      "description": "本Step的产物引用。produce模式可在生产时指向draft目标；done时指向已提交结果并保持不变。collect模式引用已有产物集合。",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "title": "产物模式",
+          "description": "produce 表示本 Step 生产的单份产物；collect 表示引用已有产物形成的集合。",
+          "enum": [
+            "produce",
+            "collect"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/Id",
+          "title": "产物标识",
+          "description": "produce模式的目标Artifact ID，生产时为draft，完成时为submitted；collect模式省略。"
+        },
+        "items": {
+          "type": "object",
+          "title": "聚合产物",
+          "description": "collect 模式必填，produce 模式省略。键为被收集的生产 Action.id，值为已完成 Step.artifact.id 指向的已提交 Artifact ID 数组；按 Step 创建顺序排列，同组去重，没有产物时该组为空数组。不复制正文，也不创建新的 Artifact。",
+          "additionalProperties": {
+            "type": "array",
+            "title": "产物集合",
+            "description": "本次聚合固定的一组已提交 Artifact 引用。",
+            "items": {
+              "$ref": "#/definitions/Id",
+              "title": "产物标识",
+              "description": "已提交的 Artifact 标识。"
+            },
+            "uniqueItems": true
+          }
+        }
+      },
+      "required": [
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "createdAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "创建时间",
+      "description": "本次实际步骤创建的时间。"
+    },
+    "startedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "开始时间",
+      "description": "本 Step 首次开始执行的时间；尚未开始时省略，重试不改变。"
+    },
+    "endedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "结束时间",
+      "description": "Step 完成或取消的时间；failed 状态仍可继续执行，不填写最终结束时间。"
+    },
+    "reads": {
+      "type": "object",
+      "title": "读取记录",
+      "description": "生产本产物时经CLI读取的材料。键为artifact:ID或external:ID；只作依赖候选，记账失败允许缺失。",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "readAt": {
+            "$ref": "#/definitions/Timestamp",
+            "description": "最近一次读取时间。"
+          }
+        },
+        "required": [
+          "readAt"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "completionSequence": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "graph Step 的持久完成顺序；与 done 原子提交，不能用时间戳或随机 ID 推断。"
+    }
+  },
+  "required": [
+    "id",
+    "runId",
+    "createdAt",
+    "status"
+  ],
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Id": {
+      "type": "string",
+      "title": "标识",
+      "description": "对象或定义的稳定标识。",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "Timestamp": {
+      "type": "string",
+      "title": "时间",
+      "description": "带时区的 RFC 3339 时间。",
+      "minLength": 1,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "ArtifactModel": {
+      "type": "object",
+      "title": "产物模型",
+      "description": "描述产物结构和要求的模型。",
+      "properties": {
+        "definedBy": {
+          "type": "string",
+          "title": "定义依据",
+          "description": "解释模型定义的元模型 ID。",
+          "minLength": 1
+        },
+        "definition": {
+          "type": "string",
+          "title": "模型定义",
+          "description": "使用 JSON 文本保存的完整模型定义。",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "definedBy",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "Validation": {
+      "type": "object",
+      "title": "最近一次校验",
+      "description": "最近一次校验的内容标识、时间、整体结果和问题；内容、产物要求或校验规则改变时须重新校验。",
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "title": "内容 SHA-256",
+          "description": "本次检查内容的 SHA-256。",
+          "minLength": 1,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifactId": {
+          "$ref": "#/definitions/Id",
+          "title": "被检查产物",
+          "description": "被检查的 Artifact 标识；sha256 对应本次实际检查的内容。"
+        },
+        "checkedAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "检查时间",
+          "description": "本次检查实际执行的时间。"
+        },
+        "status": {
+          "type": "string",
+          "title": "校验结果",
+          "description": "passed 表示全部必要检查已完成并通过；failed 表示已发现不满足要求的问题；unsupported 表示缺少所需校验能力，无法完成校验。",
+          "enum": [
+            "passed",
+            "failed",
+            "unsupported"
+          ]
+        },
+        "issues": {
+          "type": "array",
+          "title": "校验问题",
+          "description": "校验发现的问题或无法完成校验的原因；通过时为空数组。",
+          "items": {
+            "type": "object",
+            "title": "问题",
+            "description": "一个需要处理的校验问题。",
+            "properties": {
+              "path": {
+                "type": "string",
+                "title": "问题位置",
+                "description": "产物内容中出现问题的位置；针对整体内容或无法定位时省略。",
+                "minLength": 1
+              },
+              "message": {
+                "type": "string",
+                "title": "问题说明",
+                "description": "说明不满足的要求，或无法完成校验的具体原因。",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "message"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "sha256",
+        "checkedAt",
+        "status",
+        "issues"
+      ],
+      "additionalProperties": false
+    },
+    "ArtifactSpec": {
+      "type": "object",
+      "title": "产物要求",
+      "description": "产物的数据结构、序列化形式、必须满足的要求和建议。模型要求来自 model 或 artifactStore 所指向的业务模型。",
+      "properties": {
+        "model": {
+          "$ref": "#/definitions/ArtifactModel",
+          "title": "产物模型要求",
+          "description": "产物数据的结构与约束，由 definedBy 指定的元模型解释 definition。"
+        },
+        "payload": {
+          "type": "object",
+          "title": "产物序列化要求",
+          "description": "规定产物正文的序列化形式。",
+          "properties": {
+            "contentType": {
+              "type": "string",
+              "title": "序列化格式",
+              "description": "用 MIME 类型标识产物正文的序列化格式，例如 application/json、application/yaml 或 text/markdown。",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "contentType"
+          ],
+          "additionalProperties": false
+        },
+        "asserts": {
+          "type": "array",
+          "title": "必须满足的要求",
+          "description": "使用自然语言描述产物必须满足的要求。",
+          "items": {
+            "type": "string",
+            "title": "规则",
+            "description": "一项必须满足的要求。",
+            "minLength": 1
+          }
+        },
+        "suggests": {
+          "type": "array",
+          "title": "建议",
+          "description": "使用自然语言描述对产物的建议。",
+          "items": {
+            "type": "string",
+            "title": "建议",
+            "description": "一项生产建议。",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "InputRef": {
+      "type": "object",
+      "title": "输入引用",
+      "description": "本次执行实际绑定的输入；Artifact 必须已提交，External 必须固定，均属于本 Run。",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "title": "输入类型",
+          "description": "输入来自 Artifact 或 External。",
+          "minLength": 1,
+          "enum": [
+            "artifact",
+            "external"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/Id",
+          "title": "输入标识",
+          "description": "对应 Artifact 或 External 的标识。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "SchemaFrame": {
+      "type": "object",
+      "title": "Schema 帧状态",
+      "description": "Schema 执行帧的可恢复写作状态；Schema 定义从所属 Step 的产物要求和 Run 记忆快照解析。",
+      "properties": {
+        "sequence": {
+          "type": "array",
+          "title": "写作序列",
+          "description": "本次写作已展开的 Schema 字段和控制节点。",
+          "items": {
+            "type": "object",
+            "title": "执行项",
+            "description": "一个字段或写作控制节点及其字段产物引用。",
+            "properties": {
+              "nodePath": {
+                "type": "string",
+                "title": "节点路径",
+                "description": "Schema 字段或控制节点路径；重复实例使用不同路径。",
+                "minLength": 1
+              },
+              "artifactId": {
+                "$ref": "#/definitions/Id",
+                "title": "字段产物",
+                "description": "该字段保存的中间 Artifact，所属 stepId 为本 Step；内容仍由 Artifact 保存。"
+              }
+            },
+            "required": [
+              "nodePath"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "title": "当前位置",
+          "description": "下一写作项的零基位置，允许等于 sequence 长度；全部字段完成后等待整体产物确认和提交。"
+        },
+        "decisions": {
+          "type": "array",
+          "title": "写作选择",
+          "description": "写作时实际作出的跳过和重复次数选择；同一位置同类选择只保存一次。",
+          "items": {
+            "type": "object",
+            "title": "选择",
+            "description": "skip 表示跳过；repeat 须填写 count。",
+            "properties": {
+              "path": {
+                "type": "string",
+                "title": "位置",
+                "description": "对应的字段或重复控制节点路径。",
+                "minLength": 1
+              },
+              "kind": {
+                "type": "string",
+                "title": "选择类型",
+                "description": "跳过可选字段或确定重复次数。",
+                "minLength": 1,
+                "enum": [
+                  "skip",
+                  "repeat"
+                ]
+              },
+              "count": {
+                "type": "integer",
+                "title": "重复次数",
+                "description": "明确选择的次数，须符合 Schema 的范围。",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "path",
+              "kind"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "sequence",
+        "index",
+        "decisions"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewConfig": {
+      "type": "object",
+      "title": "评审配置",
+      "description": "本轮评审开始前固定的决策策略、槽位绑定、评审者身份和权限、Runner 权限；开启后不可修改，后续配置变更只作用于新轮次。",
+      "properties": {
+        "policy": {
+          "type": "object",
+          "title": "决策策略",
+          "description": "本次评审采用的完整决策策略；开启后保持不变。",
+          "properties": {
+            "id": {
+              "type": "string",
+              "title": "策略标识",
+              "description": "本次采用的决策策略 ID。",
+              "minLength": 1
+            },
+            "kind": {
+              "type": "string",
+              "title": "用途",
+              "description": "策略的决策用途。",
+              "minLength": 1,
+              "const": "artifact_acceptance"
+            },
+            "completion": {
+              "type": "string",
+              "title": "完成条件",
+              "description": "固定名单中的所有评审者提交正式意见；是否要求 Runner 提交由本轮固定权限与决策规则确定。尚未创建 Review 的必需参与者仍视为未完成，cancelled 不算提交。",
+              "minLength": 1,
+              "const": "all_assigned"
+            },
+            "resolution": {
+              "type": "string",
+              "title": "通过条件",
+              "description": "具有决定权的正式决定一致同意。",
+              "minLength": 1,
+              "const": "unanimous"
+            }
+          },
+          "required": [
+            "id",
+            "kind",
+            "completion",
+            "resolution"
+          ],
+          "additionalProperties": false
+        },
+        "bindings": {
+          "type": "object",
+          "title": "生效绑定",
+          "description": "以槽位名称为键保存本次实际采用的参与者绑定和跳过决定。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "生效绑定",
+            "description": "本次评审采用的参与者或明确跳过决定；开启后保持不变。",
+            "properties": {
+              "actorIds": {
+                "type": "array",
+                "title": "参与者",
+                "description": "该槽位绑定的评审者 ID，对应本轮 reviewConfig.reviewers 的键；跳过时为空。同一人绑定多个槽位仍只创建一份 Review。",
+                "items": {
+                  "$ref": "#/definitions/Id",
+                  "title": "标识",
+                  "description": "关联对象或定义的标识。"
+                },
+                "uniqueItems": true
+              },
+              "skipped": {
+                "type": "boolean",
+                "title": "已跳过",
+                "description": "是否明确跳过该槽位；为 true 时 actorIds 为空。"
+              }
+            },
+            "required": [
+              "actorIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reviewers": {
+          "type": "object",
+          "title": "评审者配置",
+          "description": "以 actorId 为键保存本轮需要参与的评审者身份和生效权限；与未跳过槽位的参与者并集一致，开启后固定。",
+          "additionalProperties": {
+            "type": "object",
+            "title": "评审者配置",
+            "description": "本次评审采用的评审者标识、类型、名称和权限。",
+            "properties": {
+              "id": {
+                "$ref": "#/definitions/Id",
+                "title": "参与者标识",
+                "description": "必须与本项的映射键一致。"
+              },
+              "kind": {
+                "type": "string",
+                "title": "参与者类型",
+                "description": "Human 或 Agent。",
+                "enum": [
+                  "human",
+                  "agent"
+                ]
+              },
+              "name": {
+                "type": "string",
+                "title": "参与者名称",
+                "description": "评审开启时的显示名称。",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "title": "权限列表",
+                "description": "该评审者在本次评审中实际具有的权限 ID。",
+                "items": {
+                  "$ref": "#/definitions/Id",
+                  "title": "权限标识",
+                  "description": "实际授予的权限 ID。"
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "id",
+              "kind",
+              "name",
+              "permissions"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "runner": {
+          "type": "object",
+          "title": "Runner 配置",
+          "description": "本次评审采用的 Runner 权限，开启后保持不变。",
+          "properties": {
+            "permissions": {
+              "type": "array",
+              "title": "权限列表",
+              "description": "Runner 在本次评审中实际具有的权限 ID。",
+              "items": {
+                "$ref": "#/definitions/Id",
+                "title": "权限标识",
+                "description": "实际授予的权限 ID。"
+              },
+              "uniqueItems": true
+            }
+          },
+          "required": [
+            "permissions"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "policy",
+        "bindings",
+        "reviewers",
+        "runner"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewRound": {
+      "type": "object",
+      "title": "评审轮次",
+      "description": "本 Step 一轮评审的固定要求、意见处理总结与逐条处理记录。id、artifactId、reviewConfig、createdAt 在创建个人 Review 前确定并保持不变；resolutionSummary 和 resolutions 由 Runner 随处理进度更新。个人评论、投票和执行状态保存在 Review 中。",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Id",
+          "title": "轮次标识",
+          "description": "全局唯一的轮次标识；Review.roundId 引用此标识。"
+        },
+        "artifactId": {
+          "$ref": "#/definitions/Id",
+          "title": "被评审产物",
+          "description": "本轮固定的 Artifact，必须属于本 Step 且 status=submitted；本轮所有 Review.artifactId 必须一致。"
+        },
+        "reviewConfig": {
+          "$ref": "#/definitions/ReviewConfig",
+          "title": "评审配置",
+          "description": "本轮固定的参与名单、决策策略与权限。"
+        },
+        "createdAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "开启时间",
+          "description": "本轮固定配置并开始组织评审的时间。"
+        },
+        "resolutionSummary": {
+          "type": "string",
+          "title": "处理总结",
+          "description": "Runner 对本轮评审意见处理情况的整体总结，包括主要修改、处理结论和后续安排；逐条处理细节保存在 resolutions。可随处理进度更新，尚无总结时省略。",
+          "minLength": 1
+        },
+        "resolutions": {
+          "type": "array",
+          "title": "评论处理结果",
+          "description": "Runner 对本轮已提交评论的处理记录，通过 reviewId + commentId 关联；没有处理记录时省略或为空数组。可在评审进行中或本轮结束后更新，不改变已固定的产物、参与名单和策略。",
+          "items": {
+            "$ref": "#/definitions/Resolution",
+            "title": "处理记录",
+            "description": "Runner 对一条评论的处理方式和说明。"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "artifactId",
+        "reviewConfig",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "Resolution": {
+      "type": "object",
+      "title": "评论处理结果",
+      "description": "Runner 对本轮一条个人评审评论的处理记录；同一 reviewId 与 commentId 组合只保存一份，记录处理方式、原因及必要的验证说明。",
+      "properties": {
+        "reviewId": {
+          "$ref": "#/definitions/Id",
+          "title": "关联评审",
+          "description": "评论所属的个人 Review，其 roundId 必须等于包含本记录的 reviewRound.id。"
+        },
+        "commentId": {
+          "$ref": "#/definitions/Id",
+          "title": "关联评论",
+          "description": "关联 Review.comments 中的评论 id；评论必须已正式提交。"
+        },
+        "value": {
+          "type": "string",
+          "title": "处理方式",
+          "description": "接受修复、后续处理或明确驳回。",
+          "minLength": 1,
+          "enum": [
+            "accepted-fixed",
+            "accepted-followup",
+            "rejected-out-of-scope",
+            "rejected-not-blocking",
+            "rejected-invalid"
+          ]
+        },
+        "note": {
+          "type": "string",
+          "title": "说明",
+          "description": "处理原因及具体修改或后续安排。",
+          "minLength": 1
+        },
+        "validationSummary": {
+          "type": "string",
+          "title": "验证说明",
+          "description": "已修复问题的验证结果；accepted-fixed 时填写。",
+          "minLength": 1
+        },
+        "updatedAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "处理时间",
+          "description": "Runner 最近一次更新该评论处理结果的时间。"
+        }
+      },
+      "required": [
+        "reviewId",
+        "commentId",
+        "value",
+        "note",
+        "updatedAt"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "稳定标识。"
+    },
+    "SubmittedContent": {
+      "type": "object",
+      "title": "产物内容",
+      "description": "产物的模型定义和实际内容。",
+      "properties": {
+        "model": {
+          "$ref": "#/definitions/SubmittedArtifactModel",
+          "description": "描述产物结构与要求的模型。",
+          "title": "产物模型"
+        },
+        "payload": {
+          "$ref": "#/definitions/SubmittedPayload",
+          "description": "产物的实际内容及其格式。",
+          "title": "产物内容"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "payload"
+      ]
+    },
+    "SubmittedContentRef": {
+      "type": "object",
+      "title": "内容存储引用",
+      "description": "指向 Store 中一份可读取、不可变的内容。",
+      "properties": {
+        "storeId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "保存内容的 Store ID。"
+        },
+        "dataId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容在该 Store 中的 ID。"
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容字节的 SHA-256，以 64 位小写十六进制表示；读取时核对。",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": [
+        "storeId",
+        "dataId",
+        "sha256"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedDependencyRef": {
+      "type": "object",
+      "title": "依赖引用",
+      "description": "同一 Run 内已提交的 Artifact 或内容已固定的 External 引用；禁止自依赖，产物依赖图须无环。",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "材料类型：artifact 或 external。",
+          "enum": [
+            "artifact",
+            "external"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "被依赖材料的稳定标识。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedArtifactModel": {
+      "type": "object",
+      "title": "产物模型",
+      "description": "描述内容结构与要求的模型定义。",
+      "properties": {
+        "definedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "解释模型定义的元模型 ID。"
+        },
+        "definition": {
+          "type": "string",
+          "minLength": 1,
+          "description": "模型定义的 JSON 文本，由 definedBy 指定的元模型解释。"
+        }
+      },
+      "required": [
+        "definedBy",
+        "definition"
+      ],
+      "additionalProperties": false
+    },
+    "SubmittedPayload": {
+      "type": "object",
+      "title": "产物内容",
+      "description": "以文本保存的实际内容及其格式。",
+      "properties": {
+        "contentType": {
+          "type": "string",
+          "minLength": 1,
+          "description": "内容的 MIME 类型，例如 text/plain、text/markdown 或 application/json。"
+        },
+        "content": {
+          "type": "string",
+          "title": "产物正文",
+          "description": "正文原文，保留换行、排版和注释；空字符串表示空内容。"
+        }
+      },
+      "required": [
+        "contentType",
+        "content"
+      ],
+      "additionalProperties": false
+    },
+    "SubmissionArtifact": {
+      "type": "object",
+      "title": "Artifact · 产物",
+      "description": "Step 生产的一份产物，保存内容、依赖及所属 Run 内的标签。草稿只保留当前内容；提交后除 tags 外的字段及引用内容固定，修改内容须创建新的 Artifact。",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "产物的稳定标识；草稿更新和提交保持同一 ID，提交后修改内容须创建新 ID，调整 tags 不改变 ID。"
+        },
+        "stepId": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "生产该产物的 Step；所属 Run 和生产者由该 Step 确定。"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "产物名称。"
+        },
+        "status": {
+          "type": "string",
+          "title": "产物状态",
+          "enum": [
+            "draft",
+            "submitted"
+          ],
+          "description": "draft 为草稿，可修改且只保存当前内容；submitted 为已提交，除 tags 外的字段及所引用内容固定。只允许从 draft 变为 submitted，不允许退回草稿。tags 为分类信息，可更新且不影响已固定的依赖。评审结果由 Review 记录，当前成果及最终交付根由完整 Artifact 的依赖、修订关系与 Run.outputOverrides 人工增删共同推导。"
+        },
+        "tags": {
+          "type": "array",
+          "title": "标签",
+          "description": "所属 Run 内生效的产物标签；由 stepId 确定 Run，同名标签不跨 Run 关联。创建时自动包含 default，可添加自定义标签；每份 Artifact 都须保留 default，同一标签不重复。标签可更新，不改变产物 ID、内容或已提交的依赖。按标签上报依赖只在本次提交时展开当前 Run 已提交的匹配产物 ID，后续打标签不会追加历史产物的依赖。",
+          "items": {
+            "type": "string",
+            "title": "标签名称",
+            "description": "所属 Run 内使用的标签名称。",
+            "minLength": 1,
+            "pattern": "\\S"
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "content": {
+          "$ref": "#/definitions/SubmittedContent",
+          "description": "直接保存的产物模型和正文，与contentRef互斥；声明无正文draft时可都省略，提交时必须二选一。"
+        },
+        "contentRef": {
+          "$ref": "#/definitions/SubmittedContentRef",
+          "title": "产物内容引用",
+          "description": "固定产物的内容引用，与content互斥；无正文draft可省略，submitted必须提供一个内容入口。"
+        },
+        "dependencies": {
+          "type": "array",
+          "description": "生产这份产物实际使用的材料，可引用同一 Run 中 status=submitted 的 Artifact 或内容已固定的 External；禁止自依赖，依赖图须无环。草稿期间可调整，提交后固定；无依赖时为空数组。 按标签选择依赖时保存展开后的具体 Artifact ID，不保存 tag 引用，也不随标签变化更新。",
+          "items": {
+            "$ref": "#/definitions/SubmittedDependencyRef"
+          },
+          "uniqueItems": true
+        },
+        "revisedFrom": {
+          "$ref": "#/definitions/SubmittedId",
+          "description": "本次修订所替代的已提交 Artifact ID，须属于同一 Run，可来自同一 Step 或其他 Step；不得指向自身，修订关系不得成环。"
+        },
+        "revisedSummary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "本次修改的说明，包括已解决和仍未解决的问题。"
+        }
+      },
+      "required": [
+        "id",
+        "stepId",
+        "name",
+        "status",
+        "tags",
+        "dependencies"
+      ],
+      "additionalProperties": false
+    },
+    "SubmissionFrame": {
+      "type": "object",
+      "properties": {
+        "artifact": {
+          "$ref": "#/definitions/SubmissionArtifact"
+        },
+        "nextStatus": {
+          "type": "string",
+          "enum": [
+            "awaiting_review",
+            "done"
+          ]
+        },
+        "round": {
+          "$ref": "#/definitions/ReviewRound"
+        },
+        "completionSequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "endedAt": {
+          "$ref": "#/definitions/Timestamp"
+        }
+      },
+      "required": [
+        "artifact",
+        "nextStatus"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "id": "step-example",
+      "runId": "run-example",
+      "source": {
+        "memoryRef": "procedures/example-procedure",
+        "nodePath": "flow[1]"
+      },
+      "createdAt": "2026-10-17T08:00:00Z",
+      "status": "running",
+      "startedAt": "2026-10-17T08:00:00Z",
+      "inputs": {}
+    },
+    {
+      "id": "step-writing",
+      "runId": "run-schema-writing",
+      "instruction": "逐项编写说明",
+      "runner": "agent",
+      "artifactSpec": {
+        "payload": {
+          "contentType": "text/markdown"
+        },
+        "asserts": [
+          "说明适用范围和验收标准。"
+        ],
+        "suggests": [
+          "使用具体示例说明。"
+        ]
+      },
+      "reviewSlots": [],
+      "createdAt": "2026-10-17T08:00:00Z",
+      "status": "running",
+      "startedAt": "2026-10-17T08:00:00Z",
+      "inputs": {},
+      "frames": [
+        {
+          "id": "schema-1",
+          "type": "schema",
+          "schemaFrame": {
+            "sequence": [
+              {
+                "nodePath": "requirements.scope",
+                "artifactId": "artifact-scope"
+              },
+              {
+                "nodePath": "requirements.acceptance"
+              }
+            ],
+            "index": 1,
+            "decisions": [
+              {
+                "path": "requirements.cases",
+                "kind": "repeat",
+                "count": 0
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "step-business",
+      "runId": "run-business",
+      "instruction": "保存已确认的采购记录",
+      "runner": "human",
+      "artifactSpec": {
+        "payload": {
+          "contentType": "application/json"
+        }
+      },
+      "artifactStore": {
+        "storeId": "purchase-requests",
+        "dataId": "purchase-001"
+      },
+      "reviewSlots": [],
+      "validation": {
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "artifactId": "artifact-business",
+        "checkedAt": "2026-10-17T08:05:00Z",
+        "status": "passed",
+        "issues": []
+      },
+      "createdAt": "2026-10-17T08:00:00Z",
+      "status": "done",
+      "startedAt": "2026-10-17T08:00:00Z",
+      "inputs": {},
+      "endedAt": "2026-10-17T08:05:00Z",
+      "artifact": {
+        "mode": "produce",
+        "id": "artifact-business"
+      }
+    },
+    {
+      "runId": "run-graph",
+      "createdAt": "2026-10-22T08:00:00Z",
+      "id": "step-analyze-1",
+      "source": {
+        "memoryRef": "procedures/batch-summary",
+        "actionId": "analyze"
+      },
+      "status": "done",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:01:00Z",
+      "inputs": {
+        "check": [
+          {
+            "kind": "artifact",
+            "id": "artifact-check-1"
+          }
+        ]
+      },
+      "artifact": {
+        "mode": "produce",
+        "id": "artifact-analyze-1"
+      }
+    },
+    {
+      "runId": "run-graph",
+      "createdAt": "2026-10-22T08:00:00Z",
+      "id": "step-gather",
+      "source": {
+        "memoryRef": "procedures/batch-summary",
+        "actionId": "gather"
+      },
+      "status": "done",
+      "startedAt": "2026-10-22T08:04:00Z",
+      "endedAt": "2026-10-22T08:04:01Z",
+      "inputs": {
+        "check": [
+          {
+            "kind": "artifact",
+            "id": "artifact-check-end"
+          }
+        ]
+      },
+      "artifact": {
+        "mode": "collect",
+        "items": {
+          "analyze": [
+            "artifact-analyze-1",
+            "artifact-analyze-2"
+          ]
+        }
+      }
+    },
+    {
+      "runId": "run-graph",
+      "createdAt": "2026-10-22T08:00:00Z",
+      "id": "step-summary",
+      "source": {
+        "memoryRef": "procedures/batch-summary",
+        "actionId": "summarize"
+      },
+      "status": "pending",
+      "inputs": {
+        "analyze": [
+          {
+            "kind": "artifact",
+            "id": "artifact-analyze-1"
+          },
+          {
+            "kind": "artifact",
+            "id": "artifact-analyze-2"
+          }
+        ]
+      }
+    },
+    {
+      "id": "step-retry",
+      "runId": "run-retry",
+      "createdAt": "2026-10-17T08:00:00Z",
+      "startedAt": "2026-10-17T08:00:00Z",
+      "status": "running",
+      "instruction": "编写实现方案。",
+      "runner": "agent",
+      "artifactSpec": {
+        "payload": {
+          "contentType": "text/markdown"
+        }
+      },
+      "reviewSlots": [],
+      "inputs": {}
+    },
+    {
+      "id": "step-review-design",
+      "runId": "run-review-examples",
+      "status": "awaiting_review",
+      "instruction": "编写并评审方案。",
+      "runner": "agent",
+      "artifactSpec": {
+        "payload": {
+          "contentType": "text/markdown"
+        }
+      },
+      "reviewSlots": [
+        "example-procedure::owner",
+        "example-procedure::code"
+      ],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "reviewRounds": [
+        {
+          "id": "round-design-1",
+          "artifactId": "artifact-design-1",
+          "reviewConfig": {
+            "policy": {
+              "id": "unanimous",
+              "kind": "artifact_acceptance",
+              "completion": "all_assigned",
+              "resolution": "unanimous"
+            },
+            "bindings": {
+              "example-procedure::owner": {
+                "actorIds": [
+                  "owner"
+                ]
+              },
+              "example-procedure::code": {
+                "actorIds": [],
+                "skipped": true
+              }
+            },
+            "reviewers": {
+              "owner": {
+                "id": "owner",
+                "kind": "human",
+                "name": "领域专家",
+                "permissions": [
+                  "artifact.read",
+                  "decision.decide"
+                ]
+              }
+            },
+            "runner": {
+              "permissions": [
+                "artifact.read",
+                "artifact.submit",
+                "decision.decide"
+              ]
+            }
+          },
+          "createdAt": "2026-10-22T08:00:00Z",
+          "resolutions": [
+            {
+              "reviewId": "review-owner-1",
+              "commentId": "comment-1",
+              "value": "accepted-fixed",
+              "note": "已在新版方案补充恢复步骤。",
+              "validationSummary": "核对了失败检测、回滚和恢复验证流程。",
+              "updatedAt": "2026-10-22T08:03:00Z"
+            }
+          ],
+          "resolutionSummary": "已按本轮意见补充失败检测、回滚与恢复验证步骤，并在新产物中完成修复。"
+        },
+        {
+          "id": "round-design-2",
+          "artifactId": "artifact-design-2",
+          "reviewConfig": {
+            "policy": {
+              "id": "unanimous",
+              "kind": "artifact_acceptance",
+              "completion": "all_assigned",
+              "resolution": "unanimous"
+            },
+            "bindings": {
+              "example-procedure::owner": {
+                "actorIds": [
+                  "owner"
+                ]
+              },
+              "example-procedure::code": {
+                "actorIds": [
+                  "code-reviewer"
+                ]
+              }
+            },
+            "reviewers": {
+              "owner": {
+                "id": "owner",
+                "kind": "human",
+                "name": "领域专家",
+                "permissions": [
+                  "artifact.read",
+                  "decision.decide"
+                ]
+              },
+              "code-reviewer": {
+                "id": "code-reviewer",
+                "kind": "agent",
+                "name": "代码评审者",
+                "permissions": [
+                  "artifact.read",
+                  "decision.decide"
+                ]
+              }
+            },
+            "runner": {
+              "permissions": [
+                "artifact.read",
+                "artifact.submit",
+                "decision.decide"
+              ]
+            }
+          },
+          "createdAt": "2026-10-22T08:03:00Z"
+        }
+      ]
+    },
+    {
+      "id": "step-review-cancelled",
+      "runId": "run-review-examples",
+      "status": "cancelled",
+      "instruction": "编写并评审方案。",
+      "runner": "agent",
+      "artifactSpec": {
+        "payload": {
+          "contentType": "text/markdown"
+        }
+      },
+      "reviewSlots": [
+        "example-procedure::owner"
+      ],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:01:00Z",
+      "reviewRounds": [
+        {
+          "id": "round-cancelled",
+          "artifactId": "artifact-cancelled",
+          "reviewConfig": {
+            "policy": {
+              "id": "unanimous",
+              "kind": "artifact_acceptance",
+              "completion": "all_assigned",
+              "resolution": "unanimous"
+            },
+            "bindings": {
+              "example-procedure::owner": {
+                "actorIds": [
+                  "owner"
+                ]
+              },
+              "example-procedure::code": {
+                "actorIds": [],
+                "skipped": true
+              }
+            },
+            "reviewers": {
+              "owner": {
+                "id": "owner",
+                "kind": "human",
+                "name": "领域专家",
+                "permissions": [
+                  "artifact.read",
+                  "decision.decide"
+                ]
+              }
+            },
+            "runner": {
+              "permissions": [
+                "artifact.read",
+                "artifact.submit",
+                "decision.decide"
+              ]
+            }
+          },
+          "createdAt": "2026-10-22T08:00:00Z"
+        }
+      ]
+    },
+    {
+      "id": "step-review-advisory",
+      "runId": "run-review-examples",
+      "status": "done",
+      "instruction": "编写并评审方案。",
+      "runner": "agent",
+      "artifactSpec": {
+        "payload": {
+          "contentType": "text/markdown"
+        }
+      },
+      "reviewSlots": [
+        "example-procedure::owner"
+      ],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:02:00Z",
+      "reviewRounds": [
+        {
+          "id": "round-advisory",
+          "artifactId": "artifact-advisory",
+          "reviewConfig": {
+            "policy": {
+              "id": "unanimous",
+              "kind": "artifact_acceptance",
+              "completion": "all_assigned",
+              "resolution": "unanimous"
+            },
+            "bindings": {
+              "example-procedure::owner": {
+                "actorIds": [
+                  "owner"
+                ]
+              }
+            },
+            "reviewers": {
+              "owner": {
+                "id": "owner",
+                "kind": "human",
+                "name": "领域专家",
+                "permissions": [
+                  "artifact.read",
+                  "decision.assess"
+                ]
+              }
+            },
+            "runner": {
+              "permissions": [
+                "artifact.read",
+                "artifact.submit",
+                "decision.decide"
+              ]
+            }
+          },
+          "createdAt": "2026-10-22T08:00:00Z",
+          "resolutions": [
+            {
+              "reviewId": "review-advisory",
+              "commentId": "comment-1",
+              "value": "accepted-followup",
+              "note": "已纳入后续演练文档补充事项。",
+              "updatedAt": "2026-10-22T08:02:00Z"
+            }
+          ],
+          "resolutionSummary": "本轮建议已纳入后续恢复演练文档的补充安排。"
+        }
+      ],
+      "artifact": {
+        "mode": "produce",
+        "id": "artifact-advisory"
+      }
+    }
+  ]
+}

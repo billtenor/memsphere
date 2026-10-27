@@ -1,4 +1,6 @@
 import { tryContextCommand, startExploration, contextRunList } from "./context-control.js";
+import { graphCommand, startGraphIfApplicable, printGraphStart, printGraphReviewOutput } from "./procedure-graph.js";
+import type { Snapshot as GraphSnapshot } from "../context_control/types.js";
 import { randomUUID } from "node:crypto";
 import { lstat, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -66,12 +68,13 @@ import {
   waitForArtifactReview,
   type ArtifactReviewDraftInput,
   type RunState
-} from "../run/store.js";
+} from "../context_control/review-repository.js";
 import { parseModelArtifactWriteOptions } from "../project/model-artifact.js";
 import { assertReportExecutionCapability } from "../report-execution.js";
 
 type ReportOptions = {
   run?: string;
+  step?: string;
   artifact?: string;
   artifactFile?: string;
   writeOptions?: string;
@@ -84,6 +87,7 @@ type RunStartOptions = {
   name?: string;
   reviewConfig?: string;
   change?: string;
+  output?: "text" | "json";
 };
 
 type ReviewWaitOptions = { review?: string };
@@ -192,7 +196,10 @@ export async function runStartCommand(procedureName: string | undefined, options
     provider?: import("../memory/provider.js").MemoryProvider;
     ownership?: import("../app/ownership.js").AppOwnership;
     memorySource: NonNullable<RunState["memorySource"]>;
-  }): Promise<RunState> => startRun({
+  }): Promise<RunState | GraphSnapshot> => {
+    const graph = await startGraphIfApplicable({ catalog: createMemoryCatalogForConfig(config, source), projectCatalogs: createProjectMemoryCatalogs(config, source), memoryRoot: config.memoryRoot, procedure, file: procedureFile, root: config.scopeRoot, name: runName, language: config.language, controlPlane: config.controlPlane, reviewConfiguration, memorySource: source?.memorySource });
+    if (graph) return graph;
+    return startRun({
     projectRoot: config.project ? config.scopeRoot : undefined,
     memoryRoot: config.memoryRoot,
     memorySnapshotRoot: source?.memoryRoot,
@@ -217,7 +224,8 @@ export async function runStartCommand(procedureName: string | undefined, options
     memoryCatalog: createMemoryCatalogForConfig(config, source),
     projectMemoryCatalogs: createProjectMemoryCatalogs(config, source)
   });
-  let run: RunState;
+  };
+  let run: RunState | GraphSnapshot;
   try {
     if (!changeId) {
       run = await start();
@@ -267,7 +275,8 @@ export async function runStartCommand(procedureName: string | undefined, options
     ));
     return;
   }
-  printRunOutput({ kind: "start", run, runsRoot: config.runsRoot });
+  if ("run" in run) await printGraphStart(run, options.output);
+  else printRunOutput({ kind: "start", run, runsRoot: config.runsRoot });
 }
 
 export function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
@@ -345,6 +354,7 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
   await dispatchArtifactReviewAgents({ config, run: located.run });
   const context = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  if (await printGraphReviewOutput(context.review, context.round, context.run.id)) return;
   printRunOutput({
     kind: "review",
     run: context.run,
@@ -376,6 +386,7 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
     vote: options.vote,
     comment
   });
+  if (await printGraphReviewOutput(context.review, context.round, context.run.id, options.vote)) return;
   printRunOutput({
     kind: "review_vote",
     run: context.run,
@@ -445,6 +456,9 @@ export async function runReviewSubmitForHumanCommand(options: ReviewSubmitForHum
     summary,
     authorizationNote
   });
+  if (context.review.id.startsWith("graph-review-") && context.review.status === "awaiting_revision" && options.output !== "json") {
+    await printGraphReviewOutput(context.review, context.round, context.run.id); return;
+  }
   printRunnerDelegatedReviewReceipt({
     runId: context.run.id,
     reviewId: context.review.id,
@@ -603,6 +617,7 @@ export async function runShowCommand(options: RunShowOptions): Promise<void> {
 }
 
 export async function runBindingShowCommand(options: RunBindingShowOptions): Promise<void> {
+  if (await graphCommand("binding-show", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
@@ -610,6 +625,7 @@ export async function runBindingShowCommand(options: RunBindingShowOptions): Pro
 }
 
 export async function runBindingUpdateCommand(options: RunBindingUpdateOptions): Promise<void> {
+  if (await graphCommand("binding-update", options)) return;
   const runId = requireRunId(options.run);
   const slot = options.slot?.trim();
   if (!slot) throw new Error("--slot <procedure::slot> is required");
@@ -658,6 +674,7 @@ export async function runTryRunCommand(options: RunIdOptions): Promise<void> {
 }
 
 export async function runStepShowCommand(options: RunStepShowOptions): Promise<void> {
+  if (await graphCommand("step-show", options)) return;
   const runId = requireRunId(options.run);
   const stepRef = requireStepRef(options.step);
   const config = await readConfig();

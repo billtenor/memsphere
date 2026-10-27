@@ -208,7 +208,17 @@ function collectReferenceEdges(entity: MemoryEntity, source: string, filePath: s
       break;
     case "!procedure":
       collectRuleRefs(entity.asserts ?? [], source, filePath, "asserts", "asserts", edges);
-      collectFlowRefs(entity.flow, source, filePath, "flow", edges);
+      if (entity.mode === "graph") {
+        for (const [index, action] of entity.actions.entries()) {
+          const path = `actions[${index}]`;
+          collectRuleRefs(action.asserts ?? [], source, filePath, `${path}.asserts`, "asserts", edges);
+          collectRuleRefs(action.suggests ?? [], source, filePath, `${path}.suggests`, "suggests", edges);
+          if (action.artifact) {
+            collectRuleRefs(action.artifact.asserts ?? [], source, filePath, `${path}.artifact.asserts`, "asserts", edges);
+            collectRuleRefs(action.artifact.suggests ?? [], source, filePath, `${path}.artifact.suggests`, "suggests", edges);
+          }
+        }
+      } else collectFlowRefs(entity.flow, source, filePath, "flow", edges);
       break;
   }
   return edges;

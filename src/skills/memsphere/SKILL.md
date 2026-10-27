@@ -48,7 +48,7 @@ Managed Memory 通过受控 ChangeSet 修改。Embedded CLI 使用当前 Git wor
 
 ### 自由探索：保留和交付成果
 
-启动回执给出 Run ID 和 `contextId`。跨 Shell 使用同一 ID；`memsphere continue <contextId> --help` 列出可继续生产的操作，原生 `memsphere run` 命令也可用。查询和读取使用原生命令；Continue 当前只支持自由探索生产操作，不接管 Procedure、ChangeSet 或 ACP。
+启动回执给出 Run ID 和 `contextId`。跨 Shell 使用同一 ID；`memsphere continue <contextId> --help` 列出可继续生产的操作，原生 `memsphere run` 命令也可用。查询和读取使用原生命令；这里的 Continue 用于自由探索生产；graph 的 Continue 固定 Step，见下文。旧 flow、ChangeSet 与 ACP 保持各自入口。
 
 **Artifact（产物）**是一份围绕明确目的组织、可独立阅读或使用，且值得供后续引用、评审、修订或交付保留的结果。它可以是阶段版本，但这一版应表达结果、依据与适用边界，不能只有标题或占位符。同一用途下紧密相关的内容合并，需要分别引用、评审或演进时再拆分；文件数、消息数和保存次数不决定产物数。
 
@@ -80,11 +80,26 @@ Procedure 有 Review Slot 时，首次启动会预检所有 scope、Slot、Actor
 
 只有两种情况可以结束当前回复并暂停：需要 Human 完成步骤、提供必要信息/授权或处理无法自行恢复的事项；或同一阻塞事项实际连续等待超过 5 分钟，且没有其他可推进的工作。轮询不能重置等待计时，5 分钟不是整个 Run 的时限。可自行修复的错误、字段边界、Agent Review 短暂等待和 Runner 自己待投票均不是暂停理由。暂停时说明 Run ID、停止位置、等待对象和恢复方式，恢复同一 Run，不跳过门禁或自动废弃。
 
-普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-file <path>`。Artifact 声明了业务 `store`/`model` 时，按“在 Procedure 中写入业务数据”处理绑定与写入。
+flow 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-file <path>`。Artifact 声明了业务 `store`/`model` 时，按“在 Procedure 中写入业务数据”处理绑定与写入。
 
 执行权限被拒绝时，按宿主权限机制用同一命令申请所需访问，不改参数规避检查或直写 Run 存储。
 
-#### 填写 Schema 并完成收尾
+#### graph：固定 Step 执行
+
+新 Procedure 可声明 `syntax: memsphere-20261027-stable`、`mode: graph` 和 `actions`；省略 mode 仍为 flow。先按正常 Procedure 入口读取并启动，不向启动命令传结构化业务 input；由入口 Action 准备业务材料。
+
+依赖满足时 Memsphere 立即创建 pending Step。只有一个可执行 Step 时自动 enter；多个时先读返回的概述列表，再执行 `memsphere run step enter --run R --step S`。enter 首次将该实例转为 running，重复 enter 复用同一实例、开始时间和 Continue 上下文；`run step show --run R --step S` 只读。
+
+进入后只完成当前 Step。使用返回的 `memsphere continue C report --artifact-file <file>` 上报，原生入口必须显式带 `--run R --step S`。C 固定 Project、Run、Step；不会随工作进度改绑到后继实例。评审时按提示执行 `continue C review wait`，阅读全部正式意见后执行 `continue C review vote --vote approve` 或附修改理由的 request_changes；Agent Reviewer 失败时遵守下文显式 retry 规则，可使用 `continue C review retry --assignment <actor>`。意见处置使用 `continue C review resolve --comment <id> --disposition <value> --note <text>`（accepted-fixed 另需验证摘要）；取得本人明确授权后可使用 `continue C review submit-for-human --assignment <actor> --vote <value> --comments-file <file> --authorization-note <text>`。这些入口自动固定当前 Run/Step/轮次，不允许传参改绑，沿用原生命令全部权限与受托审计。
+
+要求修改后在同一 Step 提交新 Artifact，必须附 `--revision-summary` 或 `--revision-summary-file`；保留旧候选与轮次。完成该 Step 后才返回新的可执行 Step 列表。跨 Step 并发由宿主 Agent 框架组织，不要求 Memsphere 调度 Agent。Human Action 必须先等待 Human 实际完成，Runner 再向同一 Step 提交，不能把 Human Review 的投票当成生产结果。
+
+collect Action 由命令自动完成，Agent 不执行 enter/report；结果是按 Step 创建序固定的具体 Artifact 引用数组，空数组保留，无额外聚合 Artifact 或 Review。普通依赖只传本次正式采用的产物；when 使用 JSONata 且严格返回 boolean，不提供全局业务 State。原始 MIME 解码、现有模型校验或求值失败应按错误修复，不能当作 false 跳过。
+
+`run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store，但自由探索仍在 report 完整成果时才创建 Step。
+
+
+#### flow：填写 Schema 并完成收尾
 
 按提示 `run enter-schema` 进入填写，`run schema show --run <id>` 查看结构和进度；逐项 report。遇到 repeat 用 `run repeat <count> --run <id>` 提交满足约束的总次数；只有当前可选字段可 `run skip --run <id>`。中间字段产物不等于父 Artifact 已接纳。
 
@@ -118,14 +133,14 @@ memsphere run report --run <id> --artifact-file <local-copy>
 
 ```yaml
 !concept
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names: [example-concept, 示例概念]
 defines:
   - 说明概念的含义与边界。
 ```
 
 - 顶层和嵌套区块使用对应 YAML tag；syntax 声明不可变版本，省略按历史 start 解释。canonical name 为 1–120 字符小写 ASCII kebab-case，别名不用作显式跨 Memory 引用。defines 只写非空文字；`!ref`、`!call` 等按对应类型使用 canonical 逻辑引用，Statement 的 asserts/suggests 引用不改变强制程度。
-- Procedure Artifact 使用 `type → format → schema`：type 缺省 string，format 缺省 plain；object/array/boolean/number 须显式 type。Schema 类型不从父级继承，有 fields 可推断 object，否则 string；format 可继承，markdown layout 仅在兼容的 object outline / array table 节点保留。数组用 item 或带 tag 的 items 联合，不能直接 fields；具名字段可 optional。outline 的 !repeat 按语法规则使用，不嵌套。自然语言 asserts/suggests 不会被 validator 猜测执行。
+- flow Procedure Artifact 使用 `type → format → schema`：type 缺省 string，format 缺省 plain；object/array/boolean/number 须显式 type。Schema 类型不从父级继承，有 fields 可推断 object，否则 string；format 可继承，markdown layout 仅在兼容的 object outline / array table 节点保留。数组用 item 或带 tag 的 items 联合，不能直接 fields；具名字段可 optional。outline 的 !repeat 按语法规则使用，不嵌套。自然语言 asserts/suggests 不会被 validator 猜测执行。
 
 ### 编辑、校验与发布
 

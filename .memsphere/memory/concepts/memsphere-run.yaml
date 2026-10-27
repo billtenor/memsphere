@@ -1,5 +1,5 @@
 !concept
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-run
   - Run
@@ -12,3 +12,7 @@ defines:
   - 流程运行的 Memory 快照是本次执行所依据的记忆内容，使执行记录与当时的流程定义相对应。
   - Run 的 running、done 和 abandoned 分别表示进行中、已完成和已废弃；归档表示结束后的运行收存于历史视图，恢复归档表示重新展示原运行记录。
   - 当前成果是一组代表本次运行结果的 Artifact，其依赖关系解释成果如何形成；历史修订保留先前的产物及其关联。
+  - graph 执行时在依赖满足后立即创建 pending Step；enter 首次转为 running 并返回实际工作 Prompt，重复 enter 复用实例及开始时间，show 只读。正式上报后有评审则 awaiting_review，无评审或评审接纳后 done；评审要求修改回到同一 running Step，修订新建 Artifact 与轮次。
+  - graph 当前只有一个可执行 Step 时自动 enter，多个时展示 Step 概述并由 Agent 显式选择；进入后的 Continue 固定 Project、Run、Step，贯穿生产、评审和修订直到 done，不改绑后继 Step。跨 Step 并发由宿主 Agent 框架管理。
+  - "graphFrame 是 Run.frames 的 type: graph 扩展，保存触发、汇合、待物化实例、已分发完成和序号；不另加 mode 或全局业务状态。完成序与创建序分开，collect 固定成员按 Step 创建序排列。"
+  - graph 的 run status 可以恢复和推进；列表、run show、step show、View 详情只读。Run 只有全部 Step 完成且没有未齐 Join 才能 finish，终态归档和恢复保留模型 Store 内的原证据。

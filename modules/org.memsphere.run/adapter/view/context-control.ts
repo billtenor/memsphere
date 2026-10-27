@@ -4,7 +4,7 @@ import { contextControlStyles } from "./context-control-styles.js";
 import { layoutGraph } from "./graph-layout.js";
 
 type Artifact = { id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
-type Snapshot = { run: { id: string; status: string }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
+type Snapshot = { graph?: { procedure: unknown; work: Array<{ id: string; status: string; artifact?: unknown; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag); node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
@@ -37,7 +37,7 @@ export function artifactHistory(records: Artifact[]) {
   return { latest, around, versions: (id: string) => groups.get(family(id))!, family };
 }
 
-export function createContextGraph(ui: ViewUi, request: (path: string) => Promise<any>, locale?: string, projectApiBase?: string) {
+export function createContextGraph(ui: ViewUi, request: (path: string) => Promise<any>, locale?: string, projectApiBase?: string, openReview?: (runId: string, reviewId: string) => Promise<void>) {
   const english = locale?.startsWith("en");
   const label = (zh: string, en: string) => english ? en : zh;
   const root = element("section", "cc-exploration"); root.dataset.contextControl = "";
@@ -45,6 +45,8 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const toolbar = element("div", "cc-toolbar"), graphHost = element("div", "cc-canvas-scroll");
   const viewLabel = element("span", "cc-toolbar-label"); toolbar.append(element("strong", "", label("产物", "Artifacts")), viewLabel);
   const graphCard = element("section", "cc-graph-card"); graphCard.setAttribute("aria-label", label("产物依赖图", "Artifact dependency graph")); graphCard.append(graphHost); root.append(toolbar, graphCard);
+  const workDisclosures = new Map<string, boolean>();
+  const work = element("section", "cc-work"); root.insertBefore(work, toolbar);
   let snapshot: Snapshot, history: ReturnType<typeof artifactHistory>, selected: string | undefined, currentId: string | undefined;
   let currentKind: "artifact" | "external" = "artifact";
   const events = new AbortController();
@@ -222,6 +224,19 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       const nextKey = JSON.stringify(value);
       if (nextKey === snapshotKey) return;
       snapshotKey = nextKey; snapshot = value;
+      for (const node of work.querySelectorAll<HTMLDetailsElement>("details[data-work-disclosure]")) workDisclosures.set(node.dataset.workDisclosure!, node.open);
+      work.hidden = !value.graph;
+      if (value.graph) {
+        work.replaceChildren(element("h2", "", label("流程进度", "Workflow progress")));
+        for (const step of value.graph.work) {
+          const item = element("details", "cc-work-step"); item.dataset.stepId = step.id; item.dataset.workDisclosure = step.id; item.open = workDisclosures.get(step.id) ?? false;
+          item.append(element("summary", "", `${step.action?.description ?? step.id} · ${step.status}`));
+          item.append(element("p", "", `Step ${step.id}`), element("pre", "", JSON.stringify({ inputs: step.inputs, artifact: step.action?.artifact, result: step.artifact }, null, 2)));
+          if (step.reviewHandle && openReview) item.append(button(label("查看与参与评审", "Open review"), () => { void openReview(value.run.id, step.reviewHandle!); }));
+          work.append(item);
+        }
+        const definition = element("details"); definition.dataset.workDisclosure = "definition"; definition.open = workDisclosures.get("definition") ?? false; definition.append(element("summary", "", label("流程定义", "Workflow definition")), element("pre", "", JSON.stringify(value.graph.procedure, null, 2))); work.append(definition);
+      } else work.replaceChildren();
       const times = new Map(value.steps.map(s => [s.id, s.createdAt]));
       history = artifactHistory(value.artifacts.filter(a => value.completeIds.includes(a.id)).sort((a, b) => (times.get(a.stepId) ?? "").localeCompare(times.get(b.stepId) ?? "") || a.id.localeCompare(b.id)));
       if (selected && !value.artifacts.some(a => a.id === selected)) selected = undefined;

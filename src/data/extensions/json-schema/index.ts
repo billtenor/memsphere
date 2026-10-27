@@ -336,6 +336,12 @@ class Compiler {
   }
 }
 
+type CompiledValidator = (value: unknown) => void;
+// Hosts are intentionally fresh, but compilation depends only on the model ID
+// and a checked JSON snapshot. Never cache filesystem reads or reflected values.
+const compiledSchemas = new Map<string, CompiledValidator>();
+const compilationCacheLimit = 64;
+
 /** Compile supported Draft-07 schemas without loading references or modifying values. */
 export class JsonSchemaModelRuntimeFactory implements ModelRuntimeFactory {
   readonly target = Object.freeze({ metaModel: JSON_SCHEMA_DRAFT_07 });
@@ -350,18 +356,27 @@ export class JsonSchemaModelRuntimeFactory implements ModelRuntimeFactory {
     const compiler = new Compiler(context, schema);
     compiler.check(schema, "#");
     const descriptor: Descriptor = Object.freeze({ id: model.data.id, root: compiler.type(schema) });
+    const key = JSON.stringify([model.data.id, schema]);
+    const cached = compiledSchemas.get(key);
+    if (cached) {
+      compiledSchemas.delete(key);
+      compiledSchemas.set(key, cached);
+      return createPlainRuntime(descriptor, { validate: cached });
+    }
     const ajv = new Ajv({
       allErrors: true, strict: true, strictTypes: false, ownProperties: true, allowMatchingProperties: true,
       useDefaults: false, removeAdditional: false, coerceTypes: false
     });
     const validate = ajv.compile(compiler.validationSchema(schema));
     context.signal?.throwIfAborted();
-    return createPlainRuntime(descriptor, {
-      validate(value) {
-        assertSafeValidationValue(value);
-        if (!validate(value)) throw new TypeError(`JSON Schema validation failed: ${ajv.errorsText(validate.errors, { separator: "; " })}`);
-      }
-    });
+    const compiled: CompiledValidator = value => {
+      assertSafeValidationValue(value);
+      if (!validate(value)) throw new TypeError(`JSON Schema validation failed: ${ajv.errorsText(validate.errors, { separator: "; " })}`);
+    };
+    compiledSchemas.set(key, compiled);
+    if (compiledSchemas.size > compilationCacheLimit) compiledSchemas.delete(compiledSchemas.keys().next().value!);
+    // Descriptors and reflected values remain private to each Runtime.
+    return createPlainRuntime(descriptor, { validate: compiled });
   }
 }
 

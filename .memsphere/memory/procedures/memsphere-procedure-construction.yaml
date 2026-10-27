@@ -1,12 +1,12 @@
 !procedure
-syntax: memsphere-20260721-stable
+syntax: memsphere-20261027-stable
 names:
   - memsphere-procedure-construction
   - memsphere Procedure记忆提取流程
   - Procedure 提取流程
 defines:
-  - 从已完成任务、Run、产物、仓库证据或已经理清的执行思路中，提取可复用、可执行且可验证的 Procedure Memory。
-  - 适用于新建 Procedure 或根据可靠实践更新已有 Procedure，不负责执行被提取的流程。
+  - 从已完成任务、Run、产物、仓库证据或已经理清的执行思路中，提取可复用、可执行且可验证的 flow Procedure Memory。
+  - 适用于新建或根据可靠实践更新 flow Procedure，不负责执行被提取的流程；graph 的撰写要求使用 memsphere-procedure-schema 和 memsphere-yaml-syntax-rules 的 graph 契约，本流程不提供 graph 构建分支。
   - 只保留会改变执行、判断或验收结果的内容，不把对话记录、临时尝试和通用常识照搬进 Memory。
   - 同一交付意图下围绕目标 Procedure 产生的相关 Memory 修改，可以在一个 Run 中复用同一 ChangeSet 多轮完成，直到 human 接受整个 ChangeSet 候选。
 asserts:

@@ -59,6 +59,27 @@ test("child corruption does not block the Run list or trigger production recover
   await assert.rejects(service.snapshot(run.id));
 });
 
+test("View can isolate a corrupt Run using only the Run Store while configuration errors remain fatal", async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const healthy = await service.start("healthy"), other = await service.start("other"), broken = await service.start("broken");
+  const before = await service.stores.run.get({}, healthy.id);
+  await writeFile(join(f.root, "data/context_control/runs", `${broken.id}.json`), "broken JSON");
+  const original = FilesystemJsonValueStoreFactory.prototype.openExisting;
+  t.mock.method(FilesystemJsonValueStoreFactory.prototype, "openExisting", async function(this: FilesystemJsonValueStoreFactory, ...args: Parameters<typeof original>) {
+    if (args[1].startsWith("context_control/")) assert.equal(args[1], "context_control/runs");
+    return original.apply(this, args);
+  });
+  const read = createContextRunReader(f.root, { isolateCorruptRecords: true }), rows = await read();
+  assert.equal(rows.find(r => r.id === healthy.id)!.name, "healthy");
+  assert.equal(rows.find(r => r.id === other.id)!.name, "other");
+  const unavailable = rows.find(r => r.id === broken.id)!;
+  assert.equal(unavailable.unavailable, true); assert.ok(unavailable.error);
+  assert.equal(contextRunSummary(unavailable).readOnly, true);
+  assert.deepEqual(await service.stores.run.get({}, healthy.id), before);
+  await removeBusinessStore({}, f.root, "context_control/runs");
+  await assert.rejects(read(), { code: "INITIALIZATION_INCOMPLETE" });
+});
+
 test("cached Run resources follow binding removal and replacement without a model-operation stamp change", async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const old = await service.start("old location"), read = createContextRunReader(f.root);

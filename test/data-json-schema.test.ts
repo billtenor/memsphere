@@ -32,6 +32,42 @@ function compile(definition: unknown, dependencies = registry()) {
   return new JsonSchemaModelRuntimeFactory().createRuntime({}, model(definition), dependencies);
 }
 
+test("repeated model compilation preserves current definitions, model identity and isolated values", async () => {
+  const definition = { type: "object", properties: { name: { type: "string", minLength: 2 } }, required: ["name"], additionalProperties: false };
+  const first = await compile(definition);
+  const second = await compile(structuredClone(definition));
+  assert.notStrictEqual(first.descriptor.root, second.descriptor.root);
+  const left = { name: "left" }, right = { name: "right" };
+  const leftView = first.reflect(left) as ObjectValue;
+  const rightView = second.reflect(right) as ObjectValue;
+  (leftView.get(leftView.descriptor.field("name")!) as ScalarValue).set("new");
+  assert.deepEqual(left, { name: "new" });
+  assert.deepEqual(right, { name: "right" });
+  assert.equal((rightView.get(rightView.descriptor.field("name")!) as ScalarValue).value, "right");
+  definition.properties.name.minLength = 5;
+  const changed = await compile(definition);
+  assert.throws(() => changed.reflect({ name: "new" }), /JSON Schema validation/);
+  assert.doesNotThrow(() => first.reflect({ name: "new" }));
+  const other = await new JsonSchemaModelRuntimeFactory().createRuntime({}, model(definition, "tests/other.json"), registry());
+  assert.equal(other.descriptor.id, "tests/other.json");
+  assert.notStrictEqual(other.descriptor.root, changed.descriptor.root);
+  // Runtime objects themselves are not shared with callers.
+  second.reflect = () => { throw new Error("caller replacement"); };
+  assert.doesNotThrow(() => first.reflect({ name: "ok" }));
+});
+
+test("repeated compilation still rejects unsafe definitions and cancelled calls", async () => {
+  const definition = { type: "string", minLength: 2 };
+  await compile(definition);
+  let reads = 0;
+  Object.defineProperty(definition, "type", { enumerable: true, get() { reads++; return "string"; } });
+  await assert.rejects(compile(definition), /accessors/);
+  assert.equal(reads, 0);
+  const controller = new AbortController();
+  controller.abort(new Error("cancelled compilation"));
+  await assert.rejects(new JsonSchemaModelRuntimeFactory().createRuntime({ signal: controller.signal }, model({ type: "string", minLength: 2 }), registry()), /cancelled compilation/);
+});
+
 test("JSON Schema is an independent meta-model-targeted extension with stable descriptor identities", async () => {
   assert.equal(jsonSchemaExtension.id, "memsphere/json-schema-draft-07");
   assert.equal(jsonSchemaExtension.version, "0.1.0");

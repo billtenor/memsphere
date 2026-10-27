@@ -7,6 +7,7 @@ import { RAW_MODEL, RawModelRuntime } from "../data/extensions/raw/index.js";
 import { bytesContent } from "../data/extensions/shared/payload.js";
 import { assertModelRef } from "./model-registration-contract.js";
 import { validateModelSchemaReferences } from "./model-schema-references.js";
+import { contextControlRuntime } from "../context_control/invariants.js";
 
 export type ModelCheck = "definition" | "runtime";
 export type ModelCandidate = { modelRef: string; metaModel?: string; definition: unknown; source?: string };
@@ -56,5 +57,5 @@ export async function checkModelDefinition(context: Context, candidate: ModelCan
     context.signal?.throwIfAborted();
     invalid("MODEL_RUNTIME_UNSUPPORTED", candidate.modelRef, error);
   }
-  return { model, runtime };
+  return { model, runtime: contextControlRuntime(runtime!) };
 }

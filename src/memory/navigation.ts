@@ -2,6 +2,7 @@ import type {
   ActionNode,
   CallNode,
   FlowNode,
+  GraphAction,
   IfNode,
   MemoryRefNode,
   MemoryEntity,
@@ -16,7 +17,7 @@ import type {
 import type { MemoryKind } from "./kinds.js";
 import { paginateItems, type Page, type PaginationOptions } from "../pagination.js";
 
-export const memoryNodeTypes = ["Statement", "String", "Schema", "Ref", "Action", "If", "While", "Call"] as const;
+export const memoryNodeTypes = ["Statement", "String", "Schema", "Ref", "Action", "If", "While", "Call", "Dependency", "Artifact"] as const;
 export type MemoryNodeType = (typeof memoryNodeTypes)[number];
 
 export type MemoryIdentity = {
@@ -129,7 +130,7 @@ function buildRootNodes(entity: MemoryEntity): InternalMemoryNode[] {
     case "!schema":
       return buildSchemaChildren(entity, "", []);
     case "!procedure":
-      return buildFlowNodes(entity.flow, "", [], "flow");
+      return entity.mode === "graph" ? entity.actions.map(buildGraphActionNode) : buildFlowNodes(entity.flow, "", [], "flow");
   }
 }
 
@@ -309,6 +310,23 @@ function buildFlowNodes(
   return buildUniqueSiblings(flow, flowNodeSegment, (node, segment) =>
     buildFlowNode(node, joinReference(prefix, segment), contexts, relation)
   );
+}
+
+function buildGraphActionNode(action: GraphAction): InternalMemoryNode {
+  const nodeRef = `action:${escapeReferenceValue(action.id)}`;
+  const { dependencies: _dependencies, artifact: _artifact, ...parent } = action;
+  const contexts: MemoryNodeContextEntry[] = [{ node_ref: nodeRef, type: "Action", relation: "actions", value: parent }];
+  const children = action.dependencies.map((dependency, index) => createNode({
+    nodeRef: `${nodeRef}/dependency:${index + 1}`, type: "Dependency", relation: "dependencies",
+    summary: `${JSON.stringify(dependency.from)}${dependency.when ? ` when ${dependency.when}` : ""}`,
+    value: dependency, contexts, children: []
+  }));
+  if (action.artifact) children.push(createNode({
+    nodeRef: `${nodeRef}/artifact`, type: "Artifact", relation: "artifact", name: action.artifact.name,
+    summary: action.artifact.payload.contentType, value: action.artifact, contexts, children: []
+  }));
+  return createNode({ nodeRef, type: "Action", relation: "actions", name: action.id,
+    artifact: action.artifact?.name, summary: action.description, value: action, contexts: [], children });
 }
 
 function buildFlowNode(
@@ -553,7 +571,7 @@ function stripSchemaChildren(schema: SchemaNode): Omit<SchemaNode, "fields" | "i
 }
 
 function stripProcedureFlow(procedure: ProcedureMemory): Omit<ProcedureMemory, "flow"> {
-  const { flow: _flow, ...context } = procedure;
+  const { flow: _flow, actions: _actions, ...context } = procedure;
   return context;
 }
 

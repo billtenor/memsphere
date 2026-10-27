@@ -2,6 +2,7 @@ import type { Document } from "yaml";
 import {
   assertMemorySyntaxIdentifier,
   controlPlaneMemorySyntax,
+  graphMemorySyntax,
   firstStableMemorySyntax,
   startMemorySyntax,
   type MemorySyntaxVersion
@@ -60,6 +61,11 @@ memorySyntaxMigrationRegistry.register({
 memorySyntaxMigrationRegistry.register({
   from: firstStableMemorySyntax,
   to: controlPlaneMemorySyntax,
+  migrate: () => undefined
+});
+memorySyntaxMigrationRegistry.register({
+  from: controlPlaneMemorySyntax,
+  to: graphMemorySyntax,
   migrate: () => undefined
 });
 
