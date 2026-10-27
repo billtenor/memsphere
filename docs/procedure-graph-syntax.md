@@ -4,7 +4,7 @@
 
 运行语法：`memsphere-20261027-stable`。新建 graph Procedure 必须填写该版本；旧 `memsphere-20260721-stable` 按原 flow 语义保留。完整示例可通过 `run start --file` 执行。
 
-2026-10-27 共同探索调整：不提供启动时结构化业务参数或 Run 级 `input`。入口 Action 收集或读取业务材料并形成 Artifact，后续通过依赖传递。运行时和 CLI 的整合方案见 `changes/active/20261026-procedure-graph/implementation-plan.md`；以下说明 graph 的语法和执行语义。
+2026-10-27 共同探索调整：不提供启动时结构化业务参数或 Run 级 `input`。入口 Action 收集或读取业务材料并形成 Artifact，后续通过依赖传递。运行时和 CLI 的整合方案见 `changes/archive/completed/20261026-procedure-graph/implementation-plan.md`；以下说明 graph 的语法和执行语义。
 
 本版包括顺序、固定并行、条件分支、循环、汇合和产物聚合。不包括 `forEach`、Send、动态批次、`wait: batch`、`defer`、子图、跨图跳转，以及新增的全局业务 State。
 

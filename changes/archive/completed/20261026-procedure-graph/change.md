@@ -1,12 +1,22 @@
 ---
 id: 20261026-procedure-graph
-status: accepting
 type: feature
 created: 2026-10-26
+completed_at: 2026-10-27T20:25:16+08:00
 run_id: run-20261026-091339z-19538ce9
 ---
 
 # 流程记忆 mode=graph
+
+## 产品验收与需求归档
+
+产品第二轮 `review-20261027-081948z-d4b7f400` / `round-20261027-110039z-850d25d9` 已 passed：Human actor5 明确“我投通过”并授权代提交，产品 Agent Seed-2.1-Pro-0915 approve，Runner 阅读正式意见后 approve。唯一 suggestion `comment-20261027-111156z-d5f08876` 已 accepted-fixed：忽略既有 `.playwright/`，核验无已跟踪内容，未提交任何单次证据。Human 查看真实 graph-demo Memory/运行实例，并明确本轮聚焦语法和运行，不扩展前端设计范围。
+
+按交付规范记录验收、移除 active status、写 completed_at，将四份长期需求/方案文档归档。下文实施记录按当时事实保留，其“待验收/未commit”等状态不覆盖本节最新结论。完整合并后验证为172文件、1455通过/2平台跳过/0失败；已确认功能commit `14a966a`、master合并commit `4d1c6b5`。本次收尾只变更忽略规则、归档记录及设计文档的归档链接，不修改运行代码或Memory。
+
+本功能Memory最终门禁为 `change-20261027-084251029z-56ea5f07`，passed，digest `637b63699956306937ae9ab5016942af87d3fe73ce4e12cedf8a1b35779aafdf`，View：http://127.0.0.1:30000/projects/memsphere/changes/change-20261027-084251029z-56ea5f07。旧 `change-20261027-052552940z-dfe0c95e` 保留合并前基线历史；PR需关联两者，最终进入master后按Embedded集成条件处理收尾，不以本地commit提前关闭。
+
+需求实现与产品验收已完成；PR/远端CI及Human最终合入与结果确认继续同一Run，未提前宣称整个流程结束。原始日志、截图和一次性报告保留于忽略的 `.tmp/graph-validation` 与运行存储，不随需求归档提交。
 
 ## 最新集成状态（2026-10-27）
 
