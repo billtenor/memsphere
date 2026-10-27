@@ -73,4 +73,4 @@ GitHub 身份/凭据迁移、额外权限隔离、字段级保护、测试断言
 
 需求归档只表示实现、本地验证与Agent验收已完成，不表示Run或线上激活完成。产品交付评审、commit/PR、远端CI、Human合入、可信master运行、规则激活和实际PR红绿/Human bypass现场证据、Human结果确认及分支清理仍按同一Run后续步骤推进，未完成前不宣称门禁已上线。
 
-原始证据保留在本次任务独立目录 /data00/home/liuyanjun.lyj/.codex/visualizations/2026/10/27/01a17d80-eb55-78b2-9941-176cf22dfd93/ci-change-guard-evidence/，结果与实现指纹已上报Run；原始日志不提交Git。
+原始证据保留在本次任务独立目录 当前Codex任务的独立 ci-change-guard-evidence/ 目录（完整本地路径见Run），结果与实现指纹已上报Run；原始日志不提交Git。

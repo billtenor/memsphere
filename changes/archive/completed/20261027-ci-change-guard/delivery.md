@@ -35,7 +35,7 @@ CI change guard: ".github/workflows/ci.yml" 等 CI 机制不允许在 human 未�
 - 实现验收review-20261027-141604z-fb4a00cc第一轮：研发、测试、架构均approve，Runner通过，无阻塞意见。意见已逐项处置：清单文档对齐、未来本地Action维护边界、来源应用限制、关闭/改目标PR的旧pending说明；现场激活风险保留后续核销。
 - 本轮无Memory/Skill差异，不创建空ChangeSet。最终源代码与自动化测试和全量验证相同，验收后仅修正文档并归档需求。diff与忽略规则检查通过。
 
-原始日志、规则JSON和Reviewer复测保留在当前任务目录 `/data00/home/liuyanjun.lyj/.codex/visualizations/2026/10/27/01a17d80-eb55-78b2-9941-176cf22dfd93/ci-change-guard-evidence/`。完整结果与实现指纹已上报同一Run。原始证据不提交Git；代码交付只含实现、可复用测试和必要文档/需求结论。
+原始日志、规则JSON和Reviewer复测保留在当前任务目录 `ci-change-guard-evidence/`（完整本地路径见Memsphere Run，不发布到代码仓库）。完整结果与实现指纹已上报同一Run。原始证据不提交Git；代码交付只含实现、可复用测试和必要文档/需求结论。
 
 ## 后续必须完成的步骤
 
