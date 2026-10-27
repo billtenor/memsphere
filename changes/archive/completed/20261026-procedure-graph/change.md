@@ -179,3 +179,14 @@ Human最新执行指令：“请你先提交 commit，合并最新的 master 分
 ## CI 改动撤销
 
 Human明确约束：“你不被允许修改任何ci配置”。已撤销产品验收后追加的CI workflow、调度分组/耗时、编译缓存、时限及其配套测试/fixture拆分和CI政策文档，恢复到d7bfe54的原始状态；graph功能及已验收归档保留。后续不修改CI配置，不以放宽时限或改变检查配置处理失败。先前取消/超时属于未通过结果，不能宣称最终CI成功；原始结果保留于GitHub与本地忽略的.tmp/graph-validation。
+
+
+## CI 超时：实现侧性能排查
+
+遵守Human“不允许修改任何ci配置”，本轮仅修改JSON Schema运行实现和语义回归测试；workflow、job时限/并发、测试选择与耗时调度配置均保持master原样。无Memory变更，属于语义不变的内部性能优化。
+
+实际CPU profile：35个graph runtime场景优化前82.68秒，其中Ajv compile累计35.29秒，重复宿主/Store打开会重新编译相同Run/Step/登记模型。实现按模型ID与严格JSON定义快照，进程内有界LRU复用最多64份已编译校验函数；不缓存磁盘读取、模型/Project状态、Runtime对象、描述符或业务值。每次仍检查定义与支持范围，重新构造描述符；改变定义会使用新key，损坏/取消仍拒绝，Store业务不变量及模型操作戳校验保留。
+
+最终相同35场景42.60秒、35/35通过，Ajv compile累计0.19秒；连续30次真实Step模型构建从918ms降到204ms。最终模型/反射/取消与定义检查40/40通过，typecheck/build通过；集成与远端CI最终结果按后续Run记录，不提前宣称全部检查成功。原始profile、基准、测试日志在忽略的.tmp/graph-validation，不进入Git。
+
+实现侧优化最终集成复验：model-operation14、model-service12、context-control-invariants10、context-control-upgrade8、graph-review8、graph-cli7，合计59/59通过。与最终40项模型/反射和35项运行时验证共同覆盖新缓存边界；没有放宽或跳过原有断言。CI相关路径已与origin/master逐项比对无差异。
