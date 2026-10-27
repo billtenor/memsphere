@@ -4,7 +4,7 @@
 
 测试按用户可观察契约和真实运行边界选择。删除、合并或下沉必须说明重复保护及覆盖代价；不得为隐藏失败而删断言、跳过测试或放宽验收。保留教程安全规则、数据发布/回滚、权限、并发与原生文件/进程保护。
 
-`npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。所有平台测试job及Windows打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
+`npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。Windows测试/打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
 
 ## 默认 PR
 
@@ -17,11 +17,9 @@
 | Windows | Platform Core Contracts / Platform Publication & Upgrades | 4 / 4 |
 | Windows | 真实npm安装包、Run/View及四种Shell冒烟，default另运行project-command | 独立job |
 
-Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更用例放入升级组，其余平台保护由core组执行；project-command重型集成用例复用原有安装包job的空闲时间（runner并发上限2，实际一个文件），直接调用测试runner，不再触发pretest重建。full仍由原有矩阵覆盖这份用例，安装包job仅在default追加该文件。不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。平台清单位于 `scripts/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
+Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更用例放入升级组，其余35项平台保护由core组执行；project-command重型集成用例复用原有安装包job的空闲时间（runner并发上限2，实际一个文件），直接调用测试runner，不再触发pretest重建。full仍由原有矩阵覆盖这份用例，安装包job仅在default追加该文件。不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。39项平台清单位于 `scripts/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
 
-不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试采用GitHub原生job 8分钟超时，打包及Security维持5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。graph新增集成与历史升级用例后，实测多次在原5分钟上限附近完成测试却来不及清理、保存timings，故测试job调整为8分钟有界余量；保留所有测试及失败判定，调度和编译缓存继续减少实际消耗，不把取消或超时视为通过。
-
-graph迭代补充新测试的Linux实测耗时，沿用组内长任务优先调度；历史通用流程移除的Managed/Embedded升级测试归入project-upgrade，因此进入Linux项目组及macOS/Windows升级保护。全部文件及断言保留，未增加job或并发。补齐耗时来源于合并后完整本地回归及PR #117首轮CI已完成文件，避免新重型用例按缺省2秒排在队尾导致job超时。历史升级测试拆为Managed/Embedded文件，保留全部版本与断言；Embedded循环复用基础Project，每个历史版本仍使用独立worktree。Windows将这两份文件放入既有core组，Linux/macOS仍由项目升级组覆盖。拆分文件初始调度估计按原文件实测值分摊，Windows保守沿用原文件估计以优先启动（不是原生完整耗时结果），由完整CI结果复核。
+不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试/打包及Security仅保留GitHub原生job 5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
 
 ## 合入 master / 发布前完整检查
 

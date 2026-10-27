@@ -48,7 +48,7 @@ jobs:
     needs: plan
     name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 8 }}
+    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -61,6 +61,7 @@ jobs:
           node-version: 22
           cache: npm
       - name: Reuse Node compilation within this job
+        if: runner.os == 'Windows'
         shell: bash
         run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - run: npm ci

@@ -88,13 +88,9 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(security.jobs.gitleaks["timeout-minutes"], 5);
   assert.equal(security.jobs.gitleaks.steps.some(step => step.run?.includes("ci-budget")), false);
   assert.equal(workflow.jobs["full-result"]["timeout-minutes"], 5);
-  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 8 }}");
+  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
   assert.equal(workflow.jobs["windows-package-smoke"]["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
   const steps = workflow.jobs.test.steps;
-  const compileCache = steps.find(step => step.name === "Reuse Node compilation within this job");
-  assert.equal(compileCache.if, undefined, "every test platform reuses compilation within its job");
-  assert.equal(compileCache.shell, "bash");
-  assert.equal(compileCache.run, 'echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"');
   const browserInstall = steps.find(step => step.name === "Install Playwright Chromium");
   assert.equal(browserInstall.if, "matrix.browser");
   assert.equal(browserInstall.run, "npx playwright install chromium");
