@@ -16,3 +16,4 @@ defines:
   - graph 当前只有一个可执行 Step 时自动 enter，多个时展示 Step 概述并由 Agent 显式选择；进入后的 Continue 固定 Project、Run、Step，贯穿生产、评审和修订直到 done，不改绑后继 Step。跨 Step 并发由宿主 Agent 框架管理。
   - "graphFrame 是 Run.frames 的 type: graph 扩展，保存触发、汇合、待物化实例、已分发完成和序号；不另加 mode 或全局业务状态。完成序与创建序分开，collect 固定成员按 Step 创建序排列。"
   - graph 的 run status 可以恢复和推进；列表、run show、step show、View 详情只读。Run 只有全部 Step 完成且没有未齐 Join 才能 finish，终态归档和恢复保留模型 Store 内的原证据。
+  - 自由探索上报 Artifact 后仍为 running，可在同一 Run 接收反馈与完整修订；Human 明确确认当前成果并同意结束后才进入 done。Agent 结束当前回复等待人工检查与结束 Run 是不同的决定。

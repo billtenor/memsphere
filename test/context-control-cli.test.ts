@@ -6,6 +6,9 @@ import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { businessFixture } from "./helpers/business-data.js";
+import { openContextControl } from "../src/project/context-control.js";
+import { findCommandStates } from "../src/home/command-state-store.js";
+import { textContent } from "../src/context_control/types.js";
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 async function fixture(t: test.TestContext) {
@@ -19,7 +22,7 @@ test("native CLI finishes current outputs and lists/restores archived exploratio
   const f = await fixture(t), run = await f.call("run", "start", "--name", "结束归档");
   await assert.rejects(f.invoke("archive", "run", run.id), /Finish or abandon/);
   const a = await f.call("run", "report", "--run", run.id, "--name", "A", "--artifact", "A");
-  await f.call("run", "finish", "--run", run.id);
+  await f.call("run", "finish", "--run", run.id, "--authorization", "用户检查 A 后明确确认结束");
   const snapshot = await f.call("run", "status", "--run", run.id);
   assert.equal(snapshot.run.status, "done"); assert.deepEqual(snapshot.outputArtifactIds, [a.artifactId]);
   assert.equal(snapshot.commandStates[0].status, "closed");
@@ -51,12 +54,51 @@ test("direct production, Continue, independent reads, repeated comments and immu
   assert.deepEqual(snapshot.outputArtifactIds, [revised.artifactId]);
   assert.equal(snapshot.commandStates[0].contextId, run.contextId);
   assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
-  await f.call("continue", run.contextId, "finish", "--artifact", revised.artifactId);
+  await f.call("continue", run.contextId, "finish", "--artifact", revised.artifactId, "--authorization", "用户明确确认修订版并同意结束");
   assert.match((await f.invoke("continue", run.contextId, "--help")).stdout, /No further transitions/);
   await assert.rejects(f.call("continue", run.contextId, "report", "--name", "late", "--artifact", "no"), /No transitions/);
   const record = JSON.parse(await readFile(join(f.root, "data/context_control/artifacts", run.id, `${b.artifactId}.json`), "utf8"));
   assert.equal(record.id, `${run.id}/${b.artifactId}`); assert.equal(record.value.content.payload.content, "快照");
 });
+
+for (const entry of ["native", "continue"] as const) {
+  test(`${entry} finish requires authorization and preserves feedback/revision until confirmed`, { timeout: 60000 }, async t => {
+    const f = await fixture(t), run = await f.call("run", "start", "--name", "等待确认");
+    const service = (await openContextControl(f.root))!;
+    const original = (await service.report(run.id, { name: "初版", content: textContent("初版结论") })).artifact;
+    const finish = entry === "native" ? ["run", "finish", "--run", run.id] : ["continue", run.contextId, "finish"];
+    const before = await service.snapshot(run.id);
+    const assertOpen = async () => {
+      assert.deepEqual(await service.snapshot(run.id), before);
+      const contexts = await findCommandStates("test-project", run.id, f.home);
+      assert.equal(contexts.length, 1); assert.equal(contexts[0].value.status, "active");
+    };
+    const help = (await f.invoke(...finish, "--help")).stdout;
+    assert.match(help, /--authorization <text>/);
+    assert.doesNotMatch(help, /--authorization-note/);
+    for (const options of [[], ["--authorization", " \t\n "]]) {
+      await assert.rejects(f.call(...finish, ...options), (error: any) => {
+        const result = JSON.parse(error.stderr);
+        assert.equal(result.error.code, "HUMAN_CONFIRMATION_REQUIRED");
+        assert.match(result.error.message, /--authorization/);
+        return true;
+      });
+      await assertOpen();
+    }
+    for (const option of ["--authorization-note", "--authorization-note-file"]) {
+      await assert.rejects(f.call(...finish, "--authorization", "确认", option, "unused"));
+      await assertOpen();
+    }
+    await f.call("continue", run.contextId, "review", "create", "--artifact", original.id, "--reviewer", "human", "--comment", "补充结论边界");
+    const revised = await f.call("continue", run.contextId, "report", "--revised-from", original.id, "--artifact", "修订结论及边界");
+    await f.call(...finish, "--artifact", revised.artifactId, "--authorization", "用户确认修订版并明确同意结束");
+    const ended = await service.snapshot(run.id);
+    assert.equal(ended.run.status, "done"); assert.deepEqual(ended.outputArtifactIds, [revised.artifactId]);
+    assert.equal(ended.reviews[0].comments[0].body, "补充结论边界");
+    assert.equal(ended.artifacts.find(a => a.id === revised.artifactId)!.revisedFrom, original.id);
+    assert.equal((await findCommandStates("test-project", run.id, f.home))[0].value.status, "closed");
+  });
+}
 
 for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201]) {
   test(`${kind} previews ${length} Unicode chars and exports original bytes`, { timeout: 30000 }, async t => {

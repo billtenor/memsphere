@@ -11,7 +11,7 @@ memsphere continue C review create --artifact B --reviewer human --comment "修�
 memsphere continue C report --revised-from B --artifact-file revised.md
 memsphere run outputs list --run R
 memsphere continue C outputs update --remove A --add B_NEW
-memsphere continue C finish
+memsphere continue C finish --authorization "用户已检查当前成果并明确确认结束"
 ```
 
 - 完整成果准备好后直接 report，不预建产物或声明开始工作；系统关联 Step。文本、--artifact-file、结构化 --file 互斥。结构化只接收 name、content/contentRef、dependencies、tags、revisedFrom、revisedSummary，系统身份字段拒绝。Schema 局部草稿仍走原流程。
@@ -29,7 +29,9 @@ memsphere continue C finish
 
 ## 结束、归档与恢复
 
-`memsphere --project P run finish --run R` 默认采用当前推导成果，也可重复 `--artifact ID` 确认交付根；空运行也能结束。结束后不可继续提交，前文进入已结束状态。
+Artifact 上报完成后 Run 保持 `running`，用户可继续反馈，Agent 在同一个 Run 中补充探索或提交修订。Agent 应交付当前成果并等待人工确认；结束当前回复不等于结束 Run。
+
+只有用户明确确认当前成果并同意结束后，才执行 `memsphere --project P run finish --run R --authorization "用户确认依据"`。缺少或提供空白依据会返回 `HUMAN_CONFIRMATION_REQUIRED`，Run 与 Continue 保持开放。依据由调用者如实填写，CLI 不验证对话中的真实授权；Agent 不得自行编造。默认采用当前推导成果，也可重复 `--artifact ID` 选择用户确认的交付根；空运行也需要用户确认。确认后修改过的成果需要重新确认。结束后不可继续提交，前文进入已结束状态。
 
 ```bash
 memsphere --project P archive run R
