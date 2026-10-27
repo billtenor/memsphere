@@ -187,3 +187,5 @@ PR #117 首轮 head d7bfe54 的 Linux Browser/Runtime jobs 被 GitHub 以“The 
 第三轮CI的Linux全部组及macOS成功，唯Windows升级组仍达到5分钟时限。保留所有历史版本及断言，将历史升级测试按Managed/Embedded拆为两个文件，公共manifest读取放入测试helper；Embedded复用基础Project，每个版本仍有独立worktree、独立升级候选与原工作区不受影响断言。Windows两份历史文件移至现有core组平衡长尾，原升级组保留其余发布/升级测试，macOS/Linux/full仍完整覆盖。测试计划原生保护清单显式包含两份文件，CI exactly-once覆盖断言继续通过。最初fixture清理/路径错误的失败证据保留，修正后Embedded与CI契约8/8通过；完整12项复验结果另记。并发、job数、时限及断言未放宽，无Memory/运行代码变更。
 
 拆分/平衡后最终定向复验：Managed历史升级4项、Embedded历史升级2项、CI计划与覆盖/调度6项，合计12/12通过，49.92秒。此前两次fixture实现错误的失败日志保留，未替代本次结果；远端全部检查仍需新head实际通过。
+
+最终CI时限调整：在调度/编译缓存及fixture去重后，f7111ba仍有Linux Runtime、macOS和Windows core在5分钟边界取消；多次结果无已完成断言失败，短时runner/清理波动使该预算不稳定。停止为压入原预算继续重构测试，将default测试job改为8分钟有界超时，full仍20分钟；Security/打包仍5分钟。此决定改变前述历史记录中的5分钟运行预算，不改变功能验收条件、测试内容/成功判定、平台覆盖、job数或并发。更新CI政策文档与契约断言，所有原始取消结果保留，最终必须以新head实际全部成功为准。

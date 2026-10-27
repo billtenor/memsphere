@@ -88,7 +88,7 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(security.jobs.gitleaks["timeout-minutes"], 5);
   assert.equal(security.jobs.gitleaks.steps.some(step => step.run?.includes("ci-budget")), false);
   assert.equal(workflow.jobs["full-result"]["timeout-minutes"], 5);
-  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
+  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 8 }}");
   assert.equal(workflow.jobs["windows-package-smoke"]["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
   const steps = workflow.jobs.test.steps;
   const compileCache = steps.find(step => step.name === "Reuse Node compilation within this job");
