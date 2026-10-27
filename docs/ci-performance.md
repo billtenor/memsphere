@@ -4,7 +4,7 @@
 
 测试按用户可观察契约和真实运行边界选择。删除、合并或下沉必须说明重复保护及覆盖代价；不得为隐藏失败而删断言、跳过测试或放宽验收。保留教程安全规则、数据发布/回滚、权限、并发与原生文件/进程保护。
 
-`npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。Windows测试/打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
+`npm test` 仍构建并运行全部保留的 `test/*.test.ts`，每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。所有平台测试job及Windows打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
 
 ## 默认 PR
 
@@ -21,7 +21,7 @@ Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集
 
 不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试/打包及Security仅保留GitHub原生job 5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
 
-graph迭代补充新测试的Linux实测耗时，沿用组内长任务优先调度；历史通用流程移除的Managed/Embedded升级测试归入project-upgrade，因此进入Linux项目组及macOS/Windows升级保护。全部文件及断言保留，未增加job、并发或超时时限。补齐耗时来源于合并后完整本地回归及PR #117首轮CI已完成文件，避免新重型用例按缺省2秒排在队尾导致job超时。
+graph迭代补充新测试的Linux实测耗时，沿用组内长任务优先调度；历史通用流程移除的Managed/Embedded升级测试归入project-upgrade，因此进入Linux项目组及macOS/Windows升级保护。全部文件及断言保留，未增加job、并发或超时时限。补齐耗时来源于合并后完整本地回归及PR #117首轮CI已完成文件，避免新重型用例按缺省2秒排在队尾导致job超时。历史升级测试在原生平台尚未完成测量时采用Linux实测值作为调度估计（不是原生耗时验证结果），避免继续回退为2秒；完整结果由CI本身确认。
 
 ## 合入 master / 发布前完整检查
 
