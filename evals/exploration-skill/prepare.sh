@@ -8,7 +8,7 @@ output_root="${2:-${TMPDIR:-/tmp}}"
 mkdir -p "$output_root"
 trial="$(mktemp -d "$output_root/memsphere-exploration.$case_id.XXXXXX")"
 workspace="$trial/workspace"
-mkdir -p "$workspace/.bin" "$workspace/.agent-home" "$workspace/.memsphere/memory" "$trial/evidence"
+mkdir -p "$workspace/.bin" "$workspace/.memsphere/memory" "$trial/evidence"
 git -C "$workspace" init -q -b master
 git -C "$workspace" config user.name 'Memsphere Eval'
 git -C "$workspace" config user.email 'eval@example.invalid'

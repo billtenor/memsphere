@@ -24,7 +24,7 @@ Artifact 是围绕明确目的组织、可独立使用且值得后续引用/评�
 - CLI Help 区分 Procedure 与自由探索、Continue 的范围、Memory 创建/删除/改名和 Comment finish。
 - v5 manifest 记录 11 个历史原版摘要，受控 Managed/Embedded 升级与 repair 保护自定义内容和竞态。
 - 新增 Artifact 规则及一致的开发 Project 副本；Comment 处理流程说明与现有“全部 processing、整批单 reason”接口一致。混合处理结论无法分批 finish 时保留现场并请 Human 决定，不改运行时掩盖限制。
-- 增加真实 Agent 场景及可重放 prepare/run/check，评分检查实际数据、命令和所用 Skill 的 SHA256；full CI 增加原样 npm test 作业，矩阵并行上限为 4。
+- 增加真实 Agent 场景及可重放 prepare/run/check，评分检查实际数据、命令和所用 Skill 的 SHA256。
 
 ## 向前兼容
 
@@ -55,3 +55,24 @@ Git 仅纳入本 change.md 与能力盘点，其他需求讨论、方案及单�
 补充 Run run-20261027-043530z-2c829e71 的技术 Review review-20261027-043601z-95031535 第 3 轮研发、测试、架构均通过且零未处置意见；产品 Review review-20261027-045638z-3dc610f0 第 1 轮 round-20261027-045638z-65b5fe53 获产品负责人明确“我投通过”，Runner 接纳，补充 Run 已完成。结构稿 SHA256 为 80dcb052d524e280a1d2b534fb3db65d6482a051f33d7f24c9f087b87a7fec52。
 
 结构稿通过格式校验、构建、diff 检查与 Skill 安装/产品定位两份回归；配套移除一条只匹配旧标题的断言，所有 Memory 变更级校验和交付证据断言保留。七项同字节 Agent 回放对应此前实现稿，不声称在结构稿字节上重跑。Memory 内容未修改，既有 ChangeSet 校验仍匹配；新提交的远端 CI 继续由主 Run 跟进。
+
+
+## PR 范围复核
+
+产品负责人要求撤销 CI 改动并完整复核范围。已将 .github/workflows/ci.yml 与 test/ci-workflow.test.ts 恢复为本 PR 基线，当前净差异为零；不新增测试作业、不调整矩阵并行、不修改合入门禁。此前 CI 链接仅说明历史提交的验证，不代表这些配置仍纳入交付。
+
+逐项检查全部 PR 文件与 diff 后，保留内容按已确认需求归属如下：
+
+| 内容 | 范围依据 |
+|---|---|
+| Skill、Agent 入口元数据、CLI/Continue Help | 本轮直接交付；命令参数与执行处理器不扩展能力 |
+| Artifact 定义、上报规则及对应 System Memory/开发副本 | 产品负责人明确要求定义 Artifact 和控制滥用 |
+| 移除系统通用 Procedure、manifest、upgrade/repair 内容匹配保护、历史 fixture 与回归 | 产品负责人明确要求删除预置；升级仅删除已发行原版，保留用户定制及历史 Run |
+| ChangeSet Comment 流程说明与 Help | 使 Skill 对现有全批单 reason 接口的指导准确，不修改 Comment 运行时语义 |
+| 中英文 README、关联开发规则和旧 eval 路由描述 | 同步移除失效的强制通用流程与过时说明，不调整其他产品规范 |
+| 临时隔离的 Skill 行为评测与相关测试 | 验证本轮 Skill 能力、路由、产物粒度和兼容删除，不加入 CI 或 npm test 的在线模型调用 |
+| 能力盘点和本变更记录 | 本轮必要交付说明；原始验收证据留在本地和 Run |
+
+除 CI 外，复核发现两处需修正：预置删除增加的 master/base 一致性与 Managed 健康前置检查曾影响所有系统升级，现限定在携带原版摘要的预置删除路径，保留普通更新原有行为，并添加主分支前进后普通更新仍可创建/校验的回归。Skill 评测脚本曾覆盖 HOME/CODEX_HOME，现撤掉这些环境覆盖，仍只通过 MEMSPHERE_HOME 隔离测试项目。
+
+未发现其余新增 Run/Review/Schema/业务数据/View 功能或平台配置调整。清理后未改变已通过产品验收的 Skill 正文字节与最终 Memory 内容；本轮 CI 结果需对新 head 重新核对。范围复核不授权 Human 合入，也不代替合入结果确认。

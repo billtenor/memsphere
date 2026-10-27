@@ -560,7 +560,8 @@ export async function assertSystemUpgradeWorkspace(context: ProjectContext, chan
   if (changeId) {
     const change = await readChange(project, changeId);
     assertSystemUpgradeOwner(change, context);
-    if (project.config.store.type === "embedded") await assertSystemUpgradeGitBase(context, change.base_revision, change.system_upgrade!.branch);
+    if (project.config.store.type === "embedded") await assertSystemUpgradeGitBase(context, change.base_revision, change.system_upgrade!.branch,
+      change.system_upgrade!.targets.some(target => target.operation === "delete" && Boolean(target.approvedContentDigest)));
     return;
   }
   const active = (await listProjectChanges(project)).find(change => change.status === "active"
@@ -574,7 +575,7 @@ export async function assertSystemUpgradeWorkspace(context: ProjectContext, chan
   if (dirty) throw new Error("Prepare a clean dedicated upgrade branch/worktree; existing Memory differences are protected");
 }
 
-async function assertSystemUpgradeGitBase(context: ProjectContext, base: string, expectedBranch?: string): Promise<string> {
+async function assertSystemUpgradeGitBase(context: ProjectContext, base: string, expectedBranch?: string, protectRemoval = false): Promise<string> {
   if (context.primary.config.store.type === "embedded"
     && resolve(context.workspace.path) === resolve(context.primary.config.store.repository_path)) {
     throw new Error("System upgrade requires a separate linked worktree; preserve the original workspace");
@@ -587,7 +588,7 @@ async function assertSystemUpgradeGitBase(context: ProjectContext, base: string,
     throw new Error("System upgrade integration ref refs/heads/master is missing");
   }
   if (await gitOutput(["rev-parse", "HEAD"], context.workspace.path) !== base) throw new Error("System upgrade Git base changed; prepare a fresh upgrade branch or finish integration");
-  if (master !== base) throw new Error("System upgrade integration ref changed; prepare a fresh upgrade branch before deleting System Memory");
+  if (protectRemoval && master !== base) throw new Error("System upgrade integration ref changed; prepare a fresh upgrade branch before deleting System Memory");
   return branch;
 }
 
@@ -622,10 +623,11 @@ export async function createSystemUpgradeMemoryChange(input: {
   const { primary: project, workspace } = context;
   return withFileLock(memoryMutationLock(project), async () => {
     if (!targets.length) throw new Error("Cannot create an empty system_upgrade ChangeSet");
-    if (project.config.store.type === "managed") await assertManagedHealthy(project);
+    const protectsRemoval = targets.some(target => target.operation === "delete" && Boolean(target.approvedContentDigest));
+    if (project.config.store.type === "managed" && protectsRemoval) await assertManagedHealthy(project);
     const base = project.config.store.type === "managed" ? project.config.store.published_revision
       : await gitOutput(["rev-parse", "HEAD"], workspace.path);
-    const branch = project.config.store.type === "embedded" ? await assertSystemUpgradeGitBase(context, base) : undefined;
+    const branch = project.config.store.type === "embedded" ? await assertSystemUpgradeGitBase(context, base, undefined, protectsRemoval) : undefined;
     const active = (await listProjectChanges(project)).find(change => change.status === "active" && change.intent === "system_upgrade"
       && change.system_upgrade?.instance_key === workspace.instanceKey);
     if (active) throw new Error(`Retry with project upgrade --change ${active.id}`);
@@ -699,7 +701,8 @@ export async function validateSystemUpgradeRetry(input: {
 async function validateSystemUpgradeLocked(context: ProjectContext, change: MemoryChangeSet): Promise<MemoryChangeValidationResult> {
   assertSystemUpgradeOwner(change, context);
   const project = context.primary;
-  if (project.config.store.type === "embedded") await assertSystemUpgradeGitBase(context, change.base_revision, change.system_upgrade!.branch);
+  if (project.config.store.type === "embedded") await assertSystemUpgradeGitBase(context, change.base_revision, change.system_upgrade!.branch,
+      change.system_upgrade!.targets.some(target => target.operation === "delete" && Boolean(target.approvedContentDigest)));
   else {
     await assertManagedHealthy(project);
     if (project.config.store.published_revision !== change.base_revision) throw new Error("System upgrade baseline changed");

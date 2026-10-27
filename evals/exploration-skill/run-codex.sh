@@ -8,8 +8,6 @@ printf 'run_dir=%s\n' "$run_dir" > "$run_dir/metadata.txt"
 if [[ "${2:-}" == '--dry-run' ]]; then printf '%s\n' "$run_dir"; exit 0; fi
 export MEMSPHERE_HOME="$workspace/.memsphere-home"
 export PATH="$workspace/.bin:$PATH"
-export HOME="$workspace/.agent-home"
-export CODEX_HOME="${CODEX_HOME:-/data00/home/liuyanjun.lyj/.codex}"
 set +e
 codex exec --cd "$workspace" --sandbox workspace-write --ephemeral --ignore-user-config --ignore-rules --json --output-last-message "$run_dir/final.md" - < "$trial/prompt.md" > "$run_dir/events.jsonl" 2> "$run_dir/stderr.log"
 status=$?

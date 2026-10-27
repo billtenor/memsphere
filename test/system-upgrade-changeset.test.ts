@@ -304,3 +304,15 @@ test("Embedded system upgrade rejects a stale master before deleting a user-cust
   const retry = await changes.createSystemUpgradeMemoryChange({ context: await resolveProjectContext(), targets: [target], sourceDigest: "bundle-v1" });
   assert.equal(retry.change.status, "active");
 }));
+
+test("Embedded upgrades without retired-entry removal retain their existing base behavior", async () => fixture("embedded", async (main, linked) => {
+  await writeFile(join(main, "unrelated.txt"), "Main branch advanced\n");
+  await runGit(["add", "unrelated.txt"], { cwd: main });
+  await runGit(["commit", "-m", "unrelated main change"], { cwd: main });
+  process.chdir(linked);
+  const context = await resolveProjectContext();
+  await writeFile(join(context.primary.memoryRoot, path), content);
+  const { change } = await changes.createSystemUpgradeMemoryChange({ context, targets, sourceDigest: "bundle-v1" });
+  await changes.assertSystemUpgradeWorkspace(context, change.id);
+  assert.deepEqual((await changes.validateMemoryChange(change.id)).issues, []);
+}));

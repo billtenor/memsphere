@@ -72,24 +72,17 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.deepEqual(workflow.on.push.branches, ["master"]);
   assert.equal(workflow.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
   assert.equal(workflow.jobs.test.strategy.matrix, "${{ fromJSON(needs.plan.outputs.matrix) }}");
-  assert.equal(workflow.jobs.test.strategy["max-parallel"], 4);
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").run, 'node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"');
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").env.CI_PROFILE, "${{ inputs.profile || 'default' }}");
   assert.equal(workflow.jobs.budget, undefined, "queueing is not a failure");
   assert.equal(workflow.jobs["full-result"].if, "always() && needs.plan.outputs.profile == 'full'");
-  assert.equal(workflow.jobs["all-tests"].if, "needs.plan.outputs.profile == 'full'");
-  assert.deepEqual(workflow.jobs["all-tests"].needs, "plan");
-  assert(workflow.jobs["all-tests"].steps.some(step => step.run === "npx playwright install chromium"));
-  assert(workflow.jobs["all-tests"].steps.some(step => step.run === "npm test"));
   for (const name of ["full-result"]) {
-    assert.deepEqual(workflow.jobs[name].needs, ["plan", "test", "windows-package-smoke", "all-tests"]);
+    assert.deepEqual(workflow.jobs[name].needs, ["plan", "test", "windows-package-smoke"]);
     const result = workflow.jobs[name].steps.at(-1);
     assert.equal(result.env.TEST_RESULT, "${{ needs.test.result }}");
     assert.equal(result.env.PACKAGE_RESULT, "${{ needs.windows-package-smoke.result }}");
-    assert.equal(result.env.ALL_TESTS_RESULT, "${{ needs.all-tests.result }}");
     assert.match(result.run, /test "\$TEST_RESULT" = success/);
     assert.match(result.run, /test "\$PACKAGE_RESULT" = success/);
-    assert.match(result.run, /test "\$ALL_TESTS_RESULT" = success/);
   }
   const security = parse(await readFile(".github/workflows/security.yml", "utf8"));
   assert.equal(security.jobs.gitleaks["timeout-minutes"], 5);
