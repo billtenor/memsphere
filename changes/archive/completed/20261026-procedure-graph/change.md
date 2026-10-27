@@ -183,3 +183,7 @@ PR #117 首轮 head d7bfe54 的 Linux Browser/Runtime jobs 被 GitHub 以“The 
 在既定CI跟进步骤修正：补齐24个此前未登记的Linux测试耗时（合并后本地全量及首轮CI已完成文件实测），复用既有长任务优先调度；legacy-general-task-upgrade按Managed/Embedded升级契约进入project-upgrade组，脱离Runtime默认回退分组，且增加macOS/Windows升级保护。没有删除/跳过测试，没有增加job、并发或5分钟超时。CI计划/完整覆盖/调度契约6项实际通过；新增测试仍在Linux与full中恰好执行一次。后续以新head全部适用CI结果为准，不复用首轮绿灯。Memory无新增差异。
 
 第二轮CI进一步暴露原生平台的同一新升级文件缺少调度权重而位于队尾；Linux Runtime已完成全部文件输出，但在清理/保存结果前达到job时限。补齐macOS/Windows升级文件的调度估计（采用Linux实测值，非原生完整耗时），并将已有Windows的job内Node编译缓存延伸到Linux/macOS，复用重复CLI进程的编译结果。缓存仅位于各runner.temp、不跨job或平台共享，不缓存测试状态，仍保留独立MEMSPHERE_HOME。未修改job时限/并发或测试内容；后续以远端实际结果为准。
+
+第三轮CI的Linux全部组及macOS成功，唯Windows升级组仍达到5分钟时限。保留所有历史版本及断言，将历史升级测试按Managed/Embedded拆为两个文件，公共manifest读取放入测试helper；Embedded复用基础Project，每个版本仍有独立worktree、独立升级候选与原工作区不受影响断言。Windows两份历史文件移至现有core组平衡长尾，原升级组保留其余发布/升级测试，macOS/Linux/full仍完整覆盖。测试计划原生保护清单显式包含两份文件，CI exactly-once覆盖断言继续通过。最初fixture清理/路径错误的失败证据保留，修正后Embedded与CI契约8/8通过；完整12项复验结果另记。并发、job数、时限及断言未放宽，无Memory/运行代码变更。
+
+拆分/平衡后最终定向复验：Managed历史升级4项、Embedded历史升级2项、CI计划与覆盖/调度6项，合计12/12通过，49.92秒。此前两次fixture实现错误的失败日志保留，未替代本次结果；远端全部检查仍需新head实际通过。

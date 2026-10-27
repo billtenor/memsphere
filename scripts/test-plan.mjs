@@ -20,6 +20,8 @@ export const platformTests = [
   "file-lock.test.ts",
   "git.test.ts",
   "home.test.ts",
+  "legacy-general-task-upgrade.test.ts",
+  "legacy-general-task-upgrade-embedded.test.ts",
   "memory-changeset.test.ts",
   "memory-sync.test.ts",
   "model-operation.test.ts",
@@ -79,7 +81,7 @@ export function testCategory(file, source) {
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
     return /model|settings/.test(name) ? "model-ui" : "review-ui";
   }
-  if (name.startsWith("project-upgrade") || name === "legacy-general-task-upgrade.test.ts") return "project-upgrade";
+  if (name.startsWith("project-upgrade") || name.startsWith("legacy-general-task-upgrade")) return "project-upgrade";
   if (/^(app-install|data-command|model-command|model-market-package|system-model-creation)/.test(name)) return "app-cli";
   if (/cli|windows-prerequisites/.test(name)) return "memory-cli";
   if (/^(project|config|home|git|file-lock)/.test(name)) return "project-core";
@@ -97,6 +99,9 @@ export function selectTests(files, sources, durations, suite = "all") {
       return platformTests.includes(basename(file)) && !platformUpgradeTests.includes(basename(file)) && !packagePlatformTests.includes(basename(file));
     }
     if (suite === "platform-upgrades") {
+      // Keep the heavy historical variants in the existing Windows core job;
+      // otherwise its extra work is concentrated in the publication job.
+      if (basename(file).startsWith("legacy-general-task-upgrade")) return false;
       return platformUpgradeTests.includes(basename(file)) || testCategory(file, sources[file]) === "project-upgrade";
     }
     if (suite === "platform" || suite === "platform-and-upgrades") {
