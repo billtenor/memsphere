@@ -6,7 +6,7 @@ names:
 defines:
   - 一次有名称、有状态且可追溯的运行，可执行 Procedure，也可承载 Agent 自由探索。
   - Procedure 是可复用的流程定义，Run 是一次具体执行。流程执行模式沿 Procedure 的 flow 展开，自由探索模式围绕逐步形成的产物及其依赖关系展开。
-  - Step 是某个 Action 的执行实例，Artifact 是产出，External 是引用的外部资料，Review 是对产物的评审或反馈；Run 将这些对象组织为同一次运行的上下文。
+  - Step 是某个 Action 的执行实例。自由探索中的 Artifact 是围绕明确目的组织、可独立阅读或使用，并值得供后续引用、评审、修订或交付保留的一份结果；External 是引用的外部资料，Review 是对产物的评审或反馈。Run 将这些对象组织为同一次运行的上下文。
   - Runner 是 Memsphere 在当前通用 Agent 框架中的实际执行者。只使用主 Agent 时由主 Agent 执行；启用子 Agent 时，主 Agent 和子 Agent 共同构成 Runner，内部如何分工由 Agent 框架管理。
   - Action 的 actor 只区分 human 与 agent；human 表示由人完成该步骤，agent 表示由 Runner 执行。
   - 流程运行的 Memory 快照是本次执行所依据的记忆内容，使执行记录与当时的流程定义相对应。

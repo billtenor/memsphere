@@ -1,11 +1,18 @@
 import { createHash } from "node:crypto";
 import type { ContextControl } from "./service.js";
-import type { Snapshot } from "./types.js";
+import type { Run, Snapshot } from "./types.js";
 import { isGraphRun } from "./graph-runtime.js";
 import { parseMemoryEntity } from "../memory/store.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import { graphReviewHandle } from "./review-repository.js";
 import { projectGraphRound } from "./graph-review.js";
+
+/** Basic list metadata must not depend on any child records. */
+export function contextRunSummary(run: Run & { unavailable?: boolean; error?: string }) {
+  return { ...run, representation: "context-control", procedureName: "", updatedAt: run.endedAt ?? run.createdAt,
+    archived: Boolean(run.archived), readOnly: Boolean(run.archived || run.unavailable) };
+}
+
 
 export function contextRunPayload(snapshot: Snapshot) {
   const { run } = snapshot;

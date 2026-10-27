@@ -1,0 +1,44 @@
+!procedure
+syntax: memsphere-20260721-stable
+names:
+  - memsphere 通用流程
+  - 通用流程
+  - 兜底流程
+  - memsphere-general-task-execution
+defines:
+  - 用于完成没有专用 Procedure 覆盖的一般任务。
+asserts:
+  - 存在适用的专用 Procedure 时，不得使用本流程。
+goals:
+  - 高质量地完成一项通用任务。
+flow:
+  - !action
+    action: 对齐认知。提取任务中的核心领域对象和交付物名称，使用 memsphere memory list --kind concepts 检索同名或相关 Concept；命中后使用 memsphere memory read 完整读取并应用，未命中时使用模型自身理解。存在会影响执行方向的歧义时，向 human 询问并等待确认。
+    actor: agent
+    asserts:
+      - 不得因模型自认为熟悉某个术语而跳过核心领域对象和交付物名称的 Concept 检索。
+      - 命中相关 Concept 后必须完整读取并以其全部 defines 为准；memory list 摘要不得替代 memory read。
+      - 只有未命中相关 Concept 时才可使用模型自身理解；未命中且不存在歧义时不得扩大检索。
+      - 影响后续执行的概念歧义必须在进入下一步前解决。
+      - 任务没有可识别的核心领域对象或交付物名称，或者完成检索后未命中相关 Concept 且不存在概念歧义时，概念理解简述可以填写“无”。
+    artifact: !artifact
+      name: 概念理解简述
+  - !action
+    action: 对齐交付物。明确最终交付物及其交付标准；分别使用 memsphere memory list --kind statements 和 memsphere memory list --kind schemas 获取候选，再使用 memsphere memory read 检索与交付物相关的 Statement 和 Schema，将其与用户明确要求共同整理为交付契约。缺少影响交付的必要信息时，向 human 询问并等待补充。
+    actor: agent
+    asserts:
+      - 必须明确最终交付物的内容、形式、位置和完成标准。
+      - 必须检索并纳入相关 Statement 和 Schema；必要信息缺失或约束冲突时不得进入执行步骤。
+    artifact: !artifact
+      name: 最终交付物简述
+  - !action
+    action: 执行任务并产出最终交付物。
+    actor: agent
+    asserts:
+      - 必须按照已经对齐的目标和交付要求，产出可供 human 使用的实际交付物，不得只提供计划、占位内容或完成声明。
+      - 上报前必须检查并修正问题；无法完成时必须明确说明阻塞，不得声称完成。
+    suggests:
+      - 具体执行方式可以根据实际情况拟定。
+    artifact: !artifact
+      name: 最终交付结果简述
+      final: true

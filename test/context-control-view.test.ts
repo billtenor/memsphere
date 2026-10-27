@@ -91,3 +91,28 @@ flow:
     assert.equal((await (await fetch(`${api}/runs?representation=summary&archived=true`)).json()).runs.length,0);
   } finally { await new Promise<void>(resolve=>server.close(()=>resolve())); }
 });
+
+test("summary API lists all Run states without reading a broken Artifact, while detail reports the failure", async t => {
+  const f = await businessFixture(t, {}), config = await readProjectConfig("test-project", f.home);
+  const service = (await openContextControl(f.root, true))!;
+  const running = await service.start("running"), done = await service.start("done"), abandoned = await service.start("abandoned"), archived = await service.start("archived");
+  await service.finish(done.id); await service.abandon(abandoned.id); await service.finish(archived.id); await service.archive(archived.id);
+  const artifact = (await service.report(running.id, { name: "broken child", content: textContent("body") })).artifact;
+  await writeFile(join(f.root, "data/context_control/artifacts", running.id, `${artifact.id}.json`), "broken JSON");
+  const before = await service.stores.run.get({}, running.id);
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api/projects/test-project/runs`;
+  try {
+    for (const [query, id] of [["status=running", running.id], ["status=done", done.id], ["status=abandoned", abandoned.id], ["archived=true", archived.id]]) {
+      const response = await fetch(`${base}?representation=summary&${query}`);
+      assert.equal(response.status, 200);
+      const rows = (await response.json()).runs;
+      assert.deepEqual(rows.map((r: any) => r.id), [id]);
+      assert.equal(Object.hasOwn(rows[0], "eventCount"), false);
+      assert.equal(Object.hasOwn(rows[0], "contextRevision"), false);
+    }
+    assert.equal((await fetch(`${base}/${running.id}`)).status, 500);
+    assert.deepEqual(await service.stores.run.get({}, running.id), before);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});

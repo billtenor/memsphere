@@ -1,7 +1,8 @@
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
 import { openContextControl } from "../project/context-control.js";
-import { contextRunPayload, contextRunSummaries, assertUniqueRunSources } from "../context_control/view.js";
+import { contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
+import { createContextRunReader } from "../project/context-run-summaries.js";
 import { closeRunCommandStates } from "../home/command-state-store.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -296,7 +297,16 @@ type ViewCompositionBootSnapshot = Readonly<{
 
 class ViewMemoryCache {
   readonly previews = new MemoryChangePreviewCache();
+  readonly #contextRunReaders = new Map<string, ReturnType<typeof createContextRunReader>>();
   readonly #filesByRoot = new Map<string, Map<string, { kind: MemoryKind; path: string }>>();
+
+  async contextRunSummaries(config: MemsphereConfig) {
+    if (!config.project) return [];
+    const root = resolve(config.scopeRoot);
+    let read = this.#contextRunReaders.get(root);
+    if (!read) { read = createContextRunReader(root, { isolateCorruptRecords: true }); this.#contextRunReaders.set(root, read); }
+    return (await read()).map(contextRunSummary);
+  }
 
   replaceIndex(memoryRoot: string, files: Map<string, { kind: MemoryKind; path: string }>): void {
     this.#filesByRoot.set(memoryRoot, files);
@@ -323,6 +333,7 @@ class ViewMemoryCache {
   }
 
   async dispose(): Promise<void> {
+    this.#contextRunReaders.clear();
     this.#filesByRoot.clear();
     await this.previews.dispose();
   }
@@ -1354,7 +1365,7 @@ async function handleRequest(
       const activeLegacy = await listRunSummaries(config.runsRoot);
       const archivedLegacy = (await listRunSummaries(join(config.archiveRoot, "runs"))).map(run => ({ ...run, archived: true, readOnly: true }));
       const legacyRuns = [...activeLegacy, ...archivedLegacy];
-      const contextRuns = await contextRunSummaries(await contextControlForView(config));
+      const contextRuns = await viewCache.contextRunSummaries(config);
       assertUniqueRunSources(legacyRuns, contextRuns);
       const runs = [...legacyRuns, ...contextRuns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
       sendJson(response, 200, { runs: runs.filter(run => Boolean("archived" in run && run.archived) === archived && (!status || run.status === status)) });

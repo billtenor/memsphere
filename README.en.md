@@ -294,7 +294,7 @@ The same manifest manages original JSON in `reserved-models/market-models/`: the
 
 #### Repair or Upgrade System Memory
 
-To install missing System Memory, restore it, or upgrade it to the bundled version in an existing Managed or Embedded Project, run repair. System Memory marked as retired by the current manifest v4 (with v3 compatibility) is removed by default, but only when both its historical path and canonical identity match. User Memory and Mounted Projects are not touched:
+To install missing System Memory, restore it, or upgrade it to the bundled version in an existing Managed or Embedded Project, run repair. A retired entry in manifest v5 (with v3/v4 compatibility) is removed only when its historical path, canonical identity, and issued content digest match. Customized content is preserved with a conflict; Mounted Projects are not touched:
 
 ~~~bash
 memsphere project repair my-project
@@ -329,7 +329,7 @@ After reading the target Procedure, start a named Run:
 memsphere run start <procedure-name> --name "<run-name>"
 ~~~
 
-Every step in a Run explicitly asks for an Artifact. The Agent reports results through `run report`; Memsphere validates them, records state, and enters Review when required.
+Each Procedure Run step states its Artifact requirements. The Agent reports results through `run report`; Memsphere validates them, records state, and enters formal Review when required. If no Procedure applies, `memsphere run start --name "<run-name>"` starts free exploration. Report an Artifact when a complete result is needed for reference, review, handoff, or delivery.
 
 After a Review starts, use `memsphere run binding show/update` or the View to change later reviewers. The current and historical rounds stay unchanged; the next round of the same Review uses the last successfully saved Binding. Saving a Binding in the View does not require the Settings operation token.
 
@@ -420,7 +420,7 @@ The current version also provides:
 
 - **Project**: organizes persistent or repository-managed Memory and binds it to a working directory;
 - **Model and data CLI**: validates and manages models, registers business Stores and reads or writes data through explicit IDs;
-- **Run**: turns a Procedure into a named, stateful execution;
+- **Run**: a named, stateful task execution, either following a Procedure or supporting free exploration when none applies;
 - **Artifact**: preserves each step's deliverable and validates it against a Schema;
 - **Review**: lets people or Agents review Run artifacts;
 - **ChangeSet**: safely edits, validates, and publishes Memory changes;

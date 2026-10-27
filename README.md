@@ -296,7 +296,7 @@ memsphere view start
 
 #### 修复或升级 System Memory
 
-现有 Managed 或 Embedded Project 如需补装、恢复或升级当前版本内置的 System Memory，可执行一次 repair。当前 manifest v4（兼容 v3）明确标记的废弃 System Memory 默认清理，但只有历史路径与 canonical identity 同时匹配时才允许删除，不会触碰用户 Memory 或 Mounted Project：
+现有 Managed 或 Embedded Project 如需补装、恢复或升级当前版本内置的 System Memory，可执行一次 repair。当前 manifest v5（兼容 v3/v4）明确标记的废弃 System Memory 只有历史路径、canonical identity 与已发行原文摘要同时匹配时才会删除；用户修改过的内容会保留并报冲突，Mounted Project 不受影响：
 
 ```bash
 memsphere project repair my-project
@@ -331,7 +331,7 @@ memsphere memory read <reference>
 memsphere run start <procedure-name> --name "<run-name>"
 ```
 
-运行中的每一步都会明确要求产出 Artifact。Agent 通过 `run report` 上报结果，Memsphere 负责校验、记录状态，并在需要时进入 Review。
+Procedure Run 的每一步会明确给出产物要求。Agent 通过 `run report` 上报结果，Memsphere 负责校验、记录状态，并在需要时进入正式 Review。没有适用 Procedure 时，可用 `memsphere run start --name "<run-name>"` 启动自由探索 Run；在形成可供引用、评审、交接或交付的完整结果时上报 Artifact。
 
 Review 已开始后，可以用 `memsphere run binding show/update` 或 View 调整后续评审人。当前轮和历史轮保持不变；同一 Review 的下一轮使用最后一次成功保存的 Binding。View 中保存 Binding 不要求输入设置密钥。
 
@@ -422,7 +422,7 @@ Memsphere 当前支持四种 Memory：
 
 - **Project**：组织持久或随仓库维护的 Memory，并绑定当前工作目录；
 - **模型与数据 CLI**：校验和管理模型、登记业务 Store，并通过明确的 ID 读写数据；
-- **Run**：把 Procedure 变成一次有名称、有状态的实际运行；
+- **Run**：一次有名称、有状态的任务运行，可以执行 Procedure，也可以在没有适用 Procedure 时承载自由探索；
 - **Artifact**：保存每个步骤的交付结果，并依据 Schema 进行校验；
 - **Review**：让人或 Agent 审阅运行产物；
 - **ChangeSet**：安全地编辑、校验和发布 Memory 变更；

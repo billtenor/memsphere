@@ -43,7 +43,7 @@ sections:
           - Procedure Run 与 Artifact
         asserts:
           - 修改 run start、report、status、Schema 填写、Repeat、Artifact 校验或人机步骤行为时，必须更新 memsphere-procedure、memsphere-procedure-schema、memsphere-schema-schema、memsphere-yaml-syntax-rules 和 skill 的 Run 说明。
-          - 修改通用任务执行方式或 Procedure 编写与验收要求时，必须分别检查 memsphere-general-task-execution 和 memsphere-procedure-construction。
+          - 修改通用任务执行方式或 Procedure 编写与验收要求时，必须检查当前 Skill 的自由探索路由及 memsphere-procedure-construction。
       - !statement
         names:
           - Review

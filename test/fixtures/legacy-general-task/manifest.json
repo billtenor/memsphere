@@ -1,0 +1,68 @@
+[
+  {
+    "path": "procedures/memsphere-general-task-execution.yaml",
+    "reference": "procedures/memsphere-general-task-execution",
+    "sha256": "2cfca6f713d106c402bd9ffa7c693129442ac30035529abc1a50ed12e0e6922d",
+    "source": "b7fa54a8244ef06adb495045259e7b22c0aafb3a"
+  },
+  {
+    "path": "procedures/memsphere-general-task-execution.yaml",
+    "reference": "procedures/memsphere-general-task-execution",
+    "sha256": "47a9f766af8247207fd48ad36ed3688ca0db8aad670d48e211a1d27444d69398",
+    "source": "2f2a684a407735269fc59c4fe7f9e34050f5f305"
+  },
+  {
+    "path": "procedures/memsphere-general-task-execution.yaml",
+    "reference": "procedures/memsphere 通用流程",
+    "sha256": "7e9ed42d626b2169a8ebd0d86ebd88bc2c9063e071ac7b0f8aa97fc150b9c4a4",
+    "source": "8397fc5424621a8d1127b209744056b08d7c2bf1"
+  },
+  {
+    "path": "procedures/memsphere-general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "0f4536b2c58f305a4e53bfb8691751324c431727544b0d118ab244c6f3a65da4",
+    "source": "974d6f763941a732487010bc34681eb1b5ba3507"
+  },
+  {
+    "path": "procedures/general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "1e75b0e0d85098573e91647714d05cf06a7a63a1cc45b21c5f13f615a2743750",
+    "source": "b3fbe6fcc30b2c4df1fd6cfbb7c7fa4d499e01ba"
+  },
+  {
+    "path": "procedures/memsphere-general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "02ea5530690b947960561c423b393eda22489cc932abfdf5eb4f2224a2d50c07",
+    "source": "067899924299d5c8d451afba4f49651410b9f065"
+  },
+  {
+    "path": "procedures/general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "cb766af21e6ff8397fc9b5807403392d08163cfbcda85ae2d94ce7a360eeb1a5",
+    "source": "b9bf9e237faede596d04d0fdbd04a4c733bb20e1"
+  },
+  {
+    "path": "procedures/general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "dfa7b9d89a6550970d62844d09f271930219f1c079704e88987c092409018611",
+    "source": "b33d5a5835e242af7c32a30418f3994202d5118c"
+  },
+  {
+    "path": "procedures/general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "9dd4bf24a711a4e0583fc12a055d0a1bb802c83463a9579ea656b3d6c47ef7a6",
+    "source": "38ef8a4b6a3c4ccedd2f61d7f2863357c89da2a6"
+  },
+  {
+    "path": "procedures/general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "4eec14bb03f63aa00127a2f8be4fae0f61c91e2157d4325d4b3ab00a85f71edf",
+    "source": "2ad784db51316e188fa32a6429c1404fb091d891"
+  },
+  {
+    "path": "procedures/general-task-execution.yaml",
+    "reference": "procedures/通用流程",
+    "sha256": "9441385ded096dfc83453bf501a2045db2439697e7f40017b5fe3977ed767662",
+    "source": "1f218f08130136d8a6b8a543a185e74515059f5f"
+  }
+]

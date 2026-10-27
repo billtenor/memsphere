@@ -8,6 +8,16 @@ run_id: run-20261026-091339z-19538ce9
 
 # 流程记忆 mode=graph
 
+## 最新集成状态（2026-10-27）
+
+按 Human 明确指令提前提交功能 commit `14a966a4502d136cb3c852921578fe128e076ef4`，并将最新 `origin/master`（`7eeb28c46e6e77c20ed92e82ee5bef4fdefa74e9`）合并到当前功能分支。保留主干 Run 列表仅读取 Run Store 的优化，并为 View 按记录隔离损坏 Run；Skill 同时保留主干自由探索入口与 graph Step/Continue 指引。manifest 使用主干版本 5 和新 syntax；新探索规则同步新 syntax，历史升级 fixture 保持上游原始字节。
+
+合并候选完整回归：172 个测试文件、1457 项，1455 通过、2 项 Windows 专属测试按原定义跳过、零失败，791.06 秒，前置 build 通过。typecheck、Project validate、暂存安全扫描通过；冲突相关定向测试全部复验通过。实际 View 已验证列表选择、graph Step/collect 与原始 Artifact、1280/740 宽度及无 pageerror；临时环境与等待条件造成的早期失败保留原始记录，不计作通过。
+
+合并前最终 Memory 变更级校验通过：`change-20261027-084251029z-56ea5f07`，基线为功能 commit，digest `637b63699956306937ae9ab5016942af87d3fe73ce4e12cedf8a1b35779aafdf`，View：http://127.0.0.1:30000/projects/memsphere/changes/change-20261027-084251029z-56ea5f07。原功能 ChangeSet 保留其旧基线证据，未强行复用。
+
+实现评审已通过；产品评审仍待 Human，需求保持 accepting。此次本地 commit/master 同步不代表产品验收、归档、push、PR 或最终合入完成。日志、浏览器临时材料和既有 `.playwright/` 不纳入提交。
+
 ## 需求与整体目标
 
 以主干 `f6a7df3cbe0e375b1987a780238f22e60399f254` 的 `docs/procedure-graph-syntax.md` 为需求基线，将设计实现为可编写、校验、启动、执行、评审、恢复、查看及完成交付的流程能力。该基线只有设计，尚无完整 graph 实现；本轮将其落实为可执行功能。

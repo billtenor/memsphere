@@ -1,4 +1,5 @@
 import { createContextGraph } from "./context-control.js";
+import { RunSummaryRequests } from "./summary-requests.js";
 import {
   defineViewPlugin,
   portableSlots,
@@ -131,6 +132,8 @@ export default defineViewPlugin<RunConfig>({
       review: ctx.router.register({ id: "artifact-review", path: "/tasks/:runId/artifact-reviews/:reviewId", query: ["status", "round", "material"] })
     };
     const runDetailCache = new Map<string, Json>();
+    const summaries = new RunSummaryRequests();
+    ctx.lifecycle.own(() => summaries.dispose());
     const publishSecondary = createRunSecondaryPublisher(ctx, config, routes);
     ctx.slots.register(portableSlots.runArtifactRenderer, {
       id: "run.artifact.official",
@@ -143,7 +146,7 @@ export default defineViewPlugin<RunConfig>({
       } }
     });
     const renderArtifact = (input: unknown) => ctx.slots.render(portableSlots.runArtifactRenderer, "artifact", input);
-    const page = createRunPageMounts(config, routes, navigate, ctx.ui, runDetailCache, publishSecondary, renderArtifact);
+    const page = createRunPageMounts(config, routes, navigate, ctx.ui, runDetailCache, publishSecondary, renderArtifact, summaries);
     ctx.lifecycle.own(page.dispose);
     ctx.slots.register(slots.navigationPrimary, {
       id: "run.navigation", order: 200,
@@ -161,9 +164,8 @@ export default defineViewPlugin<RunConfig>({
         icon: { kind: "system", name: "play-circle" },
         async search({ query, signal }) {
           const groups = await Promise.all(["running", "done", "abandoned", "archived"].map(async status => {
-            const response = await fetch(projectApiUrl(config, `/api/runs?${new URLSearchParams({ representation: "summary", ...(status === "archived" ? { archived: "true" } : { status }) })}`), { signal });
-            if (!response.ok) throw new Error(await response.text());
-            return (await response.json() as { runs?: Json[] }).runs ?? [];
+            const payload = await summaries.read(projectApiUrl(config, `/api/runs?${new URLSearchParams({ representation: "summary", ...(status === "archived" ? { archived: "true" } : { status }) })}`), signal);
+            return (payload.runs as Json[] | undefined) ?? [];
           }));
           const needle = query.trim().toLowerCase();
           return groups.flat().filter(run => !needle || `${run.name ?? ""} ${run.id ?? ""}`.toLowerCase().includes(needle)).slice(0, 30).map(run => ({
@@ -184,14 +186,14 @@ export default defineViewPlugin<RunConfig>({
         label: { text: tr(config, "review") },
         presentation: "dialog",
         background: ctx.router.project({ from: routes.review, to: routes.detail, params: { runId: "runId" }, query: { status: "status" }, hash: "discard" }),
-        mount: createMount(config, routes, navigate, ctx.ui, runDetailCache, true, renderArtifact)
+        mount: createMount(config, routes, navigate, ctx.ui, runDetailCache, true, renderArtifact, summaries)
       }
     });
-    startRunHome(ctx, config, routes);
+    startRunHome(ctx, config, routes, summaries);
   }
 });
 
-function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, routes: RunRoutes): void {
+function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, routes: RunRoutes, summaries: RunSummaryRequests): void {
   const leases = new Map<string, Disposer>();
   let controller = new AbortController();
   let disposed = false;
@@ -211,9 +213,7 @@ function startRunHome(ctx: ViewPluginContext, config: Readonly<RunConfig>, route
   const refresh = async () => {
     controller.abort(); controller = new AbortController();
     try {
-      const response = await fetch(projectApiUrl(config, "/api/runs?representation=summary&status=running"), { signal: controller.signal });
-      if (!response.ok) throw new Error(await response.text());
-      const payload = await response.json() as { runs?: Json[] };
+      const payload = await summaries.read(projectApiUrl(config, "/api/runs?representation=summary&status=running"), controller.signal) as { runs?: Json[] };
       const attentionKeep = new Set<string>();
       const continueKeep = new Set<string>();
       for (const run of (payload.runs ?? []).filter(item => !item.archived && !item.readOnly).slice(0, 10)) {
@@ -409,7 +409,8 @@ function createRunPageMounts(
     heading?: HeaderTitleDescriptor,
     actions?: readonly PublishedRunHeaderAction[]
   ) => void,
-  renderArtifact: (input: unknown) => HTMLElement
+  renderArtifact: (input: unknown) => HTMLElement,
+  summaries: RunSummaryRequests
 ): RunPageMounts {
   const controller = new AbortController();
   let scratch: HTMLElement | undefined;
@@ -433,7 +434,7 @@ function createRunPageMounts(
     scratch ??= document.createElement("div");
     portal ??= document.createElement("div");
     if (!app) {
-      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, ui, runDetailCache, false, refreshList, renderArtifact);
+      app = new RunApplication(scratch, portal, config, routes, route, controller, navigate, ui, runDetailCache, false, refreshList, renderArtifact, summaries);
       routeKey = `${route.pathname}${route.search}${route.hash}`;
     }
     start ??= app.start();
@@ -448,8 +449,10 @@ function createRunPageMounts(
       return;
     }
     routeKey = key;
-    update = app!.updateRoute(route).finally(() => { update = undefined; });
-    await update;
+    const task = app!.updateRoute(route).finally(() => { if (update === task) update = undefined; });
+    update = task;
+    await task;
+    if (key !== routeKey) return;
     publish(route);
   };
   const makeMount = (surface: "list" | "detail"): RefreshableViewMount => ({
@@ -512,14 +515,14 @@ function createRunPageMounts(
   };
 }
 
-function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, ui: ViewUi, runDetailCache: Map<string, Json>, reviewOnly = false, renderArtifact: (input: unknown) => HTMLElement = input => (input as { defaultRender: () => HTMLElement }).defaultRender()): RefreshableViewMount {
+function createMount(config: Readonly<RunConfig>, routes: RunRoutes,navigate:Navigate, ui: ViewUi, runDetailCache: Map<string, Json>, reviewOnly = false, renderArtifact: (input: unknown) => HTMLElement = input => (input as { defaultRender: () => HTMLElement }).defaultRender(), summaries?: RunSummaryRequests): RefreshableViewMount {
   let app: RunApplication | undefined;
   return {
     async mount({ element, portal }, context) {
       const controller = new AbortController();
       element.classList.add("run-module");
       const style = document.createElement("style"); style.textContent = styles + runDetailStyles + contentFlowStyles + defaultContentStyles + pageLayoutStyles; element.append(style);
-      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly, () => undefined, renderArtifact);
+      app = new RunApplication(element, portal, config, routes, context.route, controller,navigate,ui,runDetailCache,reviewOnly, () => undefined, renderArtifact, summaries);
       app.setRenderContext(context);
       await app.start();
       return async () => { controller.abort(); await app?.dispose(); app = undefined; element.classList.remove("run-module"); element.replaceChildren(); portal.replaceChildren(); };
@@ -543,6 +546,8 @@ class RunApplication {
   readonly #ui: ViewUi;
   readonly #onListChange: () => void;
   readonly #renderArtifact: (input: unknown) => HTMLElement;
+  readonly #summaries: RunSummaryRequests | undefined;
+  #loadGeneration = 0;
   #runs: Json[] = []; #detail: Json | null = null; #status = "running"; #poll = 0; #busy = false;
   #detailError = ""; #detailErrorRunId = "";
   #reviewContext: Json | null = null; #reviewDialog: HTMLElement | null = null;
@@ -563,9 +568,10 @@ class RunApplication {
   #runListVersion = "";
   #lastLoadChanged = true;
   #renderContext: ViewRenderContext | undefined;
-  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,ui:ViewUi,runDetailCache:Map<string,Json>,reviewOnly=false,onListChange:()=>void=()=>undefined,renderArtifact:(input:unknown)=>HTMLElement=input=>(input as {defaultRender:()=>HTMLElement}).defaultRender()) {
+  constructor(root: HTMLElement, portal: HTMLElement, config: Readonly<RunConfig>, routes: RunRoutes, route: RouteLocation, controller: AbortController,navigate:Navigate,ui:ViewUi,runDetailCache:Map<string,Json>,reviewOnly=false,onListChange:()=>void=()=>undefined,renderArtifact:(input:unknown)=>HTMLElement=input=>(input as {defaultRender:()=>HTMLElement}).defaultRender(), summaries?: RunSummaryRequests) {
     this.#root=root; this.#portal=portal; this.#config=config; this.#routes=routes; this.#route=route; this.#controller=controller;this.#navigate=navigate;this.#ui=ui;this.#runDetailCache=runDetailCache;this.#reviewOnly=reviewOnly;this.#onListChange=onListChange;this.#renderArtifact=renderArtifact;
     this.#status = normalizedRunStatus(route.query.status);
+    this.#summaries = summaries;
   }
   get status(): string { return this.#status; }
   get location(): RouteLocation { return this.#route; }
@@ -660,10 +666,12 @@ class RunApplication {
     if (this.#detail?.id !== runId || this.#detailErrorRunId === runId) {
       try {
         const payload = await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
+        if (this.#route !== route || this.#controller.signal.aborted) return;
         this.#detail = this.#rememberRun(payload.run);
         this.#detailError = "";
         this.#detailErrorRunId = "";
       } catch (error) {
+        if (this.#route !== route || this.#controller.signal.aborted) return;
         this.#detail = null;
         this.#detailError = error instanceof Error ? error.message : String(error);
         this.#detailErrorRunId = runId;
@@ -694,21 +702,29 @@ class RunApplication {
     finally { this.#busy = false; }
   }
   async #request(path: string, init?: RequestInit): Promise<any> {
+    if (!init?.method && path.startsWith("/api/runs?") && new URLSearchParams(path.split("?")[1]).get("representation") === "summary" && this.#summaries) {
+      return this.#summaries.read(projectApiUrl(this.#config, path), this.#controller.signal);
+    }
     const response = await fetch(projectApiUrl(this.#config, path), { ...init, signal: this.#controller.signal });
     if (!response.ok) throw new Error((await response.text()) || `${response.status}`);
     return response.status === 204 ? null : response.json();
   }
-  async #load(runId?: string, options: { adoptStatus?: boolean; replaceMoved?: boolean; skipUnchanged?: boolean } = {}): Promise<string | undefined> {
+  async #load(runId?: string, options: { adoptStatus?: boolean; replaceMoved?: boolean } = {}): Promise<string | undefined> {
+    const generation = ++this.#loadGeneration;
+    const route = this.#route;
+    const current = () => generation === this.#loadGeneration && route === this.#route && !this.#controller.signal.aborted;
     let prefetchedDetail: Json | null = null;
     if (runId && options.adoptStatus) {
       try {
         const detailPayload = await this.#request(`/api/runs/${encodeURIComponent(runId)}`);
+        if (!current()) return undefined;
         prefetchedDetail = this.#rememberRun(detailPayload.run);
         if (prefetchedDetail?.status) this.#status = prefetchedDetail.archived && (!this.#route.projected || this.#status === "archived") ? "archived" : prefetchedDetail.status;
         this.#detail = prefetchedDetail;
         this.#detailError = "";
         this.#detailErrorRunId = "";
       } catch (error) {
+        if (!current()) return undefined;
         this.#detail = null;
         this.#detailError = error instanceof Error ? error.message : String(error);
         this.#detailErrorRunId = runId;
@@ -717,7 +733,7 @@ class RunApplication {
     const requestedStatus = this.#status;
     const query = new URLSearchParams({ representation: "summary", ...(requestedStatus === "archived" ? { archived: "true" } : { status: requestedStatus }) });
     const payload = await this.#request(`/api/runs?${query}`);
-    if (requestedStatus !== this.#status) return undefined;
+    if (!current() || requestedStatus !== this.#status) return undefined;
     const nextRuns = payload.runs || [];
     const nextListVersion = JSON.stringify(nextRuns.map((run: Json) => [
       run.id, run.status, run.updatedAt, run.eventCount, run.archived, run.readOnly, run.contextRevision,
@@ -740,23 +756,23 @@ class RunApplication {
       this.#lastLoadChanged = true;
       return targetId;
     }
-    if (options.skipUnchanged
-      && this.#detail?.id === targetId
-      && !this.#detailError
-      && (this.#detail.representation === "context-control"
-        ? selected?.contextRevision === this.#detail.contextRevision
-        : selected?.updatedAt === this.#detail.updatedAt && Number(selected?.eventCount ?? 0) === (Array.isArray(this.#detail.events) ? this.#detail.events.length : 0))) {
-      this.#lastLoadChanged = listChanged;
-      return targetId;
-    }
     this.#lastLoadChanged = true;
-    try{const detail = await this.#request(`/api/runs/${encodeURIComponent(targetId)}`);this.#detail = this.#rememberRun(detail.run);this.#detailError="";this.#detailErrorRunId="";}catch(error){this.#detail=null;this.#detailError=error instanceof Error?error.message:String(error);this.#detailErrorRunId=targetId;}
+    try {
+      const detail = await this.#request(`/api/runs/${encodeURIComponent(targetId)}`);
+      if (!current()) return undefined;
+      this.#detail = this.#rememberRun(detail.run); this.#detailError = ""; this.#detailErrorRunId = "";
+    } catch (error) {
+      if (!current()) return undefined;
+      this.#detail = null; this.#detailError = error instanceof Error ? error.message : String(error); this.#detailErrorRunId = targetId;
+    }
     return targetId;
   }
   async #refresh(awaitNavigation = true): Promise<void> {
     try {
+      const route = this.#route;
       const selected = this.#reviewOnly ? this.#route.params.runId : this.#detail?.id;
       const replacement = await this.#load(selected, { replaceMoved: !this.#reviewContext });
+      if (route !== this.#route || this.#controller.signal.aborted) return;
       if(!this.#reviewOnly&&this.#lastLoadChanged)this.#render();
       if (replacement !== selected) {
         if (this.#route.projected) return;
@@ -830,7 +846,7 @@ class RunApplication {
           return {
             id,
             title: { text: displayName(run) },
-            meta: { text: `${shortId(id)} · ${run.eventCount ?? 0}` },
+            meta: { text: typeof run.eventCount === "number" && Number.isFinite(run.eventCount) ? `${shortId(id)} · ${run.eventCount}` : shortId(id) },
             description: review?.id ? { text: `${tr(this.#config, "reviewProgress")} ${review.submitted ?? 0}/${review.total ?? 0}` } : undefined,
             icon: { kind: "system" as const, name: run.status === "running" ? "play-circle" : run.status === "done" ? "check-circle" : "archive" },
             selected: id === this.#detail?.id,

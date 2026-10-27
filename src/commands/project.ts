@@ -25,6 +25,7 @@ import {
   readBundledSystemMemories,
   readReservedMemoryManifest,
   reservedSystemMemoryRemovalTombstones,
+  systemMemoryRemovalDigest,
   type BundledSystemMemoryDescriptor
 } from "../reserved/store.js";
 import { isMemoryKind, memoryKinds, memoryKindTags, type MemoryKind } from "../memory/kinds.js";
@@ -102,7 +103,7 @@ type SystemMemoryReconcilePlan = {
   currentDescriptors: SystemMemoryStoreDescriptor[];
   creates: BundledSystemMemoryDescriptor[];
   updates: SystemMemoryUpdateDescriptor[];
-  deletes: SystemMemoryStoreDescriptor[];
+  deletes: Array<SystemMemoryStoreDescriptor & { approvedContentDigest?: string }>;
 };
 
 type SystemMemoryStoreDescriptor = {
@@ -132,6 +133,7 @@ type EmbeddedRepairTarget = {
   reference: string;
   path: string;
   sourcePath?: string;
+  approvedContentDigest?: string;
   snapshot: EmbeddedFileSnapshot;
 };
 
@@ -190,7 +192,8 @@ async function prepareSelectedManagedSystemMemoryChange(): Promise<SystemMemoryC
         targets: plan.deletes.map((descriptor) => ({
           reference: memoryReference(descriptor),
           path: descriptor.id,
-          baseDigest: descriptor.baseDigest
+          baseDigest: descriptor.baseDigest,
+          approvedContentDigest: descriptor.approvedContentDigest
         })),
         changeId: result?.change.id,
         onChangeCreated: (created) => { result = created; }
@@ -269,17 +272,19 @@ async function buildSystemMemoryReconcilePlan(input: {
       updates.push({ ...memory, targetPath: current.id, baseDigest: current.baseDigest });
     }
   }
-  const deletes: SystemMemoryStoreDescriptor[] = [];
+  const deletes: Array<SystemMemoryStoreDescriptor & { approvedContentDigest?: string }> = [];
   for (const tombstone of reservedSystemMemoryRemovalTombstones(manifest)) {
     const current = currentByPath.get(tombstone.path);
     if (!current) continue;
     const reference = memoryReference(current);
-    if (!tombstone.references.includes(reference)) {
+    const digest = systemMemoryRemovalDigest(await readFile(join(input.memoryRoot, current.id)));
+    const match = tombstone.matches.find(item => item.reference === reference && (!item.sha256 || item.sha256 === digest));
+    if (!match) {
       throw new Error(
-        `System Memory removal identity conflict at ${tombstone.path}: found ${reference}`
+        `System Memory removal identity or content conflict at ${tombstone.path}: found ${reference}`
       );
     }
-    if (!installReferences.has(reference)) deletes.push(current);
+    if (!installReferences.has(reference)) deletes.push({ ...current, approvedContentDigest: match.sha256 });
   }
   return {
     project: input.project,
@@ -335,7 +340,8 @@ async function prepareSelectedEmbeddedSystemMemoryRepair(
     ...plan.deletes.map((memory) => ({
       operation: "delete" as const,
       reference: memoryReference(memory),
-      path: memory.id
+      path: memory.id,
+      approvedContentDigest: memory.approvedContentDigest
     }))
   ];
   await assertEmbeddedRepairTargetsClean(
@@ -352,6 +358,10 @@ async function prepareSelectedEmbeddedSystemMemoryRepair(
     }
     if (target.operation !== "create" && !snapshot.exists) {
       throw new Error(`Embedded System Memory changed or was deleted during repair: ${target.reference}`);
+    }
+    if (target.operation === "delete" && target.approvedContentDigest && snapshot.exists
+      && systemMemoryRemovalDigest(snapshot.content) !== target.approvedContentDigest) {
+      throw new Error(`Embedded System Memory removal content conflict: ${target.reference}`);
     }
     targets.push({ ...target, snapshot });
   }
@@ -1150,10 +1160,10 @@ export async function readSystemMemoryUpgradeTargets(projectName?: string) {
         ? await listPublishedMemoryIdentities(context.primary.memoryRoot, context.primary.config.store.published_revision)
         : await listWorkingMemoryIdentities(context.primary.memoryRoot)
     });
-    const targets: Array<{ reference: string; path: string; operation: "create" | "update" | "delete"; content?: string }> = [];
+    const targets: Array<{ reference: string; path: string; operation: "create" | "update" | "delete"; content?: string; approvedContentDigest?: string }> = [];
     for (const descriptor of plan.creates) targets.push({ reference: descriptor.reference, path: descriptor.path, operation: "create", content: await readFile(descriptor.sourcePath, "utf8") });
     for (const descriptor of plan.updates) targets.push({ reference: descriptor.reference, path: descriptor.targetPath, operation: "update", content: await readFile(descriptor.sourcePath, "utf8") });
-    for (const descriptor of plan.deletes) targets.push({ reference: memoryReference(descriptor), path: descriptor.id, operation: "delete" });
+    for (const descriptor of plan.deletes) targets.push({ reference: memoryReference(descriptor), path: descriptor.id, operation: "delete", approvedContentDigest: descriptor.approvedContentDigest });
     return { targets, created: plan.creates.length, updated: plan.updates.length, deleted: plan.deletes.length };
   });
 }
