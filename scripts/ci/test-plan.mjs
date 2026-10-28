@@ -1,4 +1,17 @@
-import { basename } from "node:path";
+import { readdir } from "node:fs/promises";
+import { basename, join } from "node:path";
+
+// Relative POSIX paths keep discovery identical on every CI platform.
+export async function discoverTestFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const groups = await Promise.all(entries.map(async entry => {
+    if (entry.isDirectory()) {
+      return (await discoverTestFiles(join(directory, entry.name))).map(file => `${entry.name}/${file}`);
+    }
+    return entry.isFile() && entry.name.endsWith(".test.ts") ? [entry.name] : [];
+  }));
+  return groups.flat().sort();
+}
 
 // Native filesystem/process risks retained on every supported PR platform.
 // See docs/ci-performance.md for the source-boundary audit and full-run policy.

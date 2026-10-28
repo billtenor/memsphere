@@ -64,9 +64,11 @@ test("graph reference discovery includes Action and artifact Statement requireme
   assert.deepEqual(collectMemoryReferenceTargets(p).sort(), ["statements/process-rules", "statements/result-rules"]);
 });
 
-test("the materials example parses with a preparation Action instead of startup input", async () => {
-  const document = (await readFile(new URL("../docs/procedure-graph-syntax.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
-  const yaml = [...document.matchAll(/```yaml\n([\s\S]*?)```/g)].map(m => m[1]).find(s => s.startsWith("!procedure\n") && s.includes("mode: graph\n"))!;
+for (const newline of ["\n", "\r\n"]) test(`the materials example parses with a preparation Action using ${newline === "\n" ? "LF" : "CRLF"} line endings`, async () => {
+  const document = (await readFile(new URL("../docs/procedure-graph-syntax.md", import.meta.url), "utf8")).replace(/\r?\n/g, newline);
+  const normalized = document.replace(/\r\n/g, "\n");
+  const yaml = [...normalized.matchAll(/```yaml\n([\s\S]*?)```/g)].map(m => m[1]).find(s => s.startsWith("!procedure\n") && s.includes("mode: graph\n"))!;
+  assert.ok(yaml, "published graph YAML example must be present");
   const p = parse(parseMemoryYaml(yaml));
   assert.equal(p.actions.length, 5);
   assert.equal(p.actions[0].id, "prepare");
