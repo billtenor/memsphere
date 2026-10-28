@@ -18,7 +18,7 @@ const operations: Array<[string[], string, string[]]> = [
   [["external", "add"], "external-add", ["source", "content", "contentType", "file", "output"]],
   [["artifact", "tag"], "artifact-tag", ["artifact", "tag", "output"]],
   [["outputs", "update"], "outputs-update", ["add", "remove", "output"]],
-  [["finish"], "finish", ["artifact", "output"]],
+  [["finish"], "finish", ["artifact", "authorization", "output"]],
   [["abandon"], "abandon", ["reason", "reasonFile", "output"]]
 ];
 /** Shares native option parsers and the same business handler; never shells out to another CLI. */

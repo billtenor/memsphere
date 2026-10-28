@@ -30,7 +30,7 @@ memsphere run external show --run R --external E --for B --out external.txt
 memsphere run report --run R --target B --artifact-file result.md --depends-on artifact:A
 memsphere run review create --run R --artifact B --reviewer agent --comment "补充恢复路径"
 memsphere run report --run R --revised-from B --artifact-file revised.md
-memsphere run finish --run R --artifact B_NEW
+memsphere run finish --run R --artifact B_NEW --authorization "用户已确认修订成果并同意结束"
 ```
 
 R、A、B等为相应命令返回的实际ID。按tag依赖使用 `--depends-on tag:design`，当次展开为具体ID。无目标的新CLI请求不保证重复请求去重；结果不明时先查询，不盲目重复创建。

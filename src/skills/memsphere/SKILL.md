@@ -66,7 +66,9 @@ memsphere run outputs list --run <id>
   content 为 `{model:{definedBy,definition},payload:{contentType,content}}`，definition 是 JSON 字符串；普通文本模型可用 `{definedBy:"raw.json",definition:"{}"}`。contentRef 用 `{storeId,dataId,sha256}` 固定引用，dependencies 是 `{kind:"artifact"|"external",id}` 数组，tags 是字符串数组。不填写系统身份，不把 Procedure 的 write-options/revision-summary 用于自由探索。
 - 修订用 `--revised-from <old-id>` 提交完整版本并取得新 ID；省略依赖继承旧集合，显式依赖替换它，结构化空数组可清空依赖。
 - `run review create/list/show` 记录轻量反馈，不构成正式 Procedure Review 门禁。反馈本身不自动成为新版本。
-- 结束前核对成果集合；`run outputs update --add <id> --remove <id>` 调整当前成果根，不删除历史。`run finish --run <id>` 采用当前成果，也可用 `--artifact <id>` 显式选择。
+- 产出或上报 Artifact 不代表自由探索 Run 完成。向用户交付当前成果并说明 Run 保持开放，等待用户检查；用户未明确确认结束前，不执行 finish。Agent 自认为目标已达成、测试通过、用户沉默或对局部结果表示认可，都不能代替对当前成果和结束 Run 的明确确认。
+- 用户提出反馈时，继续同一个 Run，按需记录轻量 Review、补充探索或以 revisedFrom 提交完整修订版，再交用户检查。等待人工确认可以结束当前回复，但 Run 保持 running，不能自动 finish 或 abandon。
+- 结束前核对成果集合；`run outputs update --add <id> --remove <id>` 调整当前成果根，不删除历史。只有用户明确确认当前成果并同意结束，才执行 `run finish --run <id> --authorization <用户确认依据>`；默认采用当前成果，可用 `--artifact <id>` 显式选择。确认必须针对最终待交付版本，确认后又修订的成果需重新确认；用户已明确说“确认结束”等且目标无歧义时直接执行，不重复追问。Human 也可在 View 中检查成果后点击“结束运行”并确认。
 
 已保存 Artifact/Step 后报错，先查状态和产物再重试，不假设重报会去重。
 
