@@ -62,7 +62,7 @@ async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
   const run = snapshot.run, a = g.action(run, step), c = await context(project, run.id, step.id);
   if (step.status === "awaiting_review") {
     const round = step.reviewRounds!.at(-1)!;
-    return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.language === "en" ? `Step ${step.id} is awaiting review (${round.id}). Stay on this Step.` : `Step ${step.id} 正在等待评审（${round.id}），继续处理此 Step。`, command: c ? `memsphere continue ${c.id} review wait` : `memsphere --project ${quote(project)} run review wait --review ${graphReviewHandle(run.id, step.id)}` });
+    return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.language === "en" ? `Step ${step.id} is awaiting review (${round.id}). Execute review wait and wait for the result; do not invent additional work while waiting.` : `Step ${step.id} 正在等待评审（${round.id}）。执行 review wait 并等待结果，不要在等待期间自行增加工作。`, command: c ? `memsphere continue ${c.id} review wait` : `memsphere --project ${quote(project)} run review wait --review ${graphReviewHandle(run.id, step.id)}` });
   }
   const rules = await g.rules(run, a);
   const labels = run.language === "en" ? { procedure: "Procedure rules", asserts: "Step rules", suggests: "Step suggestions", artifactAsserts: "Artifact rules", artifactSuggests: "Artifact suggestions" } : { procedure: "流程规则", asserts: "Step 规则", suggests: "Step 建议", artifactAsserts: "产物规则", artifactSuggests: "产物建议" };

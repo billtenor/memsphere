@@ -80,7 +80,7 @@ Procedure 有 Review Slot 时，首次启动会预检所有 scope、Slot、Actor
 
 执行当前 `Do`、规则和 Artifact 契约，按每次回执的 `Then` 持续推进，不提前执行未返回步骤。`Ask human to do` 必须等待相应 Human 完成，再把其结果作为当前产物上报。
 
-只有需要 Human 完成步骤、提供必要信息/授权或处理无法自行恢复的事项时，才可以结束当前回复并暂停。可自行修复的错误、字段边界、Agent Review 短暂等待和 Runner 自己待投票均不是暂停理由。暂停时说明 Run ID、停止位置、等待对象和恢复方式，恢复同一 Run，不跳过门禁或自动废弃。
+只有需要 Human 完成步骤、提供必要信息/授权或处理无法自行恢复的事项时，才可以结束当前回复并暂停。可自行修复的错误、字段边界和 Runner 自己待投票均不是暂停理由。Agent Review 尚未返回时应持续等待，结果返回后继续流程；等待本身就是当前有效动作，不要求持续产出工作。暂停时说明 Run ID、停止位置、等待对象和恢复方式，恢复同一 Run，不跳过门禁或自动废弃。
 
 flow 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-file <path>`。Artifact 声明了业务 `store`/`model` 时，按“在 Procedure 中写入业务数据”处理绑定与写入。
 
@@ -117,6 +117,7 @@ memsphere run report --run <id> --artifact-file <local-copy>
 #### 推进正式 Review
 
 - report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须用受限 `memsphere-review` 会话命令提交意见和 Vote；普通文本回复不是正式投票。
+- `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
 - Agent Assignment 首次失败时，Runner 用 `run review retry --review <id> --assignment <id>` 重试一次并继续 wait；再次失败时报告 Provider/Attempt/错误，取得 Human 对继续重试的授权后再执行。调试启动可按需使用 `debug.agent_review` 与 `run try-run`，后者只生成启动材料，不执行 Reviewer 或认领 Assignment。
 - 进入 `awaiting_runner_vote` 后，阅读全部意见，由 Runner 显式 `run review vote --review <id> --round <id> --vote approve`，或 `--vote request_changes --comment <reason>`。建议票不能替代 Runner 决定，也不扩大 Human 授权或豁免适用规则；需记录处置理由时用 `run review resolve`。修正后用完整 Artifact 和 `--revision-summary-file <file>` 原子重报。
 - 待提交 Human Assignment 出现时立即向相应 Human 收集“通过 / 要求修改 / 弃权”；通过意见可选，要求修改需意见，弃权需原因，可与后台 Agent 并行收集。普通讨论和问题不是正式投票。明确的执行性投票在目标、所需意见均清楚且 CLI 已给出当前 Review/Round 代提交语境时，就是代提交授权，不再问同义确认。
