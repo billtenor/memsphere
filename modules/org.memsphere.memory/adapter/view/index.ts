@@ -1,3 +1,4 @@
+import { createProcedureGraph, type ProcedureDefinition } from "../../../shared/view/procedure-graph.js";
 import {
   defineViewPlugin,
   portableSlots,
@@ -340,14 +341,34 @@ const memoryStyles = `
   .memory-pill.done { border-color:var(--mem-view-color-success); background:var(--mem-view-color-success-soft); color:var(--mem-view-color-success); }
   .action-contracts { margin:0 13px 10px; padding:9px 12px; border:1px solid var(--line); border-radius:6px; background:var(--mem-view-color-subtle); }
   .memory-flow-item>.memory-artifact-schema { margin:0 13px 10px; }
+  .memory-artifact-diff-card{margin:0;border:0;border-radius:0;box-shadow:none;background:transparent}.memory-artifact-diff-card+.memory-artifact-diff-card{border-top:1px solid var(--line)}
+  .memory-artifact-diff-card .memory-section-header{padding:10px 8px;background:transparent;min-height:40px;width:auto;flex:0 1 auto}.memory-artifact-diff-card .memory-section-header:hover{background:var(--mem-view-color-subtle)}
+  .memory-artifact-diff-card .memory-node-title{font-size:13px;line-height:1.55;font-weight:600}
+  .memory-artifact-diff-card>.memory-section-body{padding:0 18px 16px}
+  .memory-artifact-step-description{font-size:13px;line-height:1.7;margin:16px 0 0;color:var(--muted)}
+  .memory-artifact-rule-list .memory-list-body{padding:0}
+  .memory-artifact-model-structure{margin-top:10px;min-width:0}
+  .memory-artifact-info-group{padding:16px 0;border-bottom:1px solid var(--line)}
+  .memory-artifact-info-group:last-child{border-bottom:0;padding-bottom:0}
+  .memory-artifact-group-title{font-size:13px;font-weight:600;line-height:1.6;margin:0 0 10px;color:var(--text)}
+  .memory-artifact-info-group .memory-kv{grid-template-columns:84px minmax(0,1fr);gap:4px 12px;margin:0;padding:5px 0}
+  .memory-artifact-info-group .memory-kv>dt{font-size:13px;line-height:1.7;font-weight:400;color:var(--muted)}
+  .memory-artifact-info-group .memory-kv>dd,.memory-artifact-info-group .text-list,.memory-artifact-values{font-size:13px;line-height:1.7}
+  .memory-artifact-info-group .memory-artifact-description{grid-template-columns:minmax(0,1fr);margin-bottom:8px}
+  .memory-artifact-dependency+.memory-artifact-dependency{border-top:1px dashed var(--line);margin-top:8px;padding-top:8px}
+  .memory-artifact-values{margin:0;padding-left:20px}.memory-artifact-values li+li{margin-top:6px}
+  .memory-artifact-info-group .memory-block-title,.memory-artifact-field-title{font-size:13px;font-weight:400;line-height:1.7;color:var(--muted)}
+  .memory-artifact-field-title{margin:12px 0 6px}
+  .memory-artifact-info-group .memory-collapsible-list{margin:8px 0}
+  .memory-artifact-info-group .memory-pre{font-size:12px;line-height:1.7;margin:0;padding:10px 12px;background:var(--subtle);border:1px solid var(--line);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere}
   .memory-kv { display:grid; grid-template-columns:minmax(90px,auto) minmax(0,1fr); gap:6px 12px; padding:4px 0; }
   .memory-kv>dt { color:var(--muted); font-size:var(--memory-page-text-label); font-weight:650; line-height:var(--memory-page-line-compact); }
   .memory-kv>dd { margin:0; font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); overflow-wrap:anywhere; }
   .memory-commentable { position:relative; }
-  .memory-inline-plus { position:absolute; top:4px; right:4px; display:none; width:25px; height:25px; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--accent); }
-  .memory-commentable:hover>.memory-inline-plus,.memory-inline-plus:focus { display:block; }
+  .memory-inline-plus { position:absolute; top:4px; right:4px; display:none; width:25px; height:25px; border:1px solid var(--line); border-radius:50%; background:var(--surface); color:var(--accent); padding:0;box-sizing:border-box;place-items:center;line-height:1; }
+  .memory-commentable:hover>.memory-inline-plus,.memory-inline-plus:focus { display:grid; }
   .memory-section.memory-commentable:hover>.memory-inline-plus { display:none; }
-  .memory-section.memory-commentable>.memory-section-header:hover~.memory-inline-plus,.memory-section.memory-commentable>.memory-inline-plus:hover,.memory-section.memory-commentable>.memory-inline-plus:focus { display:block; }
+  .memory-section.memory-commentable>.memory-section-header:hover~.memory-inline-plus,.memory-section.memory-commentable>.memory-inline-plus:hover,.memory-section.memory-commentable>.memory-inline-plus:focus { display:grid; }
   .text-list>li>.memory-commentable,.memory-inline-diff-content>span.memory-commentable { display:inline; width:auto; }
   .text-list>li>.memory-commentable>.memory-inline-plus,.memory-inline-diff-content>span.memory-commentable>.memory-inline-plus,.memory-artifact-row.memory-commentable>.memory-inline-plus,.memory-flow-action.memory-commentable>.memory-inline-plus { position:static; display:inline-grid; place-items:center; vertical-align:middle; margin:-2px 0 0 8px; opacity:0; pointer-events:none; }
   .memory-commentable:hover>.memory-inline-plus,.memory-commentable>.memory-inline-plus:focus,.text-list>li:not(.memory-inline-diff-item):hover>.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-inline-diff-content>span.memory-commentable>.memory-inline-plus,.memory-inline-diff-line:hover .memory-artifact-row.memory-commentable>.memory-inline-plus { opacity:1; pointer-events:auto; }
@@ -388,6 +409,20 @@ const memoryStyles = `
   li.memory-inline-marker-old::marker { color:var(--mem-view-color-danger); }
   li.memory-inline-marker-new::marker { color:var(--mem-view-color-success); }
   .memory-inline-removed { margin:5px 0; }
+  .memory-graph-document-diff.memory-inline-diff-line{background:transparent;color:var(--text);border-left:2px solid var(--mem-view-color-accent);border-radius:0;padding:4px 0 4px 14px}
+  .memory-graph-document-diff.memory-inline-old{border-left-color:var(--mem-view-color-danger)}
+  .memory-graph-document-diff>.memory-inline-diff-list-row{display:block}
+  .memory-graph-document-diff>.memory-inline-diff-list-row>.memory-inline-diff-label{display:inline-block;padding:2px 7px;margin:0 0 10px;border-radius:4px;background:var(--mem-view-color-accent-soft);color:var(--mem-view-color-accent);font-size:11px}
+  .memory-graph-document-diff.memory-inline-old>.memory-inline-diff-list-row>.memory-inline-diff-label{background:var(--mem-view-color-danger-soft);color:var(--mem-view-color-danger)}
+  .memory-artifact-heading{display:flex;align-items:center;gap:2px;min-width:0}
+  .memory-artifact-heading>.memory-inline-plus{position:static;flex:none;display:inline-grid;opacity:0;pointer-events:none;margin:0 8px 0 0}
+  .memory-artifact-heading:hover>.memory-inline-plus,.memory-artifact-heading>.memory-inline-plus:focus-visible{opacity:1;pointer-events:auto}
+  .memory-artifact-diff-card .memory-commentable:not(.memory-section){display:inline}
+  .memory-artifact-diff-card .memory-commentable:not(.memory-section)>.memory-inline-plus{position:static;display:inline-grid;vertical-align:middle;margin:0 0 0 6px;opacity:0;pointer-events:none;width:20px;height:20px}
+  .memory-artifact-diff-card .memory-commentable:not(.memory-section):hover>.memory-inline-plus,.memory-artifact-diff-card .memory-commentable:not(.memory-section)>.memory-inline-plus:focus-visible{opacity:1;pointer-events:auto}
+  .memory-artifact-diff-card>.memory-section-body{padding:0 12px 16px}
+  .memory-artifact-rule-list>.memory-collapsible-body{padding:0}
+
   .memory-module .memory-diff-view .memory-inline-diff-line .memory-artifact-details,.memory-module .memory-diff-view .memory-inline-diff-line .memory-review-details { position:static; display:inline-flex; visibility:visible; opacity:1; pointer-events:auto; transform:none; width:auto; max-width:100%; box-shadow:none; border:0; padding:0; background:transparent; }
   .memory-inline-diff-line .memory-artifact-row { flex-wrap:wrap; }
   .memory-module .memory-diff-view .memory-inline-diff-line :is(.memory-artifact-summary,.memory-artifact-details,.memory-review-summary,.memory-review-details,.memory-pill) { min-width:0; max-width:100%; white-space:normal; overflow-wrap:anywhere; flex-wrap:wrap; }
@@ -2195,6 +2230,7 @@ class MemoryApplication {
   private commentStatus(status: string): string { return this.t(`change.comment.${status}`); }
   private renderOptions(): RenderOptions {
     return {
+      structuralGraph: Boolean(parseLocation(this.#location).changeId) && this.#changeContentMode !== "candidate",
       ui: this.#ui,
       knownReferences: new Set(this.#referenceMemories.map(memoryReference)),
       openReference: target => {
@@ -2307,6 +2343,7 @@ function projectApiUrl(config: Readonly<MemoryConfig>, path: string): string {
 }
 
 type RenderOptions = {
+  structuralGraph?: boolean;
   ui?: ViewUi;
   knownReferences?: ReadonlySet<string>;
   openReference?: (target: string) => void;
@@ -2374,7 +2411,9 @@ function renderWholeMemoryChange(
   summary.append(el("strong", "", t("change.fieldChanges").replace("{count}", String(changes.length))));
   wrap.append(summary);
   const document = renderMemoryEntity(memory.kind, entity, t, tone === "old" ? undefined : comment, options);
-  wrap.append(diffLine(tone === "old" ? cleanDiffClone(document) : document, tone, tone === "old" ? t("change.deleted") : t("change.added")));
+  const whole=diffLine(tone === "old" ? cleanDiffClone(document) : document, tone, tone === "old" ? t("change.deleted") : t("change.added"));
+  if(entity.mode==="graph")whole.classList.add("memory-graph-document-diff");
+  wrap.append(whole);
   return wrap;
 }
 
@@ -2684,21 +2723,69 @@ function renderProcedure(node: JsonRecord, path: string, t: (key: string) => str
   const document = el("div", "memory-document mem-content-document"); document.dataset.diffPath = path;
   appendStringList(document, "names", array(node.names), path, comment, t, options.ui);
   for (const key of ["defines", "goals"] as const) appendStringList(document, key, array(node[key]), path, comment, t, options.ui);
-  for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, t, comment, options);
+  const overallRuleTitle = (key: string) => key === "asserts" ? (globalThis.document.documentElement.lang.startsWith("en") ? "Overall requirements" : "总体要求") : key === "suggests" ? (globalThis.document.documentElement.lang.startsWith("en") ? "Overall suggestions" : "总体建议") : t(key);
+  for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, overallRuleTitle, comment, options);
+  if (node.mode === "graph" && !options.structuralGraph) {
+    const canvas = createProcedureGraph(node as unknown as ProcedureDefinition, { locale: globalThis.document.documentElement.lang, ui: options.ui, rulesBody: action => {
+      const holder=el("div","memory-graph-rules"),record=action as unknown as JsonRecord,index=array(node.actions).indexOf(record),actionPath=`${path}.actions[${index+1}]`,artifact=record.artifact as JsonRecord|undefined;
+      for(const [source,sourcePath] of [[record,actionPath],[artifact,`${actionPath}.artifact`]] as const)if(source)for(const key of ["asserts","suggests"]as const)appendRuleList(holder,key,array(source[key]),source.effectiveRules as JsonRecord|undefined,sourcePath,t,undefined,options);
+      holder.querySelectorAll<HTMLDetailsElement>("details.memory-collapsible-list").forEach(detail=>{detail.open=true;});return holder;
+    } });
+    document.append(canvas.element); return document;
+  }
   if (node.mode === "graph") {
-    const graph = el("div", "memory-flow"); graph.dataset.diffPath = `${path}.actions`;
-    array(node.actions).forEach((value, index) => {
-      const action = value as JsonRecord, actionPath = `${path}.actions[${index + 1}]`;
-      const card = el("details", "memory-section"); card.dataset.diffPath = actionPath;
-      card.dataset.disclosureKey = actionPath; card.open = true;
-      card.append(el("summary", "memory-node-title", String(action.description ?? action.id)));
-      const body = el("div", "memory-graph-action-body");
-      body.append(el("div", "memory-pill", String(action.actor ?? (action.collect ? "collect" : "agent"))));
-      for (const key of ["asserts", "suggests"] as const) appendRuleList(body, key, array(action[key]), action.effectiveRules as JsonRecord | undefined, actionPath, t, comment, options);
-      const definition = el("pre", "memory-pre", JSON.stringify({ id: action.id, dependencies: action.dependencies, ...(action.collect ? { collect: action.collect } : { artifact: action.artifact }) }, null, 2));
-      body.append(definition); card.append(body); graph.append(card);
-    });
-    document.append(graph); return document;
+    const en = globalThis.document.documentElement.lang.startsWith("en");
+    const label = (zh: string, english: string) => en ? english : zh;
+    const actions = array(node.actions) as JsonRecord[];
+    for (const collect of [false, true]) {
+      const entries = actions.map((action,index)=>({action,index})).filter(({action})=>Boolean(action.collect)===collect);
+      if (!entries.length) continue;
+      const {block,body:list}=collapsibleList(collect?label("收集步骤","Collection steps"):label("产物列表","Artifacts"),entries.length,"memory-graph-artifacts",options.ui);
+      block.open=true;block.dataset.diffPath=`${path}.actions`;
+      for (const {action,index} of entries) {
+        const actionPath=`${path}.actions[${index+1}]`,artifact=(action.artifact??{})as JsonRecord,artifactPath=`${actionPath}.artifact`;
+        const card=nodeSection(String(artifact.name??action.description??""),actionPath,action,comment,[],false);
+        const title=card.querySelector<HTMLElement>(".memory-node-title")!;
+        if(artifact.name){title.dataset.diffPath=`${artifactPath}.name`;title.dataset.anchor=`${artifactPath}.name`;}
+        card.classList.add("memory-artifact-diff-card");
+        const header=card.querySelector<HTMLElement>(":scope > .memory-section-header")!;
+        const heading=el("div","memory-artifact-heading");header.before(heading);heading.append(header);
+        const cardComment=card.querySelector<HTMLButtonElement>(":scope > .memory-inline-plus");if(cardComment)heading.append(cardComment);
+        const body=sectionBody(card);
+        const group=(name:string)=>{const section=el("section","memory-artifact-info-group");section.append(el("h4","memory-artifact-group-title",name));body.append(section);return section;};
+        const description=el("p","memory-artifact-step-description"),descriptionText=commentable(el("span","",String(action.description??"")),`${actionPath}.description`,action.description,comment);descriptionText.dataset.diffPath=`${actionPath}.description`;description.append(descriptionText);body.prepend(description);
+        let fieldHost=group(label("基本信息","Basic information"));
+        const field=(name:string,value:unknown,fieldPath:string)=>{
+          if(value===undefined)return;
+          const row=el("dl",`memory-kv${fieldPath.endsWith(".description")?" memory-artifact-description":""}`);const display=(item:unknown)=>item==="START"?label("开始","Start"):String(item);const text=Array.isArray(value)?value.map(display).join("、"):display(value);
+          const content=el("dd"),valueText=commentable(el("span","",text),fieldPath,value,comment);valueText.dataset.diffPath=fieldPath;content.append(valueText);
+          row.append(el("dt","",name),content);fieldHost.append(row);
+        };
+        field(label("执行者","Actor"),action.actor??(collect?"code":"agent"),`${actionPath}.actor`);
+        if(!collect){field(label("产物名称","Artifact name"),artifact.name,`${artifactPath}.name`);const payload=(artifact.payload??{})as JsonRecord;field(label("内容类型","Content type"),payload.contentType,`${artifactPath}.payload.contentType`);}
+        const dependencies=array(action.dependencies);
+        if(dependencies.length){const dependencyGroup=group(label("执行依赖","Execution dependencies"));dependencies.forEach((value,i)=>{const dependency=value as JsonRecord,dependencyPath=`${actionPath}.dependencies[${i+1}]`;fieldHost=el("div","memory-artifact-dependency");dependencyGroup.append(fieldHost);field(label("来自","From"),dependency.from,`${dependencyPath}.from`);field(label("条件","Condition"),dependency.when,`${dependencyPath}.when`);});}
+        if(collect){const collection=group(label("收集来源","Collection sources"));appendStringList(collection,"collect",array(action.collect),actionPath,comment,key=>key==="collect"?label("收集来源","Collection sources"):t(key),options.ui);}
+        if(array(artifact.review).length){const review=group(label("评审","Review")),roles=el("ul","memory-artifact-values");array(artifact.review).forEach((value,i)=>{const item=el("li"),rolePath=`${artifactPath}.review[${i+1}]`;const role=commentable(el("span","",String(value)),rolePath,value,comment);role.dataset.diffPath=rolePath;item.append(role);roles.append(item);});review.append(roles);}
+        const hasRules=[action.asserts,action.suggests,artifact.asserts,artifact.suggests].some(value=>array(value).length);
+        if(hasRules||artifact.model){const requirements=group(label("产物要求","Artifact requirements"));
+          for(const key of ["asserts","suggests"]as const){appendRuleList(requirements,key,array(action[key]),action.effectiveRules as JsonRecord|undefined,actionPath,t,comment,options);appendRuleList(requirements,key,array(artifact[key]),artifact.effectiveRules as JsonRecord|undefined,artifactPath,t,comment,options);}
+          requirements.querySelectorAll<HTMLDetailsElement>("details.memory-collapsible-list").forEach(detail=>{
+            const section=el("section","memory-artifact-rule-list");for(const attribute of [...detail.attributes])if(attribute.name.startsWith("data-"))section.setAttribute(attribute.name,attribute.value);
+            const summary=detail.querySelector(":scope > summary");const heading=summary?.querySelector(".memory-block-title")?.textContent??"";
+            section.append(el("div","memory-artifact-field-title",heading));for(const child of [...detail.childNodes])if(child!==summary)section.append(child);detail.replaceWith(section);
+          });
+          const model=artifact.model as JsonRecord|undefined;
+          if(model?.definition!==undefined){requirements.append(el("div","memory-artifact-field-title",label("产物结构","Artifact structure")));const modelPath=`${artifactPath}.model.definition`;let definition:unknown=model.definition;try{definition=JSON.parse(String(definition));}catch{}
+            const structure=el("div","memory-artifact-model-structure");if(options.ui)structure.append(options.ui.modelDefinition({model:{id:String(artifact.name??""),metaModel:String(model.definedBy??""),builtin:false,definition,source:String(model.definition)},view:"structure"}));else structure.append(el("pre","memory-pre",String(model.definition)));
+            structure.dataset.diffPath=modelPath;commentable(structure,modelPath,model.definition,comment);requirements.append(structure);
+          }
+        }
+        list.append(card);
+      }
+      document.append(block);
+    }
+    return document;
   }
   const steps = array(node.flow);
   if (steps.length) {
@@ -2883,7 +2970,11 @@ function commentable(node: HTMLElement, target: string, snapshot: unknown, comme
   node.classList.add("memory-commentable"); node.append(plusButton(() => comment(target, scalar(snapshot), { anchor: target }))); return node;
 }
 function anchored(node: HTMLElement, target: string): HTMLElement { node.dataset.anchor = target; return node; }
-function plusButton(run: () => void): HTMLButtonElement { const plus = button("+", "memory-inline-plus", run); plus.title = "添加评论"; plus.setAttribute("aria-label", "添加评论"); return plus; }
+function plusButton(run: () => void): HTMLButtonElement {
+  const plus=button("","memory-inline-plus",run);plus.title="添加评论";plus.setAttribute("aria-label","添加评论");
+  const svg=globalThis.document.createElementNS("http://www.w3.org/2000/svg","svg");svg.setAttribute("viewBox","0 0 12 12");svg.setAttribute("width","12");svg.setAttribute("height","12");svg.setAttribute("aria-hidden","true");svg.style.display="block";
+  const path=globalThis.document.createElementNS(svg.namespaceURI,"path");path.setAttribute("d","M2 6h8M6 2v8");path.setAttribute("fill","none");path.setAttribute("stroke","currentColor");path.setAttribute("stroke-width","1.5");path.setAttribute("stroke-linecap","round");svg.append(path);plus.append(svg);return plus;
+}
 function renderPrimitiveFields(node: JsonRecord, excluded: string[], t: (key: string) => string, path: string, comment?: CommentCallback): HTMLElement {
   const dl = document.createElement("dl"); dl.className = "memory-kv";
   for (const [key, value] of Object.entries(node)) if (!excluded.includes(key) && (value == null || typeof value !== "object")) {

@@ -39,6 +39,12 @@ test("graph View detail is read-only and each Step opens its own formal Review",
       assert.equal(context.submission.artifact.format.name, "markdown");
       assert.match(context.submission.artifact.renderedContent, /<h1>/);
     }
+    for (const step of snapshot.steps) {
+      const artifactId = step.reviewRounds![0].artifactId;
+      const content = await fetch(`${api}/runs/${snapshot.run.id}/artifacts/${artifactId}/content`);
+      assert.equal(content.status, 200);
+      assert.equal((await content.json()).contentType, "text/markdown");
+    }
     assert.deepEqual(await service.snapshot(snapshot.run.id), snapshot);
     const first = snapshot.steps[0], handle = graphReviewHandle(snapshot.run.id, first.id), round = first.reviewRounds![0];
     const endpoint = `${api}/artifact-reviews/${encodeURIComponent(handle)}/rounds/${round.id}/assignments/human`;
@@ -55,4 +61,29 @@ test("graph View detail is read-only and each Step opens its own formal Review",
     const list = await (await fetch(`${api}/runs?representation=summary`)).json();
     assert.ok(list.runs.some((r: any) => r.id === snapshot.run.id)); assert.ok(list.runs.some((r: any) => r.id === "run-corrupt" && r.unavailable));
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) test(`display-only frozen rule ${mode} cannot hide a Run or fail a successful abandon response`, {timeout:60000}, async t=>{
+ const {serializeMemoryYaml}=await import('../src/memory/serializer.js');
+ const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
+ const refs=['statements/bad-rules','statements/good-rules'];
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const memoryRef='procedures/best-effort-rules';
+ const source=(name:string)=>`!statement\nsyntax: ${graphMemorySyntax}\nnames: [${name}]\ndefines: [Rule source]\nasserts: [${name} evidence]\n`;
+ const started=await service.withGraph(g=>g.start({name:`Rule ${mode}`,procedure,memorySnapshot:{memories:{[memoryRef]:{memoryRef,payload:{contentType:'application/yaml',content:serializeMemoryYaml(procedure)}},...Object.fromEntries(refs.map(reference=>[reference,{memoryRef:reference,payload:{contentType:'application/yaml',content:source(reference.split('/')[1])}}]))}}}));
+ const stored=(await service.stores.run.get({},started.run.id))!,value=structuredClone(stored.value) as typeof started.run;
+ const memories=value.memorySnapshot!.memories;
+ if(mode==='missing')delete memories[refs[0]];
+ else memories[refs[0]].payload.content=mode==='malformed'?'[':mode==='wrong-kind'?`!concept\nsyntax: ${graphMemorySyntax}\nnames: [bad-rules]\ndefines: [Wrong kind]\n`:`!statement\nsyntax: ${graphMemorySyntax}\nnames: [bad-rules]\ndefines: [Cycle]\nasserts:\n  - !ref\n    target: statements/bad-rules\n`;
+ await service.stores.run.update({},started.run.id,value,{expectedRevision:stored.revision});
+ const before=await service.stores.run.get({},started.run.id);
+ const server=createViewServer(await readProjectConfig('test-project',f.home));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
+ const api=`http://127.0.0.1:${(server.address()as AddressInfo).port}/api/projects/test-project/runs/${started.run.id}`;
+ try{
+  const response=await fetch(api);assert.equal(response.status,200,await response.clone().text());const payload=await response.json();
+  assert.equal(payload.run.context.graph.work.length,1);assert.equal(payload.run.context.graph.procedure.actions[0].asserts.length,2);
+  assert.deepEqual(payload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.deepEqual(await service.stores.run.get({},started.run.id),before,'GET must not repair or mutate stored history');
+  const abandoned=await fetch(`${api}/abandon`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});assert.equal(abandoned.status,200,await abandoned.clone().text());assert.equal((await abandoned.json()).run.status,'abandoned');
+ }finally{await new Promise<void>(r=>server.close(()=>r()));}
 });

@@ -803,12 +803,12 @@ class RunApplication {
     if (this.#detail?.representation === "context-control") {
       if (!this.#contextGraph || this.#contextGraphRun !== this.#detail.id) {
         this.#contextGraph?.dispose();
-        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase, (runId, reviewId) => this.#openReview(runId, reviewId));
+        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase, (runId, reviewId, roundId) => this.#openReview(runId, reviewId, roundId));
         this.#contextGraphRun = this.#detail.id;
       }
       if (!this.#detailRoot.contains(this.#contextGraph.element)) {
         for (const child of [...this.#detailRoot.children]) if (child.tagName !== "STYLE") child.remove();
-        const main = createPageLayout("run-workspace"); main.append(this.#contextGraph.element); this.#detailRoot.append(main);
+        const main = createPageLayout("run-workspace"); main.style.setProperty("--mem-page-layout-inset", "0px"); main.append(this.#contextGraph.element); this.#detailRoot.append(main);
       }
       this.#contextGraph.update(this.#detail.context);
       return;
@@ -936,11 +936,12 @@ class RunApplication {
   }
   async #archive(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"archive")},description:{text:tr(this.#config,"archiveConfirm")},confirmLabel:{text:tr(this.#config,"archive")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}}))return;this.#busy=true;try{await this.#request(`/api/archive/runs/${encodeURIComponent(run.id)}`,{method:"POST"});if(run.representation === "context-control")await this.#navigate(this.#routes.index.to(undefined,{query:{status:this.#status}}));else await this.#refresh();}finally{this.#busy=false;}}
   async #abandon(run:Json):Promise<void>{if(!await this.#ui.confirm({title:{text:tr(this.#config,"abandon")},description:{text:tr(this.#config,"abandonConfirm")},confirmLabel:{text:tr(this.#config,"abandon")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")},tone:"danger"}))return;this.#busy=true;try{await this.#request(`/api/runs/${encodeURIComponent(run.id)}/abandon`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});await this.#refresh();}finally{this.#busy=false;}}
-  async #openReview(runId:string,reviewId:string):Promise<void>{
+  async #openReview(runId:string,reviewId:string,roundId?:string):Promise<void>{
+    this.#reviewRoundId=roundId??"";
     this.#busy=true;
     try{
       if(!this.#route.routeKey?.endsWith("artifact-review")){
-        await this.#navigate(this.#routes.review.to({runId,reviewId}, { query: this.#status === "running" ? {} : { status: this.#status } }));
+        await this.#navigate(this.#routes.review.to({runId,reviewId}, { query: { ...(this.#status === "running" ? {} : { status: this.#status }), ...(roundId ? { round: roundId } : {}) } }));
         return;
       }
       if(this.#controller.signal.aborted)return;

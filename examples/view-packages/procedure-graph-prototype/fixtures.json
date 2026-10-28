@@ -1,0 +1,981 @@
+{
+  "procedure": {
+    "tag": "!procedure",
+    "syntax": "memsphere-20261027-stable",
+    "mode": "graph",
+    "names": [
+      "analyze-materials",
+      "逐份分析资料"
+    ],
+    "defines": [
+      "准备资料，逐份分析并评审，收集结果后形成总结。"
+    ],
+    "goals": [],
+    "actions": [
+      {
+        "tag": "!action",
+        "id": "prepare",
+        "description": "准备待分析资料",
+        "actor": "agent",
+        "dependencies": [
+          {
+            "tag": "!dependency",
+            "from": "START"
+          }
+        ],
+        "artifact": {
+          "name": "待分析资料",
+          "model": {
+            "definedBy": "json-schema/draft-07.json",
+            "definition": "{\"type\": \"object\", \"properties\": {\"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"remaining\"], \"additionalProperties\": false}"
+          },
+          "payload": {
+            "contentType": "application/json"
+          }
+        }
+      },
+      {
+        "tag": "!action",
+        "id": "check",
+        "description": "检查剩余资料",
+        "actor": "agent",
+        "dependencies": [
+          {
+            "tag": "!dependency",
+            "from": "prepare"
+          },
+          {
+            "tag": "!dependency",
+            "from": "analyze"
+          }
+        ],
+        "artifact": {
+          "name": "剩余资料检查",
+          "model": {
+            "definedBy": "json-schema/draft-07.json",
+            "definition": "{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}"
+          },
+          "payload": {
+            "contentType": "application/json"
+          }
+        }
+      },
+      {
+        "tag": "!action",
+        "id": "analyze",
+        "description": "分析一份资料",
+        "actor": "agent",
+        "dependencies": [
+          {
+            "tag": "!dependency",
+            "from": "check",
+            "when": "artifacts.check.hasMore = true"
+          }
+        ],
+        "artifact": {
+          "name": "单份资料分析",
+          "model": {
+            "definedBy": "json-schema/draft-07.json",
+            "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+          },
+          "payload": {
+            "contentType": "application/json"
+          },
+          "review": [
+            "领域专家"
+          ]
+        }
+      },
+      {
+        "tag": "!action",
+        "id": "gather",
+        "description": "收集分析结果",
+        "dependencies": [
+          {
+            "tag": "!dependency",
+            "from": "check",
+            "when": "artifacts.check.hasMore = false"
+          }
+        ],
+        "collect": [
+          "analyze"
+        ]
+      },
+      {
+        "tag": "!action",
+        "id": "summarize",
+        "description": "生成分析总结",
+        "actor": "agent",
+        "dependencies": [
+          {
+            "tag": "!dependency",
+            "from": "gather"
+          }
+        ],
+        "artifact": {
+          "name": "分析总结",
+          "model": {
+            "definedBy": "raw.json",
+            "definition": "{}"
+          },
+          "payload": {
+            "contentType": "text/markdown"
+          }
+        }
+      }
+    ]
+  },
+  "snapshots": {
+    "fresh": {
+      "run": {
+        "id": "run-example",
+        "name": "逐份分析资料 · 示例运行",
+        "status": "running",
+        "createdAt": "2026-10-27T13:00:00.000Z",
+        "language": "zh-CN",
+        "memoryRef": "procedures/analyze-materials",
+        "memorySnapshot": {
+          "memories": {
+            "procedures/analyze-materials": {
+              "memoryRef": "procedures/analyze-materials",
+              "payload": {
+                "contentType": "application/yaml",
+                "content": "!procedure\nsyntax: memsphere-20261027-stable\nmode: graph\nnames:\n  - analyze-materials\n  - 逐份分析资料\ndefines:\n  - 准备资料，逐份分析并评审，收集结果后形成总结。\ngoals: []\nactions:\n  - !action\n    id: prepare\n    description: 准备待分析资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: START\n    artifact:\n      name: 待分析资料\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n  - !action\n    id: check\n    description: 检查剩余资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: prepare\n      - !dependency\n        from: analyze\n    artifact:\n      name: 剩余资料检查\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n  - !action\n    id: analyze\n    description: 分析一份资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: check\n        when: artifacts.check.hasMore = true\n    artifact:\n      name: 单份资料分析\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n      review:\n        - 领域专家\n  - !action\n    id: gather\n    description: 收集分析结果\n    dependencies:\n      - !dependency\n        from: check\n        when: artifacts.check.hasMore = false\n    collect:\n      - analyze\n  - !action\n    id: summarize\n    description: 生成分析总结\n    actor: agent\n    dependencies:\n      - !dependency\n        from: gather\n    artifact:\n      name: 分析总结\n      model:\n        definedBy: raw.json\n        definition: \"{}\"\n      payload:\n        contentType: text/markdown\n"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "id": "s-prepare",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:00:00.000Z",
+          "status": "pending",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "prepare"
+          },
+          "inputs": {}
+        }
+      ],
+      "artifacts": [],
+      "externals": [],
+      "reviews": [],
+      "completeIds": [],
+      "outputArtifactIds": []
+    },
+    "review": {
+      "run": {
+        "id": "run-example",
+        "name": "逐份分析资料 · 示例运行",
+        "status": "running",
+        "createdAt": "2026-10-27T13:00:00.000Z",
+        "language": "zh-CN",
+        "memoryRef": "procedures/analyze-materials",
+        "memorySnapshot": {
+          "memories": {
+            "procedures/analyze-materials": {
+              "memoryRef": "procedures/analyze-materials",
+              "payload": {
+                "contentType": "application/yaml",
+                "content": "!procedure\nsyntax: memsphere-20261027-stable\nmode: graph\nnames:\n  - analyze-materials\n  - 逐份分析资料\ndefines:\n  - 准备资料，逐份分析并评审，收集结果后形成总结。\ngoals: []\nactions:\n  - !action\n    id: prepare\n    description: 准备待分析资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: START\n    artifact:\n      name: 待分析资料\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n  - !action\n    id: check\n    description: 检查剩余资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: prepare\n      - !dependency\n        from: analyze\n    artifact:\n      name: 剩余资料检查\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n  - !action\n    id: analyze\n    description: 分析一份资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: check\n        when: artifacts.check.hasMore = true\n    artifact:\n      name: 单份资料分析\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n      review:\n        - 领域专家\n  - !action\n    id: gather\n    description: 收集分析结果\n    dependencies:\n      - !dependency\n        from: check\n        when: artifacts.check.hasMore = false\n    collect:\n      - analyze\n  - !action\n    id: summarize\n    description: 生成分析总结\n    actor: agent\n    dependencies:\n      - !dependency\n        from: gather\n    artifact:\n      name: 分析总结\n      model:\n        definedBy: raw.json\n        definition: \"{}\"\n      payload:\n        contentType: text/markdown\n"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "id": "s-prepare",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:00:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "prepare"
+          },
+          "inputs": {},
+          "startedAt": "2026-10-27T13:00:00.000Z",
+          "endedAt": "2026-10-27T13:01:00.000Z",
+          "completionSequence": 1,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-prepare"
+          }
+        },
+        {
+          "id": "s-check-1",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:02:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "check"
+          },
+          "inputs": {
+            "prepare": [
+              {
+                "kind": "artifact",
+                "id": "a-prepare"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:02:00.000Z",
+          "endedAt": "2026-10-27T13:03:00.000Z",
+          "completionSequence": 3,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-check-1"
+          }
+        },
+        {
+          "id": "s-analyze-1",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:04:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "analyze"
+          },
+          "inputs": {
+            "check": [
+              {
+                "kind": "artifact",
+                "id": "a-check-1"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:04:00.000Z",
+          "endedAt": "2026-10-27T13:05:00.000Z",
+          "completionSequence": 5,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-analyze-1"
+          }
+        },
+        {
+          "id": "s-check-2",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:06:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "check"
+          },
+          "inputs": {
+            "analyze": [
+              {
+                "kind": "artifact",
+                "id": "a-analyze-1"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:06:00.000Z",
+          "endedAt": "2026-10-27T13:07:00.000Z",
+          "completionSequence": 7,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-check-2"
+          }
+        },
+        {
+          "id": "s-analyze-2",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:08:00.000Z",
+          "status": "awaiting_review",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "analyze"
+          },
+          "inputs": {
+            "check": [
+              {
+                "kind": "artifact",
+                "id": "a-check-2"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:08:00.000Z"
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "a-prepare",
+          "stepId": "s-prepare",
+          "name": "待分析资料",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"remaining\": [\"资料甲\", \"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-check-1",
+          "stepId": "s-check-1",
+          "name": "剩余资料检查",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-prepare"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"hasMore\": true, \"remaining\": [\"资料甲\", \"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-analyze-1",
+          "stepId": "s-analyze-1",
+          "name": "单份资料分析",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-check-1"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"material\": \"资料甲\", \"finding\": \"资料甲描述了记忆定义图的阅读需求。\", \"remaining\": [\"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-check-2",
+          "stepId": "s-check-2",
+          "name": "剩余资料检查",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-analyze-1"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"hasMore\": true, \"remaining\": [\"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-analyze-2-v1",
+          "stepId": "s-analyze-2",
+          "name": "单份资料分析",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-check-2"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"material\": \"资料乙\", \"finding\": \"运行页面需要支持追溯。\", \"remaining\": []}"
+            }
+          }
+        },
+        {
+          "id": "a-analyze-2-v2",
+          "stepId": "s-analyze-2",
+          "name": "单份资料分析",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-check-2"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"material\": \"资料乙\", \"finding\": \"资料乙第 3 段提出：运行页面需要区分执行实例与产物修订。\", \"remaining\": []}"
+            }
+          },
+          "revisedFrom": "a-analyze-2-v1",
+          "revisedSummary": "补充结论对应的原文出处。"
+        }
+      ],
+      "externals": [],
+      "reviews": [
+        {
+          "id": "review-v1",
+          "artifactId": "a-analyze-2-v1",
+          "reviewer": {
+            "role": "reviewer",
+            "source": "human",
+            "actorId": "expert"
+          },
+          "status": "submitted",
+          "comments": [
+            {
+              "id": "comment-v1",
+              "body": "结论需要注明资料出处。",
+              "createdAt": "2026-10-27T13:10:00.000Z",
+              "severity": "blocking"
+            }
+          ],
+          "vote": {
+            "value": "request_changes"
+          },
+          "createdAt": "2026-10-27T13:09:00.000Z",
+          "endedAt": "2026-10-27T13:10:00.000Z"
+        },
+        {
+          "id": "review-v2",
+          "artifactId": "a-analyze-2-v2",
+          "reviewer": {
+            "role": "reviewer",
+            "source": "human",
+            "actorId": "expert"
+          },
+          "status": "pending",
+          "comments": [],
+          "createdAt": "2026-10-27T13:12:00.000Z"
+        }
+      ],
+      "completeIds": [
+        "a-prepare",
+        "a-check-1",
+        "a-analyze-1",
+        "a-check-2"
+      ],
+      "outputArtifactIds": []
+    },
+    "done": {
+      "run": {
+        "id": "run-example",
+        "name": "逐份分析资料 · 示例运行",
+        "status": "done",
+        "createdAt": "2026-10-27T13:00:00.000Z",
+        "language": "zh-CN",
+        "memoryRef": "procedures/analyze-materials",
+        "endedAt": "2026-10-27T13:20:00.000Z",
+        "memorySnapshot": {
+          "memories": {
+            "procedures/analyze-materials": {
+              "memoryRef": "procedures/analyze-materials",
+              "payload": {
+                "contentType": "application/yaml",
+                "content": "!procedure\nsyntax: memsphere-20261027-stable\nmode: graph\nnames:\n  - analyze-materials\n  - 逐份分析资料\ndefines:\n  - 准备资料，逐份分析并评审，收集结果后形成总结。\ngoals: []\nactions:\n  - !action\n    id: prepare\n    description: 准备待分析资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: START\n    artifact:\n      name: 待分析资料\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n  - !action\n    id: check\n    description: 检查剩余资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: prepare\n      - !dependency\n        from: analyze\n    artifact:\n      name: 剩余资料检查\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n  - !action\n    id: analyze\n    description: 分析一份资料\n    actor: agent\n    dependencies:\n      - !dependency\n        from: check\n        when: artifacts.check.hasMore = true\n    artifact:\n      name: 单份资料分析\n      model:\n        definedBy: json-schema/draft-07.json\n        definition: '{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}'\n      payload:\n        contentType: application/json\n      review:\n        - 领域专家\n  - !action\n    id: gather\n    description: 收集分析结果\n    dependencies:\n      - !dependency\n        from: check\n        when: artifacts.check.hasMore = false\n    collect:\n      - analyze\n  - !action\n    id: summarize\n    description: 生成分析总结\n    actor: agent\n    dependencies:\n      - !dependency\n        from: gather\n    artifact:\n      name: 分析总结\n      model:\n        definedBy: raw.json\n        definition: \"{}\"\n      payload:\n        contentType: text/markdown\n"
+              }
+            }
+          }
+        }
+      },
+      "steps": [
+        {
+          "id": "s-prepare",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:00:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "prepare"
+          },
+          "inputs": {},
+          "startedAt": "2026-10-27T13:00:00.000Z",
+          "endedAt": "2026-10-27T13:01:00.000Z",
+          "completionSequence": 1,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-prepare"
+          }
+        },
+        {
+          "id": "s-check-1",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:02:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "check"
+          },
+          "inputs": {
+            "prepare": [
+              {
+                "kind": "artifact",
+                "id": "a-prepare"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:02:00.000Z",
+          "endedAt": "2026-10-27T13:03:00.000Z",
+          "completionSequence": 3,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-check-1"
+          }
+        },
+        {
+          "id": "s-analyze-1",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:04:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "analyze"
+          },
+          "inputs": {
+            "check": [
+              {
+                "kind": "artifact",
+                "id": "a-check-1"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:04:00.000Z",
+          "endedAt": "2026-10-27T13:05:00.000Z",
+          "completionSequence": 5,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-analyze-1"
+          }
+        },
+        {
+          "id": "s-check-2",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:06:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "check"
+          },
+          "inputs": {
+            "analyze": [
+              {
+                "kind": "artifact",
+                "id": "a-analyze-1"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:06:00.000Z",
+          "endedAt": "2026-10-27T13:07:00.000Z",
+          "completionSequence": 7,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-check-2"
+          }
+        },
+        {
+          "id": "s-analyze-2",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:08:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "analyze"
+          },
+          "inputs": {
+            "check": [
+              {
+                "kind": "artifact",
+                "id": "a-check-2"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:08:00.000Z",
+          "endedAt": "2026-10-27T13:13:00.000Z",
+          "completionSequence": 9,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-analyze-2-v2"
+          }
+        },
+        {
+          "id": "s-check-3",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:14:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "check"
+          },
+          "inputs": {
+            "analyze": [
+              {
+                "kind": "artifact",
+                "id": "a-analyze-2-v2"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:14:00.000Z",
+          "endedAt": "2026-10-27T13:15:00.000Z",
+          "completionSequence": 15,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-check-3"
+          }
+        },
+        {
+          "id": "s-gather",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:16:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "gather"
+          },
+          "inputs": {
+            "check": [
+              {
+                "kind": "artifact",
+                "id": "a-check-3"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:16:00.000Z",
+          "endedAt": "2026-10-27T13:17:00.000Z",
+          "completionSequence": 17,
+          "artifact": {
+            "mode": "collect",
+            "items": {
+              "analyze": [
+                "a-analyze-1",
+                "a-analyze-2-v2"
+              ]
+            }
+          }
+        },
+        {
+          "id": "s-summary",
+          "runId": "run-example",
+          "createdAt": "2026-10-27T13:18:00.000Z",
+          "status": "done",
+          "source": {
+            "memoryRef": "procedures/analyze-materials",
+            "actionId": "summarize"
+          },
+          "inputs": {
+            "analyze": [
+              {
+                "kind": "artifact",
+                "id": "a-analyze-1"
+              },
+              {
+                "kind": "artifact",
+                "id": "a-analyze-2-v2"
+              }
+            ]
+          },
+          "startedAt": "2026-10-27T13:18:00.000Z",
+          "endedAt": "2026-10-27T13:19:00.000Z",
+          "completionSequence": 19,
+          "artifact": {
+            "mode": "produce",
+            "id": "a-summary"
+          }
+        }
+      ],
+      "artifacts": [
+        {
+          "id": "a-prepare",
+          "stepId": "s-prepare",
+          "name": "待分析资料",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"remaining\": [\"资料甲\", \"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-check-1",
+          "stepId": "s-check-1",
+          "name": "剩余资料检查",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-prepare"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"hasMore\": true, \"remaining\": [\"资料甲\", \"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-analyze-1",
+          "stepId": "s-analyze-1",
+          "name": "单份资料分析",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-check-1"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"material\": \"资料甲\", \"finding\": \"资料甲描述了记忆定义图的阅读需求。\", \"remaining\": [\"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-check-2",
+          "stepId": "s-check-2",
+          "name": "剩余资料检查",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-analyze-1"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"hasMore\": true, \"remaining\": [\"资料乙\"]}"
+            }
+          }
+        },
+        {
+          "id": "a-analyze-2-v1",
+          "stepId": "s-analyze-2",
+          "name": "单份资料分析",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-check-2"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"material\": \"资料乙\", \"finding\": \"运行页面需要支持追溯。\", \"remaining\": []}"
+            }
+          }
+        },
+        {
+          "id": "a-analyze-2-v2",
+          "stepId": "s-analyze-2",
+          "name": "单份资料分析",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-check-2"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"material\": {\"type\": \"string\", \"description\": \"当前分析的资料\"}, \"finding\": {\"type\": \"string\", \"description\": \"依据资料形成的结论\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"material\", \"finding\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"material\": \"资料乙\", \"finding\": \"资料乙第 3 段提出：运行页面需要区分执行实例与产物修订。\", \"remaining\": []}"
+            }
+          },
+          "revisedFrom": "a-analyze-2-v1",
+          "revisedSummary": "补充结论对应的原文出处。"
+        },
+        {
+          "id": "a-check-3",
+          "stepId": "s-check-3",
+          "name": "剩余资料检查",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-analyze-2-v2"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "json-schema/draft-07.json",
+              "definition": "{\"type\": \"object\", \"properties\": {\"hasMore\": {\"type\": \"boolean\"}, \"remaining\": {\"type\": \"array\", \"items\": {\"type\": \"string\"}}}, \"required\": [\"hasMore\", \"remaining\"], \"additionalProperties\": false}"
+            },
+            "payload": {
+              "contentType": "application/json",
+              "content": "{\"hasMore\": false, \"remaining\": []}"
+            }
+          }
+        },
+        {
+          "id": "a-summary",
+          "stepId": "s-summary",
+          "name": "分析总结",
+          "status": "submitted",
+          "tags": [
+            "default"
+          ],
+          "dependencies": [
+            {
+              "kind": "artifact",
+              "id": "a-analyze-1"
+            },
+            {
+              "kind": "artifact",
+              "id": "a-analyze-2-v2"
+            }
+          ],
+          "content": {
+            "model": {
+              "definedBy": "raw.json",
+              "definition": "{}"
+            },
+            "payload": {
+              "contentType": "text/markdown",
+              "content": "总结覆盖资料甲和资料乙的分析结果，分别引用两份已采用产物。"
+            }
+          }
+        }
+      ],
+      "externals": [],
+      "reviews": [
+        {
+          "id": "review-v1",
+          "artifactId": "a-analyze-2-v1",
+          "reviewer": {
+            "role": "reviewer",
+            "source": "human",
+            "actorId": "expert"
+          },
+          "status": "submitted",
+          "comments": [
+            {
+              "id": "comment-v1",
+              "body": "结论需要注明资料出处。",
+              "createdAt": "2026-10-27T13:10:00.000Z",
+              "severity": "blocking"
+            }
+          ],
+          "vote": {
+            "value": "request_changes"
+          },
+          "createdAt": "2026-10-27T13:09:00.000Z",
+          "endedAt": "2026-10-27T13:10:00.000Z"
+        },
+        {
+          "id": "review-v2",
+          "artifactId": "a-analyze-2-v2",
+          "reviewer": {
+            "role": "reviewer",
+            "source": "human",
+            "actorId": "expert"
+          },
+          "status": "submitted",
+          "comments": [],
+          "createdAt": "2026-10-27T13:12:00.000Z",
+          "vote": {
+            "value": "approve"
+          },
+          "endedAt": "2026-10-27T13:13:00.000Z"
+        }
+      ],
+      "completeIds": [
+        "a-prepare",
+        "a-check-1",
+        "a-analyze-1",
+        "a-check-2",
+        "a-analyze-2-v2",
+        "a-check-3",
+        "a-summary"
+      ],
+      "outputArtifactIds": [
+        "a-summary"
+      ]
+    }
+  }
+}

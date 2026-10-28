@@ -361,7 +361,9 @@ export function definitionTable(ui: ViewUi, definition: unknown, text: (zh: stri
     if (focused) Array.from(body.querySelectorAll<HTMLButtonElement>("button")).find(button => button.dataset.definitionNode === focused)?.focus();
   }
   renderRows();
-  scroll.append(table); root.append(actions);
+  scroll.append(table);
+  const visibleRoots = hideContainer ? tree.children : [tree];
+  if (visibleRoots.some(row => row.children.length > 0 || row.expandReference)) root.append(actions);
   root.append(scroll);
   return root;
 }
