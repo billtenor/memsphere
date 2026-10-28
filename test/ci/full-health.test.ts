@@ -8,7 +8,7 @@ import { parse } from "yaml";
 import {
   ACTIONS_APP_ID, CONTEXT, LEGACY_CONTEXT, FULL_JOB, REPOSITORY, WORKFLOW_ID, computeHealth, createApi,
   decideHealth, fullEvidence, refreshHealth, requiredCheckRules, verifyBootstrap
-} from "../scripts/full-health.mjs";
+} from "../../scripts/full-health.mjs";
 
 const sha = "a".repeat(40);
 const master = "b".repeat(40);

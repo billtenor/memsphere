@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
-import { ciProfile, createCiPlan } from "../scripts/ci-plan.mjs";
-import { packagePlatformTests, platformTests, selectTests, testSuites } from "../scripts/test-plan.mjs";
+import { ciProfile, createCiPlan } from "../../scripts/ci-plan.mjs";
+import { discoverTestFiles, packagePlatformTests, platformTests, selectTests, testSuites } from "../../scripts/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
-const files = (await readdir("test")).filter(file => file.endsWith(".test.ts"));
+const files = await discoverTestFiles("test");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(`test/${file}`, "utf8")])));
 
 test("PR runs every retained test on Linux and every declared native risk on macOS and Windows", () => {

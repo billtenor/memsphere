@@ -22,7 +22,7 @@ CI change guard: ".github/workflows/ci.yml" 等 CI 机制不允许在 human 未�
 
 ## 保护范围与维护
 
-权威清单位于 `scripts/ci-change-guard.mjs` 的 `PROTECTED_FILES` 和 `.github/workflows/` 目录前缀规则，覆盖：
+权威清单位于 `scripts/ci-change-guard.mjs` 的 `PROTECTED_FILES`、`.github/workflows/` 和 `test/ci/` 目录前缀规则，覆盖：
 
 - 所有 workflow（包括新建文件）。
 - CI 矩阵、测试选择/执行/分配配置与相关策略回归测试。

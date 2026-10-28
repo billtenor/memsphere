@@ -25,7 +25,7 @@
 - `scripts/security-check.sh`、`scripts/security-setup.sh`、`.gitleaks-privacy.toml`、`.gitleaksignore`：安全检查和本地安装入口。
 - `scripts/check-reserved-models.mjs`、`scripts/build-view-assets.mjs`、`scripts/build-example-view-package.mjs`、`scripts/build-example-app.mjs`：package.json build 直接调用。
 - `package.json`、`package-lock.json`、`npm-shrinkwrap.json`、`.npmrc`、`.nvmrc`、`tsconfig.json`、`tsconfig.modules.json`：CI 构建/依赖/运行时配置，当前不存在的标准配置文件新增亦保护。lockfile 纳入既有“相关配置”类别，采纳产品风险，不增加凭据防护范围。
-- `test/ci-workflow.test.ts`、`test/test-plan.test.ts`、`test/full-health.test.ts`、`test/ci-change-guard.test.ts`：CI 策略和门禁回归自身（开发计划按方案评审意见补齐 test-plan 回归）。其余业务测试和源码不整体锁住。
+- `test/ci/ci-workflow.test.ts`、`test/ci/test-plan.test.ts`、`test/ci/full-health.test.ts`、`test/ci/ci-change-guard.test.ts`：CI 策略和门禁回归自身（开发计划按方案评审意见补齐 test-plan 回归）。其余业务测试和源码不整体锁住。
 
 自动化回归核对 workflow 与 package scripts 直接引用的 scripts 路径均在保护集合内，作为未来修改 workflow 时更新清单的提示。源码间接依赖不无限递归保护；普通产品代码更改仍由既有测试验证。
 
@@ -52,3 +52,7 @@
 ## 限制
 
 GitHub 原生 bypass 是 Human 合并时使用的例外，不会把红色检查改绿，也不是提前授予 Agent 之后合并的许可。首次安装直到 Human 合入后才能可信运行并激活规则，此前不宣称保护已生效。所有线上实测与未实测项分别记录。
+
+## CI测试目录整理细化
+
+CI专用测试位于test/ci/。scripts/test-plan.mjs提供共享discoverTestFiles，供本地runner、CI planner及工作流覆盖测试调用，递归返回相对test目录的POSIX路径；runner日志和结果用相对路径，现有按文件名记录的耗时仍用于既有排序。迁移前后实际173文件、全部套件成员及default/full矩阵对比一致。test/ci/以目录前缀整体保护，新增CI测试自动受保护，不改变业务测试边界。

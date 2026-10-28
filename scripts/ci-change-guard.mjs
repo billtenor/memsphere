@@ -10,13 +10,12 @@ export const PROTECTED_FILES = [
   "scripts/check-reserved-models.mjs", "scripts/build-view-assets.mjs",
   "scripts/build-example-view-package.mjs", "scripts/build-example-app.mjs",
   "package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc", ".nvmrc",
-  "tsconfig.json", "tsconfig.modules.json", ".gitleaks-privacy.toml", ".gitleaksignore",
-  "test/ci-workflow.test.ts", "test/test-plan.test.ts", "test/full-health.test.ts", "test/ci-change-guard.test.ts"
+  "tsconfig.json", "tsconfig.modules.json", ".gitleaks-privacy.toml", ".gitleaksignore"
 ];
 const protectedFiles = new Set(PROTECTED_FILES);
 export const AUTHORIZATION_MESSAGE = "等 CI 机制不允许在 human 未授权的情况下修改。请检查修改的必要性，或者请求 human 授权";
 export const HUMAN_INSTRUCTIONS = "Human 请在 GitHub PR 合并区域手工绕过 CI change protection 规则并亲自合并；其他合并规则仍须满足。";
-export const isProtected = path => path.startsWith(".github/workflows/") || protectedFiles.has(path);
+export const isProtected = path => path.startsWith(".github/workflows/") || path.startsWith("test/ci/") || protectedFiles.has(path);
 
 function validPath(path) {
   if (typeof path !== "string" || !path || path.startsWith("/") || path.split("/").some(part => part === ".." || part === ".")) {

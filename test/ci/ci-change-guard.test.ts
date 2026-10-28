@@ -3,11 +3,11 @@ import { readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
 import { parse } from "yaml";
-import { createApi, REPOSITORY } from "../scripts/full-health.mjs";
+import { createApi, REPOSITORY } from "../../scripts/full-health.mjs";
 import {
   AUTHORIZATION_MESSAGE, CONTEXT, HUMAN_INSTRUCTIONS, PROTECTED_FILES,
   failureDescription, failureLines, isProtected, protectedChanges, readPullFiles, refreshGuard
-} from "../scripts/ci-change-guard.mjs";
+} from "../../scripts/ci-change-guard.mjs";
 
 const head = "a".repeat(40);
 const base = "b".repeat(40);
@@ -53,7 +53,7 @@ async function fixture(t: any, options: any = {}) {
 
 // Protect CI policy, while preserving normal product implementation and test changes.
 test("every protected CI file rejects changes while normal product files remain allowed", () => {
-  for (const filename of [...PROTECTED_FILES, ".github/workflows/future.yml"]) {
+  for (const filename of [...PROTECTED_FILES, ".github/workflows/future.yml", "test/ci/future.test.ts"]) {
     assert.deepEqual(protectedChanges([changed(filename)]), [filename], filename);
   }
   assert.deepEqual(protectedChanges([changed("src/cli.ts"), changed("test/run-store.test.ts"), changed("docs/usage.md")]), []);
@@ -209,5 +209,5 @@ test("all scripts directly invoked by workflows and package commands and CI-poli
   for (const source of [...workflowSources, ...Object.values(pkg.scripts) as string[]]) {
     for (const match of source.matchAll(/scripts\/[a-zA-Z0-9_-]+\.(?:mjs|sh|json)/g)) assert(isProtected(match[0]), `CI directly invokes unprotected ${match[0]}`);
   }
-  for (const file of ["test/ci-workflow.test.ts", "test/test-plan.test.ts", "test/full-health.test.ts", "test/ci-change-guard.test.ts"]) assert(isProtected(file));
+  for (const file of ["test/ci/ci-workflow.test.ts", "test/ci/test-plan.test.ts", "test/ci/full-health.test.ts", "test/ci/ci-change-guard.test.ts"]) assert(isProtected(file));
 });

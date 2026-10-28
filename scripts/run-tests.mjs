@@ -1,13 +1,13 @@
-import { readdir, readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { selectTests, testSuites } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites } from "./test-plan.mjs";
 
-const testDirectory = new URL("../test/", import.meta.url);
-const files = (await readdir(testDirectory)).filter(name => name.endsWith(".test.ts"))
-  .sort().map(name => fileURLToPath(new URL(name, testDirectory)));
+const testDirectory = fileURLToPath(new URL("../test/", import.meta.url));
+const files = (await discoverTestFiles(testDirectory)).map(name => resolve(testDirectory, name));
+const testName = file => relative(testDirectory, file).split(sep).join("/");
 const platformDurations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
 const durations = platformDurations[process.platform] ?? platformDurations.win32;
 const nodeArguments = [];
@@ -40,7 +40,7 @@ try {
   await Promise.all(Array.from({ length: Math.min(concurrency, selected.length) }, async () => {
     while (next < selected.length) {
       const file = selected[next++];
-      console.log(`# Starting: ${basename(file)}`);
+      console.log(`# Starting: ${testName(file)}`);
       const home = await mkdtemp(join(testHome, "file-"));
       const fileStarted = performance.now();
       const result = await new Promise(resolveResult => {
@@ -56,9 +56,9 @@ try {
       });
       const seconds = (performance.now() - fileStarted) / 1000;
       // Keep each file's TAP intact even when files execute concurrently.
-      console.log(`\n# File: ${basename(file)} (${seconds.toFixed(2)}s)`);
+      console.log(`\n# File: ${testName(file)} (${seconds.toFixed(2)}s)`);
       process.stdout.write(result.output);
-      results.push({ file: basename(file), seconds, exitCode: result.code, signal: result.signal });
+      results.push({ file: testName(file), seconds, exitCode: result.code, signal: result.signal });
       await rm(home, { recursive: true, force: true });
     }
   }));
@@ -68,7 +68,7 @@ try {
     const path = resolve(resultsPath);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, JSON.stringify({ platform: process.platform, suite, title,
-      seconds: (performance.now() - started) / 1000, planned: selected.map(file => basename(file)), results }, null, 2) + "\n");
+      seconds: (performance.now() - started) / 1000, planned: selected.map(testName), results }, null, 2) + "\n");
   }
 }
 const failures = results.filter(result => result.exitCode !== 0);

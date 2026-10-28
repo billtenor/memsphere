@@ -67,3 +67,7 @@ Human要求体验真实拦截，临时增加仅针对PR118的演示入口，并�
 ## 恢复后完整CI的既有Windows问题修复
 
 恢复提交1fd2732的普通CI通过；完整回归40533697453复现master运行40512256758已存在的失败：两个Procedure图测试提取Markdown中YAML示例时只匹配LF，Windows checkout的CRLF导致示例为undefined。仅修正test/procedure-graph-syntax.test.ts与test/procedure-graph-runtime.test.ts的测试输入换行处理，新增LF/CRLF明确覆盖并保留原断言。新增CRLF用例先实际失败，修正后受影响三文件67项全部通过。生产代码、Memory、门禁代码及CI参数/超时/选测标准不变；本地全量和最新head远端完整回归继续跟进，最终结果记录于Run。
+
+## CI测试目录整理
+
+四个CI专用测试已集中到test/ci/，同步导入与维护说明。runner、planner和覆盖测试共用递归发现，仍发现全部173文件；已对比迁移前后每个套件的成员以及default/full矩阵，均一致。新增嵌套发现与真实runner列举回归，CI专用39项通过；本地全量与更新后PR检查继续跟进，最终结果见Run/PR。CI并发、超时、矩阵和原有断言标准不变。

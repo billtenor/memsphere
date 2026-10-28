@@ -1,6 +1,7 @@
-import { readdir, readFile } from "node:fs/promises";
-import { pathToFileURL } from "node:url";
-import { platformTests, selectTests, testSuites } from "./test-plan.mjs";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { discoverTestFiles, platformTests, selectTests, testSuites } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -40,8 +41,9 @@ export function createCiPlan(profile, files, sources) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const files = (await readdir(new URL("../test/", import.meta.url))).filter(file => file.endsWith(".test.ts"));
-  const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(new URL(`../test/${file}`, import.meta.url), "utf8")])));
+  const directory = fileURLToPath(new URL("../test/", import.meta.url));
+  const files = await discoverTestFiles(directory);
+  const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(directory, file), "utf8")])));
   const profile = ciProfile(process.env.GITHUB_EVENT_NAME, process.env.CI_PROFILE);
   console.log(`profile=${profile}`);
   console.log(`matrix=${JSON.stringify(createCiPlan(profile, files, sources))}`);
