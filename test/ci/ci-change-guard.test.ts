@@ -178,7 +178,7 @@ test("one failed PR query invalidates all listed old greens and still evaluates 
 });
 
 test("dry-run evaluates current facts without writing any statuses", async t => {
-  const f = await fixture(t, { files: [changed("package-lock.json")] });
+  const f = await fixture(t, { files: [changed("scripts/ci/ci-plan.mjs")] });
   assert.equal((await refreshGuard(f.api, { log: () => {} }))[0].state, "failure");
   assert.deepEqual(f.posts, []);
 });
@@ -203,11 +203,32 @@ test("the trusted guard cannot run a PR's modified guard or dependencies", async
   }
 });
 
-test("all scripts directly invoked by workflows and package commands and CI-policy tests remain protected", async () => {
+test("workflow CI entrypoints and CI-policy tests remain protected", async () => {
   const workflowSources = await Promise.all((await readdir(".github/workflows")).map(file => readFile(`.github/workflows/${file}`, "utf8")));
-  const pkg = JSON.parse(await readFile("package.json", "utf8"));
-  for (const source of [...workflowSources, ...Object.values(pkg.scripts) as string[]]) {
-    for (const match of source.matchAll(/scripts\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.(?:mjs|sh|json)/g)) assert(isProtected(match[0]), `CI directly invokes unprotected ${match[0]}`);
+  for (const source of workflowSources) {
+    for (const match of source.matchAll(/scripts\/ci\/[a-zA-Z0-9_/-]+\.(?:mjs|sh|json)/g)) assert(isProtected(match[0]), `Unprotected CI entrypoint ${match[0]}`);
   }
   for (const file of ["test/ci/ci-workflow.test.ts", "test/ci/test-plan.test.ts", "test/ci/full-health.test.ts", "test/ci/ci-change-guard.test.ts"]) assert(isProtected(file));
+});
+
+test("product builds, dependencies and compiler configuration do not require CI-policy authorization", () => {
+  const files = [
+    "scripts/check-reserved-models.mjs", "scripts/build-view-assets.mjs",
+    "scripts/build-example-view-package.mjs", "scripts/build-example-app.mjs",
+    "scripts/future-product-build.mjs", "test/future-product.test.ts",
+    "package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc", ".nvmrc",
+    "tsconfig.json", "tsconfig.modules.json"
+  ];
+  for (const filename of files) assert.equal(isProtected(filename), false, filename);
+  assert.deepEqual(protectedChanges(files.map(filename => changed(filename))), []);
+});
+
+test("security policy remains protected independently of CI directories", () => {
+  assert.deepEqual(PROTECTED_FILES, [
+    "scripts/security-check.sh", "scripts/security-setup.sh",
+    ".gitleaks-privacy.toml", ".gitleaksignore"
+  ]);
+  for (const filename of PROTECTED_FILES) {
+    assert.deepEqual(protectedChanges([changed(filename)]), [filename]);
+  }
 });

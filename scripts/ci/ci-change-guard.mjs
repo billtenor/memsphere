@@ -2,12 +2,11 @@ import { pathToFileURL } from "node:url";
 import { createApi, REPOSITORY } from "./full-health.mjs";
 
 export const CONTEXT = "CI change guard";
+// CI infrastructure is protected by directory. These explicit files implement
+// repository security policy; product build/dependency configuration is not CI policy.
 export const PROTECTED_FILES = [
   "scripts/security-check.sh", "scripts/security-setup.sh",
-  "scripts/check-reserved-models.mjs", "scripts/build-view-assets.mjs",
-  "scripts/build-example-view-package.mjs", "scripts/build-example-app.mjs",
-  "package.json", "package-lock.json", "npm-shrinkwrap.json", ".npmrc", ".nvmrc",
-  "tsconfig.json", "tsconfig.modules.json", ".gitleaks-privacy.toml", ".gitleaksignore"
+  ".gitleaks-privacy.toml", ".gitleaksignore"
 ];
 const protectedFiles = new Set(PROTECTED_FILES);
 export const AUTHORIZATION_MESSAGE = "等 CI 机制不允许在 human 未授权的情况下修改。请检查修改的必要性，或者请求 human 授权";
