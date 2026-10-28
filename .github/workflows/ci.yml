@@ -42,7 +42,7 @@ jobs:
       - id: plan
         env:
           CI_PROFILE: ${{ inputs.profile || 'default' }}
-        run: node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"
+        run: node scripts/ci/ci-plan.mjs >> "$GITHUB_OUTPUT"
 
   test:
     needs: plan
@@ -107,7 +107,7 @@ jobs:
           npm install --prefix .ci-install $package
       - name: Packaged core Run and View lifecycle
         shell: pwsh
-        run: node scripts/windows-package-smoke.mjs
+        run: node scripts/ci/windows-package-smoke.mjs
       - name: Windows PowerShell 5.1 smoke
         shell: powershell
         run: |
@@ -143,7 +143,7 @@ jobs:
         if: needs.plan.outputs.profile == 'default'
         env:
           CI_TEST_RESULTS: ci-results/windows-latest-package-platform.json
-        run: node scripts/run-tests.mjs --suite=package-platform --test-concurrency=2
+        run: node scripts/ci/run-tests.mjs --suite=package-platform --test-concurrency=2
       - name: Preserve native contract timings
         if: always() && needs.plan.outputs.profile == 'default'
         uses: actions/upload-artifact@v4
@@ -187,4 +187,4 @@ jobs:
       - env:
           GITHUB_TOKEN: ${{ github.token }}
           REVIEWED_SHA: ${{ inputs.reviewed_sha }}
-        run: node scripts/full-health.mjs --bootstrap --publish
+        run: node scripts/ci/full-health.mjs --bootstrap --publish

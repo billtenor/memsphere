@@ -8,7 +8,7 @@ import { parse } from "yaml";
 import {
   ACTIONS_APP_ID, CONTEXT, LEGACY_CONTEXT, FULL_JOB, REPOSITORY, WORKFLOW_ID, computeHealth, createApi,
   decideHealth, fullEvidence, refreshHealth, requiredCheckRules, verifyBootstrap
-} from "../../scripts/full-health.mjs";
+} from "../../scripts/ci/full-health.mjs";
 
 const sha = "a".repeat(40);
 const master = "b".repeat(40);
@@ -296,7 +296,7 @@ test("Publisher always checks out trusted master, uses minimal permissions and n
   assert.equal(bootstrap.permissions.statuses, "write");
   assert.equal(ci.permissions.statuses, undefined);
   assert.equal(ci.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
-  assert(bootstrap.steps.some((s: any) => s.run === "node scripts/full-health.mjs --bootstrap --publish"));
+  assert(bootstrap.steps.some((s: any) => s.run === "node scripts/ci/full-health.mjs --bootstrap --publish"));
 });
 
 
@@ -306,11 +306,11 @@ test("CLI dry run reads real HTTP facts without writes; normal publisher refuses
   const env = { ...process.env, GITHUB_REPOSITORY: REPOSITORY, GITHUB_TOKEN: "fixture", GITHUB_API_URL: endpoint,
     GITHUB_SHA: old, CHECKED_OUT_SHA: old, GITHUB_REF: "refs/heads/feature", GITHUB_EVENT_NAME: "workflow_dispatch" };
   const execute = promisify(execFile);
-  const output = await execute(process.execPath, ["scripts/full-health.mjs"], { env });
+  const output = await execute(process.execPath, ["scripts/ci/full-health.mjs"], { env });
   assert.equal(JSON.parse(output.stdout)[0].state, "success");
-  await assert.rejects(execute(process.execPath, ["scripts/full-health.mjs", "--publish"], { env }), /trusted master checkout/);
+  await assert.rejects(execute(process.execPath, ["scripts/ci/full-health.mjs", "--publish"], { env }), /trusted master checkout/);
   assert.equal(posts.length, 0);
-  const published = await execute(process.execPath, ["scripts/full-health.mjs", "--publish"], {
+  const published = await execute(process.execPath, ["scripts/ci/full-health.mjs", "--publish"], {
     env: { ...env, GITHUB_REF: "refs/heads/master", GITHUB_SHA: master, CHECKED_OUT_SHA: master }
   });
   assert.equal(JSON.parse(published.stdout)[0].state, "success");
@@ -319,7 +319,7 @@ test("CLI dry run reads real HTTP facts without writes; normal publisher refuses
   // and publish B's pending full rather than reject event/checkout SHA mismatch.
   runs.push(run(2, master, { status: "in_progress", conclusion: null }));
   const before = posts.length;
-  const lateEvent = await execute(process.execPath, ["scripts/full-health.mjs", "--publish"], {
+  const lateEvent = await execute(process.execPath, ["scripts/ci/full-health.mjs", "--publish"], {
     env: { ...env, GITHUB_REF: "refs/heads/master", GITHUB_SHA: old, CHECKED_OUT_SHA: master }
   });
   assert.equal(JSON.parse(lateEvent.stdout)[0].state, "pending");

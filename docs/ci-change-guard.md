@@ -22,7 +22,7 @@ CI change guard: ".github/workflows/ci.yml" 等 CI 机制不允许在 human 未�
 
 ## 保护范围与维护
 
-权威清单位于 `scripts/ci-change-guard.mjs` 的 `PROTECTED_FILES`、`.github/workflows/` 和 `test/ci/` 目录前缀规则，覆盖：
+权威清单位于 `scripts/ci/ci-change-guard.mjs` 的 `PROTECTED_FILES`、`.github/workflows/` 、`test/ci/` 和 `scripts/ci/` 目录前缀规则，覆盖：
 
 - 所有 workflow（包括新建文件）。
 - CI 矩阵、测试选择/执行/分配配置与相关策略回归测试。
@@ -37,7 +37,7 @@ CI change guard: ".github/workflows/ci.yml" 等 CI 机制不允许在 human 未�
 
 每次重新检查所有 open master PR，先撤销旧的绿色状态，再按实时 head/base 读取完整分页差异；差异计数不符、超过 GitHub 3000 文件上限、查询错误或持续变化都不会发布成功。此时显示 error 或保持 pending/缺失，查看日志解决 API/权限/数据问题后，在 Actions → CI change protection → Run workflow，使用 master 刷新。命中保护文件的 failure 属于正常结果；一个 CI PR 导致扫描 workflow 显示失败，不代表其他 PR 的独立 status 也失败。扫描期间关闭或改目标分支的 PR，其旧 head 上可能保留 pending；重新打开或重新指向 master 会触发重新结算，已退出 master 范围的 PR 不影响 master 合并。
 
-脚本也支持只读诊断：设置 `GITHUB_TOKEN` 后运行 `node scripts/ci-change-guard.mjs`；只有显式 `--publish` 才写状态。不要在命令输出或日志中暴露 token。手工诊断不用于伪造 GitHub Actions 来源的必过状态。
+脚本也支持只读诊断：设置 `GITHUB_TOKEN` 后运行 `node scripts/ci/ci-change-guard.mjs`；只有显式 `--publish` 才写状态。不要在命令输出或日志中暴露 token。手工诊断不用于伪造 GitHub Actions 来源的必过状态。
 
 ## 首次安装和规则激活
 

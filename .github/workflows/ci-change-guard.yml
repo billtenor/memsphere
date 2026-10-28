@@ -33,4 +33,4 @@ jobs:
       - name: Inspect PR files without running PR code
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/ci-change-guard.mjs --publish
+        run: node scripts/ci/ci-change-guard.mjs --publish

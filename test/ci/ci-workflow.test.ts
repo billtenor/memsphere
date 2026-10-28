@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
-import { ciProfile, createCiPlan } from "../../scripts/ci-plan.mjs";
-import { discoverTestFiles, packagePlatformTests, platformTests, selectTests, testSuites } from "../../scripts/test-plan.mjs";
+import { ciProfile, createCiPlan } from "../../scripts/ci/ci-plan.mjs";
+import { discoverTestFiles, packagePlatformTests, platformTests, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = await discoverTestFiles("test");
@@ -28,7 +28,7 @@ test("PR runs every retained test on Linux and every declared native risk on mac
   }
   const packaged = workflow.jobs["windows-package-smoke"].steps.find(step => step.name === "Native platform contracts");
   assert.equal(packaged.if, "needs.plan.outputs.profile == 'default'");
-  assert.match(packaged.run, /node scripts\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
+  assert.match(packaged.run, /node scripts\/ci\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
   assert(executions <= 266, "at least 40% fewer file executions than the 444-file baseline");
   assert(platformTests.includes("project-command.test.ts"), "repair CAS, literal Git paths, symlink rejection and rollback remain platform checks");
   assert(platformTests.includes("project-resolver.test.ts"));
@@ -72,7 +72,7 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.deepEqual(workflow.on.push.branches, ["master"]);
   assert.equal(workflow.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
   assert.equal(workflow.jobs.test.strategy.matrix, "${{ fromJSON(needs.plan.outputs.matrix) }}");
-  assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").run, 'node scripts/ci-plan.mjs >> "$GITHUB_OUTPUT"');
+  assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").run, 'node scripts/ci/ci-plan.mjs >> "$GITHUB_OUTPUT"');
   assert.equal(workflow.jobs.plan.steps.find(step => step.id === "plan").env.CI_PROFILE, "${{ inputs.profile || 'default' }}");
   assert.equal(workflow.jobs.budget, undefined, "queueing is not a failure");
   assert.equal(workflow.jobs["full-result"].if, "always() && needs.plan.outputs.profile == 'full'");
@@ -96,7 +96,7 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(browserInstall.run, "npx playwright install chromium");
   assert(steps.some(step => step.run?.startsWith("npm run test:ci")));
   assert.equal(steps.some(step => step.run === "npm run build"), false);
-  const normalizedWindowsPackageSmoke = (await readFile("scripts/windows-package-smoke.mjs", "utf8")).replaceAll("\r\n", "\n");
+  const normalizedWindowsPackageSmoke = (await readFile("scripts/ci/windows-package-smoke.mjs", "utf8")).replaceAll("\r\n", "\n");
   assert.match(
     normalizedWindowsPackageSmoke,
     /names:\s*\n\s*- windows-ci-smoke\n\s*- Windows CI smoke/

@@ -5,7 +5,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { discoverTestFiles, selectTests, testSuites } from "./test-plan.mjs";
 
-const testDirectory = fileURLToPath(new URL("../test/", import.meta.url));
+const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
 const files = (await discoverTestFiles(testDirectory)).map(name => resolve(testDirectory, name));
 const testName = file => relative(testDirectory, file).split(sep).join("/");
 const platformDurations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));

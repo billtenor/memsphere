@@ -3,9 +3,6 @@ import { createApi, REPOSITORY } from "./full-health.mjs";
 
 export const CONTEXT = "CI change guard";
 export const PROTECTED_FILES = [
-  "scripts/ci-plan.mjs", "scripts/test-plan.mjs", "scripts/run-tests.mjs", "scripts/test-durations.json",
-  "scripts/full-health.mjs", "scripts/ci-change-guard.mjs",
-  "scripts/project-smoke.mjs", "scripts/windows-package-smoke.mjs",
   "scripts/security-check.sh", "scripts/security-setup.sh",
   "scripts/check-reserved-models.mjs", "scripts/build-view-assets.mjs",
   "scripts/build-example-view-package.mjs", "scripts/build-example-app.mjs",
@@ -15,7 +12,7 @@ export const PROTECTED_FILES = [
 const protectedFiles = new Set(PROTECTED_FILES);
 export const AUTHORIZATION_MESSAGE = "等 CI 机制不允许在 human 未授权的情况下修改。请检查修改的必要性，或者请求 human 授权";
 export const HUMAN_INSTRUCTIONS = "Human 请在 GitHub PR 合并区域手工绕过 CI change protection 规则并亲自合并；其他合并规则仍须满足。";
-export const isProtected = path => path.startsWith(".github/workflows/") || path.startsWith("test/ci/") || protectedFiles.has(path);
+export const isProtected = path => path.startsWith(".github/workflows/") || path.startsWith("test/ci/") || path.startsWith("scripts/ci/") || protectedFiles.has(path);
 
 function validPath(path) {
   if (typeof path !== "string" || !path || path.startsWith("/") || path.split("/").some(part => part === ".." || part === ".")) {
@@ -127,7 +124,7 @@ export async function refreshGuard(api, { publish = false, log = console.log, ta
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   try {
-    if (process.argv.slice(2).some(arg => arg !== "--publish")) throw new Error("Usage: node scripts/ci-change-guard.mjs [--publish]");
+    if (process.argv.slice(2).some(arg => arg !== "--publish")) throw new Error("Usage: node scripts/ci/ci-change-guard.mjs [--publish]");
     if (!process.env.GITHUB_TOKEN) throw new Error("GITHUB_TOKEN is required");
     const reports = await refreshGuard(createApi({ token: process.env.GITHUB_TOKEN }), {
       publish: process.argv.includes("--publish"),

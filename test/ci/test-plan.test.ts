@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
-import { discoverTestFiles, selectTests, testCategory } from "../../scripts/test-plan.mjs";
+import { discoverTestFiles, selectTests, testCategory } from "../../scripts/ci/test-plan.mjs";
 
 test("test discovery retains root tests and recursively includes CI subdirectories", async t => {
   const directory = await mkdtemp(join(tmpdir(), "memsphere-test-discovery-"));
@@ -16,7 +16,7 @@ test("test discovery retains root tests and recursively includes CI subdirectori
 });
 
 test("the real test runner schedules the relocated CI tests alongside all discovered tests", async () => {
-  const plan = JSON.parse(execFileSync(process.execPath, ["scripts/run-tests.mjs", "--list"], { encoding: "utf8" }));
+  const plan = JSON.parse(execFileSync(process.execPath, ["scripts/ci/run-tests.mjs", "--list"], { encoding: "utf8" }));
   const files = plan.files.map((file: string) => relative(resolve("test"), file).split(sep).join("/")).sort();
   assert.deepEqual(files, await discoverTestFiles("test"));
   for (const file of ["ci-workflow", "test-plan", "full-health", "ci-change-guard"]) {

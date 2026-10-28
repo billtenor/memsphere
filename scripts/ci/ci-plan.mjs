@@ -41,7 +41,7 @@ export function createCiPlan(profile, files, sources) {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const directory = fileURLToPath(new URL("../test/", import.meta.url));
+  const directory = fileURLToPath(new URL("../../test/", import.meta.url));
   const files = await discoverTestFiles(directory);
   const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(directory, file), "utf8")])));
   const profile = ciProfile(process.env.GITHUB_EVENT_NAME, process.env.CI_PROFILE);

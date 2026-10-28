@@ -43,4 +43,4 @@ jobs:
           FULL_HEALTH_PUBLISH_LEGACY: ${{ vars.FULL_HEALTH_PUBLISH_LEGACY }}
         run: |
           export CHECKED_OUT_SHA="$(git rev-parse HEAD)"
-          node scripts/full-health.mjs --publish
+          node scripts/ci/full-health.mjs --publish

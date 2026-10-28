@@ -6,7 +6,7 @@
 
 ## 实现
 
-新增 `.github/workflows/ci-change-guard.yml`，监听针对 master 的 pull_request_target（opened/synchronize/reopened/ready_for_review/edited）、master push 与 workflow_dispatch。工作流 checkout `refs/heads/master`，persist-credentials=false；Node 22 直接运行仅依赖内置模块的 `scripts/ci-change-guard.mjs`，不运行 npm ci、不安装 PR 依赖、不执行 PR 代码。只授 contents:read、pull-requests:read、statuses:write。
+新增 `.github/workflows/ci-change-guard.yml`，监听针对 master 的 pull_request_target（opened/synchronize/reopened/ready_for_review/edited）、master push 与 workflow_dispatch。工作流 checkout `refs/heads/master`，persist-credentials=false；Node 22 直接运行仅依赖内置模块的 `scripts/ci/ci-change-guard.mjs`，不运行 npm ci、不安装 PR 依赖、不执行 PR 代码。只授 contents:read、pull-requests:read、statuses:write。
 
 使用独立 commit status `CI change guard`（来源 GitHub Actions，integration_id 15368），显式发布到 PR 最新 head SHA，避免 pull_request_target 的 job 所属基准 SHA 与 PR head 不一致。workflow job 使用不同名称，避免同名 check/status 双重约束。每次扫描所有 open master PR（与现有 full-health publisher 的刷新模式一致），全局串行且不取消，任何事件都以 API 实时状态为准；master push 或手工 refresh 也能刷新目标分支变化后的差异。
 
@@ -19,9 +19,9 @@
 保护清单放在 guard 脚本中，不另增配置层：
 
 - `.github/workflows/**`：ci、security、full-health、新 guard 及未来 workflow。
-- `scripts/ci-plan.mjs`、`scripts/test-plan.mjs`、`scripts/run-tests.mjs`、`scripts/test-durations.json`：CI 矩阵、选测、执行与分配参数。
-- `scripts/full-health.mjs`、`scripts/ci-change-guard.mjs`：现有与新增合并门禁及自身清单。
-- `scripts/project-smoke.mjs`、`scripts/windows-package-smoke.mjs`：ci.yml 或 package.json 直接调用的 smoke。
+- `scripts/ci/ci-plan.mjs`、`scripts/ci/test-plan.mjs`、`scripts/ci/run-tests.mjs`、`scripts/ci/test-durations.json`：CI 矩阵、选测、执行与分配参数。
+- `scripts/ci/full-health.mjs`、`scripts/ci/ci-change-guard.mjs`：现有与新增合并门禁及自身清单。
+- `scripts/ci/project-smoke.mjs`、`scripts/ci/windows-package-smoke.mjs`：ci.yml 或 package.json 直接调用的 smoke。
 - `scripts/security-check.sh`、`scripts/security-setup.sh`、`.gitleaks-privacy.toml`、`.gitleaksignore`：安全检查和本地安装入口。
 - `scripts/check-reserved-models.mjs`、`scripts/build-view-assets.mjs`、`scripts/build-example-view-package.mjs`、`scripts/build-example-app.mjs`：package.json build 直接调用。
 - `package.json`、`package-lock.json`、`npm-shrinkwrap.json`、`.npmrc`、`.nvmrc`、`tsconfig.json`、`tsconfig.modules.json`：CI 构建/依赖/运行时配置，当前不存在的标准配置文件新增亦保护。lockfile 纳入既有“相关配置”类别，采纳产品风险，不增加凭据防护范围。
@@ -55,4 +55,4 @@ GitHub 原生 bypass 是 Human 合并时使用的例外，不会把红色检查�
 
 ## CI测试目录整理细化
 
-CI专用测试位于test/ci/。scripts/test-plan.mjs提供共享discoverTestFiles，供本地runner、CI planner及工作流覆盖测试调用，递归返回相对test目录的POSIX路径；runner日志和结果用相对路径，现有按文件名记录的耗时仍用于既有排序。迁移前后实际173文件、全部套件成员及default/full矩阵对比一致。test/ci/以目录前缀整体保护，新增CI测试自动受保护，不改变业务测试边界。
+CI专用测试位于test/ci/。scripts/ci/test-plan.mjs提供共享discoverTestFiles，供本地runner、CI planner及工作流覆盖测试调用，递归返回相对test目录的POSIX路径；runner日志和结果用相对路径，现有按文件名记录的耗时仍用于既有排序。迁移前后实际173文件、全部套件成员及default/full矩阵对比一致。test/ci/以目录前缀整体保护，新增CI测试自动受保护，不改变业务测试边界。
