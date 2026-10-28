@@ -78,7 +78,7 @@ Procedure 有 Review Slot 时，首次启动会预检所有 scope、Slot、Actor
 
 执行当前 `Do`、规则和 Artifact 契约，按每次回执的 `Then` 持续推进，不提前执行未返回步骤。`Ask human to do` 必须等待相应 Human 完成，再把其结果作为当前产物上报。
 
-只有两种情况可以结束当前回复并暂停：需要 Human 完成步骤、提供必要信息/授权或处理无法自行恢复的事项；或同一阻塞事项实际连续等待超过 5 分钟，且没有其他可推进的工作。轮询不能重置等待计时，5 分钟不是整个 Run 的时限。可自行修复的错误、字段边界、Agent Review 短暂等待和 Runner 自己待投票均不是暂停理由。暂停时说明 Run ID、停止位置、等待对象和恢复方式，恢复同一 Run，不跳过门禁或自动废弃。
+只有需要 Human 完成步骤、提供必要信息/授权或处理无法自行恢复的事项时，才可以结束当前回复并暂停。可自行修复的错误、字段边界、Agent Review 短暂等待和 Runner 自己待投票均不是暂停理由。暂停时说明 Run ID、停止位置、等待对象和恢复方式，恢复同一 Run，不跳过门禁或自动废弃。
 
 flow 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-file <path>`。Artifact 声明了业务 `store`/`model` 时，按“在 Procedure 中写入业务数据”处理绑定与写入。
 
