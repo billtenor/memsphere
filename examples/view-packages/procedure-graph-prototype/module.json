@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.procedure-graph.prototype",
+  "version": "0.1.0",
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.0.0",
+    "capabilities": [
+      "router.register",
+      "styles.scoped"
+    ],
+    "styles": [
+      {
+        "id": "prototype",
+        "file": "./prototype.css",
+        "scope": "module"
+      }
+    ],
+    "contributions": [
+      {
+        "id": "navigation",
+        "cell": "navigation.primary@1:navigation",
+        "priority": 100
+      },
+      {
+        "id": "title",
+        "cell": "header.title@1:title",
+        "priority": 100
+      },
+      {
+        "id": "page",
+        "cell": "main.view@1:route:prototype",
+        "priority": 100
+      }
+    ]
+  }
+}

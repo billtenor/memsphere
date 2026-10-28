@@ -1,7 +1,7 @@
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
 import { openContextControl } from "../project/context-control.js";
-import { contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
+import { contextRunDetailPayload, contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
 import { createContextRunReader } from "../project/context-run-summaries.js";
 import { closeRunCommandStates } from "../home/command-state-store.js";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
@@ -1403,7 +1403,7 @@ async function handleRequest(
       if (body.artifactIds !== undefined && (!Array.isArray(body.artifactIds) || body.artifactIds.some(id => typeof id !== "string"))) throw new Error("artifactIds must be an array of strings");
       await contextLocation.service.finish(contextLocation.run.id, body.artifactIds as string[] | undefined);
       const warnings = await closeRunCommandStates(config.project!.name, contextLocation.run.id, config.homeRoot);
-      sendJson(response, 200, { run: contextRunPayload(await contextLocation.service.snapshot(contextLocation.run.id)), warnings });
+      sendJson(response, 200, { run: await contextRunDetailPayload(await contextLocation.service.snapshot(contextLocation.run.id)), warnings });
     } catch (error) { sendJson(response, 400, { error: error instanceof Error ? error.message : String(error) }); }
     return;
   }
@@ -1420,7 +1420,7 @@ async function handleRequest(
       if (contextLocation) {
         await contextLocation.service.abandon(contextLocation.run.id, body.reason, "view");
         const warnings = await closeRunCommandStates(config.project!.name, contextLocation.run.id, config.homeRoot);
-        sendJson(response, 200, { run: contextRunPayload(await contextLocation.service.snapshot(contextLocation.run.id)), warnings });
+        sendJson(response, 200, { run: await contextRunDetailPayload(await contextLocation.service.snapshot(contextLocation.run.id)), warnings });
         return;
       }
       const result = await abandonRun({
@@ -1670,7 +1670,7 @@ async function handleRequest(
   if (request.method === "GET" && runMatch) {
     const runId = decodeURIComponent(runMatch[1]);
     if (contextLocation) {
-      sendJson(response, 200, { run: contextRunPayload(await contextLocation.service.snapshot(runId)) });
+      sendJson(response, 200, { run: await contextRunDetailPayload(await contextLocation.service.snapshot(runId)) });
       return;
     }
     let located: Awaited<ReturnType<typeof readViewRunById>>;
@@ -1707,7 +1707,7 @@ async function handleRequest(
       sendJson(response, 200, { run: await toViewRunPayload(runsRoot, run) }); return;
     }
     await located.service.archive(id, false);
-    sendJson(response, 200, { run: contextRunPayload(await located.service.snapshot(id)) }); return;
+    sendJson(response, 200, { run: await contextRunDetailPayload(await located.service.snapshot(id)) }); return;
   }
   const archiveRunMatch = url.pathname.match(/^\/api\/archive\/runs\/([^/]+)$/);
   if (request.method === "POST" && archiveRunMatch) {
@@ -3101,6 +3101,7 @@ const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.ur
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 const viewRuntimeDependencies = new Map([
+  ["/assets/procedure-graph-layout.js", { compiled: new URL("../view/procedure-graph-layout.js", import.meta.url), source: new URL("../../modules/shared/view/graph-layout.ts", import.meta.url) }],
   ["/assets/model-definition.js", {
     compiled: new URL("../view/model-definition.js", import.meta.url),
     source: new URL("../view/model-definition.ts", import.meta.url)
@@ -3486,6 +3487,11 @@ async function readCompiledBrowserModule(compiledUrl: URL, sourceUrl: URL): Prom
       import.meta.url.endsWith(".ts")
       && error && typeof error === "object" && "code" in error && error.code === "ENOENT"
     ) {
+      if (compiledUrl.pathname.endsWith("/procedure-graph-layout.js")) {
+        const { build } = await import("esbuild");
+        const result = await build({ entryPoints: [fileURLToPath(sourceUrl)], bundle: true, write: false, format: "esm", platform: "browser", target: "es2022" });
+        return result.outputFiles[0].text;
+      }
       const [{ transpileModule, ModuleKind, ScriptTarget }, source] = await Promise.all([
         import("typescript"),
         readFile(sourceUrl, "utf8")

@@ -5,6 +5,9 @@ import { isGraphRun } from "./graph-runtime.js";
 import { parseMemoryEntity } from "../memory/store.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import { graphReviewHandle } from "./review-repository.js";
+import { resolveRuleParts, RuleResolutionError } from "../memory/rules.js";
+import { toEffectiveRuleDisplayTree } from "../memory/serializer.js";
+import type { StatementMemory } from "../memory/ast.js";
 import { projectGraphRound } from "./graph-review.js";
 
 /** Basic list metadata must not depend on any child records. */
@@ -25,6 +28,43 @@ export function contextRunPayload(snapshot: Snapshot) {
   }) : [];
   return { ...run, artifactReviewSummaries, outputArtifactIds: snapshot.outputArtifactIds, representation: "context-control", procedureName: p?.names[0] ?? "", updatedAt: run.endedAt ?? snapshot.steps.map(s => s.endedAt ?? s.createdAt).sort().at(-1) ?? run.createdAt,
     contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, ...(graph ? { graph } : {}) } };
+}
+/** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
+export async function contextRunDetailPayload(snapshot: Snapshot) {
+  const payload = contextRunPayload(snapshot);
+  const procedure = payload.context.graph?.procedure;
+  if (!procedure) return payload;
+  const statements = new Map<string, StatementMemory>();
+  const lookup = async (reference: string): Promise<StatementMemory> => {
+    if (statements.has(reference)) return statements.get(reference)!;
+    const source = snapshot.run.memorySnapshot?.memories[reference];
+    if (!source) throw new Error(`Frozen rule not found: ${reference}`);
+    const entity = parseMemoryEntity('statements', parseMemoryYaml(source.payload.content));
+    if (entity.tag !== '!statement') throw new Error(`Expected frozen Statement: ${reference}`);
+    statements.set(reference, entity);
+    return entity;
+  };
+  for (const action of procedure.actions) for (const source of [action, action.artifact]) {
+    if (!source) continue;
+    const effectiveRules = {};
+    for (const channel of ['asserts', 'suggests'] as const) {
+      const parts = source[channel];
+      const projected = [];
+      for (const part of parts ?? []) {
+        if (typeof part === 'string') continue;
+        try {
+          const resolved = toEffectiveRuleDisplayTree(await resolveRuleParts(channel, [part], lookup));
+          projected.push(...resolved[channel] ?? []);
+        } catch (error) {
+          // A display-only rule source must not make the Run or a successful write response unavailable.
+          if (!(error instanceof RuleResolutionError)) throw error;
+        }
+      }
+      if (projected.length) Object.assign(effectiveRules, { [channel]: projected });
+    }
+    if (Object.keys(effectiveRules).length) Object.assign(source, { effectiveRules });
+  }
+  return payload;
 }
 export async function contextRunSummaries(service: ContextControl | undefined) {
   if (!service) return [];

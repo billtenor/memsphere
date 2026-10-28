@@ -40,3 +40,5 @@ for (const catalogEntry of builtinModuleCatalog) {
   });
   await copyFile(manifestPath, resolve(outputRoot, "module.json"));
 }
+
+await build({ entryPoints: [resolve(repositoryRoot, "modules/shared/view/graph-layout.ts")], outfile: resolve(repositoryRoot, "dist/view/procedure-graph-layout.js"), bundle: true, format: "esm", platform: "browser", target: "es2022", logLevel: "silent" });
