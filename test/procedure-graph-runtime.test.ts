@@ -440,7 +440,7 @@ test("partial joins prevent finish and terminal graph archive/restore preserves 
 
 for (const materials of [[], ["资料甲", "资料乙"]]) test(`published materials example completes with ${materials.length} materials and automatic collect`, async t => {
   const { readFile } = await import("node:fs/promises"); const { parseMemoryYaml } = await import("../src/memory/yaml.js");
-  const document = await readFile(new URL("../docs/procedure-graph-syntax.md", import.meta.url), "utf8");
+  const document = (await readFile(new URL("../docs/procedure-graph-syntax.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const yaml = [...document.matchAll(/```yaml\n([\s\S]*?)```/g)].map(m => m[1]).find(text => text.startsWith("!procedure\n") && text.includes("mode: graph\n"))!;
   const definition = parseMemoryEntity("procedures", parseMemoryYaml(yaml)) as GraphProcedureMemory;
   const f = await fixture(t);

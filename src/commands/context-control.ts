@@ -10,8 +10,9 @@ import { textContent, type Body, type ReportInput } from "../context_control/typ
 import { downstream, scopedSnapshot } from "../context_control/graph.js";
 import { emitCommandResult } from "./cli-errors.js";
 import { graphCommand } from "./procedure-graph.js";
+import { isGraphRun } from "../context_control/graph-runtime.js";
 
-export type Options = { contextId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
+export type Options = { authorization?: string; contextId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
 function strictObject(value: unknown, allowed: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("INVALID_ARGUMENT", "Expected an object");
@@ -117,8 +118,10 @@ export async function tryContextCommand(operation: string, options: object): Pro
     const snap = await s.snapshot(runId);
     if (operation === "review-list") result = snap.reviews.filter(r => r.artifactId === requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"));
     else { result = snap.reviews.find(r => r.id === requireOption(o.review, "--review")); if (!result) throw failure("NOT_FOUND", "Review not found"); }
-  } else if (operation === "finish") result = await s.finish(runId, Array.isArray(o.artifact) ? o.artifact : o.artifact ? [o.artifact] : undefined);
-  else if (operation === "abandon") {
+  } else if (operation === "finish") {
+    if (!isGraphRun(run) && !o.authorization?.trim()) throw failure("HUMAN_CONFIRMATION_REQUIRED", "Finishing free exploration requires explicit Human confirmation of the current outputs. Keep the Run open for feedback and revision; after confirmation, provide --authorization recording the Human's decision. An Agent's own conclusion is not authorization.");
+    result = await s.finish(runId, Array.isArray(o.artifact) ? o.artifact : o.artifact ? [o.artifact] : undefined);
+  } else if (operation === "abandon") {
     if (o.reason !== undefined && o.reasonFile) throw failure("INVALID_ARGUMENT", "Use reason or reason-file");
     result = await s.abandon(runId, o.reasonFile ? await readFile(o.reasonFile, "utf8") : o.reason);
   } else throw failure("INVALID_ARGUMENT", `Unknown context control operation: ${operation}`);
@@ -183,7 +186,8 @@ export function registerExplorationCommands(run: import("commander").Command) {
     .action(o => contextOnlyCommand("review-list", o));
   scoped(review.command("show").description("Show one light free exploration Review.").requiredOption("--review <id>"))
     .action(o => contextOnlyCommand("review-show", o));
-  scoped(run.command("finish").description("Finish free exploration with current output roots or selected Artifacts.").option("--artifact <id>", "Final Artifact, repeatable", repeated))
+  scoped(run.command("finish").description("Finish a graph Procedure, or finish free exploration after Human confirmation.").option("--artifact <id>", "Final Artifact, repeatable", repeated)
+    .option("--authorization <text>", "State the Human's explicit confirmation for free exploration"))
     .action(o => contextOnlyCommand("finish", o));
 }
 

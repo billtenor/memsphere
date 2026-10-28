@@ -38,6 +38,11 @@ test("skill route and Artifact meaning agree with reserved Memory", async () => 
   assert.match(reserved, /否则启动自由探索 Run/);
   assert.match(reserved, /可独立阅读或使用/);
   assert.doesNotMatch(skill, /always start.*Procedure/i);
+  assert.match(skill, /--authorization <用户确认依据>/);
+  assert.match(skill, /等待人工确认可以结束当前回复，但 Run 保持 running，不能自动 finish 或 abandon/);
+  assert.match(skill, /只有 Human 明确决定停止时才/);
+  assert.match(reserved, /等待人工确认可以结束当前回复，但不得自动 finish 或 abandon/);
+  assert.match(reserved, /--authorization <用户确认依据>/);
 });
 
 

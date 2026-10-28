@@ -65,7 +65,7 @@ test("graph reference discovery includes Action and artifact Statement requireme
 });
 
 test("the materials example parses with a preparation Action instead of startup input", async () => {
-  const document = await readFile(new URL("../docs/procedure-graph-syntax.md", import.meta.url), "utf8");
+  const document = (await readFile(new URL("../docs/procedure-graph-syntax.md", import.meta.url), "utf8")).replace(/\r\n/g, "\n");
   const yaml = [...document.matchAll(/```yaml\n([\s\S]*?)```/g)].map(m => m[1]).find(s => s.startsWith("!procedure\n") && s.includes("mode: graph\n"))!;
   const p = parse(parseMemoryYaml(yaml));
   assert.equal(p.actions.length, 5);
