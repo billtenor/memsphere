@@ -660,7 +660,9 @@ function createSelectField(descriptor: SelectDescriptor): FieldHandle<HTMLSelect
     if (control.disabled || !list.hidden) return;
     active = Math.max(0, current.options.findIndex(option => option.value === current.value));
     list.hidden = false;
-    document.body.append(list);
+    // A modal dialog makes nodes outside its subtree inert, including menus
+    // portaled to body. Keep the menu in the control's modal interaction scope.
+    (control.closest("dialog[open]") ?? document.body).append(list);
     render();
     control.setAttribute("aria-expanded", "true");
     position();

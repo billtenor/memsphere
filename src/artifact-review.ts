@@ -65,21 +65,6 @@ export type ArtifactReviewSubmittedOpinion = {
   };
 };
 
-export function artifactReviewOpinionReferencesImplementation(
-  opinion: ArtifactReviewSubmittedOpinion | undefined
-): boolean {
-  if (!opinion) return false;
-  const source = [
-    opinion.summary,
-    ...opinion.comments.flatMap((comment) => [
-      comment.body,
-      comment.anchor?.target,
-      comment.anchor?.location
-    ])
-  ].filter((value): value is string => Boolean(value)).join("\n");
-  return /\bimplementation\b|\b(?:src|test|tests)\/[^\s`]+|\bcode path\b|\bdiff\b/i.test(source);
-}
-
 export type ArtifactReviewAgentAttemptStatus = "queued" | "running" | "submitted" | "failed" | "cancelled";
 
 export type ArtifactReviewAgentFailure = {

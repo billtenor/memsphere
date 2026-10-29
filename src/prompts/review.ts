@@ -1,5 +1,4 @@
 import {
-  artifactReviewOpinionReferencesImplementation,
   repeatedArtifactReviewAdvisories,
   type ArtifactReview,
   type ArtifactReviewRound
@@ -79,9 +78,6 @@ export function buildArtifactReviewSummaryPromptModel(
         binding: localize(locale, assignment.binding),
         vote: localize(locale, assignment.submitted?.vote ?? "pending"),
         decisionIntent: assignment.binding === "decision" ? assignment.submitted?.summary : undefined,
-        implementationEvidenceReferenced: assignment.submitted
-          ? artifactReviewOpinionReferencesImplementation(assignment.submitted)
-          : undefined,
         comments: (assignment.submitted?.comments ?? []).map((comment) => ({
           severity: localize(locale, comment.severity ?? "unspecified"),
           body: comment.body

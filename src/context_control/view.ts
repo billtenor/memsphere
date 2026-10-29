@@ -12,17 +12,17 @@ import { projectGraphRound } from "./graph-review.js";
 
 /** Basic list metadata must not depend on any child records. */
 export function contextRunSummary(run: Run & { unavailable?: boolean; error?: string }) {
-  return { ...run, representation: "context-control", procedureName: "", updatedAt: run.endedAt ?? run.createdAt,
+  return { id:run.id,name:run.name,status:run.status,language:run.language,createdAt:run.createdAt,...(run.unavailable?{unavailable:true,error:run.error}:{}),representation: "context-control", procedureName: "", updatedAt: run.endedAt ?? run.createdAt,
     archived: Boolean(run.archived), readOnly: Boolean(run.archived || run.unavailable) };
 }
 
 
-export function contextRunPayload(snapshot: Snapshot) {
+export function contextRunPayload(snapshot: Snapshot, lightweight = false) {
   const { run } = snapshot;
   const p = isGraphRun(run) ? parseMemoryEntity("procedures", parseMemoryYaml(run.memorySnapshot!.memories[run.memoryRef!].payload.content)) : undefined;
   const creationOrder = new Map(run.frames?.[0]?.graphFrame?.triggers.map((trigger, index) => [trigger.stepId, index]) ?? []);
   const graph = p?.tag === "!procedure" && p.mode === "graph" ? { procedure: p, work: [...snapshot.steps].sort((a, b) => creationOrder.get(a.id)! - creationOrder.get(b.id)!).map(s => ({ ...s, action: p.actions.find(a => a.id === s.source?.actionId), ...(s.reviewRounds?.length ? { reviewHandle: graphReviewHandle(run.id, s.id) } : {}) })) } : undefined;
-  const artifactReviewSummaries = graph ? snapshot.steps.filter(s => s.reviewRounds?.length).map(step => {
+  const artifactReviewSummaries = graph && !lightweight ? snapshot.steps.filter(s => s.reviewRounds?.length).map(step => {
     const round = step.reviewRounds!.at(-1)!; const projected = projectGraphRound(run, step, round, snapshot.reviews);
     return { id: graphReviewHandle(run.id, step.id), stepId: step.id, currentRoundId: round.id, status: projected.status === "changes_requested" ? "awaiting_revision" : projected.status, round: projected };
   }) : [];
@@ -30,8 +30,8 @@ export function contextRunPayload(snapshot: Snapshot) {
     contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, ...(graph ? { graph } : {}) } };
 }
 /** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
-export async function contextRunDetailPayload(snapshot: Snapshot) {
-  const payload = contextRunPayload(snapshot);
+export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false) {
+  const payload = contextRunPayload(snapshot, lightweight);
   const procedure = payload.context.graph?.procedure;
   if (!procedure) return payload;
   const statements = new Map<string, StatementMemory>();

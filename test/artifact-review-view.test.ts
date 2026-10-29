@@ -161,6 +161,19 @@ flow:
     assert.equal(directInitial.status, 200);
     assert.equal((await directInitial.json() as ReviewContext).assignment.actorId, "alice");
 
+    const compactResponse = await fetch(`${directRoundPath}?view=compact&auto_actor=true`);
+    assert.equal(compactResponse.status, 200);
+    const compact = await compactResponse.json();
+    assert.equal(compact.assignment, undefined, "multiple Humans require explicit identity");
+    assert.equal(compact.review.round.assignments, undefined, "assignments are sent once in the selected round");
+    assert.equal(compact.rounds[0].assignments.length, 2);
+    assert.equal(compact.submission.artifact.content, "# Private candidate\n");
+    const contractOnly = await (await fetch(`${directRoundPath}?view=compact&material=contract&actor_id=alice`)).json();
+    assert.equal(contractOnly.assignment.actorId, "alice");
+    assert.equal(contractOnly.submission.artifact.content, undefined);
+    assert.equal(contractOnly.submission.artifact.value, undefined);
+    assert.ok(contractOnly.submission.contractArtifact.value);
+
     const aliceInitial = await fetch(`${roundPath}?actor_id=alice`);
     assert.equal(aliceInitial.status, 200);
     const aliceInitialSource = await aliceInitial.text();
@@ -291,6 +304,19 @@ flow:
     )?.submitted?.comments[0];
     assert.equal(advisory?.body, "Advisory suggestion\\n\\nSecond paragraph");
     assert.match(advisory?.renderedBody ?? "", /<p>Advisory suggestion<\/p>\s*<p>Second paragraph<\/p>/);
+
+    const initialResults = await (await fetch(`${directRoundPath}?view=compact`)).json();
+    const collapsedBob = initialResults.rounds[0].assignments.find((a:any)=>a.actorId==="bob").submitted;
+    assert.equal(collapsedBob.detailsDeferred,true);
+    assert.equal(collapsedBob.summary,undefined);
+    assert.deepEqual(collapsedBob.comments,[]);
+    assert.equal(collapsedBob.commentCount,1);
+    assert.doesNotMatch(JSON.stringify(initialResults),/implementationEvidenceReferenced/);
+    const expandedResults = await (await fetch(`${directRoundPath}?view=compact&material=contract&opinion_actor=bob`)).json();
+    const expandedBob = expandedResults.rounds[0].assignments.find((a:any)=>a.actorId==="bob").submitted;
+    assert.equal(expandedBob.detailsDeferred,false);
+    assert.match(expandedBob.comments[0].renderedBody,/<p>Advisory suggestion/);
+    assert.equal(expandedResults.rounds[0].assignments.find((a:any)=>a.actorId==="alice").submitted.detailsDeferred,true);
 
     const originalKill = process.kill.bind(process);
     const probedWorkerPids: number[] = [];

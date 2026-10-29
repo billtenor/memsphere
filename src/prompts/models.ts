@@ -116,7 +116,6 @@ export type ArtifactReviewSummaryPromptModel = {
     binding: string;
     vote: string;
     decisionIntent?: string;
-    implementationEvidenceReferenced?: boolean;
     comments: Array<{
       severity: string;
       body: string;

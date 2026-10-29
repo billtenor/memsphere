@@ -11,7 +11,7 @@ import { FilesystemJsonValueStoreFactory } from "../src/data/extensions/filesyst
 import { createBusinessStore, removeBusinessStore } from "../src/project/business-stores.js";
 import { mutateModel } from "../src/project/model-service.js";
 
-test("list summaries read only Run records, include all pages and reuse resources without caching records", async t => {
+test("list summaries read only Run records, include all pages and reuse unchanged summary records while detecting updates", async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const a = await service.start("first"), b = await service.start("second");
   await service.report(a.id, { name: "result", content: textContent("body") });
@@ -34,6 +34,7 @@ test("list summaries read only Run records, include all pages and reuse resource
   const read = createContextRunReader(f.root);
   assert.deepEqual(new Set((await read()).map(r => r.id)), new Set([a.id, b.id]));
   assert.deepEqual(opened, ["context_control/runs"]);
+  const firstReads=reads.length;await read();assert.equal(reads.length,firstReads,"unchanged records must not be reread");
   const row = (await service.stores.run.get({}, b.id))!;
   await service.stores.run.update({}, b.id, { ...b, name: "renamed", status: "done", endedAt: new Date().toISOString() }, { expectedRevision: row.revision });
   const next = await read();

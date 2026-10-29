@@ -7,7 +7,7 @@ import { contextControlStyles } from "./context-control-styles.js";
 import { layoutGraph } from "./graph-layout.js";
 
 type Artifact = { id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
-type Snapshot = { graph?: { procedure: unknown; work: Array<{ id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
+type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag); node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
@@ -40,7 +40,7 @@ export function artifactHistory(records: Artifact[]) {
   return { latest, around, versions: (id: string) => groups.get(family(id))!, family };
 }
 
-export function createContextGraph(ui: ViewUi, request: (path: string) => Promise<any>, locale?: string, projectApiBase?: string, openReview?: (runId: string, reviewId: string, roundId?: string) => Promise<void>) {
+export function createContextGraph(ui: ViewUi, request: (path: string) => Promise<any>, locale?: string, projectApiBase?: string, openReview?: (runId: string, reviewId: string, roundId?: string) => Promise<void>, mountReview?: (runId:string,reviewId:string,roundId:string,container:HTMLElement,content:HTMLElement,panel:HTMLElement)=>Promise<void>, disposeReview?:()=>void) {
   const english = locale?.startsWith("en");
   const label = (zh: string, en: string) => english ? en : zh;
   const root = element("section", "cc-exploration"); root.dataset.contextControl = "";
@@ -55,22 +55,30 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   let graphSelection: { action: ProcedureAction; stepId?: string; artifactId?: string } | undefined;
   const graphNavigation:Array<NonNullable<typeof graphSelection>>=[];
   const artifactNavigation:Array<{kind:"artifact"|"external";id:string}>=[];
+  const loadedActions=new Set<string>();
+  const actionDefinitions=new Map<string,ProcedureAction>();
+  let artifactsLoaded=false;
   let graphView: "workflow" | "artifacts" = "workflow";
   const graphViews = element("div", "cc-graph-view-tabs"); root.insertBefore(graphViews, work);
   const syncGraphView = () => { const graph = Boolean(snapshot?.graph);root.classList.toggle("cc-artifact-perspective",graph&&graphView==="artifacts"); graphViews.hidden = !graph; [...graphViews.querySelectorAll("button")].forEach((button, index) => button.setAttribute("aria-pressed", String(index === (graphView === "workflow" ? 0 : 1)))); work.hidden = !graph || graphView !== "workflow"; graphCard.hidden = graph && graphView !== "artifacts"; };
   for (const [id, title] of [["workflow", label("流程视角", "Workflow view")], ["artifacts", label("产物视角", "Artifact view")]] as const) { const tab = element("button", "", title); tab.type = "button"; tab.addEventListener("click", () => { graphView = id; syncGraphView(); if(id==="artifacts"){graphKey="";void graph();}else procedureCanvas?.refreshLayout(); }); graphViews.append(tab); }
   let procedureCanvas: ReturnType<typeof createProcedureGraph> | undefined;
   let renderController: AbortController | undefined; let activePane = "content";
-  let reviewWidth=280,reviewCollapsed=false;
+  let reviewRatio=(100-(Number(localStorage.getItem("memsphere.artifactReviewSplit.v1"))||70))/100,reviewCollapsed=false;
   const button = (text: string, action: () => void, cls = "cc-button") => { const node = element("button", cls, text); node.type = "button"; node.addEventListener("click", action); return node; };
   const reset = button(label("回到最新", "Latest"), () => { selected = undefined; close(); graph(); }); artifactCanvas.header.append(reset);
-  const close = () => { refreshEpoch++; graphNavigation.length=0;artifactNavigation.length=0;graphSelection = undefined; renderController?.abort(); activePane = "content"; generation++; dialog?.close(); dialog?.remove(); dialog = undefined; currentId = undefined; const node = graphHost.querySelector<HTMLButtonElement>(`[data-artifact-id="${selected ?? origin?.dataset.artifactId ?? ""}"]`); (node ?? origin)?.focus(); };
+  const close = () => { disposeReview?.(); refreshEpoch++; graphNavigation.length=0;artifactNavigation.length=0;graphSelection = undefined; renderController?.abort(); activePane = "content"; generation++; dialog?.close(); dialog?.remove(); dialog = undefined; currentId = undefined; const node = graphHost.querySelector<HTMLButtonElement>(`[data-artifact-id="${selected ?? origin?.dataset.artifactId ?? ""}"]`); (node ?? origin)?.focus(); };
   const stopDrag=artifactCanvas.stopPan;
   const versions = (a: Artifact) => snapshot.graph ? artifactHistory(snapshot.artifacts).versions(a.id) : snapshot.completeIds.includes(a.id) ? history.versions(a.id) : [a];
   const choose = (id: string) => { selected = id; graph(); };
   const select = (id: string) => { choose(id); graphHost.querySelector<HTMLButtonElement>(`[data-artifact-id="${id}"]`)?.focus(); };
   async function graph() {
     if(snapshot.graph&&graphView!=="artifacts")return;
+    if(snapshot.lazy&&snapshot.graph&&!artifactsLoaded){
+      const payload=await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}?representation=artifacts`);
+      if(disposed)return;Object.assign(snapshot,{artifacts:payload.run.context.artifacts,completeIds:payload.run.context.completeIds});
+      history=artifactHistory(snapshot.artifacts);artifactsLoaded=true;
+    }
     const projectionKey = JSON.stringify([snapshot, selected]);
     if (projectionKey === graphKey) return;
     graphKey = projectionKey;
@@ -79,7 +87,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const openMenus = new Set([...graphHost.querySelectorAll<HTMLDetailsElement>(".cc-history[open]")].map(d => d.parentElement?.querySelector<HTMLElement>("[data-node-key]")?.dataset.nodeKey));
     try {
       reset.hidden = !selected; reset.textContent = snapshot.run.status === "done" ? label("回到交付视图", "Delivery view") : label("回到当前成果", "Current outputs");
-      const defaultView = () => history.latest(snapshot.outputArtifactIds);
+      const defaultView = () => history.latest(snapshot.graph ? undefined : snapshot.outputArtifactIds);
       const visible = selected && snapshot.completeIds.includes(selected) ? history.around(selected) : defaultView();
       stopDrag();
       const referenced = new Set(visible.flatMap(a => a.dependencies.filter(d => d.kind === "external").map(d => d.id)));
@@ -100,10 +108,10 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       for (const a of visible) {
         const group = versions(a), index = group.findIndex(v => v.id === a.id);
         const stack = element("div", "cc-node-stack");
-        const node = button("", () => { origin = node; void open(a.id); }, "cc-node"); node.dataset.artifactId = a.id; node.dataset.nodeKey = key("artifact", a.id); node.dataset.selected = String(selected === a.id); node.setAttribute("aria-label", `${a.name} v${index + 1}`);
+        const node = button("", () => { origin = node; const step=snapshot.graph?.work.find(s=>s.id===a.stepId); const action=(snapshot.graph?.procedure as ProcedureDefinition|undefined)?.actions.find(x=>x.id===step?.source?.actionId); if(action)void openGraphAction(action,step?.id,a.id);else void open(a.id); }, "cc-node"); node.dataset.artifactId = a.id; node.dataset.nodeKey = key("artifact", a.id); node.dataset.selected = String(selected === a.id); node.setAttribute("aria-label", `${a.name} v${index + 1}`);
         const tagRow = element("div", "cc-node-tags"); a.tags.filter(t => t !== "default").forEach(t => tagRow.append(ui.badge({ text: t })));
         const comments = snapshot.reviews.filter(r => r.artifactId === a.id).reduce((n, r) => n + r.comments.length, 0);
-        const footer = element("div", "cc-node-footer"); footer.append(element("span", "", a.status === "draft" ? label("草稿", "Draft") : snapshot.completeIds.includes(a.id) ? label("已提交", "Submitted") : label("提交未完成", "Incomplete submission")), element("span", "", `${comments} ${label("条评论", "comments")}`));
+        const footer = element("div", "cc-node-footer"); footer.append(element("span", "", a.status === "draft" ? label("草稿", "Draft") : snapshot.completeIds.includes(a.id) ? label("已提交", "Submitted") : label("提交未完成", "Incomplete submission")));if(!snapshot.lazy)footer.append(element("span","",`${comments} ${label("条评论","comments")}`));
         node.append(element("div", "cc-node-version", `v${index + 1}${index === group.length - 1 ? label(" · 最新", " · Latest") : ""}`), element("strong", "", a.name), tagRow, footer); stack.append(node);
         if (group.length > 1) { const details = element("details", "cc-history"); details.append(element("summary", "", `${label("历史版本", "History")} · ${group.length - 1}`)); const menu = element("div", "cc-history-menu"); [...group].reverse().forEach((v) => menu.append(button(`v${group.indexOf(v) + 1} · ${v.name}`, () => select(v.id), "cc-history-option"))); details.append(menu); stack.append(details); }
         canvas.append(stack);
@@ -158,31 +166,50 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     if(!graphSelection)artifactBack(head);
     const columns = element("div", "cc-modal-columns"), content = element("section", "cc-pane cc-pane-content"), reviews = element("section", "cc-pane cc-pane-review");
     content.setAttribute("aria-label", label("产物内容", "Artifact content")); reviews.setAttribute("aria-label", label("评审", "Reviews"));
-    const metadata = element("div", "cc-metadata"); metadata.append(element("span", "cc-chip", a.id), ...a.tags.map(t => ui.badge({ text: t }))); content.append(metadata);
-    const group = versions(a), index = group.findIndex(a => a.id === id), bar = element("div", "cc-version-bar");
+    const metadata = element("div", "cc-metadata"); metadata.append(element("span", "cc-chip", a.id), ...a.tags.filter(t=>!snapshot.graph||t!=="default").map(t => ui.badge({ text: t }))); if(!snapshot.graph)content.append(metadata);
+    const group = versions(a), bar = element("div", "cc-version-bar");
     const switchTo = (next: string, action: string) => { if (graphSelection) { void openGraphAction(graphSelection.action, graphSelection.stepId, next); } else { choose(next); void open(next); } const control = dialog?.querySelector<HTMLButtonElement | HTMLSelectElement>(`[data-version-action="${action}"]`); (control?.disabled ? dialog?.querySelector<HTMLSelectElement>('[data-version-action="select"]') : control)?.focus(); };
     const versionField=ui.select({label:{text:label("产物版本","Artifact version")},value:id,options:group.map((version,i)=>({value:version.id,label:{text:`v${i+1} · ${version.name}`}})),onChange:next=>switchTo(next,"select")});versionField.root.classList.add("cc-select-field");const selectVersion=versionField.control;selectVersion.classList.add("cc-version-select");selectVersion.setAttribute("aria-label",label("历史版本","History"));
-    const older = button(label("上一版", "Previous"), () => switchTo(group[index - 1].id, "older")), newer = button(label("下一版", "Next"), () => switchTo(group[index + 1].id, "newer")); older.dataset.versionAction = "older"; newer.dataset.versionAction = "newer"; selectVersion.dataset.versionAction = "select"; older.disabled = index === 0; newer.disabled = index === group.length - 1; bar.append(versionField.root, older, newer); content.append(bar);
+    selectVersion.dataset.versionAction = "select"; bar.append(versionField.root);
+    if(snapshot.graph){
+      const header=element("section","cc-artifact-header");header.setAttribute("aria-label",label("产物导航","Artifact navigation"));
+      const details=element("details","cc-artifact-info");details.append(element("summary","",label("产物信息","Artifact information")),metadata);
+      header.append(bar,details);content.append(header);
+    }else content.append(bar);
     const deps = element("div", "cc-related");if(a.dependencies.length)deps.append(element("span","",label("依赖产物","Dependencies"))); a.dependencies.forEach(r => deps.append(r.kind === "artifact" ? button(snapshot.artifacts.find(a => a.id === r.id)?.name ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});choose(r.id);void open(r.id); }, "cc-text-button") : button(snapshot.externals?.find(e => e.id === r.id)?.source ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});void openExternal(r.id); }, "cc-text-button"))); if(!graphSelection)content.append(deps);
     const body = element("article", "cc-document", a.status === "draft" ? label("未提交", "Not submitted") : label("加载中…", "Loading…")); content.append(body);
+    const reviewStep=snapshot.graph?.work.find(step=>step.id===a.stepId);
+    const reviewRound=reviewStep?.reviewRounds?.filter(round=>round.artifactId===id).at(-1);
+    const inline=Boolean(mountReview&&reviewStep?.reviewHandle&&reviewRound);
+    if(!inline)disposeReview?.();
     const entries = snapshot.reviews.filter(r => r.artifactId === id); reviews.append(element("h3", "cc-pane-title", label("评审", "Reviews")));
     if (!entries.length) reviews.append(element("div", "cc-no-review", label("暂无评审", "No reviews")));
     for (const r of entries) { const card = element("article", "cc-review-card"); card.append(element("div", "cc-review-head", `${r.reviewer.source === "human" ? "Human" : "Agent"} · ${r.createdAt}`)); for (const c of r.comments) card.append(element("p", "", c.body)); reviews.append(card); }
     const tabs = element("div", "cc-mobile-tabs"), media = window.matchMedia("(max-width: 760px)");
     const divider=element("div","cc-review-divider");divider.tabIndex=0;divider.setAttribute("role","separator");divider.setAttribute("aria-orientation","vertical");divider.setAttribute("aria-label",label("调整评审栏宽度","Resize review panel"));
-    const clampWidth=(width:number)=>Math.max(220,Math.min(Math.max(220,(columns.clientWidth||window.innerWidth*.9)-320),width));
-    const applyWidth=()=>{const width=clampWidth(reviewWidth);columns.style.setProperty("--cc-review-width",`${width}px`);divider.setAttribute("aria-valuemin","220");divider.setAttribute("aria-valuemax",String(Math.max(220,columns.clientWidth-320)));divider.setAttribute("aria-valuenow",String(Math.round(width)));};
-    const reviewToggle=ui.iconButton({label:{text:label("展开评审","Show reviews")},icon:{kind:"system",name:"sidebar-simple"},run:()=>{reviewCollapsed=false;applyPane();}});reviewToggle.classList.add("cc-review-toggle");head.insertBefore(reviewToggle,head.lastChild);
+    const clampRatio=(ratio:number)=>Math.max(.25,Math.min(.7,ratio));
+    const applyWidth=()=>{reviewRatio=clampRatio(reviewRatio);columns.style.setProperty("--cc-review-width",`${reviewRatio*100}%`);divider.setAttribute("aria-valuemin","25");divider.setAttribute("aria-valuemax","70");divider.setAttribute("aria-valuenow",String(Math.round(reviewRatio*100)));divider.setAttribute("aria-valuetext",`${Math.round(reviewRatio*100)}%`);};
+    const saveRatio=()=>localStorage.setItem("memsphere.artifactReviewSplit.v1",String(100-reviewRatio*100));
+    const reviewToggle=ui.iconButton({label:{text:label("展开评审","Show reviews")},icon:{kind:"system",name:"sidebar-simple"},run:()=>{reviewCollapsed=false;applyPane();dialog?.dispatchEvent(new Event("cc-review-visible"));}});reviewToggle.classList.add("cc-review-toggle");head.insertBefore(reviewToggle,head.lastChild);
     const reviewClose=ui.iconButton({label:{text:label("收起评审","Hide reviews")},icon:{kind:"system",name:"x"},run:()=>{reviewCollapsed=true;activePane="content";applyPane();}});reviewClose.classList.add("cc-review-close");const reviewHeader=element("header","cc-review-pane-head");reviewHeader.append(reviews.firstElementChild!,reviewClose);reviews.prepend(reviewHeader);
+    const reviewScroll=element("div","cc-review-scroll");reviewScroll.append(...[...reviews.children].filter(child=>child!==reviewHeader));reviews.append(reviewScroll);
     const applyPane = () => { content.hidden = media.matches && activePane !== "content"; reviews.hidden = media.matches ? activePane !== "review" : reviewCollapsed;divider.hidden=media.matches||reviewCollapsed;columns.classList.toggle("cc-review-collapsed",!media.matches&&reviewCollapsed);reviewToggle.hidden=!reviewCollapsed||media.matches;reviewToggle.setAttribute("aria-expanded",String(!reviewCollapsed));applyWidth(); };
-    tabs.append(button(label("产物内容", "Content"), () => { activePane = "content"; applyPane(); }), button(label("评审", "Reviews"), () => { activePane = "review";reviewCollapsed=false;applyPane(); })); media.addEventListener("change", applyPane, { signal: renderController.signal });window.addEventListener("resize",applyPane,{signal:renderController.signal});
-    let drag:{x:number;width:number}|undefined;
-    divider.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();drag={x:event.clientX,width:clampWidth(reviewWidth)};divider.setPointerCapture(event.pointerId);});
-    divider.addEventListener("pointermove",event=>{if(!drag)return;reviewWidth=clampWidth(drag.width+drag.x-event.clientX);applyWidth();});
-    for(const name of ["pointerup","pointercancel","lostpointercapture"])divider.addEventListener(name,()=>{drag=undefined;});
-    divider.addEventListener("keydown",event=>{if(!["ArrowLeft","ArrowRight","Home"].includes(event.key))return;event.preventDefault();reviewWidth=clampWidth(event.key==="Home"?280:reviewWidth+(event.key==="ArrowLeft"?16:-16));applyWidth();});
+    tabs.append(button(label("产物内容", "Content"), () => { activePane = "content"; applyPane(); }), button(label("评审", "Reviews"), () => { activePane = "review";reviewCollapsed=false;applyPane();dialog?.dispatchEvent(new Event("cc-review-visible")); })); media.addEventListener("change", applyPane, { signal: renderController.signal });window.addEventListener("resize",applyPane,{signal:renderController.signal});
+    let drag:{x:number;ratio:number}|undefined;
+    divider.addEventListener("pointerdown",event=>{if(event.button!==0)return;event.preventDefault();drag={x:event.clientX,ratio:reviewRatio};divider.setPointerCapture(event.pointerId);});
+    divider.addEventListener("pointermove",event=>{if(!drag)return;reviewRatio=clampRatio(drag.ratio+(drag.x-event.clientX)/columns.clientWidth);applyWidth();});
+    for(const name of ["pointerup","pointercancel","lostpointercapture"])divider.addEventListener(name,()=>{if(drag)saveRatio();drag=undefined;});
+    divider.addEventListener("keydown",event=>{if(!["ArrowLeft","ArrowRight","Home"].includes(event.key))return;event.preventDefault();reviewRatio=clampRatio(event.key==="Home"?.3:reviewRatio+(event.key==="ArrowLeft"?.02:-.02));applyWidth();saveRatio();});
     columns.append(content,divider,reviews); dialog.replaceChildren(head, tabs, columns); if (!dialog.open) dialog.showModal();applyPane();
-    if (a.status !== "draft") try {
+    if(inline){
+      const material=element("div","cc-review-material");content.append(material);
+      material.addEventListener("cc-review-material-ready",()=>{body.hidden=true;},{signal:renderController.signal});
+      const panel=element("div","cc-review-session");reviewScroll.append(panel);
+      reviews.querySelectorAll(".cc-review-card,.cc-no-review").forEach(node=>node.remove());
+      void mountReview!(snapshot.run.id,reviewStep!.reviewHandle!,reviewRound!.id,dialog,material,panel).catch(error=>{if(!disposed&&currentId===id)panel.textContent=error instanceof Error?error.message:String(error);});
+      body.hidden=Boolean(material.querySelector(".artifact-review-material-heading"));
+    }
+    if (!body.hidden && (inline || a.status !== "draft")) try {
       const value = await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}/artifacts/${encodeURIComponent(id)}/content`);
       if (!disposed && generation === currentGeneration && currentId === id) {
         if (value.previewable === false) {
@@ -211,11 +238,24 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const statuses:Record<string,string>={pending:label("待执行","Pending"),running:label("执行中","Running"),awaiting_review:label("待评审","Awaiting review"),done:label("已完成","Done"),failed:label("失败","Failed"),cancelled:label("已取消","Cancelled")};
     const info=element("details","cc-execution-info");info.dataset.disclosureKey=`execution:${step.id}`;info.append(element("summary","",label("执行信息","Execution information")));
     const facts=element("dl","cc-execution-facts");for(const [name,value]of [[label("状态","Status"),statuses[step.status]??step.status],[label("创建时间","Created"),step.createdAt],[label("开始时间","Started"),step.startedAt],[label("结束时间","Ended"),step.endedAt]])if(value){const content=element("dd");if(name!==label("状态","Status")){const time=element("time","",new Date(value).toLocaleString(english?"en":"zh-CN"));time.dateTime=value;content.append(time);}else content.textContent=value;facts.append(element("dt","",name),content);}info.append(facts);
-    const inputs=Object.values(step.inputs??{}).flat()as Array<{kind:string;id:string}>;
-    if(inputs.length){info.append(element("h4","",label("固定输入","Fixed inputs")));const list=element("div","cc-fixed-inputs");for(const input of inputs)if(input.kind==="artifact")list.append(graphMember(input.id));info.append(list);}
     return info;
   }
   async function openGraphAction(action: ProcedureAction, stepId?: string, chosenArtifactId?: string) {
+    if(snapshot.lazy&&!loadedActions.has(action.id)){
+      disposeReview?.();renderController?.abort();const requestGeneration=++generation;
+      if(!dialog){dialog=element("dialog","cc-dialog");dialog.addEventListener("cancel",event=>{event.preventDefault();close();});root.append(dialog);}
+      const head=element("header","cc-modal-head");head.append(element("h2","",action.artifact?.name??action.description),button(label("关闭","Close"),close));
+      const loading=element("section","cc-step-body");loading.setAttribute("aria-busy","true");loading.append(ui.feedback({state:"loading",title:{text:label("加载中…","Loading…")}}));dialog.replaceChildren(head,loading);if(!dialog.open)dialog.showModal();
+      let payload:any;
+      try{payload=await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}?representation=action&action=${encodeURIComponent(action.id)}`);}
+      catch(error){if(disposed||generation!==requestGeneration)return;loading.removeAttribute("aria-busy");loading.replaceChildren(element("p","",error instanceof Error?error.message:String(error)),button(label("重试","Retry"),()=>void openGraphAction(action,stepId,chosenArtifactId)));return;}
+      if(disposed||generation!==requestGeneration)return;const next=payload.run.context as Snapshot;
+      snapshot.graph!.work=next.graph!.work.map(s=>s.source?.actionId===action.id?s:(snapshot.graph!.work.find(old=>old.id===s.id)??s));
+      snapshot.artifacts=[...new Map([...snapshot.artifacts,...next.artifacts].map(a=>[a.id,a])).values()];
+      action=(next.graph!.procedure as ProcedureDefinition).actions.find(a=>a.id===action.id)??action;
+      actionDefinitions.set(action.id,action);loadedActions.add(action.id);
+    }
+    action=actionDefinitions.get(action.id)??action;
     const selection: { action: ProcedureAction; stepId?: string; artifactId?: string } = { action, stepId }; graphSelection = selection;
     const steps = snapshot.graph!.work.filter(step => step.source?.actionId === action.id);
     const step = steps.find(s => s.id === stepId) ?? steps.at(-1);
@@ -231,6 +271,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const artifactId = candidates.some(a => a.id === chosenArtifactId) ? chosenArtifactId : result?.id ?? step.reviewRounds?.at(-1)?.artifactId ?? candidates.at(-1)?.id;
     selection.artifactId = artifactId;
     if (!artifactId) {
+      disposeReview?.();
       renderController?.abort(); generation++; currentId = undefined;
       const body = element("section","cc-step-body");
       const intro=element("div","cc-step-intro");intro.append(element("p","cc-step-description",action.description),ui.badge({text:stateLabels[step.status]??step.status}));body.append(intro);
@@ -248,12 +289,16 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     await open(artifactId);
     if (!dialog || currentId !== artifactId || graphSelection !== selection) return;
     const head=dialog.querySelector<HTMLElement>(".cc-modal-head")!;dialog.querySelector(".cc-version-bar")?.prepend(executionSelect());graphBack(head);
-    dialog.querySelector(".cc-pane-content")?.prepend(executionInformation(step));
-    const upstream=upstreamSteps(step);if(upstream)dialog.querySelector(".cc-version-bar")?.after(upstream);
-    const round = step.reviewRounds?.filter(r => r.artifactId === artifactId).at(-1);
-    if (step.reviewHandle && round && openReview) dialog.querySelector(".cc-pane-review")?.append(button(label("查看与参与评审", "Open review"), () => { const runId = snapshot.run.id, handle = step.reviewHandle!; close(); void openReview(runId, handle, round.id); }));
+    const header=dialog.querySelector(".cc-artifact-header");
+    const info=executionInformation(step),metadata=header?.querySelector(".cc-metadata");
+    if(metadata){const facts=info.querySelector("dl")!;facts.append(element("dt","",label("产物 ID","Artifact ID")),element("dd","cc-artifact-id",metadata.textContent??""));}
+    header?.querySelector(".cc-artifact-info")?.remove();
+    const upstream=upstreamSteps(step);if(upstream)header?.append(upstream);
+    header?.append(info);
+
   }
   async function openExternal(id: string) {
+    disposeReview?.();
     const external = snapshot.externals?.find(e => e.id === id); if (!external) return;
     currentKind = "external"; currentId = id; const currentGeneration = ++generation;
     renderController?.abort(); renderController = new AbortController();
@@ -305,6 +350,14 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       const nextKey = JSON.stringify(value);
       if (nextKey === snapshotKey) return;
       const detailChanged = !snapshot || detailFingerprint(snapshot) !== detailFingerprint(value);
+      if(value.lazy&&snapshot?.run.id===value.run.id){
+        value.artifacts=snapshot.artifacts;artifactsLoaded=false;
+        if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
+          const old=snapshot.graph!.work.find(s=>s.id===step.id);
+          if(old?.status===step.status&&JSON.stringify(old.artifact)===JSON.stringify(step.artifact))return {...old,...step};
+          if(step.source)loadedActions.delete(step.source.actionId);return step;
+        });
+      }else{loadedActions.clear();actionDefinitions.clear();artifactsLoaded=false;}
       snapshotKey = nextKey; snapshot = value;
       work.hidden = !value.graph;
       if (value.graph) {

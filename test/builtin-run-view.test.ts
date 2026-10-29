@@ -303,7 +303,9 @@ test("Run builtin renders a deep-linked Run and opens its Artifact Review", asyn
     await page.locator(".view-overlay-layer .artifact-review-modal").waitFor();
     assert.match(await page.locator("#artifact-review-artifact-pane").innerText(), /Review this artifact/);
     assert.match(await page.locator("#artifact-review-review-pane").innerText(), /Runner delegated/);
-    assert.match(await page.locator("#artifact-review-review-pane").innerText(), /Human explicitly authorized this submission/);
+    assert.equal(await page.locator(".artifact-review-result-details .artifact-review-opinion").count(),0);
+    await page.getByRole("button",{name:"Review details",exact:true}).click();
+    await page.getByText(/Human explicitly authorized this submission/).waitFor();
     assert.equal(new URL(page.url()).pathname, "/tasks/run-demo/artifact-reviews/review-1");
     assert.equal(runDetailRequests, requestsBeforeReview, "opening the review should reuse the Run detail already loaded by the page");
     const [surfaceBox, modalBox] = await Promise.all([

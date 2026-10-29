@@ -278,6 +278,16 @@ function renderArtifactResult({ event, occurrence }: PresentedRunEvent, run: Jso
   const card = document.createElement("details");
   card.className = `${standalone ? "run-artifact " : ""}run-collapsible task-result mem-content-disclosure`;
   const artifact = event.artifact || {};
+  if(artifact.lazyUrl){
+    card.addEventListener("toggle",()=>{if(!card.open||card.dataset.loading||card.dataset.loaded)return;card.dataset.loading="true";
+      const feedback=document.createElement("div");feedback.textContent=options.locale?.startsWith("en")?"Loading…":"加载中…";card.append(feedback);
+      void options.request(artifact.lazyUrl).then((value:Json)=>{
+        if(!card.isConnected)return;
+        const loaded=renderArtifactResult({event:{...event,artifact:value.artifact},occurrence},run,options,labels,standalone);
+        card.dataset.loaded="true";delete card.dataset.loading;card.replaceChildren(...loaded.childNodes);
+      }).catch((error:unknown)=>{feedback.textContent=error instanceof Error?error.message:String(error);const retry=options.ui.button({label:{text:options.locale?.startsWith("en")?"Retry":"重试"},run:()=>{feedback.remove();delete card.dataset.loading;card.dispatchEvent(new Event("toggle"));}});feedback.append(retry);});
+    });
+  }
   stampDisclosure(card, `artifact:${standalone ? "collection" : "step"}:${event.stepId}`, { at: event.at, frame: event.frame, occurrence, type: artifact.type, name: artifact.name, path: artifact.path, format: artifact.format });
   const title = document.createElement("h3");
   title.className = "mem-content-disclosure-title";
@@ -311,7 +321,7 @@ function renderArtifactResult({ event, occurrence }: PresentedRunEvent, run: Jso
   summary.append(disclosureChevron(), title);
   const body = document.createElement("div");
   body.className = "run-disclosure-body mem-content-disclosure-body";
-  body.append(meta, options.renderArtifact(Object.freeze(presentation)));
+  body.append(meta);if(!artifact.lazyUrl)body.append(options.renderArtifact(Object.freeze(presentation)));
   card.append(summary, body);
   if (review?.id) {
     const open = options.ui.button({ label: { text: labels.review }, run: () => options.openReview(run.id, review.id) });

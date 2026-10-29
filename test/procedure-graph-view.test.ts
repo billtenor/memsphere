@@ -39,6 +39,20 @@ test("graph View detail is read-only and each Step opens its own formal Review",
       assert.equal(context.submission.artifact.format.name, "markdown");
       assert.match(context.submission.artifact.renderedContent, /<h1>/);
     }
+    const selected = snapshot.steps[0];
+    const selectedHandle = graphReviewHandle(snapshot.run.id, selected.id);
+    const compact = await (await fetch(`${api}/runs/${snapshot.run.id}/artifact-reviews/${encodeURIComponent(selectedHandle)}/rounds/current?view=compact&auto_actor=true`)).json();
+    assert.equal(compact.assignment.actorId, "human", "one Human identity is resolved in the same response");
+    assert.equal(compact.review.currentRoundId, selected.reviewRounds![0].id);
+    assert.match(compact.submission.artifact.renderedContent, /<h1>/);
+    const savedList = service.stores.step.list;
+    service.stores.step.list = async () => { throw Error("unrelated Steps must not be enumerated"); };
+    try {
+      const narrow = await service.withGraph(g => g.reviewSnapshot(snapshot.run.id, selected.id, "current"));
+      assert.deepEqual(narrow.steps.map(s => s.id), [selected.id]);
+      assert.deepEqual(narrow.artifacts.map(a => a.id), [selected.reviewRounds![0].artifactId]);
+      assert.ok(narrow.reviews.every(r => r.roundId === selected.reviewRounds![0].id));
+    } finally { service.stores.step.list = savedList; }
     for (const step of snapshot.steps) {
       const artifactId = step.reviewRounds![0].artifactId;
       const content = await fetch(`${api}/runs/${snapshot.run.id}/artifacts/${artifactId}/content`);
@@ -60,6 +74,12 @@ test("graph View detail is read-only and each Step opens its own formal Review",
     await writeFile(join(f.root, "data/context_control/runs/run-corrupt.json"), JSON.stringify({ ...row, id: "run-corrupt", value: { broken: true } }));
     const list = await (await fetch(`${api}/runs?representation=summary`)).json();
     assert.ok(list.runs.some((r: any) => r.id === snapshot.run.id)); assert.ok(list.runs.some((r: any) => r.id === "run-corrupt" && r.unavailable));
+    const firstPage=await (await fetch(`${api}/runs?representation=summary&limit=1`)).json();
+    assert.equal(firstPage.runs.length,1);assert.ok(firstPage.nextCursor);
+    const secondPage=await (await fetch(`${api}/runs?representation=summary&limit=1&cursor=${encodeURIComponent(firstPage.nextCursor)}`)).json();
+    assert.equal(secondPage.runs.length,1);assert.notEqual(firstPage.runs[0].id,secondPage.runs[0].id);
+    assert.equal((await fetch(`${api}/runs?representation=summary&limit=0`)).status,400);
+
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
 
@@ -86,4 +106,16 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
   assert.deepEqual(await service.stores.run.get({},started.run.id),before,'GET must not repair or mutate stored history');
   const abandoned=await fetch(`${api}/abandon`,{method:'POST',headers:{'content-type':'application/json'},body:'{}'});assert.equal(abandoned.status,200,await abandoned.clone().text());assert.equal((await abandoned.json()).run.status,'abandoned');
  }finally{await new Promise<void>(r=>server.close(()=>r()));}
+});
+
+test("graph overview reads neither artifact bodies nor reviews", async t=>{
+  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
+  const procedure:GraphProcedureMemory={tag:"!procedure",syntax:graphMemorySyntax,names:["lazy-graph"],mode:"graph",defines:["Lazy overview"],actions:[{tag:"!action",id:"A",description:"Prepare",dependencies:[{tag:"!dependency",from:"START"}],artifact:{name:"Result",model:{definedBy:"raw.json",definition:"{}"},payload:{contentType:"text/plain"}}}]};
+  const run=await service.withGraph(async g=>{const started=await g.start({name:"Lazy",procedure,controlPlane:{runner:{permissions:["artifact.read","artifact.submit"]},actors:{},acpProviders:{}}});await g.enter(started.run.id,started.steps[0].id);await g.report(started.run.id,started.steps[0].id,{text:"body must stay lazy"});return started.run;});
+  const savedArtifact=service.stores.artifact.get,savedReview=service.stores.review.list;
+  service.stores.artifact.get=async()=>{throw Error("unexpected artifact read");};
+  service.stores.review.list=async()=>{throw Error("unexpected review enumeration");};
+  try{const view=await service.viewProjection(run.id,"overview");assert.ok(view);assert.equal(view.steps[0].status,"done");assert.deepEqual(view.artifacts,[]);assert.deepEqual(view.reviews,[]);assert.equal(view.steps[0].reviewRounds,undefined);}
+  finally{service.stores.artifact.get=savedArtifact;service.stores.review.list=savedReview;}
+  const detail=await service.viewProjection(run.id,"action","A");assert.equal(detail?.artifacts.length,1);assert.equal(detail?.artifacts[0].content,undefined);assert.deepEqual(detail?.reviews,[]);
 });
