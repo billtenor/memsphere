@@ -70,7 +70,7 @@ test("a delayed terminal list cannot replace the latest running selection", { ti
   const held = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { arrive = resolve; });
   try {
     const page = await browser.newPage();
-    await page.route("**/runs?representation=summary&status=done", async route => { arrive(); await held; await route.continue(); });
+    await page.route("**/runs?representation=summary&status=done*", async route => { arrive(); await held; await route.continue(); });
     await page.goto(`${origin}/projects/test-project/tasks`);
     await page.locator(`[data-item-id="${running.id}"]`).waitFor();
     await page.getByRole("button", { name: "已完成", exact: true }).click();
@@ -141,7 +141,7 @@ test("real Run graph changes history without opening an overlay and keeps its di
     assert.equal(await page.locator(".cc-node").count(), 3);
     await page.locator(".cc-history").getByText("历史版本 · 1", { exact: true }).click();
     await page.evaluate(() => { (window as any).__graph = document.querySelector(".cc-graph"); });
-    await Promise.all([page.waitForResponse(r => r.url().endsWith(`/runs/${run.id}`)), page.getByRole("button", { name: "刷新", exact: true }).click()]);
+    await Promise.all([page.waitForResponse(r => new URL(r.url()).pathname.endsWith(`/runs/${run.id}`)), page.getByRole("button", { name: "刷新", exact: true }).click()]);
     assert.equal(await page.evaluate(() => (window as any).__graph === document.querySelector(".cc-graph") && !!document.querySelector(".cc-history[open]")), true);
     await page.getByRole("button", { name: "v1 · 方案", exact: true }).click();
     assert.equal(await page.locator("dialog").count(), 0);
@@ -149,12 +149,13 @@ test("real Run graph changes history without opening an overlay and keeps its di
     await page.getByRole("button", { name: "方案 v1", exact: true }).click();
     await page.getByText("旧正文", { exact: true }).waitFor();
     await page.evaluate(() => { (window as any).__dialog = document.querySelector("dialog"); });
-    await page.getByRole("button", { name: "下一版", exact: true }).click();
+    assert.equal(await page.getByRole("button",{name:/^(上一版|下一版)$/}).count(),0);
+    await page.locator(".cc-version-select").selectOption({label:"v2 · 方案"});
     await page.getByText("新正文", { exact: true }).waitFor(); await page.getByText("新版本意见", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => (window as any).__dialog === document.querySelector("dialog") && document.querySelector("dialog")!.open), true);
     await page.locator('.cc-related').getByRole('button',{name:'需求',exact:true}).click();await page.getByText('固定需求',{exact:true}).waitFor();await page.getByRole('button',{name:'← 返回',exact:true}).click();await page.getByText('新正文',{exact:true}).waitFor();
     const review=page.locator(".cc-pane-review"),divider=page.getByRole("separator",{name:"调整评审栏宽度",exact:true});
-    assert.ok(Math.abs((await review.boundingBox())!.width-280)<2);
+    assert.ok(Math.abs((await review.boundingBox())!.width/(await page.locator(".cc-modal-columns").boundingBox())!.width-.3)<.01);
     const handle=(await divider.boundingBox())!;await page.mouse.move(handle.x+handle.width/2,handle.y+80);await page.mouse.down();await page.mouse.move(handle.x-60,handle.y+80);await page.mouse.up();
     assert.ok((await review.boundingBox())!.width>330);
     await divider.focus();await page.keyboard.press("ArrowLeft");const resized=(await review.boundingBox())!.width;

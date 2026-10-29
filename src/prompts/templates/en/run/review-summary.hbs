@@ -17,9 +17,7 @@ Participants:
 {{#if decisionIntent}}
   - decision_intent: {{decisionIntent}}
 {{/if}}
-{{#unlessNil implementationEvidenceReferenced}}
-  - implementation_evidence_referenced: {{implementationEvidenceReferenced}}
-{{/unlessNil}}
+
 {{#each comments}}
   - comment [{{severity}}]: {{body}}
 {{/each}}

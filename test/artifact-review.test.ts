@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createArtifactReviewAssignments,
-  artifactReviewOpinionReferencesImplementation,
   evaluateArtifactReviewRound,
   repeatedArtifactReviewAdvisories,
   type ArtifactReview,
@@ -206,18 +205,6 @@ test("repeated advisory comments aggregate across review rounds", () => {
     count: 2,
     rounds: [1, 2]
   }]);
-});
-
-test("submitted opinions expose whether implementation evidence was referenced", () => {
-  const opinion = {
-    comments: [],
-    vote: "approve" as const,
-    summary: "Reviewed src/run/store.ts and the implementation diff.",
-    submittedAt: "2026-07-21T00:00:00.000Z",
-    authorization: {} as never
-  };
-  assert.equal(artifactReviewOpinionReferencesImplementation(opinion), true);
-  assert.equal(artifactReviewOpinionReferencesImplementation({ ...opinion, summary: "The requirement text is clear." }), false);
 });
 
 test("Runner delegated comments file parser accepts only the strict public shape", () => {

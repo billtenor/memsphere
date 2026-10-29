@@ -1,3 +1,4 @@
+import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
 import { openContextControl } from "../project/context-control.js";
@@ -35,7 +36,6 @@ import {
 import {
   artifactReviewAssignmentId,
   artifactReviewFailureCategory,
-  artifactReviewOpinionReferencesImplementation,
   artifactReviewRoundControlPlane,
   repeatedArtifactReviewAdvisories,
   type ArtifactReviewAgentAttempt,
@@ -1368,7 +1368,14 @@ async function handleRequest(
       const contextRuns = await viewCache.contextRunSummaries(config);
       assertUniqueRunSources(legacyRuns, contextRuns);
       const runs = [...legacyRuns, ...contextRuns].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-      sendJson(response, 200, { runs: runs.filter(run => Boolean("archived" in run && run.archived) === archived && (!status || run.status === status)) });
+      const filtered=runs.filter(run => Boolean("archived" in run && run.archived) === archived && (!status || run.status === status));
+      const rawLimit=url.searchParams.get("limit");
+      if(rawLimit!==null){
+        const limit=Number(rawLimit);if(!Number.isInteger(limit)||limit<1||limit>100){sendJson(response,400,{error:"limit must be 1–100"});return;}
+        const cursor=url.searchParams.get("cursor");const offset=cursor?filtered.findIndex(run=>run.id===cursor)+1:0;
+        if(cursor&&!offset){sendJson(response,400,{error:"Run list changed; refresh the list"});return;}
+        const page=filtered.slice(offset,offset+limit);sendJson(response,200,{runs:page,...(offset+limit<filtered.length?{nextCursor:page.at(-1)!.id}:{})});
+      }else sendJson(response,200,{runs:filtered});
       return;
     }
     sendJson(response, 200, { runs: await loadRunPayload(config) });
@@ -1383,7 +1390,7 @@ async function handleRequest(
   if (request.method === "GET" && contextArtifactMatch) {
     if (!contextLocation) { sendJson(response, 404, { error: "Run not found" }); return; }
     try {
-      const value = await (contextArtifactMatch[2] === "externals" ? contextLocation.service.readExternal(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])) : contextLocation.service.readArtifact(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])));
+      const value = await withContextControlViewRead(config.scopeRoot, () => contextArtifactMatch[2] === "externals" ? contextLocation.service.readExternal(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])) : contextLocation.service.readViewArtifact(contextLocation.run.id, decodeURIComponent(contextArtifactMatch[3])));
       if (url.searchParams.get("download") === "1") {
         response.writeHead(200, { "content-type": value.contentType, "content-disposition": "attachment", "x-content-type-options": "nosniff" });
         response.end(value.bytes); return;
@@ -1512,29 +1519,34 @@ async function handleRequest(
     /^\/api\/runs\/([^/]+)\/artifact-reviews\/([^/]+)\/rounds\/([^/]+)$/
   );
   if (request.method === "GET" && directArtifactReviewRoundMatch) {
-    const actorId = url.searchParams.get("actor_id")?.trim();
+    let actorId = url.searchParams.get("actor_id")?.trim();
+    const compact=url.searchParams.get("view")==="compact",material=url.searchParams.get("material")??"candidate";
     try {
       const runId = decodeURIComponent(directArtifactReviewRoundMatch[1]);
       const reviewId = decodeURIComponent(directArtifactReviewRoundMatch[2]);
       const roundId = decodeURIComponent(directArtifactReviewRoundMatch[3]);
-      const located = reviewId.startsWith("graph-review-") ? { runsRoot, ...await findArtifactReview({ runsRoot, reviewId }) } : await readViewRunById(config, runId);
+      const located = reviewId.startsWith("graph-review-") ? { runsRoot, ...await withContextControlViewRead(config.scopeRoot,async()=>findArtifactReview({ runsRoot, reviewId,service:await contextControlForView(config),...(compact?{viewRoundId:roundId,viewMaterialIndex:material.startsWith("context:")?Number(material.slice(8)):undefined}:{}) })) } : await readViewRunById(config, runId);
       if (located.run.id !== runId) throw new Error("Run/Review identity mismatch");
       const review = located.run.artifactReviews?.find((candidate) => candidate.id === reviewId);
       if (!review) throw new Error(`Artifact Review not found: ${reviewId}`);
-      const round = review.rounds.find((candidate) => candidate.id === roundId);
+      const resolvedRoundId=roundId==="current"?review.currentRoundId:roundId;
+      const round = review.rounds.find((candidate) => candidate.id === resolvedRoundId);
       if (!round) throw new Error(`Artifact Review Round not found: ${roundId}`);
+      if(!actorId&&compact&&url.searchParams.get("auto_actor")==="true"){
+        const humans=round.assignments.filter(a=>(a.actorKind??"human")==="human");if(humans.length===1)actorId=humans[0].actorId;
+      }
       if (actorId) {
-        const context = artifactReviewForActor({ run: located.run, review, roundId, actorId });
+        const context = artifactReviewForActor({ run: located.run, review, roundId:resolvedRoundId, actorId });
         if ((context.assignment.actorKind ?? "human") !== "human") {
           throw new Error(`Agent Artifact Review assignment is not assigned to the Human View API: ${actorId}`);
         }
-        sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, context));
+        sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, context,compact,material,url.searchParams.get("opinion_actor")??undefined));
       } else {
         sendJson(response, 200, await artifactReviewContextPayload(located.runsRoot, {
           run: located.run,
           review,
           round
-        }));
+        },compact,material,url.searchParams.get("opinion_actor")??undefined));
       }
     } catch (error) {
       sendArtifactReviewError(response, error);
@@ -1666,10 +1678,30 @@ async function handleRequest(
     return;
   }
 
+  const eventContentMatch=url.pathname.match(/^\/api\/runs\/([^/]+)\/events\/(\d+)\/artifact$/);
+  if(request.method==="GET"&&eventContentMatch){
+    if(contextLocation){sendJson(response,404,{error:"Legacy artifact not found"});return;}
+    const located=await readViewRunById(config,decodeURIComponent(eventContentMatch[1]));
+    const event=located.run.events[Number(eventContentMatch[2])];
+    if(!event?.artifact){sendJson(response,404,{error:"Artifact not found"});return;}
+    const artifact=structuredClone(event.artifact);await hydrateArtifactContent(located.runsRoot,located.run.id,artifact);
+    const {authorization:_authorization,...publicArtifact}=artifact;sendJson(response,200,{artifact:publicArtifact});return;
+  }
+
   const runMatch = url.pathname.match(/^\/api\/runs\/([^/]+)$/);
   if (request.method === "GET" && runMatch) {
     const runId = decodeURIComponent(runMatch[1]);
     if (contextLocation) {
+      const representation=url.searchParams.get("representation");
+      if(representation&&["overview","artifacts","action"].includes(representation)){
+        const projection=await withContextControlViewRead(config.scopeRoot,()=>contextLocation.service.viewProjection(runId,representation as "overview"|"artifacts"|"action",url.searchParams.get("action")??undefined));
+        if(projection){
+          const payload=representation==="overview"?contextRunPayload(projection,true):await contextRunDetailPayload(projection,true);
+          const {memorySnapshot,permissionConfig,reviewConfig,...base}=payload;
+          const {memorySnapshot:_memory,permissionConfig:_permissions,reviewConfig:_reviews,...run}=payload.context.run;
+          sendJson(response,200,{run:{...base,context:{...payload.context,run,lazy:true}}});return;
+        }
+      }
       sendJson(response, 200, { run: await contextRunDetailPayload(await contextLocation.service.snapshot(runId)) });
       return;
     }
@@ -1690,7 +1722,7 @@ async function handleRequest(
         await readRun(located.runsRoot, located.run.id)
       )
       : { ...located.run, readOnly: true as const };
-    const payload = await toViewRunPayload(located.runsRoot, run);
+    const payload = await toViewRunPayload(located.runsRoot, run, url.searchParams.get("representation")==="overview");
     sendJson(response, 200, {
       run: located.runsRoot === runsRoot ? payload : { ...(payload as Record<string, unknown>), archived: true }
     });
@@ -2183,13 +2215,18 @@ async function systemMemoryReferences(): Promise<Set<string>> {
 
 // Existing embedders may supply a bare Run configuration. Model-backed Runs
 // require a Project; never treat an actual Project Store failure as absence.
+const viewContextServices=new Map<string,ReturnType<typeof openContextControl>>();
 function contextControlForView(config: MemsphereConfig) {
-  return config.project ? openContextControl(config.scopeRoot) : undefined;
+  if(!config.project)return undefined;
+  const key=resolve(config.scopeRoot);let pending=viewContextServices.get(key);
+  if(!pending){pending=openContextControl(key).then(service=>{if(!service)viewContextServices.delete(key);return service;}).catch(error=>{viewContextServices.delete(key);throw error;});viewContextServices.set(key,pending);}
+  return pending;
 }
 
 async function contextRunForView(config: MemsphereConfig, runId: string) {
+  return withContextControlViewRead(config.scopeRoot, async () => {
   const service = await contextControlForView(config);
-  const run = service && await service.findRun(runId);
+  const run = service && await service.findViewRun(runId);
   if (!run) return undefined;
   try { await readViewRunById(config, runId); }
   catch (error) {
@@ -2197,6 +2234,7 @@ async function contextRunForView(config: MemsphereConfig, runId: string) {
     throw error;
   }
   throw new Error("Run ID exists in both legacy and model Stores");
+  });
 }
 
 async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
@@ -2212,17 +2250,28 @@ async function loadRunPayload(config: MemsphereConfig): Promise<unknown[]> {
   return [...legacy, ...context.filter(run => !run.archived)];
 }
 
-async function toViewRunPayload(runsRoot: string, run: RunState): Promise<unknown> {
-  const hydrated = await hydrateRunArtifactContent(runsRoot, run);
+async function toViewRunPayload(runsRoot: string, run: RunState, lightweight=false): Promise<unknown> {
+  const hydrated = lightweight?run:await hydrateRunArtifactContent(runsRoot, run);
   const { artifactReviews: _privateArtifactReviews, ...publicRun } = hydrated;
   const review = currentArtifactReview(hydrated);
   const schemaWriting = await schemaWritingPayload(runsRoot, hydrated);
+  const summary=(candidate:NonNullable<RunState["artifactReviews"]>[number])=>{
+    const value=artifactReviewSummary(candidate,hydrated.controlPlane) as {id:string;stepId?:string;status:string;artifactName:string;currentRoundId:string;policyId?:string;round?:{id:string;sequence:number;total:number;submitted:number}};
+    if(!lightweight)return value;
+    const {id,stepId,status,artifactName,currentRoundId,policyId,round}=value;
+    return {id,stepId,status,artifactName,currentRoundId,policyId,round:round?{id:round.id,sequence:round.sequence,total:round.total,submitted:round.submitted}:undefined};
+  };
   return toEffectiveRuleDisplayValue({
     ...publicRun,
+    ...(lightweight?{events:publicRun.events.map((event,index)=>{
+      if(!event.artifact)return event;
+      const {value,content,renderedContent,contentRef,...artifact}=event.artifact as typeof event.artifact & Record<string,unknown>;
+      return {...event,artifact:{...artifact,lazyUrl:`/api/runs/${encodeURIComponent(run.id)}/events/${index}/artifact`}};
+    })}:{}),
     bindingSnapshot: buildRunBindingSnapshot(hydrated),
-    artifactReview: review ? artifactReviewSummary(review, hydrated.controlPlane) : undefined,
+    artifactReview: review ? summary(review) : undefined,
     artifactReviewSummaries: (hydrated.artifactReviews ?? []).map((candidate) =>
-      artifactReviewSummary(candidate, hydrated.controlPlane)
+      summary(candidate)
     ),
     schemaWriting
   });
@@ -2320,8 +2369,7 @@ function artifactReviewSummary(
         status: assignment.status,
         attempt: publicArtifactReviewAttempt(assignment.attempts?.at(-1)),
         vote: assignment.submitted?.vote,
-        summary: assignment.submitted?.summary,
-        implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted)
+        summary: assignment.submitted?.summary
       })),
       runner: runnerCanDecide || runnerVote ? {
         actorName: "Runner",
@@ -2386,17 +2434,20 @@ function normalizeActivityInteger(value: string | null, fallback: number, name: 
 
 async function artifactReviewContextPayload(
   runsRoot: string,
-  context: Omit<ArtifactReviewContext, "assignment"> & { assignment?: ArtifactReviewContext["assignment"] }
+  context: Omit<ArtifactReviewContext, "assignment"> & { assignment?: ArtifactReviewContext["assignment"] },
+  compact=false, material="candidate", opinionActor?:string
 ): Promise<unknown> {
   const submission = context.review.submissions.find((candidate) => candidate.id === context.round.submissionId);
   if (!submission) throw new Error(`Artifact Review Submission not found: ${context.round.submissionId}`);
+  if(compact&&material!=="candidate"&&material!=="contract"&&(!/^context:(0|[1-9]\d*)$/.test(material)||Number(material.slice(8))>=submission.contextArtifacts.length))material="candidate";
   const artifact = structuredClone(submission.artifact) as RunState["events"][number]["artifact"] & {
     content?: string;
     contentError?: string;
     renderedContent?: string;
     renderedContentType?: string;
   };
-  await hydrateArtifactContent(runsRoot, context.run.id, artifact);
+  if(!compact||material==="candidate")await hydrateArtifactContent(runsRoot, context.run.id, artifact);
+  if(compact&&material!=="candidate"){delete artifact.content;delete artifact.renderedContent;delete artifact.value;}
   const { authorization: _authorization, ...publicArtifact } = artifact;
   const reviewStep = findReviewStep(context.run, context.review.stepId);
   const contractArtifact = {
@@ -2436,19 +2487,20 @@ async function artifactReviewContextPayload(
     const review = reviews.length === 1 ? reviews[0] : undefined;
     return {
       ...item,
-      reviewContext: review ? {
+      reviewContext: review&&(!compact||material===`context:${index}`) ? {
         review: artifactReviewSummary(review, context.run.controlPlane),
-        rounds: publicArtifactReviewRounds(review)
+        rounds: publicArtifactReviewRounds(review,compact?review.outcome?.roundId:undefined,opinionActor)
       } : undefined
     };
   });
-  for (const item of contextArtifacts) {
-    await hydrateArtifactContent(runsRoot, context.run.id, item.artifact);
+  for (const [index,item] of contextArtifacts.entries()) {
+    if(!compact||material===`context:${index}`)await hydrateArtifactContent(runsRoot, context.run.id, item.artifact);
+    else{const {value,content,renderedContent,...metadata}=item.artifact as typeof item.artifact & {renderedContent?:string;content?:string};item.artifact={...metadata,deferred:true} as typeof item.artifact;delete item.reviewContext; }
     const { authorization: _authorization, ...publicContextArtifact } = item.artifact;
     item.artifact = publicContextArtifact as typeof item.artifact;
   }
   return {
-    review: artifactReviewSummary(context.review, context.run.controlPlane),
+    review: compact?(()=>{const summary=artifactReviewSummary(context.review,context.run.controlPlane) as Record<string,any>;return {...summary,round:summary.round?{...summary.round,assignments:undefined}:undefined};})():artifactReviewSummary(context.review, context.run.controlPlane),
     submission: {
       id: submission.id,
       digest: submission.digest,
@@ -2469,16 +2521,16 @@ async function artifactReviewContextPayload(
       draft: (context.assignment.actorKind ?? "human") === "agent"
         ? undefined
         : structuredClone(context.assignment.draft),
-      submitted: publicArtifactReviewOpinion(context.assignment.submitted),
+      submitted: publicArtifactReviewOpinion(context.assignment.submitted,!compact||context.assignment.actorId===opinionActor),
       attempts: context.assignment.attempts?.map(publicArtifactReviewAttempt),
       slotNames: artifactReviewSlotNames(context.assignment.slotIds)
     } : undefined,
-    rounds: publicArtifactReviewRounds(context.review)
+    rounds: publicArtifactReviewRounds(context.review,compact?context.round.id:undefined,opinionActor)
   };
 }
 
-function publicArtifactReviewRounds(review: ArtifactReviewContext["review"]): unknown[] {
-  return review.rounds.map((round) => ({
+function publicArtifactReviewRounds(review: ArtifactReviewContext["review"],selectedRoundId?:string,opinionActor?:string): unknown[] {
+  return review.rounds.map((round) => selectedRoundId&&round.id!==selectedRoundId?{id:round.id,sequence:round.sequence,createdAt:round.createdAt}:({
     id: round.id,
     sequence: round.sequence,
     submissionId: round.submissionId,
@@ -2495,11 +2547,10 @@ function publicArtifactReviewRounds(review: ArtifactReviewContext["review"]): un
       slotIds: assignment.slotIds,
       binding: assignment.binding,
       status: assignment.status,
-      submitted: publicArtifactReviewOpinion(assignment.submitted),
-      implementationEvidenceReferenced: artifactReviewOpinionReferencesImplementation(assignment.submitted),
+      submitted: publicArtifactReviewOpinion(assignment.submitted,!selectedRoundId||assignment.actorId===opinionActor),
       attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
     })),
-    votes: round.votes.map(publicArtifactReviewVote),
+    votes: round.votes.map(vote=>selectedRoundId?{subject:vote.subject,binding:vote.binding,value:vote.value,automatic:vote.automatic,submittedAt:vote.submittedAt}:publicArtifactReviewVote(vote)),
     result: round.result,
     commentDispositions: structuredClone(round.commentDispositions ?? []),
     revisionSummary: review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
@@ -2537,16 +2588,18 @@ function publicArtifactReviewAttempt(attempt: ArtifactReviewAgentAttempt | undef
   };
 }
 
-function publicArtifactReviewOpinion(opinion: ArtifactReviewSubmittedOpinion | undefined): unknown {
+function publicArtifactReviewOpinion(opinion: ArtifactReviewSubmittedOpinion | undefined,includeDetails=true): unknown {
   if (!opinion) return undefined;
   return {
-    comments: opinion.comments.map((comment) => ({
+    commentCount: opinion.comments.length,
+    comments: includeDetails?opinion.comments.map((comment) => ({
       ...structuredClone(comment),
       renderedBody: renderArtifactReviewMarkdown(comment.body)
-    })),
+    })):[],
     vote: opinion.vote,
-    summary: opinion.summary,
-    renderedSummary: opinion.summary ? renderArtifactReviewMarkdown(opinion.summary) : undefined,
+    summary: includeDetails?opinion.summary:undefined,
+    renderedSummary: includeDetails&&opinion.summary ? renderArtifactReviewMarkdown(opinion.summary) : undefined,
+    detailsDeferred: !includeDetails,
     submittedAt: opinion.submittedAt,
     delegation: opinion.delegation ? {
       kind: opinion.delegation.kind,

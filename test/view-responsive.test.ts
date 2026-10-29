@@ -1273,7 +1273,7 @@ test("View deep links restore Memory, Run, and browser history", async () => {
       const staleRunDetailGate = new Promise<void>((resolve) => { releaseStaleRunDetail = resolve; });
       const staleRunDetailCaptured = new Promise<void>((resolve) => { captureStaleRunDetail = resolve; });
       let delayedRunDetail = false;
-      await page.route(`**/api/projects/responsive/runs/${runId}`, async (route) => {
+      await page.route(`**/api/projects/responsive/runs/${runId}*`, async (route) => {
         if (delayedRunDetail) return route.continue();
         delayedRunDetail = true;
         const response = await route.fetch();
@@ -1315,5 +1315,20 @@ test("View deep links restore Memory, Run, and browser history", async () => {
     } finally {
       await page.close();
     }
+  });
+});
+
+test("Flow defers artifact content until its output disclosure is opened", async()=>{
+  await withResponsiveView(async(browser,url)=>{
+    const base=`${url}/api/projects/responsive`;
+    const overview=await (await fetch(`${base}/runs/${runId}?representation=overview`)).json();
+    const artifact=overview.run.events[0].artifact;
+    assert.equal(artifact.content,undefined);assert.equal(artifact.renderedContent,undefined);assert.equal(artifact.value,undefined);assert.ok(artifact.lazyUrl);
+    const page=await browser.newPage();const contentRequests:string[]=[];
+    page.on("request",request=>{if(new URL(request.url()).pathname.endsWith("/events/0/artifact"))contentRequests.push(request.url());});
+    await page.goto(`${url}/projects/responsive/tasks/${runId}?status=done`);
+    const card=page.locator("details.task-result").first();await card.waitFor();assert.equal(contentRequests.length,0);
+    await card.locator(":scope > summary").click();await card.locator("table").waitFor();assert.equal(contentRequests.length,1);
+    await card.locator(":scope > summary").click();await card.locator(":scope > summary").click();assert.equal(contentRequests.length,1);
   });
 });

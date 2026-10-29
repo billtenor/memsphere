@@ -332,6 +332,7 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
   try {
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
+    await page.locator("details.task-result > summary").first().click();
     await page.locator("[data-custom-artifact=true]").waitFor({ state: "attached" });
     assert.equal(await page.locator("[data-custom-artifact=true]").count(), 1, JSON.stringify({
       body: await page.locator("body").innerText(),
@@ -347,7 +348,6 @@ test("real Run Artifact uses a custom renderer and restores the official body wh
     }));
     active = await launch();
     await page.goto(`${active.origin}/projects/demo/tasks/${runId}`);
-    await page.locator(".artifact-review-artifact-content").waitFor({ state: "attached" });
     await page.locator("details.task-result > summary").first().click();
     await page.locator(".artifact-review-artifact-content").waitFor();
     assert.equal(await page.locator("[data-custom-artifact]").count(), 0);

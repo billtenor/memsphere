@@ -17,9 +17,7 @@
 {{#if decisionIntent}}
   - 决策说明：{{decisionIntent}}
 {{/if}}
-{{#unlessNil implementationEvidenceReferenced}}
-  - 已引用实现证据：{{implementationEvidenceReferenced}}
-{{/unlessNil}}
+
 {{#each comments}}
   - 意见 [{{severity}}]：{{body}}
 {{/each}}

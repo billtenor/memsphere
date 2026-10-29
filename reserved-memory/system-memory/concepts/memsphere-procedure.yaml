@@ -16,6 +16,11 @@ defines:
   - Schema 逐字段上报合成的中间 Artifact 与正式文件同由 Memsphere 管理；Agent 用 run artifact export 导出本地副本后编辑，再通过统一 run report 上报，不直接编辑托管内容。
   - export 默认选择该步骤的中间 Artifact、当前 Review Submission 或最近已上报 Artifact；不提供历史版本选择参数，不改变 Procedure YAML 的 Artifact 契约。
   - Procedure 的合法 YAML 结构由 memsphere-procedure-schema 定义。
+  - flow 与 graph 复用公共列表、下拉控件与评审会话；公共修复同时作用于两种模式。flow 的产物正文同样在展开产物时读取，首屏只返回产物摘要；重复展开已加载的产物不重新请求正文，隐藏的评审活动不轮询。
+  - flow 与 graph 公共评审默认按正文 70%、评审栏 30% 分配宽度，拖动后按比例保持；评审标题与关闭按钮固定，内容区域独立滚动。参与进度与评审记录合并为评审结果，每人只显示投票结论，详细意见默认折叠、展开时读取并复用，Agent 运行记录单独按需展开；不生成或展示推断式实现证据引用标记。
+  - flow 与 graph 的公共评审浮窗先展示加载状态，正文与评审并行读取；直接打开 flow 评审不读取隐藏的背景 Run。评审首屏只读取所选轮次的参与摘要和所选材料正文，个人详细意见、其余轮次与材料按需读取；唯一 Human 身份在同一请求中确定，多 Human 保留显式选择。graph 评审只定向读取所选 Step 及必要输入，不枚举无关 Step 和评审。
+  - graph Run View 按当前可见界面渐进读取：首屏仅加载流程定义和节点执行状态，侧栏摘要独立加载并分页；打开节点后读取该 Action 的实例与产物摘要，正文、评审和 Agent 活动按对应面板的可见状态读取，隐藏评审栏时停止轮询。执行信息只展示统一的状态、时间与产物 ID，上游跳转集中在上游步骤区。
+  - graph Run 的步骤产物在弹窗内复用 flow 的完整评审会话与材料渲染，流程视角和产物视角按产物所属 Step 和轮次关联评审；无对应轮次时保留产物正文并显示评审空态。评审权限和结算语义不变。
   - Artifact Review 浮窗按所选材料展示对应的评审内容；当前待评审产物可编辑本人当前 Assignment，前序产物只读展示接受该冻结快照的评审，无法确认对应记录的材料显示无独立评审记录。切回当前待评审产物保留未提交的本地意见。
   - 模型数据 Artifact 可声明 store 和可选 model；模型从业务 Store 推导，model 显式指定时须一致。首版目标为 filesystem JSON ValueStore，schema 与 store/model 互斥；object/array 使用 json/yaml，string/number/boolean 使用 json/yaml 或 plain，普通 Action 的模型 boolean 是业务数据而非控制条件。
   - 模型 Artifact 仍完整保存不可变提交快照，用于 Review、历史查看和追溯；接受后另行将同一模型值整条 upsert 到业务 Store，成功才推进。业务记录后续更新不改变历史快照；Store revision 不是历史内容读取能力，Artifact 不仅保存业务引用。写入后 Run 保存失败时同 ID redo，允许 revision 增长；取消、删除、归档或恢复 Run 不联动删除或重写业务数据。
