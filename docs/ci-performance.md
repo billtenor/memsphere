@@ -4,7 +4,7 @@
 
 测试按用户可观察契约和真实运行边界选择。删除、合并或下沉必须说明重复保护及覆盖代价；不得为隐藏失败而删断言、跳过测试或放宽验收。保留教程安全规则、数据发布/回滚、权限、并发与原生文件/进程保护。
 
-`npm test` 仍构建并运行`test/` 下递归发现的全部 `.test.ts`（含 `test/ci/`），每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。Windows测试/打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
+`npm test` 仍构建并运行`test/` 下递归发现的全部 `.test.ts`（含 `test/ci/`），每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。各平台测试job与Windows打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
 
 ## 默认 PR
 
@@ -20,6 +20,22 @@
 Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更用例放入升级组，其余35项平台保护由core组执行；project-command重型集成用例复用原有安装包job的空闲时间（runner并发上限2，实际一个文件），直接调用测试runner，不再触发pretest重建。full仍由原有矩阵覆盖这份用例，安装包job仅在default追加该文件。不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。39项平台清单位于 `scripts/ci/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
 
 不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试/打包及Security仅保留GitHub原生job 5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
+
+Runner 交付后，系统升级和历史通用流程升级两个重测试改由已有的升级分组执行，不再落入 Run/Data/SDK 的默认兜底分类。Linux Projects & Memory、macOS完整Memory组和Windows完整升级组接收它们；默认原生保护集合保持原范围，在已有Reviewer平台文件中补充Windows queue包装脚本验证。所有文件仍完整执行，未增加job或并发，也未放宽5分钟预算。
+
+### daemon 测试职责审计
+
+按 `memsphere-repository-testing-rules`，非被测前置状态应优先用 Store/API 构造。daemon 通知测试原先逐例通过 CLI 创建 graph Run、上报候选、准备 Human 票，重复演练了非被测流程；现通过 Graph API、CommandState Store 和 Review API 准备这些状态。真实 CLI wait、身份拒绝、并发登记、显式重试与真实 daemon/queue 子进程继续执行，通知内容、目标会话、幂等和失败结果断言保持。Run start/report/Continue 绑定的真实 CLI 保护由 `procedure-graph-cli.test.ts` 保留，未以手写夹具取代该边界的专门测试。
+
+通知内容、失败可查询、重试、历史任务及写冲突用例通过 Review API 准备受控待提交 Agent，不再为每份前置票重复运行 ACP Reviewer 及其工具进程。异步重复 wait 和同步 pending wait 两例仍执行真实 ACP 调度与受控 Reviewer 工具链；它们验证调度边界，其余用例继续验证真实 CLI、daemon 和 queue 边界。没有用模块测试替代这些真实边界。
+
+各平台清理都必须观察夹具自身的 daemon/Reviewer PID 已退出：业务提交完成或 daemon 状态文件删除都可能早于进程完全退出，进程可能继续写活动记录，Windows 还会保留 cwd。清理通过有界的存活检查等待这些 PID 退出，再删除目录；Linux 已退出但待回收的僵尸进程不再持有文件资源。不使用固定睡眠或忽略 `EBUSY`/`ENOTEMPTY`。受控 Reviewer 使用测试进程 PID，清理不把测试自身列为待退出子进程。
+
+首次通知与显式重试拆为各自的契约测试。同步等待不再睡眠500毫秒后猜测进程是否已进入等待，而是等待受控 Reviewer 建立 session；不确定投递后的禁止重发测试不再睡眠2.2秒猜测 daemon 已再次扫描，而是登记禁用接收方标记任务并等待其取消，证明后续调度已发生。状态等待均有界，既有用例超时不放宽。浏览器滚动测试使用 locator trial click 重新定位重渲染后的按钮，保留页面与弹窗滚动隔离断言。
+
+Run 锁与 View 读取测试的模型、Store 和服务初始化移至 `beforeEach` 夹具阶段，各用例继续拥有独立目录与服务；业务操作仍在原5秒/10秒等超时内验证。初始化不是锁绕过契约，不应消耗其测试主体时限。真实文件锁占用、跨服务 CAS 竞争、失败注入和恢复断言保留，不改为共享可变 Store，也不放宽CI job预算。
+
+并发 CLI report 的 `STEP_FINISHED` 失败不是应放宽的测试预期：已提交产物后，自动进入下一 Step 使用的快照可能过期。提示生成遇到该目标已完成时，返回读取当前 Run 状态的命令；不使已持久化的提交误报失败。用小范围提示测试确定性覆盖此竞态与其他错误原样传播，真实并发 CLI 测试继续保留原有错误白名单、产物数、完成状态和完成序号断言。
 
 ## 合入 master / 发布前完整检查
 

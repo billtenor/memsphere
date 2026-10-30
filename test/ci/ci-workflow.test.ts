@@ -95,6 +95,11 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(browserInstall.if, "matrix.browser");
   assert.equal(browserInstall.run, "npx playwright install chromium");
   assert(steps.some(step => step.run?.startsWith("npm run test:ci")));
+  const compileCache = steps.find(step => step.name === "Reuse Node compilation within this job");
+  assert.equal(compileCache.if, undefined, "all platforms reuse bytecode within their own job");
+  assert.equal(compileCache.shell, "bash");
+  assert.match(compileCache.run, /NODE_COMPILE_CACHE=\$RUNNER_TEMP\/memsphere-node-compile-cache/);
+  assert(steps.indexOf(compileCache) < steps.findIndex(step => step.run?.startsWith("npm run test:ci")));
   assert.equal(steps.some(step => step.run === "npm run build"), false);
   const normalizedWindowsPackageSmoke = (await readFile("scripts/ci/windows-package-smoke.mjs", "utf8")).replaceAll("\r\n", "\n");
   assert.match(

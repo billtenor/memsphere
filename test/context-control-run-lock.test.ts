@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach, type TestContext } from "node:test";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -14,6 +14,18 @@ import type { GraphRuntime } from "../src/context_control/graph-runtime.js";
 import type { Run, Step } from "../src/context_control/types.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
 import { businessFixture } from "./helpers/business-data.js";
+
+type PreparedFixture = Awaited<ReturnType<typeof businessFixture>> & {
+  service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
+};
+const fixtures = new Map<string, PreparedFixture>();
+beforeEach(async t => {
+  const f = await businessFixture(t, {});
+  const service = (await openContextControl(f.root, true))!;
+  fixtures.set(t.name, { ...f, service });
+  t.after(() => { fixtures.delete(t.name); });
+});
+function preparedFixture(t: TestContext) { return fixtures.get(t.name)!; }
 
 async function runLock(root: string, runId: string) {
   await mkdir(join(root, ".runtime", "context-control"), { recursive: true });
@@ -34,8 +46,8 @@ async function expectRunCasConflict(service: NonNullable<Awaited<ReturnType<type
 }
 
 test("findRun and listRuns are readonly under a held Run lock while native status still recovers", { timeout: 10000 }, async t => {
-  const f = await businessFixture(t, {});
-  const service = (await openContextControl(f.root, true))!;
+  const f = preparedFixture(t);
+  const service = preparedFixture(t).service;
   const run = await service.start("readonly lookup"), other = await service.start("other Run");
   const steps = service.stores.step, create = steps.create.bind(steps);
   let missingKey = "";
@@ -66,8 +78,8 @@ test("findRun and listRuns are readonly under a held Run lock while native statu
 });
 
 test("exploration recovery bypasses the Run lock and preserves concurrent Step edits with CAS", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service, other = (await openContextControl(root))!;
   const run = await service.start("recovery CAS"), target = await service.createArtifact(run.id, { name: "pending" });
   const store = service.stores.step, update = store.update.bind(store);
   store.update = async () => { throw Error("interrupted submission"); };
@@ -93,8 +105,8 @@ test("exploration recovery bypasses the Run lock and preserves concurrent Step e
 });
 
 test("concurrent recovery creates one missing Step and a retry reuses its identity", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service, other = (await openContextControl(root))!;
   const run = await service.start("recovery create"), store = service.stores.step, create = store.create.bind(store);
   store.create = async () => { throw Error("missing Step"); };
   try { await assert.rejects(service.createArtifact(run.id, { name: "draft" }), /missing Step/); }
@@ -115,8 +127,8 @@ test("concurrent recovery creates one missing Step and a retry reuses its identi
 });
 
 test("exploration finish bypasses the Run lock without recovering incomplete records and stays idempotent", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service;
   const run = await service.start("readonly finish");
   const a = (await service.report(run.id, { name: "a", content: textContent("a") })).artifact;
   const b = (await service.report(run.id, { name: "b", content: textContent("b") })).artifact;
@@ -143,8 +155,8 @@ test("exploration finish bypasses the Run lock without recovering incomplete rec
 });
 
 test("finish accepts the same concurrent completion but rejects stale decisions and output selection", { timeout: 8000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service, other = (await openContextControl(root))!;
   for (const kind of ["same", "different", "abandon", "outputs"] as const) {
     const run = await service.start(`finish CAS ${kind}`);
     const a = (await service.report(run.id, { name: "a", content: textContent("a") })).artifact;
@@ -172,8 +184,8 @@ test("finish accepts the same concurrent completion but rejects stale decisions 
 });
 
 test("exploration abandonment bypasses the Run lock without recovery and retains Run CAS", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service, other = (await openContextControl(root))!;
   const run = await service.start("abandon CAS");
   const steps = service.stores.step, create = steps.create.bind(steps);
   let orphanKey = "";
@@ -202,8 +214,8 @@ test("exploration abandonment bypasses the Run lock without recovery and retains
 });
 
 test("archive and restore bypass the Run lock and reject stale concurrent Run writes", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service;
   const other = (await openContextControl(root))!;
   const run = await service.start("archive CAS"); await service.finish(run.id);
   await withNativeFileLock(await runLock(root, run.id), async () => {
@@ -215,8 +227,8 @@ test("archive and restore bypass the Run lock and reject stale concurrent Run wr
 });
 
 test("output updates bypass the Run lock, retain CAS and do not recover incomplete submissions", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service;
   const other = (await openContextControl(root))!;
   const run = await service.start("output CAS");
   const a = (await service.report(run.id, { name: "a", content: textContent("a") })).artifact;
@@ -249,8 +261,8 @@ test("output updates bypass the Run lock, retain CAS and do not recover incomple
 });
 
 test("draft creation writes only its own records without a Run lock or recovering other drafts", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service;
   const other = (await openContextControl(root))!;
   const run = await service.start("independent drafts");
   const source = (await service.report(run.id, { name: "original", content: textContent("original") })).artifact;
@@ -290,8 +302,8 @@ test("draft creation writes only its own records without a Run lock or recoverin
 });
 
 test("reports bypass the Run lock and resolve tag dependencies without recovering unrelated submissions", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service, other = (await openContextControl(root))!;
   const run = await service.start("targeted report");
   const source = (await service.report(run.id, { name: "source", tags: ["seed"], content: textContent("source") })).artifact;
   const incomplete = await service.createArtifact(run.id, { name: "incomplete", tags: ["seed"] });
@@ -321,8 +333,8 @@ test("reports bypass the Run lock and resolve tag dependencies without recoverin
 });
 
 test("report preserves Artifact and Step CAS conflicts and recovers a durable submission without losing reads", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service, other = (await openContextControl(root))!;
   const run = await service.start("report CAS");
   for (const entity of ["artifact", "step"] as const) {
     const target = await service.createArtifact(run.id, { name: entity });
@@ -347,8 +359,8 @@ test("report preserves Artifact and Step CAS conflicts and recovers a durable su
 });
 
 test("independent exploration record writes complete while the same Run lock is held", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service;
   const run = await service.start("records");
   const submitted = await service.report(run.id, { name: "source", content: textContent("body") });
   const drafts = await Promise.all([service.createArtifact(run.id, { name: "a" }), service.createArtifact(run.id, { name: "b" })]);
@@ -369,8 +381,8 @@ test("independent exploration record writes complete while the same Run lock is 
 });
 
 test("Graph reads, Step entry, personal Reviews and dispositions bypass the Run lock; same-record writes retain CAS", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t);
+  const service = preparedFixture(t).service;
   await service.withGraph(async g => {
     const start = await g.start({ name: "independent graph", procedure: {
       tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["lock-graph"], defines: ["Independent Steps"],
@@ -468,7 +480,7 @@ const gate = () => {
 
 // Exercises actual native lock occupation, not elapsed-time comparisons.
 test("Graph report, vote, advance, finish and abandon work while the former Run lock is held", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service;
   await service.withGraph(async g => {
     const start = await g.start({ name: "held lock", procedure: procedure([action("A", "START", true), action("B", "A")]),
       controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } } },
@@ -494,7 +506,7 @@ test("Graph report, vote, advance, finish and abandon work while the former Run 
 });
 
 test("parallel Graph reports keep both saved submissions and recover shared Run CAS conflicts", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service;
   await service.withGraph(async g => {
     const start = await g.start({ name: "parallel", procedure: procedure([action("A"), action("B"), action("C", "A"), action("D", "B")]) });
     for (const step of start.steps) await g.enter(start.run.id, step.id);
@@ -523,7 +535,7 @@ test("parallel Graph reports keep both saved submissions and recover shared Run 
 });
 
 test("two reports for the same Graph Step cannot overwrite the winning submission", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service, other = (await openContextControl(root))!;
   await service.withGraph(async g => {
     const start = await g.start({ name: "same Step", procedure: procedure([action("A")]) }), id = start.run.id, step = start.steps[0];
     await g.enter(id, step.id);
@@ -552,7 +564,7 @@ async function interrupted(g: GraphRuntime, service: NonNullable<Awaited<ReturnT
 }
 
 test("concurrent recovery finishing the same submission does not overwrite a removed frame", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service, other = (await openContextControl(root))!;
   await service.withGraph(async g => {
     const start = await interrupted(g, service), id = start.run.id, store = service.stores.run, update = store.update.bind(store), barrier = gate();
     let paused = false;
@@ -573,7 +585,7 @@ test("concurrent recovery finishing the same submission does not overwrite a rem
 });
 
 test("a stale advance does not dispatch a completion already processed by another advance", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service, other = (await openContextControl(root))!;
   await service.withGraph(async g => {
     const start = await interrupted(g, service), id = start.run.id;
     const update = g.records.update.bind(g.records);
@@ -601,7 +613,7 @@ test("a stale advance does not dispatch a completion already processed by anothe
 });
 
 test("another Reviewer can submit while one saved vote is paused before settlement", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service, other = (await openContextControl(root))!;
   await service.withGraph(async g => {
     const start = await g.start({ name: "independent votes", procedure: procedure([action("A", "START", true)]),
       controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: {
@@ -623,7 +635,7 @@ test("another Reviewer can submit while one saved vote is paused before settleme
 });
 
 test("Graph finish and abandon retain Run CAS instead of overwriting a concurrent Run edit", { timeout: 10000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const { root } = preparedFixture(t), service = preparedFixture(t).service, other = (await openContextControl(root))!;
   await service.withGraph(async g => {
     for (const terminal of ["finish", "abandon"] as const) {
       const start = await g.start({ name: terminal, procedure: procedure([action("A")]) }), id = start.run.id;

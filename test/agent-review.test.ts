@@ -1304,3 +1304,27 @@ function fakeClientLaunch(
 function normalizeNewlines(value: string): string {
   return value.replace(/\r\n/g, "\n");
 }
+
+test("Windows queue passes complete multiline messages through direct and npm Node shims", { skip: process.platform !== "win32" }, async t => {
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { checkQueueCapability } = await import("../src/runner/identity.js");
+  const { sendQueue } = await import("../src/daemon/service.js");
+  const directory = await mkdtemp(join(tmpdir(), "queue $& shim "));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const script = join(directory, "queue.mjs"), output = join(directory, "args.json"), shim = join(directory, "codex.cmd");
+  await writeFile(script, `import { writeFileSync } from 'node:fs'; if (process.argv.includes('--help')) console.log('queue --thread --message'); else writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));`);
+  const body = '请执行命令以继续：\ncommand "quoted" %percent% & | ^ !';
+  for (const source of [
+    `@"${process.execPath}" "${script}" %*\r\n`,
+    'SET "_prog=%dp0%\\node.exe"\r\nSET "_prog=node"\r\nendLocal & "%_prog%" "%dp0%\\queue.mjs" %*\r\n'
+  ]) {
+    await writeFile(shim, source);
+    await checkQueueCapability(shim);
+    await sendQueue(shim, "session", body, directory);
+    assert.deepEqual(JSON.parse(await readFile(output, "utf8")), ["queue", "--thread", "session", "--message", `[Memsphere 自动消息]\n${body}`]);
+  }
+  await writeFile(shim, '@echo unknown %*\r\n');
+  await assert.rejects(checkQueueCapability(shim), /QUEUE_BATCH_UNSUPPORTED/);
+});

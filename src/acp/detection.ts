@@ -82,7 +82,7 @@ export async function detectAcpProviderInstance(
   }
 }
 
-async function resolveExecutable(command: string, pathValue: string | undefined): Promise<string | undefined> {
+export async function resolveExecutable(command: string, pathValue: string | undefined): Promise<string | undefined> {
   if (isAbsolute(command) || command.includes("/") || command.includes("\\")) {
     const candidate = resolve(command);
     return await isExecutable(candidate) ? candidate : undefined;
