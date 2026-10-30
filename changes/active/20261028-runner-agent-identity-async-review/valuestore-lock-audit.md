@@ -216,3 +216,12 @@ Human 确认自由探索 finish 移除 Run 锁和 redo，保留 CAS 及重复完
 验证三文件 43/43 通过，另补实际 ContextControl.finish Graph 分流用例 1/1 通过，共 44 个不同相关测试通过；类型检查、git diff --check 通过。覆盖原生 Run 锁占用下完成及重复完成、不恢复未完成产物、重复显式成果去重、默认重复完成不写回；并发相同完成复用赢家整条记录，成果不同/abandon/成果配置更新赢家均不被陈旧完成覆盖。Graph 补测覆盖未完成拒绝、显式成果完成及重复完成不改记录。日志 /tmp/memsphere-finish-unlock-tests.log、/tmp/memsphere-finish-unlock-routing-tests.log、/tmp/memsphere-finish-unlock-types.log。未重建 dist 或更改冻结正式候选。
 
 下一场景拟讨论自由探索 findRun（listRuns 逐条调用它）：当前查询 running Run 时仍获取 Run 锁并 recover 全 Run。拟仅读取 Run 及校验状态，不执行恢复；run status 经 snapshot 的恢复能力保持，snapshot/readArtifact 本身的恢复锁后续逐项讨论。此后续方案尚未实施，待 Human 确认。
+
+
+### 2026-10-30 提交实现并合入最新 master
+
+按 Human 指令先提交本次实现、测试、需求/方案和 Graph 回溯需求概述，再将 origin/master（499d3ba，Graph/Flow 统一评审及渐进式加载；同时包含 Graph 可视化）合入当前功能分支。实现提交为 541d229。未把临时运行回执、旧验收候选证据 JSON、node_modules 纳入提交。本地未跟踪的 agile graph Procedure 与 master 新增版本逐字节一致，备份后由 Git 接管，内容未变。
+
+三处内容冲突均按能力并存解决：commands/view 保留 daemon/Runner 探测及 master View 读取入口；context-control-access 保留模型 stamp 一致性读取，不恢复已删除的 Project 锁；graph-runtime 保留 master 的定向 reviewSnapshot，沿用本分支纯查询无 Run 锁及个人记录 CAS 更新。补充锁占用用例覆盖定向 reviewSnapshot 不阻塞。
+
+合并后类型检查、61 项源码定向回归通过。最终 Memory 变更级校验 valid=true、issues=[]：change-20261030-031536690z-1676929d，checkpoint dcc16e183c29ac0acf58a8ef97c54f2c6f3d0914e45e5661cea7be6364c239b6；View 为 http://0.0.0.0:30000/projects/memsphere/changes/change-20261030-031536690z-1676929d。日志 /tmp/memsphere-master-merge-typecheck.log、/tmp/memsphere-master-merge-source-tests.log、/tmp/memsphere-post-merge-memory-validation.json。构建与 CLI/daemon/View 验证使用临时工作树，不覆盖原工作树冻结 dist。此处记录 Git 集成，不代表新的正式候选已验收。

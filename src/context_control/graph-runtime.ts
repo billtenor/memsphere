@@ -90,6 +90,17 @@ export class GraphRuntime {
     try { return await this.advance(run.id); }
     catch (error) { throw Object.assign(error as object, { details: { runId: run.id, recoveryCommand: `memsphere run status --run ${run.id}`, message: "Run saved; recover it instead of starting a duplicate" } }); }
   }
+  /** Selected review reads must not enumerate other Steps, Artifacts or Reviews. */
+  async reviewSnapshot(runId: string, stepId: string, roundId?: string): Promise<Snapshot> {
+    const run = (await this.run(runId)).value, step = (await this.step(run, stepId)).value;
+    const ids = new Set([...(step.reviewRounds ?? []).map(r => r.artifactId), ...Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id)]);
+    const artifacts = await Promise.all([...ids].map(async id => (await this.records.require<Artifact>("artifact", runId, id)).value));
+    const sources = await Promise.all([...new Set(artifacts.filter(a => a.stepId !== step.id).map(a => a.stepId))].map(async id => (await this.step(run, id)).value));
+    const selected = roundId === "current" ? step.reviewRounds?.at(-1)?.id : roundId;
+    const keys = (step.reviewRounds ?? []).filter(r => !roundId || r.id === selected || r.id === step.reviewRounds?.at(-1)?.id).flatMap(r => [...Object.keys(r.reviewConfig.reviewers), "runner"].map(actor => graphReviewId(r.id, actor)));
+    const reviews = (await Promise.all(keys.map(id => this.records.get<Review>("review", runId, id)))).flatMap(row => row ? [row.value] : []);
+    return { run, steps: [step, ...sources], artifacts, externals: [], reviews, completeIds: sources.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id), outputArtifactIds: [] };
+  }
   async snapshot(runId: string): Promise<Snapshot> { return this.snapshotValue(runId); }
   /** Personal Review writes use their own record revision; graph recovery is separate. */
   async mutateReview<T>(runId: string, stepId: string, roundId: string, actor: string, action: (value: Review, run: Run, step: Step) => Promise<T>): Promise<T> {

@@ -324,6 +324,9 @@ test("Graph reads, Step entry, personal Reviews and dispositions bypass the Run 
         assert.equal((await service.findRun(runId))?.id, runId);
         assert.equal((await service.snapshot(runId)).steps.length, 2);
         assert.equal((await g.bindingSnapshot(runId)).runId, runId);
+        const selected = await g.reviewSnapshot(runId, first.step.id, round);
+        assert.equal(selected.steps[0].id, first.step.id);
+        assert.ok(selected.reviews.some(r => r.reviewer.actorId === "a"));
         assert.equal(Buffer.from((await service.readArtifact(runId, first.artifact.id)).bytes).toString(), first.step.id);
         await g.mutateReview(runId, first.step.id, round, "b", async value => { value.comments = [{ id: "b", body: "B", createdAt: new Date().toISOString() }]; });
         // A competing write to the same record wins; the paused stale write must fail.

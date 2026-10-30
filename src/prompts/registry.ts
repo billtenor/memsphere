@@ -63,7 +63,6 @@ const reviewParticipantSchema = z.object({
   binding: z.string(),
   vote: z.string(),
   decisionIntent: z.string().optional(),
-  implementationEvidenceReferenced: z.boolean().optional(),
   comments: z.array(z.object({
     severity: z.string(),
     body: z.string()

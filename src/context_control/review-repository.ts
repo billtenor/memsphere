@@ -15,6 +15,7 @@ import { graphReviewId, projectGraphRound, storeGraphComments } from "./graph-re
 import { isGraphRun, type GraphRuntime } from "./graph-runtime.js";
 import type { Artifact, Review, Run, Snapshot, Step } from "./types.js";
 import { failure } from "./errors.js";
+import type { ContextControl } from "./service.js";
 export * from "../run/store.js";
 const stamp = () => new Date().toISOString();
 const digest = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex");
@@ -25,10 +26,10 @@ function identity(reviewId: string) {
   if (!runId || !stepId || rest.length) throw failure("INVALID_ARGUMENT", "Invalid graph Review handle");
   return { runId, stepId };
 }
-async function use<T>(input: { runsRoot: string; reviewId: string }, action: (g: GraphRuntime, id: { runId: string; stepId: string }) => Promise<T>): Promise<T> {
-  const id = identity(input.reviewId)!; const service = await openContextControl(dirname(input.runsRoot));
+async function use<T>(input: { runsRoot: string; reviewId: string; service?:ContextControl }, action: (g: GraphRuntime, id: { runId: string; stepId: string },service:ContextControl) => Promise<T>): Promise<T> {
+  const id = identity(input.reviewId)!; const service = input.service ?? await openContextControl(dirname(input.runsRoot));
   if (!service) throw failure("NOT_FOUND", "Graph model Stores not found");
-  return service.withGraph(g => action(g, id));
+  return service.withGraph(g => action(g, id,service));
 }
 function graphFormat(contentType: string) {
   const mime = mimeType(contentType);
@@ -39,25 +40,29 @@ async function artifactDto(service: NonNullable<Awaited<ReturnType<typeof openCo
   const value = decodeGraphContent(body.bytes, body.contentType);
   return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType };
 }
-async function project(runsRoot: string, snapshot: Snapshot, selected?: string): Promise<legacy.RunState> {
-  const service = (await openContextControl(dirname(runsRoot)))!;
+async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl): Promise<legacy.RunState> {
+  const service = providedService ?? (await openContextControl(dirname(runsRoot)))!;
   return service.withGraph(async g => {
     const run = snapshot.run;
+    if(viewRoundId==="current")viewRoundId=snapshot.steps.find(s=>s.id===selected)?.reviewRounds?.at(-1)?.id;
     const rules = await g.rules(run);
     const reviews: ArtifactReview<legacy.RunEvent["artifact"]>[] = [];
-    for (const step of snapshot.steps.filter(s => s.reviewRounds?.length)) {
+    for (const step of snapshot.steps.filter(s => s.reviewRounds?.length&&(!selected||s.id===selected))) {
       const rounds: ArtifactReviewRound[] = [], submissions = [];
       for (const round of step.reviewRounds!) {
         const artifact = snapshot.artifacts.find(a => a.id === round.artifactId);
         if (!artifact || artifact.stepId !== step.id) throw failure("INVALID_STATE", "Frozen Review Artifact missing or belongs to another Step");
-        const dto = await artifactDto(service, artifact);
-        const hash = digest((await service.body(artifact)).bytes);
+        const body=!viewRoundId||round.id===viewRoundId?await service.body(artifact):undefined;
+        const hash=body?digest(body.bytes):"";
+        const value=body?decodeGraphContent(body.bytes,body.contentType):undefined;
+        const contentType=body?.contentType??artifact.content?.payload.contentType??"text/plain";
+        const dto:legacy.RunEvent["artifact"]={name:artifact.name,type:value===null?"null":Array.isArray(value)?"array":(typeof value==="undefined"?"string":typeof value),format:graphFormat(contentType),storage:"inline",contentType,...(!viewRoundId||round.id===viewRoundId?{value}:{})};
         rounds.push(projectGraphRound(run, step, round, snapshot.reviews.filter(r => r.roundId === round.id), hash));
         const contextArtifacts = [];
         for (const id of new Set(Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id))) {
           const material = snapshot.artifacts.find(a => a.id === id);
           if (!material || !snapshot.completeIds.includes(id)) throw failure("INVALID_STATE", `Review material is not accepted: ${id}`);
-          contextArtifacts.push({ stepId: material.stepId, artifact: await artifactDto(service, material) });
+          contextArtifacts.push({stepId:material.stepId,artifact:viewRoundId&&!(round.id===viewRoundId&&contextArtifacts.length===viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
         }
         submissions.push({ id: artifact.id, digest: hash, createdAt: round.createdAt, artifact: dto, contextArtifacts,
           ...(artifact.revisedSummary ? { revisionSummary: { body: artifact.revisedSummary, digest: digest(artifact.revisedSummary), createdAt: round.createdAt, previousSubmissionId: artifact.revisedFrom! } } : {}) });
@@ -90,9 +95,9 @@ export async function readRun(runsRoot: string, id: string): Promise<legacy.RunS
   if (run && isGraphRun(run)) return project(runsRoot, await service!.snapshot(id));
   throw missing;
 }
-export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0]) {
+export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0] & {viewRoundId?:string;viewMaterialIndex?:number;service?:ContextControl}) {
   const id = identity(input.reviewId); if (!id) return legacy.findArtifactReview(input);
-  const run = await use(input, async g => project(input.runsRoot, await g.snapshot(id.runId), id.stepId));
+  const run = await use(input, async (g,_,service) => project(input.runsRoot, await g.reviewSnapshot(id.runId,id.stepId,input.viewRoundId), id.stepId,input.viewRoundId,input.viewMaterialIndex,service));
   const review = run.artifactReviews!.find(r => r.id === input.reviewId);
   if (!review) throw failure("NOT_FOUND", `Graph Step has no Review: ${id.stepId}`);
   return { run, review };

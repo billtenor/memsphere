@@ -1,0 +1,106 @@
+!procedure
+syntax: memsphere-20261027-stable
+mode: graph
+names: [graph-run-visualization-demo, 图编排运行展示示例]
+defines:
+  - 用实际步骤、条件循环和自动收集展示 graph 运行页面。
+goals:
+  - 展示运行节点状态、同一步骤的多次执行、真实产物正文和 collect 成员。
+asserts:
+  - 本流程只生成和查看演示说明，不提交代码、不创建 PR、不操作合入。
+actions:
+  - !action
+    id: prepare
+    description: 整理本次运行示例的展示目标。
+    actor: agent
+    dependencies:
+      - !dependency
+        from: "START"
+    artifact:
+      name: 运行展示目标
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: check
+    description: 检查展示说明是否还需要补全。
+    actor: agent
+    dependencies:
+      - !dependency
+        from: "prepare"
+      - !dependency
+        from: revise
+    artifact:
+      name: 说明是否需要补全
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"boolean"}'
+      payload:
+        contentType: application/json
+  - !action
+    id: revise
+    description: 补全节点、执行实例和产物浮窗的查看说明。
+    actor: agent
+    dependencies:
+      - !dependency
+        from: "check"
+        when: artifacts.check = true
+    artifact:
+      name: 运行查看说明
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: observations
+    description: 整理本次实际页面检查和回归测试证据。
+    actor: agent
+    dependencies:
+      - !dependency
+        from: "prepare"
+    artifact:
+      name: 页面检查记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: summary
+    description: 汇总运行示例的查看入口与实际执行情况。
+    actor: agent
+    dependencies:
+      - !dependency
+        from: ["check", "observations"]
+        when: artifacts.check = false
+    artifact:
+      name: 运行示例导览
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: collect
+    description: 收集本次运行说明和检查证据。
+    dependencies:
+      - !dependency
+        from: summary
+    collect: [prepare, revise, observations, summary]
+  - !action
+    id: human_preview
+    description: 查看运行示例并反馈展示问题。
+    actor: human
+    dependencies:
+      - !dependency
+        from: collect
+    artifact:
+      name: 页面查看反馈
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown

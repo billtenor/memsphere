@@ -70,7 +70,7 @@ test("a delayed terminal list cannot replace the latest running selection", { ti
   const held = new Promise<void>(resolve => { release = resolve; }), entered = new Promise<void>(resolve => { arrive = resolve; });
   try {
     const page = await browser.newPage();
-    await page.route("**/runs?representation=summary&status=done", async route => { arrive(); await held; await route.continue(); });
+    await page.route("**/runs?representation=summary&status=done*", async route => { arrive(); await held; await route.continue(); });
     await page.goto(`${origin}/projects/test-project/tasks`);
     await page.locator(`[data-item-id="${running.id}"]`).waitFor();
     await page.getByRole("button", { name: "已完成", exact: true }).click();
@@ -141,7 +141,7 @@ test("real Run graph changes history without opening an overlay and keeps its di
     assert.equal(await page.locator(".cc-node").count(), 3);
     await page.locator(".cc-history").getByText("历史版本 · 1", { exact: true }).click();
     await page.evaluate(() => { (window as any).__graph = document.querySelector(".cc-graph"); });
-    await Promise.all([page.waitForResponse(r => r.url().endsWith(`/runs/${run.id}`)), page.getByRole("button", { name: "刷新", exact: true }).click()]);
+    await Promise.all([page.waitForResponse(r => new URL(r.url()).pathname.endsWith(`/runs/${run.id}`)), page.getByRole("button", { name: "刷新", exact: true }).click()]);
     assert.equal(await page.evaluate(() => (window as any).__graph === document.querySelector(".cc-graph") && !!document.querySelector(".cc-history[open]")), true);
     await page.getByRole("button", { name: "v1 · 方案", exact: true }).click();
     assert.equal(await page.locator("dialog").count(), 0);
@@ -149,9 +149,18 @@ test("real Run graph changes history without opening an overlay and keeps its di
     await page.getByRole("button", { name: "方案 v1", exact: true }).click();
     await page.getByText("旧正文", { exact: true }).waitFor();
     await page.evaluate(() => { (window as any).__dialog = document.querySelector("dialog"); });
-    await page.getByRole("button", { name: "下一版", exact: true }).click();
+    assert.equal(await page.getByRole("button",{name:/^(上一版|下一版)$/}).count(),0);
+    await page.locator(".cc-version-select").selectOption({label:"v2 · 方案"});
     await page.getByText("新正文", { exact: true }).waitFor(); await page.getByText("新版本意见", { exact: true }).waitFor();
     assert.equal(await page.evaluate(() => (window as any).__dialog === document.querySelector("dialog") && document.querySelector("dialog")!.open), true);
+    await page.locator('.cc-related').getByRole('button',{name:'需求',exact:true}).click();await page.getByText('固定需求',{exact:true}).waitFor();await page.getByRole('button',{name:'← 返回',exact:true}).click();await page.getByText('新正文',{exact:true}).waitFor();
+    const review=page.locator(".cc-pane-review"),divider=page.getByRole("separator",{name:"调整评审栏宽度",exact:true});
+    assert.ok(Math.abs((await review.boundingBox())!.width/(await page.locator(".cc-modal-columns").boundingBox())!.width-.3)<.01);
+    const handle=(await divider.boundingBox())!;await page.mouse.move(handle.x+handle.width/2,handle.y+80);await page.mouse.down();await page.mouse.move(handle.x-60,handle.y+80);await page.mouse.up();
+    assert.ok((await review.boundingBox())!.width>330);
+    await divider.focus();await page.keyboard.press("ArrowLeft");const resized=(await review.boundingBox())!.width;
+    await page.getByRole("button",{name:"收起评审",exact:true}).click();assert.equal(await review.isVisible(),false);assert.equal(await divider.isVisible(),false);
+    await page.getByRole("button",{name:"展开评审",exact:true}).click();assert.ok(Math.abs((await review.boundingBox())!.width-resized)<2);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "评审", exact: true }).click();
     assert.equal(await page.getByRole("region", { name: "评审", exact: true }).isVisible(), true);
@@ -182,6 +191,10 @@ test("External projection, full details, edge endpoints and two-axis grab pannin
     assert.equal(await page.getByRole("button", { name: /历史独占来源/ }).count(), 0);
     await page.getByRole("button", { name: /尚未使用的资料/ }).waitFor();
     await page.locator(".cc-graph[data-layout-ready]").waitFor();
+    assert.ok((await page.locator('.cc-graph-card .pg-metadata').innerText()).includes('自由探索'));
+    assert.equal(await page.locator('.cc-graph-card .pg-controls button').count(), 4);
+    const normalEdge = await page.locator('.cc-edge').first().evaluate(el => { const css=getComputedStyle(el);return {stroke:css.stroke,opacity:css.opacity,width:css.strokeWidth,expected:(()=>{const probe=document.createElement('span');probe.style.color='var(--mem-view-color-text-muted)';el.parentElement!.append(probe);const color=getComputedStyle(probe).color;probe.remove();return color;})()}; });
+    assert.equal(normalEdge.stroke, normalEdge.expected); assert.equal(normalEdge.opacity, '1'); assert.equal(normalEdge.width, '1.5px');
     await page.locator(".cc-edge-hit").first().hover();
     assert.equal(await page.locator('.cc-edge[data-highlighted="true"]').count(), 1);
     assert.equal(await page.locator('.cc-node[data-edge-highlighted="true"]').count(), 2);

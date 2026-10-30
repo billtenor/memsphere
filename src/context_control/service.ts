@@ -67,6 +67,14 @@ export class ContextControl {
     } while (cursor);
     return values;
   }
+  /** View identity reads never recover an unfinished operation. */
+  async findViewRun(runId: string): Promise<Run | undefined> {
+    return this.lock(runId, async () => {
+      const row = await this.record<Run>("run", runId, runId);
+      if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
+      return row?.value;
+    });
+  }
   async findRun(runId: string): Promise<Run | undefined> {
     const row = await this.record<Run>("run", runId, runId);
     if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
@@ -104,6 +112,27 @@ export class ContextControl {
     const row = await this.require<Run>("run", runId, runId, context);
     if (row.value.status !== "running" || row.value.archived) throw failure("RUN_FINISHED", `Run is ${row.value.status}`);
     return row;
+  }
+  /** Read only what the current View surface needs; never recover or load reviews. */
+  async viewProjection(runId:string, surface:"overview"|"artifacts"|"action", actionId?:string):Promise<Snapshot|undefined> {
+    return this.lock(runId,async()=>{
+      const run=(await this.require<Run>("run",runId,runId)).value;
+      if(!isGraphRun(run))return undefined;
+      const stepIds=[...new Set(run.frames?.find(f=>f.type==="graph")?.graphFrame.triggers.flatMap(t=>t.stepId?[t.stepId]:[])??[])];
+      const all=(await Promise.all(stepIds.map(id=>this.record<Step>("step",runId,id)))).flatMap(row=>row?[row.value]:[]);
+      const selected=surface==="action"?all.filter(s=>s.source?.actionId===actionId):all;
+      let artifacts:Artifact[]=[];
+      if(surface!=="overview"){
+        const ids=new Set<string>();
+        for(const step of selected){if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
+        artifacts=(await Promise.all([...ids].map(id=>this.record<Artifact>("artifact",runId,id)))).flatMap(row=>row?[row.value]:[]);
+      }
+      // Bodies are obtained only from the artifact content endpoint.
+      artifacts=artifacts.map(({content,contentRef,...a})=>{if(a.revisedFrom&&!artifacts.some(other=>other.id===a.revisedFrom))delete a.revisedFrom;return a;});
+      const steps=all.map(s=>({id:s.id,runId:s.runId,createdAt:s.createdAt,status:s.status,source:s.source,startedAt:s.startedAt,endedAt:s.endedAt,artifact:s.artifact,
+        ...(surface!=="overview"&&selected.some(x=>x.id===s.id)?{artifact:s.artifact,inputs:s.inputs,reviewRounds:s.reviewRounds}: {})}));
+      return {run,steps,artifacts,externals:[],reviews:[],completeIds:all.filter(s=>s.status==="done"&&s.artifact?.mode==="produce").map(s=>(s.artifact as {id:string}).id),outputArtifactIds:[]};
+    });
   }
   async snapshot(runId: string): Promise<Snapshot> {
     const run = await this.require<Run>("run", runId, runId);
@@ -262,6 +291,14 @@ export class ContextControl {
       }
       const step = (await this.require<Step>("step", runId, artifact.stepId)).value;
       return { artifact, step, candidates: Object.keys(step.reads ?? {}).filter(key => !artifact.dependencies.some(r => refKey(r) === key)) };
+    });
+  }
+  /** Read a frozen body without running recovery as a side effect of displaying it. */
+  async readViewArtifact(runId: string, artifactId: string) {
+    return this.lock(runId, async () => {
+      const run = await this.require<Run>("run", runId, runId);
+      if (isGraphRun(run.value)) return this.withGraph(g => g.readArtifact(runId, artifactId));
+      return this.body(await this.complete(runId, artifactId));
     });
   }
   async readArtifact(runId: string, artifactId: string) {
