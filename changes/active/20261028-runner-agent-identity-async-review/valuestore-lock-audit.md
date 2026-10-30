@@ -225,3 +225,6 @@ Human 确认自由探索 finish 移除 Run 锁和 redo，保留 CAS 及重复完
 三处内容冲突均按能力并存解决：commands/view 保留 daemon/Runner 探测及 master View 读取入口；context-control-access 保留模型 stamp 一致性读取，不恢复已删除的 Project 锁；graph-runtime 保留 master 的定向 reviewSnapshot，沿用本分支纯查询无 Run 锁及个人记录 CAS 更新。补充锁占用用例覆盖定向 reviewSnapshot 不阻塞。
 
 合并后类型检查、61 项源码定向回归通过。最终 Memory 变更级校验 valid=true、issues=[]：change-20261030-031536690z-1676929d，checkpoint dcc16e183c29ac0acf58a8ef97c54f2c6f3d0914e45e5661cea7be6364c239b6；View 为 http://0.0.0.0:30000/projects/memsphere/changes/change-20261030-031536690z-1676929d。日志 /tmp/memsphere-master-merge-typecheck.log、/tmp/memsphere-master-merge-source-tests.log、/tmp/memsphere-post-merge-memory-validation.json。构建与 CLI/daemon/View 验证使用临时工作树，不覆盖原工作树冻结 dist。此处记录 Git 集成，不代表新的正式候选已验收。
+
+
+合并后独立工作树验证补充：完整 npm run build 通过；18 文件的 CLI、daemon、View、模型及存储/锁集成测试 124/124 通过（日志 /tmp/memsphere-master-merge-build.log、/tmp/memsphere-master-merge-integration.log）。master 新增 context-control-view-read 测试原先引用已删除的 Project 锁接口，现改为直接占用旧 settings.lock 验证读取不受影响，并使用维护日志的 withModelMaintenance/commitModelOperation 验证模型发布期间只读结果重试和 pending 拒绝；没有恢复 Project 全局锁。实现及合并分别已保存为 541d229、eb2b078；本次测试接口适配另行提交。最终主工作树未重建 dist，临时工作树验证完成后清理；只保留本地评审材料未提交。
