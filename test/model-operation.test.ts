@@ -192,7 +192,8 @@ for (const running of ["write", "recover"] as const) {
     }
     const active = await worker(t, f.root, { mode: running, pause: "pending" });
     active.start(); await active.next("paused");
-    const before = await snapshotTree(f.root, [".runtime/model-operation.claim"]);
+    const heldClaims = [".runtime/model-operation.claim", ".runtime/config.json.lock"];
+    const before = await snapshotTree(f.root, heldClaims);
     const alias = join(f.directory, "active-alias");
     await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
     await assert.rejects(withModelMaintenance(alias, async () => { assert.fail("Busy request must not run preflight"); }), { code: "MODEL_OPERATION_BUSY" });
@@ -200,7 +201,7 @@ for (const running of ["write", "recover"] as const) {
     const other = await worker(t, f.root, { mode: "new-write" });
     other.start(); const result = await other.next("result"); await other.exit;
     assert.equal(result.code, "MODEL_OPERATION_BUSY");
-    assert.deepEqual(await snapshotTree(f.root, [".runtime/model-operation.claim"]), before, "Rejected requests must not change the active journal or files");
+    assert.deepEqual(await snapshotTree(f.root, heldClaims), before, "Rejected requests must not change the active journal or files");
     active.child.send("continue");
     assert.equal((await active.next("result")).ok, true); await active.exit;
     await withModelMaintenance(f.root, async () => {});
