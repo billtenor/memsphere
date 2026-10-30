@@ -14,6 +14,7 @@ import { currentCliRuntimeDescriptor } from "../acp/cli-runtime.js";
 import { listTasks, updateTask, taskDiagnostics, type TaskRow } from "./tasks.js";
 import { inspectReview, reviewResumeNotification, reviewReady } from "./review.js";
 import { readRunnerAgents } from "../runner/identity.js";
+import { resolveQueueCommand } from "../runner/queue-command.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 
 const stateSchema = z.object({ protocol: z.literal(1), pid: z.number().int().positive(), instanceId: z.string(), token: z.string(), endpoint: z.string() }).strict();
@@ -248,10 +249,11 @@ export async function runDaemon(home = resolveMemsphereHome()) {
     }
   });
 }
-export function sendQueue(command: string, sessionId: string, body: string, cwd: string) {
+export async function sendQueue(command: string, sessionId: string, body: string, cwd: string) {
+  const launch = await resolveQueueCommand(command);
   return new Promise<void>((resolve, reject) => {
     const message = `[Memsphere 自动消息]\n${body}`;
-    const child = spawnCommand(command, ["queue", "--thread", sessionId, "--message", message], { cwd, stdio: "ignore" });
+    const child = spawnCommand(launch.command, [...launch.args, "queue", "--thread", sessionId, "--message", message], { cwd, stdio: "ignore" });
     const timeout = setTimeout(() => { child.kill(); reject(new Error("Queue timeout; outcome unknown")); }, 15000);
     child.once("error", e => { clearTimeout(timeout); reject(e); });
     child.once("close", code => { clearTimeout(timeout); if (code === 0) resolve(); else reject(new Error(`Queue exited ${code}`)); });

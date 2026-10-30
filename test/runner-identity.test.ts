@@ -2,6 +2,23 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { detectIdentity, runnerAgentsSchema } from "../src/runner/identity.js";
 import { taskSchema } from "../src/daemon/tasks.js";
+import { parseWindowsNodeShim } from "../src/runner/queue-command.js";
+
+test("Windows Node shim resolution keeps static paths and rejects ambiguous launchers", () => {
+  const shim = String.raw`C:\Tools\codex.cmd`;
+  const node = String.raw`C:\Node\node.exe`;
+  assert.deepEqual(parseWindowsNodeShim(String.raw`@"C:\Node\node.exe" "C:\Tools\queue.mjs" %*`, shim, node), {
+    command: node, args: [String.raw`C:\Tools\queue.mjs`]
+  });
+  const npm = 'SET "_prog=%dp0%\\node.exe"\r\nSET "_prog=node"\r\nendLocal & "%_prog%" "%dp0%\\node_modules\\codex\\cli.js" %*\r\n';
+  assert.deepEqual(parseWindowsNodeShim(npm, shim, node), {
+    command: node, args: [String.raw`C:\Tools\node_modules\codex\cli.js`], adjacentNode: String.raw`C:\Tools\node.exe`
+  });
+  for (const source of [npm + npm, npm.replace("%dp0%\\node_modules", "%UNKNOWN%\\node_modules"), '@echo custom %*', npm.replace('SET "_prog=node"', 'SET "_prog=other"')]) {
+    assert.equal(parseWindowsNodeShim(source, shim, node), undefined);
+  }
+});
+
 
 test("identity is the current Agent session and ambiguous or unsafe IDs fail closed", () => {
   assert.equal(detectIdentity({}), undefined);

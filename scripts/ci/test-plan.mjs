@@ -76,18 +76,19 @@ export const testSuites = {
   "memory-cli": { title: "Memory & Project CLI", categories: ["memory-cli"] },
   "app-cli": { title: "App, Model & Data CLI", categories: ["app-cli"] },
   "project-core": { title: "Project Lifecycle", categories: ["project-core"] },
-  "project-upgrade": { title: "Project Upgrades", categories: ["project-upgrade"] },
+  "project-upgrade": { title: "Project Upgrades", categories: ["project-upgrade", "runtime-upgrades"] },
   "memory-core": { title: "Memory Stores & Changes", categories: ["memory-core"] },
   "runtime-core": { title: "Run, Data & SDK", categories: ["runtime-core"] },
   browser: { title: "Browser UI", categories: ["model-ui", "review-ui"] },
   cli: { title: "CLI & Packaging", categories: ["memory-cli", "app-cli"] },
-  "memory-and-projects": { title: "Projects & Memory", categories: ["project-core", "project-upgrade", "memory-core"] },
-  core: { title: "Projects, Memory & Runtime", categories: ["project-core", "project-upgrade", "memory-core", "runtime-core"] }
+  "memory-and-projects": { title: "Projects & Memory", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core"] },
+  core: { title: "Projects, Memory & Runtime", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core", "runtime-core"] }
 };
 
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
   const name = basename(file);
+  if (["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"].includes(name)) return "runtime-upgrades";
   if (name === "embedded-changeset.test.ts") return "memory-core";
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
     return /model|settings/.test(name) ? "model-ui" : "review-ui";

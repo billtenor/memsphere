@@ -6,6 +6,7 @@ import { validateFilename } from "../data/extensions/shared/filesystem.js";
 import { detectAcpProviderInstance } from "../acp/detection.js";
 import { listAcpProviderDefinitions, defaultAcpProviderInstance } from "../acp/catalog.js";
 import { spawnCommand } from "../platform-process.js";
+import { resolveQueueCommand } from "./queue-command.js";
 
 export const agentTypes = ["codex", "traex"] as const;
 export type AgentType = typeof agentTypes[number];
@@ -58,9 +59,10 @@ export async function detectRunnerAgents() {
   }));
 }
 
-export function checkQueueCapability(command: string): Promise<void> {
+export async function checkQueueCapability(command: string): Promise<void> {
+  const launch = await resolveQueueCommand(command);
   return new Promise((resolve, reject) => {
-    const child = spawnCommand(command, ["queue", "--help"], { stdio: ["ignore", "pipe", "ignore"] });
+    const child = spawnCommand(launch.command, [...launch.args, "queue", "--help"], { stdio: ["ignore", "pipe", "ignore"] });
     let output = "";
     const timer = setTimeout(() => { child.kill(); reject(new Error("queue capability probe timed out")); }, 3000);
     child.stdout?.on("data", chunk => { output = (output + chunk.toString()).slice(0, 65536); });
