@@ -15,6 +15,7 @@ export async function writeRegisteredFixtureFile(path: string, source: string) {
 }
 
 export async function registerFixtureDefinition(root: string, modelRef: string, source: string) {
+  modelRef = modelRef.split(sep).join("/");
   if (!stores.has(root)) stores.set(root, createModelRegistrationStore({}, "fixture-registrations", join(root, "models/registrations/project")));
   const store = await stores.get(root)!;
   const id = createHash("sha256").update(modelRef).digest("hex"), row = await store.get({}, id);

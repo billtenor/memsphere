@@ -39,14 +39,19 @@ export async function businessFixture(t: TestContext, schemas: Record<string, un
   return { directory, root, home, cwd, createStore, beforeCleanup, registerModels };
 }
 
-export async function snapshotTree(root: string): Promise<unknown[]> {
+export async function snapshotTree(root: string, emptyLockedFiles: string[] = []): Promise<unknown[]> {
   const result: unknown[] = [];
   async function visit(directory: string, prefix: string) {
     for (const name of (await fs.readdir(directory)).sort()) {
       const path = join(directory, name); const relative = `${prefix}${name}`; const stat = await fs.lstat(path);
       if (stat.isSymbolicLink()) result.push([relative, "link", await fs.readlink(path)]);
       else if (stat.isDirectory()) { result.push([relative, "directory", stat.mtimeMs]); await visit(path, `${relative}/`); }
-      else result.push([relative, "file", stat.mtimeMs, (await fs.readFile(path)).toString("hex")]);
+      else {
+        // Windows exclusive claims cannot be read, but carry no payload. Still
+        // compare their presence, size and mtime together with all journal bytes.
+        const bytes = emptyLockedFiles.includes(relative) && stat.size === 0 ? "" : (await fs.readFile(path)).toString("hex");
+        result.push([relative, "file", stat.mtimeMs, bytes]);
+      }
     }
   }
   await visit(root, ""); return result;

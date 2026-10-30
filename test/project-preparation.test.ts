@@ -99,6 +99,7 @@ test("Private bootstrap resolves a Project through an aliased parent directory",
   await withNewProjectDirectory(f.home, "aliased", root, async () => {
     const registry = await readProjectRegistry(f.home);
     assert.equal(registry.projects.aliased.root, await realpath(f.root));
+    await assertProjectPrepared(root);
     await assertProjectPrepared(f.root);
   });
   await assertProjectPrepared(f.root);

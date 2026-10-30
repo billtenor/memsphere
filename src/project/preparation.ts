@@ -13,7 +13,7 @@ export async function assertProjectPrepared(root: string): Promise<void> {
   try { await readFile(projectPreparationPath(root)); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
   const owner = preparing.getStore();
-  if (owner?.active && owner.root === resolve(root)) return;
+  if (owner?.active && owner.root === await realpath(root)) return;
   throw Object.assign(new Error(`Project preparation is unfinished: ${root}`), { code: "PROJECT_PREPARATION_PENDING" });
 }
 /** Exclusive directory creation owns this attempt; no other attempt's directory is removed. */

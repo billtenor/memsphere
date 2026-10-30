@@ -55,7 +55,7 @@ test("findRun and listRuns are readonly under a held Run lock while native statu
   });
   // Invoke the current source CLI without rebuilding the running daemon's dist.
   const result = await promisify(execFile)(process.execPath, [
-    "--import", fileURLToPath(import.meta.resolve("tsx")), fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+    "--import", import.meta.resolve("tsx"), fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
     "--project", "test-project", "run", "status", "--run", run.id, "--output", "json",
   ], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
   const status = JSON.parse(result.stdout);

@@ -24,7 +24,18 @@ const statePath = (home: string) => join(root(home), "daemon.json");
 const intentPath = (home: string) => join(root(home), "daemon-services.json");
 const endpoint = (home: string) => process.platform === "win32" ? `\\\\.\\pipe\\memsphere-${createHash("sha256").update(home).digest("hex").slice(0, 24)}` : join(root(home), "daemon.sock");
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; } };
-async function readState(home: string) { try { return stateSchema.parse(JSON.parse(await readFile(statePath(home), "utf8"))); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw e; } }
+async function readState(home: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { return stateSchema.parse(JSON.parse(await readFile(statePath(home), "utf8"))); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT") return undefined;
+      // Windows deletion/atomic replacement may briefly deny a concurrent read.
+      if (process.platform !== "win32" || attempt >= 19 || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) throw error;
+      await delay(10 * (attempt + 1));
+    }
+  }
+}
 export async function readServiceIntent(home = resolveMemsphereHome()) {
   try { return intentSchema.parse(JSON.parse(await readFile(intentPath(home), "utf8"))); } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return intentSchema.parse({ version: 1, view: { desiredState: "stopped" } }); throw e; }
 }

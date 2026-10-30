@@ -4,7 +4,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { businessFixture } from "./helpers/business-data.js";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
@@ -37,6 +38,17 @@ test("daemon survives CLI exit, restores View intent, and isolates separate Home
   assert.equal(JSON.parse((await call(homes[1], "daemon", "status")).stdout).instanceId, second.instanceId);
 });
 
+async function writeTestCommand(command: string, source: string) {
+  if (process.platform === "win32") {
+    const script = `${command}.mjs`;
+    await writeFile(script, source);
+    await writeFile(`${command}.cmd`, `@"${process.execPath}" "${script}" %*\r\n`);
+  } else {
+    await writeFile(command, source);
+    await chmod(command, 0o755);
+  }
+}
+
 async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" | "cas-conflict" = "success", includeAgent = true) {
   const f = await businessFixture(t, {});
   const bin = join(f.directory, "bin"); await mkdir(bin);
@@ -44,17 +56,15 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
   const providers = { codex: { env: { REVIEW_TEST_GATE: gate } } };
   const provider = join(bin, "codex-acp");
-  await writeFile(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) { console.log("fake-acp test"); process.exit(0); } process.env.MEMSPHERE_HOME = ${JSON.stringify(f.home)}; process.argv[2] = "gated-approve"; import(${JSON.stringify(resolve("test/fixtures/fake-acp-reviewer.mjs"))});\n`);
-  await chmod(provider, 0o755);
+  await writeTestCommand(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) { console.log("fake-acp test"); process.exit(0); } process.env.MEMSPHERE_HOME = ${JSON.stringify(f.home)}; process.argv[2] = "gated-approve"; import(${JSON.stringify(pathToFileURL(resolve("test/fixtures/fake-acp-reviewer.mjs")).href)});\n`);
   const queue = join(f.directory, "queue.json");
   const queueLog = join(f.directory, "queue-attempts.ndjson");
   const fake = join(bin, "codex");
-  await writeFile(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="cas-conflict") { const path = ${JSON.stringify(join(f.home, "data", "daemon-tasks"))}; for(const file of fs.readdirSync(path).filter(x=>x.startsWith("task-") && x.endsWith(".json"))) { const record = path+"/"+file; const row=JSON.parse(fs.readFileSync(record,"utf8")); row.revision++; fs.writeFileSync(record+".tmp",JSON.stringify(row)); fs.renameSync(record+".tmp",record); } } if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
-  await chmod(fake, 0o755);
+  await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="cas-conflict") { const path = ${JSON.stringify(join(f.home, "data", "daemon-tasks"))}; for(const file of fs.readdirSync(path).filter(x=>x.startsWith("task-") && x.endsWith(".json"))) { const record = path+"/"+file; const row=JSON.parse(fs.readFileSync(record,"utf8")); row.revision++; fs.writeFileSync(record+".tmp",JSON.stringify(row)); fs.renameSync(record+".tmp",record); } } if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
   await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents, acp_providers: providers }));
-  const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}:${process.env.PATH}` };
+  const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
   f.beforeCleanup(async () => { await completeAgent(true).catch(() => undefined); await call("daemon", "stop"); });
   const procedure = join(f.directory, "graph.yaml");
