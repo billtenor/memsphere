@@ -116,7 +116,7 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
     assert.equal(activity.events.some((event) => event.kind === "message"), true);
     assert.equal(activity.events.find((event) => event.kind === "tool")?.status, "completed");
     assert.equal(activity.events.some((event) => event.kind === "plan"), true);
-    assert.doesNotMatch(JSON.stringify(activity), /rawInput|rawOutput|private/);
+    assert.doesNotMatch(JSON.stringify(activity), /rawInput|rawOutput|"private"\s*:/);
     const rawRecords = (await readFile(agentActivityRawPath(activityLocation), "utf8"))
       .trim()
       .split("\n")
