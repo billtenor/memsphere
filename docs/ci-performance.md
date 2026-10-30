@@ -4,7 +4,7 @@
 
 测试按用户可观察契约和真实运行边界选择。删除、合并或下沉必须说明重复保护及覆盖代价；不得为隐藏失败而删断言、跳过测试或放宽验收。保留教程安全规则、数据发布/回滚、权限、并发与原生文件/进程保护。
 
-`npm test` 仍构建并运行`test/` 下递归发现的全部 `.test.ts`（含 `test/ci/`），每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。Windows测试/打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
+`npm test` 仍构建并运行`test/` 下递归发现的全部 `.test.ts`（含 `test/ci/`），每个文件使用独立临时 MEMSPHERE_HOME，文件内部串行；`--test-concurrency=N` 控制文件进程数。`--results=<path>` 或 CI_TEST_RESULTS 保存计划与实际结果。失败不停止其他文件，不转换为成功。`pretest:ci` 每个测试job构建一次，Windows安装包使用 `npm pack --ignore-scripts` 复用该job产物；不跨OS共享dist。各平台测试job与Windows打包job在runner.temp启用Node 22原生编译缓存，供该job的重复Node/CLI子进程复用编译结果；不缓存测试状态、不复用MEMSPHERE_HOME、不跨job共享缓存。
 
 ## 默认 PR
 
