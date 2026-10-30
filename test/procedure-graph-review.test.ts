@@ -92,3 +92,16 @@ test("graph ACP worker uses the real Session CLI to read the candidate and submi
     assert.equal(result.round.status, "awaiting_runner_vote");
   } finally { if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome; }
 });
+
+test("graph Review adapter restores omitted idle timeout as null", async t => {
+  const f = await fixture(t, true);
+  const runId = f.result.snapshot.run.id;
+  const row = (await f.service.stores.run.get({}, runId))!;
+  const value = structuredClone(row.value) as any;
+  delete value.permissionConfig.actors.reviewer.agent.idleTimeoutMs;
+  await f.service.stores.run.update({}, runId, value, { expectedRevision: row.revision });
+  const context = await reviews.readArtifactReviewForActor(f.input);
+  const actor = context.run.controlPlane!.actors.reviewer;
+  assert.equal(actor.kind, "agent");
+  if (actor.kind === "agent") assert.equal(actor.agent.idleTimeoutMs, null);
+});

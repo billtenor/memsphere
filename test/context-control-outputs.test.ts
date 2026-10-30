@@ -22,13 +22,18 @@ test("outputs track parallel leaves, revisions, real dependencies and manual roo
 });
 
 for (const read of ["snapshot", "listRuns", "findRun", "outputs"] as const) {
-  test(`${read} repairs the pending Step before deriving outputs and fails clearly while Step storage is broken`, async t => {
+  const recovers = read === "snapshot" || read === "outputs";
+  test(`${read} ${recovers ? "repairs the pending Step and reports broken storage" : "remains readonly with a pending Step and broken completion storage"}`, async t => {
     const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!;
     const r = await s.start("recovery"); const update = s.stores.step.update.bind(s.stores.step);
     s.stores.step.update = async () => { throw Error("injected completion failure"); };
     await assert.rejects(s.report(r.id, { name: "A", content: textContent("A") }), (error: any) => !!error.details.artifactId);
     const request = () => read === "listRuns" ? s.listRuns() : s[read](r.id);
-    await assert.rejects(request(), { code: "RECOVERY_REQUIRED" });
+    if (recovers) await assert.rejects(request(), { code: "RECOVERY_REQUIRED" });
+    else {
+      await request();
+      await assert.rejects(s.snapshot(r.id), { code: "RECOVERY_REQUIRED" });
+    }
     s.stores.step.update = update; await request();
     const snap = await s.snapshot(r.id); assert.equal(snap.completeIds.length, 1); assert.deepEqual(snap.outputArtifactIds, snap.completeIds);
     await s.updateOutputs(r.id, [], snap.completeIds); await request(); assert.deepEqual(await s.outputs(r.id), []);

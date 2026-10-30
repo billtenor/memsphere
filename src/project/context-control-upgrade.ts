@@ -20,7 +20,7 @@ const previous = {
 };
 // Known pre-graph release and the locally installed graph review candidates.
 const beforeGraph = {
-  run: ["594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
+  run: ["8b4604ece26b05fc674f5de3ff24a8dc95a9650fbbedbbefcad81783128b676b", "594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
   step: ["a8bcdf5da03ef45a813c4d956c545067686e49cee99047426fb0a3c4fa63eecd", "9a39b10e98c9d5a3f2d48d4caf8dad5f18e0b1b04cebd45ab8014ffecf295a9a", "43f43c0a5470b3f07f43702a9ac7c6d83a23a7678230a8a2816b989e5ded1053", "7dc7c88dd1d0908628385179c460c523e9ee4ca184156238fd665242c077056c"]
 };
 /** Journal admission protects this known release conversion, not generic schema migration. */

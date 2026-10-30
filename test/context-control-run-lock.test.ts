@@ -1,11 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { withNativeFileLock } from "../src/file-lock.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { textContent } from "../src/context_control/types.js";
+import type { GraphProcedureMemory } from "../src/memory/ast.js";
+import type { GraphRuntime } from "../src/context_control/graph-runtime.js";
+import type { Run, Step } from "../src/context_control/types.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
 import { businessFixture } from "./helpers/business-data.js";
 
@@ -26,6 +32,87 @@ async function expectRunCasConflict(service: NonNullable<Awaited<ReturnType<type
   finally { release(); store.update = update; }
   await rejected;
 }
+
+test("findRun and listRuns are readonly under a held Run lock while native status still recovers", { timeout: 10000 }, async t => {
+  const f = await businessFixture(t, {});
+  const service = (await openContextControl(f.root, true))!;
+  const run = await service.start("readonly lookup"), other = await service.start("other Run");
+  const steps = service.stores.step, create = steps.create.bind(steps);
+  let missingKey = "";
+  steps.create = async (_context, key) => { missingKey = key; throw Error("interrupted draft"); };
+  try { await assert.rejects(service.createArtifact(run.id, { name: "unfinished" }), /interrupted draft/); }
+  finally { steps.create = create; }
+  const before = await service.stores.run.get({}, run.id);
+  const artifacts = await service.stores.artifact.list({});
+  const saved = await service.stores.artifact.get({}, artifacts.items[0].id);
+  await withNativeFileLock(await runLock(f.root, run.id), async () => {
+    assert.deepEqual(await service.findRun(run.id), run);
+    assert.equal(await service.findRun("missing"), undefined);
+    assert.deepEqual((await service.listRuns()).map(r => r.id).sort(), [run.id, other.id].sort());
+    assert.equal(await steps.get({}, missingKey), undefined);
+    assert.deepEqual(await service.stores.run.get({}, run.id), before);
+    assert.deepEqual(await service.stores.artifact.get({}, artifacts.items[0].id), saved);
+  });
+  // Invoke the current source CLI without rebuilding the running daemon's dist.
+  const result = await promisify(execFile)(process.execPath, [
+    "--import", fileURLToPath(import.meta.resolve("tsx")), fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
+    "--project", "test-project", "run", "status", "--run", run.id, "--output", "json",
+  ], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
+  const status = JSON.parse(result.stdout);
+  const step = status.steps.find((s: { id: string }) => `${run.id}/${s.id}` === missingKey);
+  assert.equal(step.status, "running");
+  assert.equal(step.artifact.id, (saved!.value as { id: string }).id);
+  assert.deepEqual(await service.stores.run.get({}, run.id), before);
+});
+
+test("exploration recovery bypasses the Run lock and preserves concurrent Step edits with CAS", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {});
+  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const run = await service.start("recovery CAS"), target = await service.createArtifact(run.id, { name: "pending" });
+  const store = service.stores.step, update = store.update.bind(store);
+  store.update = async () => { throw Error("interrupted submission"); };
+  try { await assert.rejects(service.report(run.id, { target: target.id, content: textContent("saved") }), /interrupted submission/); }
+  finally { store.update = update; }
+  let release!: () => void, started!: () => void;
+  const entered = new Promise<void>(r => { started = r; }), gate = new Promise<void>(r => { release = r; });
+  store.update = async (...args) => { started(); await gate; return update(...args); };
+  const rejected = assert.rejects(service.snapshot(run.id), (error: unknown) => {
+    const e = error as { code: string; cause: { code: string } };
+    return e.code === "RECOVERY_REQUIRED" && e.cause.code === "REVISION_CONFLICT";
+  });
+  try {
+    await entered;
+    await other.productionReads(run.id, target.stepId, { "external:source": { readAt: new Date().toISOString() } });
+  } finally { release(); store.update = update; }
+  await rejected;
+  await withNativeFileLock(await runLock(root, run.id), async () => {
+    const recovered = await service.snapshot(run.id), step = recovered.steps.find(s => s.id === target.stepId)!;
+    assert.equal(step.status, "done"); assert.ok(step.reads?.["external:source"]);
+    assert.equal(Buffer.from((await service.readArtifact(run.id, target.id)).bytes).toString(), "saved");
+  });
+});
+
+test("concurrent recovery creates one missing Step and a retry reuses its identity", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {});
+  const service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  const run = await service.start("recovery create"), store = service.stores.step, create = store.create.bind(store);
+  store.create = async () => { throw Error("missing Step"); };
+  try { await assert.rejects(service.createArtifact(run.id, { name: "draft" }), /missing Step/); }
+  finally { store.create = create; }
+  let release!: () => void, started!: () => void;
+  const entered = new Promise<void>(r => { started = r; }), gate = new Promise<void>(r => { release = r; });
+  store.create = async (...args) => { started(); await gate; return create(...args); };
+  const rejected = assert.rejects(service.snapshot(run.id), (error: unknown) => {
+    const e = error as { code: string; cause: { code: string } };
+    return e.code === "RECOVERY_REQUIRED" && e.cause.code === "ALREADY_EXISTS";
+  });
+  try { await entered; await other.snapshot(run.id); }
+  finally { release(); store.create = create; }
+  await rejected;
+  const recovered = await service.snapshot(run.id);
+  assert.equal(recovered.steps.length, 1); assert.equal(recovered.artifacts.length, 1);
+  assert.equal(recovered.artifacts[0].stepId, recovered.steps[0].id);
+});
 
 test("exploration finish bypasses the Run lock without recovering incomplete records and stays idempotent", { timeout: 5000 }, async t => {
   const { root } = await businessFixture(t, {});
@@ -322,6 +409,16 @@ test("Graph reads, Step entry, personal Reviews and dispositions bypass the Run 
     try {
       await withNativeFileLock(await runLock(root, runId), async () => {
         assert.equal((await service.findRun(runId))?.id, runId);
+        assert.equal((await service.findViewRun(runId))?.id, runId);
+        assert.equal(Buffer.from((await service.readViewArtifact(runId, first.artifact.id)).bytes).toString(), first.step.id);
+        const overview = await service.viewProjection(runId, "overview");
+        assert.deepEqual(overview?.artifacts, []); assert.deepEqual(overview?.reviews, []);
+        for (const surface of ["artifacts", "action"] as const) {
+          const projection = await service.viewProjection(runId, surface, first.step.source!.actionId);
+          assert.ok(projection?.artifacts.some(a => a.id === first.artifact.id));
+          assert.ok(projection.artifacts.every(a => a.content === undefined && a.contentRef === undefined));
+          assert.deepEqual(projection.reviews, []);
+        }
         assert.equal((await service.snapshot(runId)).steps.length, 2);
         assert.equal((await g.bindingSnapshot(runId)).runId, runId);
         const selected = await g.reviewSnapshot(runId, first.step.id, round);
@@ -353,5 +450,195 @@ test("Graph reads, Step entry, personal Reviews and dispositions bypass the Run 
     const snapshot = await g.snapshot(runId);
     assert.ok(snapshot.steps.every(s => s.reviewRounds![0].resolutions?.length === 1));
     assert.ok(snapshot.reviews.filter(r => r.reviewer.actorId === "a").every(r => r.attempts![0].completion?.stopReason === "done"));
+  });
+});
+
+const action = (id: string, from = "START", review = false) => ({
+  tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from }],
+  artifact: { name: id, model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, ...(review ? { review: ["approval"] } : {}) },
+});
+const procedure = (actions: ReturnType<typeof action>[]): GraphProcedureMemory => ({
+  tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["concurrent-graph"], defines: ["Concurrency"], actions,
+} as GraphProcedureMemory);
+const gate = () => {
+  let release!: () => void, started!: () => void;
+  const entered = new Promise<void>(r => { started = r; }), waiting = new Promise<void>(r => { release = r; });
+  return { entered, release, pause: async () => { started(); await waiting; } };
+};
+
+// Exercises actual native lock occupation, not elapsed-time comparisons.
+test("Graph report, vote, advance, finish and abandon work while the former Run lock is held", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "held lock", procedure: procedure([action("A", "START", true), action("B", "A")]),
+      controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } } },
+      reviewConfiguration: { reviews: { "concurrent-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } }, slots: { "concurrent-graph::approval": { actorIds: ["human"] } } } });
+    const id = start.run.id, dir = join(root, ".runtime/context-control"); await mkdir(dir, { recursive: true });
+    await withNativeFileLock(join(dir, `${createHash("sha256").update(id).digest("hex")}.lock`), async () => {
+      await g.enter(id, start.steps[0].id);
+      const candidate = await g.report(id, start.steps[0].id, { text: "A" });
+      const round = candidate.step.reviewRounds![0].id;
+      await g.submitReview(id, candidate.step.id, round, "human", "approve");
+      const voted = await g.submitReview(id, candidate.step.id, round, "runner", "approve");
+      const b = voted.steps.find(s => s.source!.actionId === "B")!; await g.enter(id, b.id);
+      const report = await g.report(id, b.id, { text: "B" }); await g.advance(id);
+      assert.equal((await service.finish(id, [report.artifact.id])).status, "done");
+      assert.equal((await g.finish(id)).status, "done");
+    });
+    const another = await g.start({ name: "abandon", procedure: procedure([action("A")]) });
+    await withNativeFileLock(join(dir, `${createHash("sha256").update(another.run.id).digest("hex")}.lock`), async () => {
+      assert.equal((await g.abandon(another.run.id)).status, "abandoned");
+      assert.equal((await g.abandon(another.run.id)).status, "abandoned");
+    });
+  });
+});
+
+test("parallel Graph reports keep both saved submissions and recover shared Run CAS conflicts", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "parallel", procedure: procedure([action("A"), action("B"), action("C", "A"), action("D", "B")]) });
+    for (const step of start.steps) await g.enter(start.run.id, step.id);
+    const store = service.stores.step, update = store.update.bind(store), barrier = gate(); let saved = 0;
+    store.update = async (...args) => {
+      const result = await update(...args);
+      if ((args[2] as Step).frames?.length && ++saved <= 2) {
+        if (saved === 2) barrier.release();
+        await barrier.pause();
+      }
+      return result;
+    };
+    let results;
+    try { results = await Promise.allSettled(start.steps.map(s => g.report(start.run.id, s.id, { text: s.source!.actionId }))); }
+    finally { store.update = update; }
+    for (const r of results) if (r.status === "rejected") {
+      assert.ok(["REVISION_CONFLICT", "ALREADY_EXISTS"].includes(r.reason.code));
+      assert.equal(r.reason.details.runId, start.run.id); assert.ok(r.reason.details.artifactId);
+    }
+    const recovered = await g.advance(start.run.id);
+    assert.equal(recovered.artifacts.length, 2);
+    assert.equal(recovered.steps.filter(s => s.status === "done").length, 2);
+    assert.deepEqual(recovered.steps.filter(s => s.status === "pending").map(s => s.source!.actionId).sort(), ["C", "D"]);
+    assert.equal(new Set(recovered.steps.filter(s => s.status === "done").map(s => s.completionSequence)).size, 2);
+  });
+});
+
+test("two reports for the same Graph Step cannot overwrite the winning submission", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "same Step", procedure: procedure([action("A")]) }), id = start.run.id, step = start.steps[0];
+    await g.enter(id, step.id);
+    const store = service.stores.step, update = store.update.bind(store), barrier = gate();
+    store.update = async (...args) => { await barrier.pause(); return update(...args); };
+    const rejected = assert.rejects(g.report(id, step.id, { text: "stale" }), { code: "REVISION_CONFLICT" });
+    try { await barrier.entered; await other.withGraph(h => h.report(id, step.id, { text: "winner" })); }
+    finally { barrier.release(); store.update = update; }
+    await rejected;
+    const snapshot = await g.advance(id); assert.equal(snapshot.artifacts.length, 1);
+    assert.equal(Buffer.from((await g.readArtifact(id, snapshot.artifacts[0].id)).bytes).toString(), "winner");
+  });
+});
+
+async function interrupted(g: GraphRuntime, service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>) {
+  const start = await g.start({ name: "recovery", procedure: procedure([action("A"), action("B", "A")]) });
+  await g.enter(start.run.id, start.steps[0].id);
+  const store = service.stores.artifact, create = store.create.bind(store);
+  store.create = async () => { throw Error("saved frame"); };
+  try { await assert.rejects(g.report(start.run.id, start.steps[0].id, { text: "A" }), /saved frame/); }
+  finally { store.create = create; }
+  const saved = await g.records.require<Step>("step", start.run.id, start.steps[0].id);
+  await assert.rejects(g.report(start.run.id, start.steps[0].id, { text: "replacement" }), { code: "RECOVERY_REQUIRED" });
+  assert.deepEqual(await g.records.require<Step>("step", start.run.id, start.steps[0].id), saved);
+  return start;
+}
+
+test("concurrent recovery finishing the same submission does not overwrite a removed frame", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  await service.withGraph(async g => {
+    const start = await interrupted(g, service), id = start.run.id, store = service.stores.run, update = store.update.bind(store), barrier = gate();
+    let paused = false;
+    store.update = async (...args) => {
+      const result = await update(...args);
+      if (!paused && (args[2] as Run).frames![0].graphFrame.nextCompletionSequence > 1) { paused = true; await barrier.pause(); }
+      return result;
+    };
+    const recovery = g.advance(id);
+    try { await barrier.entered; await other.withGraph(h => h.advance(id)); }
+    finally { barrier.release(); store.update = update; }
+    await recovery;
+    const snapshot = await g.advance(id);
+    assert.equal(snapshot.steps.filter(s => s.source!.actionId === "B").length, 1);
+    assert.equal(snapshot.run.frames![0].graphFrame.processedStepIds.length, 1);
+    assert.equal(snapshot.steps.find(s => s.source!.actionId === "A")!.frames?.length, 0);
+  });
+});
+
+test("a stale advance does not dispatch a completion already processed by another advance", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  await service.withGraph(async g => {
+    const start = await interrupted(g, service), id = start.run.id;
+    const update = g.records.update.bind(g.records);
+    // Leave a completed source whose downstream dispatch has not yet committed.
+    g.records.update = async (...args) => {
+      if (args[0] === "run" && (args[3] as Run).frames![0].graphFrame.processedStepIds.length) throw Error("dispatch interrupted");
+      return update(...args);
+    };
+    try { await assert.rejects(g.advance(id), /dispatch interrupted/); }
+    finally { g.records.update = update; }
+    const require = g.records.require.bind(g.records), barrier = gate(); let reads = 0;
+    g.records.require = async (...args) => {
+      // Initial Run, materialization, loop snapshot, then the fresh dispatch row.
+      if (args[0] === "run" && ++reads === 4) await barrier.pause();
+      return require(...args);
+    };
+    const advancing = g.advance(id);
+    try { await barrier.entered; await other.withGraph(h => h.advance(id)); }
+    finally { barrier.release(); g.records.require = require; }
+    await advancing;
+    const snapshot = await g.advance(id);
+    assert.equal(snapshot.steps.filter(s => s.source!.actionId === "B").length, 1);
+    assert.deepEqual(snapshot.run.frames![0].graphFrame.processedStepIds, [start.steps[0].id]);
+  });
+});
+
+test("another Reviewer can submit while one saved vote is paused before settlement", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "independent votes", procedure: procedure([action("A", "START", true)]),
+      controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: {
+        a: { kind: "human", name: "A", permissions: ["artifact.read", "decision.decide"] },
+        b: { kind: "human", name: "B", permissions: ["artifact.read", "decision.decide"] },
+      } }, reviewConfiguration: { reviews: { "concurrent-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } }, slots: { "concurrent-graph::approval": { actorIds: ["a", "b"] } } } });
+    const id = start.run.id; await g.enter(id, start.steps[0].id);
+    const candidate = await g.report(id, start.steps[0].id, { text: "A" }), round = candidate.step.reviewRounds![0].id;
+    const store = service.stores.review, update = store.update.bind(store), barrier = gate();
+    store.update = async (...args) => { const result = await update(...args); await barrier.pause(); return result; };
+    const first = g.submitReview(id, candidate.step.id, round, "a", "approve");
+    try { await barrier.entered; await other.withGraph(h => h.submitReview(id, candidate.step.id, round, "b", "approve")); }
+    finally { barrier.release(); store.update = update; }
+    await first;
+    const snapshot = await g.submitReview(id, candidate.step.id, round, "runner", "approve");
+    assert.equal(snapshot.reviews.filter(r => r.status === "submitted").length, 3);
+    assert.equal(snapshot.steps[0].status, "done");
+  });
+});
+
+test("Graph finish and abandon retain Run CAS instead of overwriting a concurrent Run edit", { timeout: 10000 }, async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!, other = (await openContextControl(root))!;
+  await service.withGraph(async g => {
+    for (const terminal of ["finish", "abandon"] as const) {
+      const start = await g.start({ name: terminal, procedure: procedure([action("A")]) }), id = start.run.id;
+      if (terminal === "finish") { await g.enter(id, start.steps[0].id); await g.report(id, start.steps[0].id, { text: "A" }); }
+      const store = service.stores.run, update = store.update.bind(store), barrier = gate();
+      store.update = async (...args) => { await barrier.pause(); return update(...args); };
+      const rejected = assert.rejects(g[terminal](id), { code: "REVISION_CONFLICT" });
+      try {
+        await barrier.entered;
+        const row = (await other.stores.run.get({}, id))!;
+        await other.stores.run.update({}, id, { ...row.value as Run, name: "winning edit" }, { expectedRevision: row.revision });
+      } finally { barrier.release(); store.update = update; }
+      await rejected;
+      const result = await g[terminal](id);
+      assert.equal(result.name, "winning edit"); assert.equal(result.status, terminal === "finish" ? "done" : "abandoned");
+    }
   });
 });

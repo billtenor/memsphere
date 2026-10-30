@@ -155,7 +155,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
         if (config.project?.name !== row.value.input.project) throw new Error("Task Project changed");
         const context = await inspectReview(config, row.value.input.reviewId);
         if (context.run.id !== row.value.input.runId || context.review.currentRoundId !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed" } }); return; }
-        if (claimed) await dispatchArtifactReviewAgents({ config, run: context.run });
+        if (claimed) await dispatchArtifactReviewAgents({ config, run: context.run, workspaceRoot: row.value.input.cwd });
         if (!reviewReady(context)) return;
         stage = "render";
         const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId);

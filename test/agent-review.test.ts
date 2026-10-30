@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +64,7 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
     assert.equal(assignment.actorKind, "agent");
     assert.equal(assignment.status, "queued");
 
+    let attemptDirectory: string | undefined;
     await runArtifactReviewAgentWorker({
       config: configPath,
       review: review.id,
@@ -71,8 +72,14 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
       assignment: artifactReviewAssignmentId(assignment),
       nodeExecutable: process.execPath,
       cliEntrypoint: fakeCli,
-      providerResolver: resolveFakeProvider
+      workspaceRoot: dirname(configPath),
+      providerResolver: () => ({ id: "traex", buildLaunch(input) {
+        attemptDirectory = input.workspaceRoot;
+        return fakeAgentReviewProvider.buildLaunch(input);
+      } })
     });
+    assert.ok(attemptDirectory);
+    await assert.rejects(readdir(attemptDirectory), { code: "ENOENT" });
 
     const after = await readRun(runsRoot, runId);
     const completed = currentArtifactReview(after);
@@ -849,7 +856,7 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
   }
   assert.equal(launch.env.SystemRoot ?? launch.env.SYSTEMROOT, "C:\\Windows");
   assert.equal(launch.startupTimeoutMs, 60_000);
-  assert.equal(launch.idleTimeoutMs, 120_000);
+  assert.equal(launch.idleTimeoutMs, null);
   assert.equal(launch.maxRuntimeMs, null);
 
   const unlimited = provider.buildLaunch({
@@ -1040,6 +1047,55 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
   }), /agent_max_runtime_timeout: total runtime exceeded 100ms/);
 });
 
+test("ACP Client permits silent work with both timeouts disabled and detects transport failures", { timeout: 15_000 }, async () => {
+  const input = (mode: string) => ({
+    launch: fakeClientLaunch(mode, { startupTimeoutMs: 3_000, idleTimeoutMs: null, maxRuntimeMs: null }),
+    prompt: "Review", reminder: "Submit", workspaceRoot: tmpdir(),
+    isSubmitted: async () => true, onSession: async () => undefined
+  });
+  const result = await runAgentReviewAcpSession(input("idle"));
+  assert.equal(result.stopReason, "end_turn");
+  for (const mode of ["exit-zero", "exit-error", "exit-signal", "disconnect"]) {
+    const before = Date.now();
+    await assert.rejects(runAgentReviewAcpSession({ ...input(mode), isSubmitted: async () => false }),
+      /agent_process_exit:|agent_connection_closed:/);
+    assert.ok(Date.now() - before < 5_000, "transport failure must not wait for a configured timeout");
+  }
+});
+
+test("Reviewer Attempts use fresh caller-local temporary directories, including retries", async () => {
+  await withAgentReviewFixture("no-submit", async ({ configPath, runsRoot, runId }) => {
+    const caller = await mkdtemp(join(tmpdir(), "memsphere-review-caller-"));
+    const nestedCaller = join(caller, "nested");
+    await mkdir(nestedCaller);
+    const directories: string[] = [];
+    try {
+      for (let index = 0; index < 2; index++) {
+        const review = currentArtifactReview(await readRun(runsRoot, runId))!;
+        const round = review.rounds.find(r => r.id === review.currentRoundId)!;
+        const assignment = round.assignments[0];
+        if (index) await retryArtifactReviewAgentAssignment({ runsRoot, reviewId: review.id, roundId: round.id, actorId: assignment.actorId });
+        await runArtifactReviewAgentWorker({
+          config: configPath, review: review.id, round: round.id,
+          assignment: artifactReviewAssignmentId(assignment), nodeExecutable: process.execPath,
+          cliEntrypoint: fakeCli, workspaceRoot: nestedCaller,
+          providerResolver: () => ({ id: "traex", buildLaunch(input) {
+            directories.push(input.workspaceRoot);
+            assert.equal(dirname(input.workspaceRoot), join(nestedCaller, "tmp"));
+            for (const name of ["TMPDIR", "TMP", "TEMP"]) assert.equal(input.sessionEnv[name], input.workspaceRoot);
+            return fakeAgentReviewProvider.buildLaunch(input);
+          } })
+        });
+        const after = currentArtifactReview(await readRun(runsRoot, runId))!;
+        assert.equal(after.rounds.at(-1)!.assignments[0].attempts?.at(-1)?.failure?.code, "agent_submission_missing");
+        assert.deepEqual(await readdir(join(nestedCaller, "tmp")), []);
+      }
+      assert.equal(directories.length, 2);
+      assert.notEqual(directories[0], directories[1]);
+    } finally { await rm(caller, { recursive: true, force: true }); }
+  });
+});
+
 async function withAgentReviewFixture(
   mode: "approve" | "no-submit",
   run: (fixture: { configPath: string; runsRoot: string; runId: string }) => Promise<void>
@@ -1171,7 +1227,7 @@ function agentIdentity(
       args,
       env: {},
       startupTimeoutMs: 60_000,
-      idleTimeoutMs: 120_000,
+      idleTimeoutMs: null,
       maxRuntimeMs: null,
       ...overrides
     }

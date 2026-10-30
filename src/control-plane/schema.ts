@@ -98,7 +98,7 @@ function providerInstanceFileSchema(type: AcpProviderType) {
   args: z.array(z.string()).optional(),
   env: providerEnvironmentSchema.optional(),
   startup_timeout_ms: z.number().int().positive().optional(),
-  idle_timeout_ms: z.number().int().positive().optional(),
+  idle_timeout_ms: z.number().int().positive().nullable().optional(),
   max_runtime_ms: z.number().int().positive().nullable().optional()
 }).strict().superRefine((input, context) => {
   const defaults = defaultAcpProviderInstance(type);
@@ -127,7 +127,7 @@ function providerInstanceInputSchema(type: AcpProviderType) {
     args: [...(input.args ?? defaults.args)],
     env: { ...(input.env ?? defaults.env) },
     startupTimeoutMs: input.startup_timeout_ms ?? defaults.startupTimeoutMs,
-    idleTimeoutMs: input.idle_timeout_ms ?? defaults.idleTimeoutMs,
+    idleTimeoutMs: input.idle_timeout_ms === undefined ? defaults.idleTimeoutMs : input.idle_timeout_ms,
     maxRuntimeMs: input.max_runtime_ms === undefined ? defaults.maxRuntimeMs : input.max_runtime_ms
   };
   });
@@ -282,7 +282,7 @@ const snapshotAgentRuntimeSchema = z.object({
   model: nonEmptyString.optional(),
   promptVersion: nonEmptyString.optional(),
   startupTimeoutMs: z.number().int().positive().optional(),
-  idleTimeoutMs: z.number().int().positive().optional(),
+  idleTimeoutMs: z.number().int().positive().nullable().optional(),
   maxRuntimeMs: z.number().int().positive().nullable().optional()
 }).strict().transform((agent) => ({
   provider: agent.provider ?? "traex",
@@ -296,7 +296,7 @@ const snapshotAgentRuntimeSchema = z.object({
   env: { ...(agent.env ?? {}) },
   model: agent.model,
   startupTimeoutMs: agent.startupTimeoutMs ?? 60_000,
-  idleTimeoutMs: agent.idleTimeoutMs ?? 120_000,
+  idleTimeoutMs: agent.idleTimeoutMs ?? null,
   maxRuntimeMs: agent.maxRuntimeMs ?? null
 }));
 

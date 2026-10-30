@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { type Page } from "playwright";
 import { browserScope } from "./helpers/browser.js";
 import { startProjectModelView } from "./fixtures/project-model-view.js";
+import { registerFixtureDefinition, writeRegisteredFixtureFile as writeFile } from "./helpers/model-fixture.js";
 
 type Fixture = Awaited<ReturnType<typeof startProjectModelView>>;
 async function withView(run: (page: Page, fixture: Fixture) => Promise<void>) {
@@ -467,7 +468,7 @@ test("model list filtering keeps a model without description readable and shows 
   await page.getByLabel("模型列表", { exact: true }).getByText("没有匹配的模型", { exact: true }).waitFor();
   await page.locator(".model-browser-body").getByText("没有匹配的模型", { exact: true }).waitFor();
   await filter.fill("");
-  await page.getByRole("button", { name: "advanced.json", exact: true }).waitFor();
+  await page.getByRole("button", { name: "组合条件", exact: true }).waitFor();
 }));
 
 test("a corrupt model remains selectable without preventing other definitions from opening", async () => withView(async (page, fixture) => {
@@ -531,14 +532,14 @@ test("a late model definition response cannot replace the newer selected model",
   });
   try {
     const pending = page.waitForRequest(request => request.url().endsWith("definition?model=advanced.json"));
-    await page.getByRole("button", { name: "advanced.json", exact: true }).click();
+    await page.getByRole("button", { name: "组合条件", exact: true }).click();
     await pending;
     await page.getByRole("button", { name: "订单 Alpha", exact: true }).click();
     await page.waitForURL(url => url.pathname.endsWith("/models") && url.searchParams.get("model") === "sales/order.json");
     release();
     await page.getByRole("heading", { name: "订单 Alpha", exact: true }).waitFor();
   await showStructure(page);
-    assert.equal(await page.getByRole("heading", { name: "advanced.json", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("heading", { name: "组合条件", exact: true }).count(), 0);
   } finally { release(); await page.unroute(pattern); }
 }));
 
@@ -624,11 +625,13 @@ test("confirmed model directory save switches the next refresh without migration
   await page.reload();
   await directory.waitFor();
   assert.equal(await directory.inputValue(), "custom");
-  await page.getByRole("button", { name: "模型", exact: true }).click();
-  await page.getByRole("button", { name: "新目录模型", exact: true }).click();
+  await registerFixtureDefinition(fixture.root, "new.json", await readFile(join(fixture.root, "custom/new.json"), "utf8"));
+  await page.goto(`${fixture.origin}/projects/alpha/models?scope=custom&model=new.json`);
   await page.getByRole("heading", { name: "新目录模型", exact: true }).waitFor();
   await showStructure(page);
-  assert.equal(await page.locator('.mem-view-list-item[data-item-id="sales/order.json"]').count(), 0);
+  const catalog = await (await page.request.get(`${fixture.origin}/api/projects/alpha/models`)).json();
+  assert.equal(catalog.models.find((m: { id: string }) => m.id === "sales/order.json").status, "unavailable");
+  assert.equal(catalog.models.find((m: { id: string }) => m.id === "new.json").status, "available");
   assert.equal(await readFile(join(fixture.root, "models/json-schema/draft-07/sales/order.json"), "utf8"), fixture.source);
   assert.equal(JSON.parse(await readFile(join(fixture.home, "config.json"), "utf8")).language, "zh-CN");
   assert.equal(JSON.parse(await readFile(join(fixture.home, "projects/beta/config.json"), "utf8")).modelsDirectory, undefined);
@@ -664,5 +667,5 @@ test("model information is the default tab and orders identity, standard, tags a
   assert.equal(row("存储方式"), "持久化存储");
   assert.equal(row("存储 ID"), "models/system/json-schema/draft-07");
   await showStructure(page);
-  assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id"]);
+  assert.deepEqual(await page.locator(".model-definition-name").allTextContents(), ["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id", "definition_sha256"]);
 }));

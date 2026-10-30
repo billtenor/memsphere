@@ -8,7 +8,7 @@ export type AcpProviderInstance = {
   args: string[];
   env: Record<string, string>;
   startupTimeoutMs: number;
-  idleTimeoutMs: number;
+  idleTimeoutMs: number | null;
   maxRuntimeMs: number | null;
 };
 
@@ -86,7 +86,7 @@ export function defaultAcpProviderInstance(type: AcpProviderType): AcpProviderIn
     args: [],
     env: {},
     startupTimeoutMs: 60_000,
-    idleTimeoutMs: 120_000,
+    idleTimeoutMs: null,
     maxRuntimeMs: null
   };
 }

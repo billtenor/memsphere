@@ -90,7 +90,17 @@ test("independent CLI processes enter idempotently and complete different Steps 
   const steps = (await f.call("run", "show", "--run", start.runId)).steps;
   const entries = await Promise.all([...steps, steps[0]].map((s: any) => f.invoke("run", "step", "enter", "--run", start.runId, "--step", s.id)));
   assert.equal(entries[0].stdout, entries[2].stdout);
-  await Promise.all(steps.map((s: any) => f.call("run", "report", "--run", start.runId, "--step", s.id, "--artifact", s.id)));
+  const submitted = await Promise.allSettled(steps.map((s: any) => f.call("run", "report", "--run", start.runId, "--step", s.id, "--artifact", s.id)));
+  for (const submission of submitted) if (submission.status === "rejected") {
+    const line = submission.reason.message.split("\n").find((line: string) => line.startsWith('{"error":'));
+    assert.ok(line, "concurrent report failure must provide a machine-readable error");
+    const error = JSON.parse(line).error;
+    assert.ok(["REVISION_CONFLICT", "ALREADY_EXISTS"].includes(error.code));
+    assert.equal(error.details.runId, start.runId); assert.ok(error.details.artifactId);
+    assert.equal(error.details.recoveryCommand, `memsphere run status --run ${start.runId}`);
+  }
+  // A saved submission remains durable even when concurrent automatic recovery conflicts.
+  await f.call("run", "status", "--run", start.runId);
   const result = await f.call("run", "show", "--run", start.runId);
   assert.equal(result.steps.length, 2); assert.equal(result.artifacts.length, 2);
   assert.deepEqual(result.steps.map((s: any) => s.status), ["done", "done"]);

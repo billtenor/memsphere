@@ -28,6 +28,18 @@ export async function runAgentReviewAcpSession(input: {
 }): Promise<AgentReviewAcpSession> {
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
   const process = spawnAgent(input.launch);
+  const transport = new AbortController();
+  const onExit = (code: number | null, signal: string | null) => {
+    transport.abort(new Error(`agent_process_exit: ${signal ? `signal ${signal}` : `exited ${code}`}`));
+  };
+  const onProcessError = (error: Error) => transport.abort(new Error(`agent_process_spawn: ${error.message}`, { cause: error }));
+  const onDisconnect = () => transport.abort(new Error("agent_connection_closed: ACP output stream closed"));
+  const onStreamError = (error: Error) => transport.abort(new Error(`agent_connection_closed: ${error.message}`, { cause: error }));
+  process.once("exit", onExit);
+  process.once("error", onProcessError);
+  process.stdout.once("end", onDisconnect);
+  process.stdout.once("close", onDisconnect);
+  process.stdout.once("error", onStreamError);
   let stderr = "";
   let idleTimeout: TimeoutWatchdog | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
@@ -62,7 +74,7 @@ export async function runAgentReviewAcpSession(input: {
         `total runtime exceeded ${input.launch.maxRuntimeMs}ms`,
         terminate
       );
-  const startupSignal = combineSignals(startupTimeout.signal, maxRuntimeTimeout?.signal);
+  const startupSignal = AbortSignal.any([transport.signal, combineSignals(startupTimeout.signal, maxRuntimeTimeout?.signal)]);
   const markActivity = () => idleTimeout?.touch();
   process.stderr.setEncoding("utf8");
   process.stderr.on("data", (chunk) => {
@@ -99,14 +111,14 @@ export async function runAgentReviewAcpSession(input: {
         }
         return context.buildSession(resolve(input.launch.cwd)).withSession(async (session) => {
           startupTimeout.dispose();
-          idleTimeout = createTimeoutWatchdog(
+          idleTimeout = input.launch.idleTimeoutMs === null ? undefined : createTimeoutWatchdog(
             input.launch.idleTimeoutMs,
             "agent_idle_timeout",
             `no ACP activity for ${input.launch.idleTimeoutMs}ms`,
             terminate,
             true
           );
-          const runtimeSignal = combineSignals(idleTimeout.signal, maxRuntimeTimeout?.signal);
+          const runtimeSignal = AbortSignal.any([transport.signal, ...[idleTimeout?.signal, maxRuntimeTimeout?.signal].filter((signal): signal is AbortSignal => signal !== undefined)]);
           const metadata = {
             protocolVersion: initialized.protocolVersion,
             sessionId: session.sessionId,
@@ -114,7 +126,7 @@ export async function runAgentReviewAcpSession(input: {
             agentVersion: initialized.agentInfo?.version
           };
           await input.onSession(metadata);
-          idleTimeout.touch();
+          idleTimeout?.touch();
           let outcome = await promptUntilSubmission(
             session,
             input.prompt,
@@ -126,7 +138,7 @@ export async function runAgentReviewAcpSession(input: {
           if (outcome.submitted) return { ...metadata, stopReason: "submitted" };
           let response = outcome.response;
           if (!(await input.isSubmitted())) {
-            idleTimeout.touch();
+            idleTimeout?.touch();
             outcome = await promptUntilSubmission(
               session,
               input.reminder,
@@ -147,6 +159,7 @@ export async function runAgentReviewAcpSession(input: {
     return { ...result, stderr };
   } catch (error) {
     const timeoutError = timeoutReason(startupTimeout, idleTimeout, maxRuntimeTimeout);
+    const transportError = transport.signal.aborted ? transport.signal.reason : undefined;
     const exitCode = process.exitCode;
     startupTimeout.dispose();
     idleTimeout?.dispose();
@@ -158,6 +171,7 @@ export async function runAgentReviewAcpSession(input: {
     if (timeoutError) {
       throw new Error(withAgentStderr(timeoutError.message, stderr), { cause: error });
     }
+    if (transportError) throw new Error(withAgentStderr(transportError.message, stderr), { cause: error });
     if (error instanceof Error && error.message.startsWith("agent_process_spawn:")) throw error;
     if (exitCode !== null && exitCode !== 0) {
       throw new Error(withAgentStderr(`agent_process_exit: exited ${exitCode}`, stderr), { cause: error });
@@ -165,6 +179,11 @@ export async function runAgentReviewAcpSession(input: {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(withAgentStderr(message, stderr), { cause: error });
   } finally {
+    process.off("exit", onExit);
+    process.off("error", onProcessError);
+    process.stdout.off("end", onDisconnect);
+    process.stdout.off("close", onDisconnect);
+    process.stdout.off("error", onStreamError);
     startupTimeout.dispose();
     idleTimeout?.dispose();
     maxRuntimeTimeout?.dispose();

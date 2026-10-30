@@ -1,5 +1,4 @@
 import { automaticOutputs, deriveOutputs, outputOverrides } from "./outputs.js";
-import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "../data/api/context.js";
 import type { ValueStore, StoredValue } from "../data/api/value-store.js";
@@ -10,7 +9,6 @@ import { GraphRuntime, isGraphRun } from "./graph-runtime.js";
 export { failure } from "./errors.js";
 
 export type Stores = Record<Entity, ValueStore>;
-export type RunLock = <T>(runId: string, action: () => Promise<T>, signal?: AbortSignal) => Promise<T>;
 export type ContentReader = (ref: { storeId: string; dataId: string }, context: Context) => Promise<{ bytes: Uint8Array; contentType: string }>;
 const now = () => new Date().toISOString();
 const id = (kind: string) => `${kind}-${randomUUID()}`;
@@ -19,16 +17,12 @@ const tags = (input: string[] = []) => [...new Set(["default", ...input.map(v =>
 const refKey = (ref: Ref) => `${ref.kind}:${ref.id}`;
 const uniqueRefs = (refs: Ref[]) => [...new Map(refs.map(r => [refKey(r), r])).values()];
 
-/** Domain writes use ValueStore CAS; Run locks coordinate recovery and Run-wide changes. */
+/** Domain writes and recovery use each ValueStore record's uniqueness and CAS. */
 export class ContextControl {
-  constructor(readonly stores: Stores, private readonly lock: RunLock, private readonly contentReader: ContentReader) {
-    const active = new AsyncLocalStorage<string>();
-    const acquire = lock;
-    this.lock = (runId, action, signal) => active.getStore() === runId ? action() : acquire(runId, () => active.run(runId, action), signal);
-  }
-  /** Graph operations share the existing Stores and Run locking. */
+  constructor(readonly stores: Stores, private readonly contentReader: ContentReader) {}
+  /** Graph operations share the same model Stores. */
   async withGraph<T>(action: (runtime: GraphRuntime) => Promise<T>): Promise<T> {
-    return action(new GraphRuntime(this.stores, this.lock, this.contentReader));
+    return action(new GraphRuntime(this.stores, this.contentReader));
   }
   private key(entity: Entity, runId: string, entityId: string) { return entity === "run" ? entityId : `${runId}/${entityId}`; }
   private async record<T>(entity: Entity, runId: string, entityId: string, context: Context = {}): Promise<(StoredValue & { value: T }) | undefined> {
@@ -69,19 +63,13 @@ export class ContextControl {
   }
   /** View identity reads never recover an unfinished operation. */
   async findViewRun(runId: string): Promise<Run | undefined> {
-    return this.lock(runId, async () => {
-      const row = await this.record<Run>("run", runId, runId);
-      if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
-      return row?.value;
-    });
+    const row = await this.record<Run>("run", runId, runId);
+    if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
+    return row?.value;
   }
   async findRun(runId: string): Promise<Run | undefined> {
     const row = await this.record<Run>("run", runId, runId);
     if (row?.value.status === "running" && row.value.archived) throw failure("INVALID_STATE", "Running Run cannot be archived");
-    if (row?.value.status === "running" && !isGraphRun(row.value)) {
-      await this.lock(runId, () => this.recover(runId));
-      return (await this.record<Run>("run", runId, runId))?.value;
-    }
     return row?.value;
   }
   async listRuns(): Promise<Run[]> {
@@ -115,29 +103,27 @@ export class ContextControl {
   }
   /** Read only what the current View surface needs; never recover or load reviews. */
   async viewProjection(runId:string, surface:"overview"|"artifacts"|"action", actionId?:string):Promise<Snapshot|undefined> {
-    return this.lock(runId,async()=>{
-      const run=(await this.require<Run>("run",runId,runId)).value;
-      if(!isGraphRun(run))return undefined;
-      const stepIds=[...new Set(run.frames?.find(f=>f.type==="graph")?.graphFrame.triggers.flatMap(t=>t.stepId?[t.stepId]:[])??[])];
-      const all=(await Promise.all(stepIds.map(id=>this.record<Step>("step",runId,id)))).flatMap(row=>row?[row.value]:[]);
-      const selected=surface==="action"?all.filter(s=>s.source?.actionId===actionId):all;
-      let artifacts:Artifact[]=[];
-      if(surface!=="overview"){
-        const ids=new Set<string>();
-        for(const step of selected){if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
-        artifacts=(await Promise.all([...ids].map(id=>this.record<Artifact>("artifact",runId,id)))).flatMap(row=>row?[row.value]:[]);
-      }
-      // Bodies are obtained only from the artifact content endpoint.
-      artifacts=artifacts.map(({content,contentRef,...a})=>{if(a.revisedFrom&&!artifacts.some(other=>other.id===a.revisedFrom))delete a.revisedFrom;return a;});
-      const steps=all.map(s=>({id:s.id,runId:s.runId,createdAt:s.createdAt,status:s.status,source:s.source,startedAt:s.startedAt,endedAt:s.endedAt,artifact:s.artifact,
-        ...(surface!=="overview"&&selected.some(x=>x.id===s.id)?{artifact:s.artifact,inputs:s.inputs,reviewRounds:s.reviewRounds}: {})}));
-      return {run,steps,artifacts,externals:[],reviews:[],completeIds:all.filter(s=>s.status==="done"&&s.artifact?.mode==="produce").map(s=>(s.artifact as {id:string}).id),outputArtifactIds:[]};
-    });
+    const run=(await this.require<Run>("run",runId,runId)).value;
+    if(!isGraphRun(run))return undefined;
+    const stepIds=[...new Set(run.frames?.find(f=>f.type==="graph")?.graphFrame.triggers.flatMap(t=>t.stepId?[t.stepId]:[])??[])];
+    const all=(await Promise.all(stepIds.map(id=>this.record<Step>("step",runId,id)))).flatMap(row=>row?[row.value]:[]);
+    const selected=surface==="action"?all.filter(s=>s.source?.actionId===actionId):all;
+    let artifacts:Artifact[]=[];
+    if(surface!=="overview"){
+      const ids=new Set<string>();
+      for(const step of selected){if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
+      artifacts=(await Promise.all([...ids].map(id=>this.record<Artifact>("artifact",runId,id)))).flatMap(row=>row?[row.value]:[]);
+    }
+    // Bodies are obtained only from the artifact content endpoint.
+    artifacts=artifacts.map(({content,contentRef,...a})=>{if(a.revisedFrom&&!artifacts.some(other=>other.id===a.revisedFrom))delete a.revisedFrom;return a;});
+    const steps=all.map(s=>({id:s.id,runId:s.runId,createdAt:s.createdAt,status:s.status,source:s.source,startedAt:s.startedAt,endedAt:s.endedAt,artifact:s.artifact,
+      ...(surface!=="overview"&&selected.some(x=>x.id===s.id)?{artifact:s.artifact,inputs:s.inputs,reviewRounds:s.reviewRounds}: {})}));
+    return {run,steps,artifacts,externals:[],reviews:[],completeIds:all.filter(s=>s.status==="done"&&s.artifact?.mode==="produce").map(s=>(s.artifact as {id:string}).id),outputArtifactIds:[]};
   }
   async snapshot(runId: string): Promise<Snapshot> {
     const run = await this.require<Run>("run", runId, runId);
     if (isGraphRun(run.value)) return this.withGraph(graph => graph.snapshot(runId));
-    if (run.value.status === "running") await this.lock(runId, () => this.recover(runId));
+    if (run.value.status === "running") await this.recover(runId);
     return this.snapshotValue(runId);
   }
   private async snapshotValue(runId: string): Promise<Snapshot> {
@@ -295,16 +281,13 @@ export class ContextControl {
   }
   /** Read a frozen body without running recovery as a side effect of displaying it. */
   async readViewArtifact(runId: string, artifactId: string) {
-    return this.lock(runId, async () => {
-      const run = await this.require<Run>("run", runId, runId);
-      if (isGraphRun(run.value)) return this.withGraph(g => g.readArtifact(runId, artifactId));
-      return this.body(await this.complete(runId, artifactId));
-    });
+    const run = await this.require<Run>("run", runId, runId);
+    if (isGraphRun(run.value)) return this.withGraph(g => g.readArtifact(runId, artifactId));
+    return this.body(await this.complete(runId, artifactId));
   }
   async readArtifact(runId: string, artifactId: string) {
     const run = await this.require<Run>("run", runId, runId);
     if (isGraphRun(run.value)) return this.withGraph(g => g.readArtifact(runId, artifactId));
-    if (run.value.status === "running") await this.lock(runId, () => this.recover(runId));
     return this.body(await this.complete(runId, artifactId));
   }
   async readExternal(runId: string, externalId: string) {
@@ -346,14 +329,14 @@ export class ContextControl {
   }
   async finish(runId: string, artifactIds?: string[]) {
     const row = await this.require<Run>("run", runId, runId);
-    if (isGraphRun(row.value)) return this.lock(runId, () => this.withGraph(async graph => {
+    if (isGraphRun(row.value)) return this.withGraph(async graph => {
       if (artifactIds) {
         const snapshot = await graph.advance(runId);
         if (snapshot.steps.some(s => s.status !== "done") || snapshot.run.frames![0].graphFrame.joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
         await this.updateOutputs(runId, artifactIds, snapshot.outputArtifactIds.filter(id => !artifactIds.includes(id)));
       }
       return graph.finish(runId);
-    }));
+    });
     const snapshot = await this.snapshotValue(runId);
     const outputs = deriveOutputs(row.value, snapshot.artifacts, snapshot.completeIds);
     const roots = [...new Set(artifactIds ?? outputs)].sort();

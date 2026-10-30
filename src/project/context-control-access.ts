@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { readModelOperationStamp, assertModelOperationStamp, withConsistentModelRead } from "./model-operation.js";
 
 const current = new AsyncLocalStorage<string>();
-/** Check model availability; operations coordinate through Run locks and record CAS. */
+/** Check model availability; operations coordinate through record uniqueness and CAS. */
 export function withContextControlAccess<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
   const key = resolve(root);

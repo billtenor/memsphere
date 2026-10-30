@@ -20,7 +20,7 @@ async function fixture(run: (page: import('playwright').Page, origin: string) =>
             if (r.modelRef === 'sales/order.json')
                 await store.update({}, item.id, { ...r, name: '订单 Alpha', description: '订购与支付', package: 'project.orders', package_name: '订单管理', tags: ['订单', '交易', '示例'] });
         }
-    });
+    }, { registerModels: false });
     const browser = await browserScope();
     const page = await browser.newPage();
     if (requireToken) await page.addInitScript(() => sessionStorage.setItem('memsphere.settingsToken.v1', 'fixture-token'));

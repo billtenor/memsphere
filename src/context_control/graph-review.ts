@@ -23,6 +23,7 @@ export function graphPermissionConfig(config: ControlPlaneConfig, language: Run[
   const snapshot = createControlPlaneSnapshot(config);
   const actors = Object.fromEntries(Object.entries(snapshot.actors).map(([id, actor]) => {
     const value = JSON.parse(JSON.stringify({ ...actor, name: actor.name || id }));
+    if (value.agent?.idleTimeoutMs == null) delete value.agent?.idleTimeoutMs;
     if (value.agent?.maxRuntimeMs == null) delete value.agent?.maxRuntimeMs;
     return [id, value];
   }));

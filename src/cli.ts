@@ -599,6 +599,7 @@ runReview
   .requiredOption("--assignment <id>", "artifact review assignment id")
   .requiredOption("--node-executable <path>", "Node executable path")
   .requiredOption("--cli-entrypoint <path>", "CLI entrypoint path")
+  .option("--workspace-root <path>", "Original caller working directory")
   .action(runArtifactReviewAgentWorker);
 
 run

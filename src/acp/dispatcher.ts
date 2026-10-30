@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { withNativeFileLock } from "../file-lock.js";
 import { atomicWriteJson } from "../persistence.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
@@ -18,6 +18,7 @@ export async function dispatchArtifactReviewAgents(input: {
   config: MemsphereConfig;
   run: RunState;
   runtime?: CliRuntimeDescriptor;
+  workspaceRoot?: string;
   launchWorker?: (assignment: {
     reviewId: string;
     roundId: string;
@@ -37,6 +38,7 @@ export async function dispatchArtifactReviewAgents(input: {
   if (queued.length === 0) return 0;
   if (input.config.debug.agentReview) return 0;
   const runtime = input.runtime ?? currentCliRuntimeDescriptor();
+  const workspaceRoot = resolve(input.workspaceRoot ?? process.cwd());
   await Promise.all(queued.map(async ({ review, round, assignment }) => {
     const assignmentId = artifactReviewAssignmentId(assignment);
     if (input.launchWorker) {
@@ -62,10 +64,11 @@ export async function dispatchArtifactReviewAgents(input: {
       "--round", round.id,
       "--assignment", assignmentId,
       "--node-executable", runtime.nodeExecutable,
-      "--cli-entrypoint", runtime.cliEntrypoint
+      "--cli-entrypoint", runtime.cliEntrypoint,
+      "--workspace-root", workspaceRoot
     ];
     const worker = spawnCommand(runtime.nodeExecutable, args, {
-      cwd: process.cwd(),
+      cwd: workspaceRoot,
       detached: true,
       stdio: "ignore",
       windowsHide: true

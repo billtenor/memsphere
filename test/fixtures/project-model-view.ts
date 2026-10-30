@@ -1,13 +1,14 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { createViewServer } from "../../src/commands/view.js";
+import { registerFixtureDefinition } from "../helpers/model-fixture.js";
 import { installBundledSystemModels } from "../../src/project/system-models.js";
 import type { MemsphereConfig } from "../../src/config.js";
 
 /** Runs the actual View server and built-in modules against an isolated on-disk Home. */
-export async function startProjectModelView(prepare?: (config: MemsphereConfig) => Promise<void>) {
+export async function startProjectModelView(prepare?: (config: MemsphereConfig) => Promise<void>, options: { registerModels?: boolean } = {}) {
   const home = await mkdtemp(join(tmpdir(), "memsphere-model-browser-"));
   const root = join(home, "projects", "alpha");
   const store = { type: "managed", branch: "master", published_revision: "abc" };
@@ -36,6 +37,14 @@ export async function startProjectModelView(prepare?: (config: MemsphereConfig) 
   const config: MemsphereConfig = { configPath: join(root, "config.json"), scopeRoot: root, homeRoot: home, language: "zh-CN",
     memoryRoot: join(root, "memory"), runsRoot: join(root, "runs"), archiveRoot: join(root, "archives"),
     debug: { agentReview: false, root: join(home, ".runtime") }, view: { host: "127.0.0.1", port: 0 }, project: { name: "alpha", mounted: [] } };
+  if (options.registerModels !== false) {
+    for (const name of ["alpha", "beta"]) {
+      const project = join(home, "projects", name);
+      for (const ref of name === "alpha" ? ["sales/order.json", "advanced.json", "bad.json"] : ["sales/order.json"]) {
+        await registerFixtureDefinition(project, ref, await readFile(join(project, "models/json-schema/draft-07", ref), "utf8"));
+      }
+    }
+  }
   await prepare?.(config);
   const server = createViewServer(config, { settingsToken: config.view.operatorToken });
   // Closing client sockets does not await async HTTP handlers. Drain those

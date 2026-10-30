@@ -8,25 +8,20 @@ import { openContextControl } from "../src/project/context-control.js";
 import { businessFixture } from "./helpers/business-data.js";
 import { textContent } from "../src/context_control/types.js";
 
-test("Context Control ignores the old Project gate and a busy Run does not block another Run", async t => {
+test("Context Control ignores former Project and Run gates for recovery and independent writes", async t => {
   const { root } = await businessFixture(t, {});
   const service = (await openContextControl(root, true))!;
   const a = await service.start("A"), b = await service.start("B");
   await mkdir(join(root, ".runtime", "context-control"), { recursive: true });
-  let pending: Promise<unknown> | undefined;
-  let finished = false;
   await withNativeFileLock(join(root, ".runtime", "settings.lock"), async () => {
     const reopened = (await openContextControl(root))!;
     const runLock = join(root, ".runtime", "context-control", `${createHash("sha256").update(a.id).digest("hex")}.lock`);
     await withNativeFileLock(runLock, async () => {
-      pending = reopened.snapshot(a.id).then(snapshot => { finished = true; return snapshot; });
+      assert.equal((await reopened.snapshot(a.id)).run.id, a.id);
       const result = await reopened.report(b.id, { name: "independent", content: textContent("B") });
       assert.equal(result.step.status, "done");
       assert.equal((await reopened.snapshot(b.id)).artifacts.length, 1);
-      assert.equal(finished, false);
     });
-    await pending;
-    assert.equal(finished, true);
   });
 });
 

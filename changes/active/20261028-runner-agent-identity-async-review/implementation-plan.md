@@ -437,3 +437,92 @@ Human 确认自由探索 finish 移除 Run 锁和 redo，保留 CAS 及重复完
 
 
 合并后独立工作树验证补充：完整 npm run build 通过；18 文件的 CLI、daemon、View、模型及存储/锁集成测试 124/124 通过（日志 /tmp/memsphere-master-merge-build.log、/tmp/memsphere-master-merge-integration.log）。master 新增 context-control-view-read 测试原先引用已删除的 Project 锁接口，现改为直接占用旧 settings.lock 验证读取不受影响，并使用维护日志的 withModelMaintenance/commitModelOperation 验证模型发布期间只读结果重试和 pending 拒绝；没有恢复 Project 全局锁。实现及合并分别已保存为 541d229、eb2b078；本次测试接口适配另行提交。最终主工作树未重建 dist，临时工作树验证完成后清理；只保留本地评审材料未提交。
+
+
+### 2026-10-30 findRun/listRuns 只读查询
+
+Human 确认 findRun 去掉 Run 锁及附带恢复，listRuns 也只读，并保留 run status 的恢复能力。findRun 现在只读取 Run、校验 running/archived 状态并返回，不扫描 Artifact/Step，不 recover；listRuns 继续逐条调用 findRun，不新增写入。status 命令仍经 snapshot 的既有恢复入口处理当前 Run，本批未改变 snapshot 或 readArtifact 的恢复流程。
+
+验证三文件 45/45 通过，类型检查与 git diff --check 通过。新增用例注入 Artifact 已保存、Step 尚未创建的中断，持有同 Run 原生锁时 findRun/listRuns 仍完成，缺失 Run 返回 undefined，既有 Run/Artifact 记录原样保留且不补建 Step；随后真实执行当前源码 CLI run status，按原 Artifact/Step ID 补建缺失 Step，Run 记录本身不被重写。测试使用 --import tsx 的源码入口，不重建当前运行 daemon 的 dist。日志 /tmp/memsphere-find-run-readonly-tests.log、/tmp/memsphere-find-run-readonly-types.log。
+
+下一场景拟讨论合入 master 后新增的 View 只读入口 findViewRun、viewProjection、readViewArtifact：均不执行恢复、不写领域记录，但仍套 Run 锁。拟移除这些只读入口的外层 Run 锁，保留定向加载、身份/状态校验和正文校验。此后续方案尚未实施，待 Human 确认。
+
+
+### 2026-10-30 View 三个只读入口去掉 Run 锁
+
+按 Human 确认，findViewRun、viewProjection、readViewArtifact 去掉外层 Run 锁；保留既有定向加载、身份/状态校验、已完成 Artifact/Step 校验和正文校验。overview 不加载 Artifact/Review，artifacts/action 投影不返回正文；View 查询不恢复中断操作，不补建 Step。
+
+相关四文件 31/31 测试、类型检查通过；修正不完整产物测试的目标 ID 后，View 读取测试再次 4/4 通过。持有同 Run 原生锁时覆盖三个入口及 Graph 三种投影；不完整 Artifact 仍被拒绝，缺失 Step 未被查询修复。日志 /tmp/memsphere-view-read-unlock-tests.log、/tmp/memsphere-view-read-unlock-types.log、/tmp/memsphere-view-read-final-tests.log。本次只修改源码与测试，未重建运行中 daemon 的 dist。
+
+下一场景拟讨论自由探索 readArtifact：读取单个产物前仍对 running Run 获取 Run 锁并 recover 全 Run。拟去掉这层锁及隐式恢复，直接保留目标 Artifact/Step 完成状态、身份及正文校验；中断状态由 run status 恢复。该后续方案尚未实施，待 Human 确认。
+
+
+### 2026-10-30 自由探索 readArtifact 去掉 Run 锁与隐式恢复
+
+按 Human 确认，自由探索 readArtifact 不再获取 Run 锁或 recover 全 Run；仍 require Run，并通过 complete 校验目标 Artifact/Step 身份及完成状态，通过 body 校验正文或 contentRef SHA-256。Graph 读取路径保持原样。
+
+扩展原生锁占用用例：锁占用时已完成产物可读，缺失产物与缺失 Step 被拒绝且不补建；释放锁后显式 snapshot 恢复 Step，draft 仍按未完成产物拒绝。四文件 31/31 测试及类型检查通过，日志 /tmp/memsphere-artifact-read-unlock-tests.log、/tmp/memsphere-artifact-read-unlock-types.log。未重建运行中 daemon 的 dist。
+
+下一场景拟讨论自由探索 snapshot/run status 的恢复锁：保留显式全 Run 扫描恢复能力，考虑去掉外层 Run 锁，依靠缺失 Step 创建的唯一性和现有 Step 更新 CAS 防止覆盖；并发冲突沿既有恢复错误返回、允许重试，不额外引入全 Run 事务。该后续方案尚未实施，待 Human 确认。
+
+
+### 2026-10-30 按 Human 授权继续清理剩余 Run 锁
+
+Human 授权自主处理可以决策的剩余场景，遇产品/风险选择再停。自由探索 snapshot/run status 保留扫描与显式恢复，去掉外层 Run 锁；缺失 Step 由 create 唯一性保护，现有 Step 由 CAS 更新，竞争失败沿 RECOVERY_REQUIRED 返回原因，重试恢复。findRun/listRuns/readArtifact/View 查询继续保持前述只读行为。
+
+Graph advance、report、submitReview、finish、abandon，以及 ContextControl Graph finish 外层不再获取 Run 锁。删除 ContextControl/GraphRuntime 的 RunLock 参数及重入锁包装，删除 openContextControl 的 Run 锁工厂；各实体仍经 ValueStore create/CAS。report 和 submitReview 不再先 advance 全 Run；保存本次提交/投票后保留既有结算与自动推进。已有未恢复提交帧时 report 返回 RECOVERY_REQUIRED 及原产物身份，不覆盖已保存提交；投票保存后推进失败附 reviewId/roundId 及 status 恢复指令，不提示重投。
+
+针对实际竞争补充处理：推进重新读取 Run 后跳过已消费 completion，collect 重新读取 Step 后跳过已完成记录；materialize 跳过已移除 pending 项；恢复始终跟随原 submission frame ID，帧已移除或更换即返回，不覆盖其他恢复者的结果；settle 复用已有提交帧。finish 绑定校验用 Run 版本并检查完成 Step 已被消费，最后 CAS 保存终态。abandon 重新读取 Review 后跳过已提交/已取消者，Review CAS 成功后才终止对应 worker，取消冲突可重试。未引入新的资源级大锁或多记录事务。
+
+测试覆盖持有旧 Run 原生锁时恢复/Graph 提交、投票、推进、结束和废弃；并发缺失 Step 创建、恢复 Step CAS 保留 reads、同 Step 提交冲突、不同 Step 各自保存、同帧双重恢复、旧推进不重复派生 Step、独立 Reviewer 投票、终态 Run CAS 保留赢家变更。相关既有测试按此前 Human 批准的 findRun/listRuns 只读与无锁 snapshot 契约更新。当前运行 daemon 的 dist 未重建，正式验收旧轮不代表本次源码候选通过。
+
+剩余边界：src/run/store.ts 仍有 16 个 withRunWriteLock 调用点，全部读取并回写旧 Flow 的同一个 Run JSON，未走 ValueStore，没有 CAS；与已清理的 Graph/自由探索多记录 Run 锁不同。直接去掉会产生最后一次整文件保存覆盖其他修改。继续清理这组需要将旧 Flow 迁入记录存储或引入文件版本条件写，这属于额外存储改造范围，停在此处交 Human 决策。
+
+最终验证：15 个相关源码测试文件 149/149 通过（包含 7 项 Graph 并发专项），npm run typecheck 与 git diff --check 通过。日志 /tmp/memsphere-run-lock-cleanup-regression.log、/tmp/memsphere-run-lock-cleanup-types.log。源码扫描确认 ContextControl、GraphRuntime 及 Project 打开入口无 RunLock 或 this.lock 调用；剩余 16 个调用点均已在锁审计清单列出。
+
+
+### 2026-10-30 新一轮评审范围确认
+
+Human 明确决定旧 Flow 存储改造“不纳入”，因此保留 src/run/store.ts 中 16 个真实共写同一 Run JSON、且没有 CAS 的写锁。此前“待 Human 决策”的范围问题在此关闭；不得把旧 Flow 存储迁移或文件 CAS 扩展为本轮实现任务。Human 随后正式投要求修改并要求重新发起一轮 Review：以最新完整实现作为新候选，旧票保持历史，不转移到新版本。
+
+
+### 2026-10-30 新候选准备与全量回归契约对齐
+
+正式 Human 第4轮 request_changes 已通过当前 CLI 写入，旧轮 changes_requested；七条非阻塞建议/风险已逐项 accepted-followup，完整处置留 Run 候选，旧票不转移。此前首次用旧 dist 代提交时遭旧 Run 原生锁 LOCK_TIMEOUT；停止旧 daemon、构建当前分支后重试成功，新 daemon 恢复原 View running 状态。此处是实际操作观察，不替代并发测试。全局 memsphere 安装入口未重定向，Reviewer 使用当前分支受限 CLI。
+
+新候选前全量回归发现历史/合并新增夹具仍假设“只写模型定义就可读”、系统外部改定义立即生效，以及市场导入必须共用一个活动 ChangeSet。按 Human 已批准契约对齐：模型展示/反射夹具使用配套登记与 definition_sha256；专门测试登记初始化的场景保持未登记起点；未登记读取明确拒绝，篡改系统定义明确断言 MODEL_DEFINITION_HASH_MISMATCH，不放松生产检查；两个市场导入分别核对自己的活动 ChangeSet，保留原导入状态断言。新增测试辅助文件仅服务隔离 fixture，不进入生产路径。全量初跑与失败后的受影响文件复核分别留原始结果，新候选如实列出，不能把首跑失败改写为一次全通过。
+
+
+### 修订5最终验证补充
+
+全量初跑183文件保留10个失败的原始记录；按当前已批准契约修正模型登记夹具与旧预期后，12个受影响文件复核全部通过。Graph跨进程测试保留保存身份、可恢复冲突错误码与恢复后不丢提交的断言。7项新增Graph并发用例并入现有Run锁测试文件，全部保留并复核通过；当前发现182文件，CI原执行预算不变。最终覆盖依据为初跑加受影响文件复核，不表述成一次全通过。
+
+
+### 2026-10-30 Human 修订：可禁用 ACP 运行超时
+
+本条替代此前必须启用 idle 超时的约束。ACP Provider 的 idle_timeout_ms 接受正整数或 null；省略与 null 均表示不启用 idle 超时。max_runtime_ms 同样接受正整数或 null，默认不限制总运行时间。startup_timeout_ms 保持原有启动超时语义。此处不引入工具执行超时，也不以其他默认时限间接限制工具耗时。
+
+配置、ControlPlane 快照与 Provider launch 允许 nullable idleTimeoutMs。context-control Run 的模型运行时不支持联合类型，因此持久化 permissionConfig 时与现有 maxRuntimeMs 一样省略 null；idleTimeoutMs 改为可选，读取省略字段还原为 null。不扩大通用 JSON Schema Runtime 的支持范围。已冻结的正整数不被默认值覆盖，既有 Run 不因配置默认值变化而自动变更。若显式启用 idle，其语义仍是 ACP 活动静默时限。
+
+进程意外退出（包括退出码 0、非零及信号退出）和 ACP 连接提前关闭均通过事件监听直接失败，不等待 idle/总时限，也不新增控制这两项检测的开关。ACP Client 使用独立 transport AbortSignal 中止未完成请求；正常完成请求并确认正式提交后的主动连接关闭和进程清理保持成功。断连诊断为 agent_connection_closed，进程退出为 agent_process_exit；超时显式启用时保留原超时诊断。
+
+验证须覆盖默认/显式 null 配置与快照、静默会话正常结束、全部运行超时禁用时进程正常码提前退出/非零退出/进程仍活着但输出连接关闭、显式启动/idle/总超时，以及正常正式提交。共享工作区 dist 构建与临时日志隔离另行处理，不混入本条变更。
+
+本修订发生在第5轮冻结候选之后；第5轮意见不能作为此新增实现的通过证明，后续候选需重新冻结代码与验证证据。本次不重建评审进程正在使用的共享 dist，也不手改既有 Run 的冻结配置。
+
+验证结果：独立临时副本 `/tmp/memsphere-null-timeouts-validation-bph_d0vp` 执行完整 npm run build 通过（含两套 TypeScript 编译与模型检查）；agent-review、control-plane、procedure-graph-review、context-control 四文件共73项，72通过、0失败、1个平台专项跳过。原始日志 `/tmp/memsphere-null-timeouts-isolated-build.log`、`/tmp/memsphere-null-timeouts-isolated-tests.log`。此前共享 dist 模板缺失导致的失败记录保留，不计为实现通过证据；现场 dist 未由本次构建覆盖。
+
+
+### 2026-10-30 Human 修订：Reviewer Attempt 工作目录隔离
+
+每次 Reviewer Attempt 在主 Agent 调用 Memsphere 时的当前工作目录下创建 `tmp/memsphere-review-<随机唯一值>/`，不提升为 Git 根目录。新重试创建新目录，不复用上一 Attempt。目录不预置 artifacts/scratch 等子目录，也不复制代码或预下载 Artifact；Reviewer 按需使用既有读取/导出能力，自行组织本地材料。
+
+派发时将原始调用目录作为绝对路径传给 worker；异步 daemon 从 DaemonTask.input.cwd 取得调用目录，不使用 daemon 自己的工作目录。Provider 子进程 cwd、ACP session/new cwd、会话受限 CLI 的 workspaceRoot，以及 TMPDIR/TMP/TEMP 均指向本 Attempt 目录。受限 CLI 启动器继续由内部独立管理，不作为 Reviewer 目录布局要求。
+
+正常完成、失败和可执行 finally 清理均删除该 Attempt 目录，活动日志和正式投票继续保留在原 Run Store。强制杀死 worker 时 finally 无法保证执行，可能留下目录；不在此处增加全局锁或后台清扫机制。原仓库已有 tmp/ Git 忽略规则。cwd/临时目录变量提供默认位置隔离，不能约束硬编码绝对路径；强制文件系统访问边界由 Provider 沙箱提供，本次不新增容器/挂载隔离，也不重新建模或物化代码 Artifact。
+
+验证包括：主调用目录处于嵌套目录时不回退到 Git 根、两次 Attempt 目录不同、子进程与 ACP cwd 一致、三个临时变量一致、成功/失败清理、真实 Session CLI 从隔离目录完成读取与提交。新增方案在第5轮候选之后，后续评审必须重新冻结。
+
+本条验证结果：独立副本 `/tmp/memsphere-attempt-isolation-validation-12t6j92p` 完整构建通过；agent-review、procedure-graph-review、daemon-integration 三文件共46项，45通过、0失败、1项平台专项跳过。实际 fake ACP Provider 校验进程 cwd、session/new cwd、TMPDIR/TMP/TEMP 全部一致；重试目录不同，成功/失败目录清理和真实 Session CLI 读取/提交通过。原始日志 `/tmp/memsphere-attempt-isolation-build.log`、`/tmp/memsphere-attempt-isolation-tests.log`。现场共享 dist 与运行中的 Reviewer 未被本次构建覆盖。
+
+交付前兼容补充：已为此前发布的 Run 定义（definitionHash 8b4604ec…）加入显式、仅更新定义的升级路径，保留 Run 记录版本；Graph Review adapter 将持久化省略的 idleTimeoutMs 还原为 null。context-control-upgrade 与 procedure-graph-review 两文件18项回归通过。按 Human 要求，现场现有 Run 的 Agent idle 配置通过 data edit + CAS 禁用，未改变角色、权限和模型。

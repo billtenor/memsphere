@@ -9,7 +9,7 @@ import { resolveRuleParts } from "../memory/rules.js";
 import { createControlPlaneSnapshot, type ControlPlaneConfig, type PermissionId, type RunReviewConfiguration } from "../control-plane/index.js";
 import { buildRunReviewPreflight, validateRunReviewConfiguration, type RunProcedureTemplate } from "../run/store.js";
 import type { ArtifactReviewComment, ArtifactReviewVoteValue } from "../artifact-review.js";
-import type { ContentReader, RunLock, Stores } from "./service.js";
+import type { ContentReader, Stores } from "./service.js";
 import type { Arrival, Artifact, Body, ContentRef, External, GraphFrame, GraphJoin, Ref, Review, ReviewRound, Run, Snapshot, Step, SubmissionFrame } from "./types.js";
 import { Records } from "./records.js";
 import { failure } from "./errors.js";
@@ -33,7 +33,7 @@ export type GraphReport = { text?: string; content?: Body["content"]; contentRef
 /** Graph persistence uses the same model Stores as exploration, with its own completion/recovery rules. */
 export class GraphRuntime {
   readonly records: Records;
-  constructor(stores: Stores, private readonly lock: RunLock, private readonly reader: ContentReader) { this.records = new Records(stores); }
+  constructor(stores: Stores, private readonly reader: ContentReader) { this.records = new Records(stores); }
   private async run(id: string) {
     const row = await this.records.require<Run>("run", id, id);
     if (!isGraphRun(row.value) || row.value.frames?.length !== 1 || !row.value.frames[0].graphFrame || row.value.frames[0].graphFrame.memoryRef !== row.value.memoryRef) throw failure("INVALID_STATE", `Not a valid graph Run: ${id}`);
@@ -283,6 +283,7 @@ export class GraphRuntime {
       if (!found) await this.records.create("step", runId, step);
       else for (const key of ["id", "runId", "source", "inputs", "createdAt"] as const) if (!isDeepStrictEqual(found.value[key], step[key])) throw failure("RECOVERY_CONFLICT", `Step creation material differs: ${step.id}.${key}`);
       row = await this.run(runId); const run = structuredClone(row.value);
+      if (!this.frame(run).pendingSteps.some(s => s.id === step.id)) continue;
       this.frame(run).pendingSteps = this.frame(run).pendingSteps.filter(s => s.id !== step.id);
       await this.saveRun(row, run);
     }
@@ -305,7 +306,8 @@ export class GraphRuntime {
     const run = (await this.run(runId)).value;
     let row = await this.step(run, stepId); let step = structuredClone(row.value);
     assertContextControlRecord("memsphere/context_control/step.json", step);
-    let stage = step.frames?.find(f => f.type === "submission")?.submissionFrame;
+    const frameId = step.frames?.find(f => f.type === "submission")?.id;
+    let stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
     if (!stage) return;
     if ((stage.nextStatus === "awaiting_review") !== Object.hasOwn(stage, "round")) throw failure("INVALID_STATE", "Submission round must match awaiting_review status");
     const spec = this.action(run, step).artifact;
@@ -319,11 +321,15 @@ export class GraphRuntime {
     }
     if (stage.nextStatus === "done" && stage.completionSequence === undefined) {
       const completionSequence = await this.reserveCompletion(runId);
-      row = await this.step(run, stepId); step = structuredClone(row.value); stage = step.frames!.find(f => f.type === "submission")!.submissionFrame;
-      stage.completionSequence = completionSequence; stage.endedAt = now();
-      await this.records.update("step", runId, row, step);
+      row = await this.step(run, stepId); step = structuredClone(row.value); stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
+      if (!stage) return;
+      if (stage.completionSequence === undefined) {
+        stage.completionSequence = completionSequence; stage.endedAt = now();
+        await this.records.update("step", runId, row, step);
+      }
     }
-    row = await this.step(run, stepId); step = structuredClone(row.value); stage = step.frames!.find(f => f.type === "submission")!.submissionFrame;
+    row = await this.step(run, stepId); step = structuredClone(row.value); stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
+    if (!stage) return;
     step.artifact = { mode: "produce", id: stage.artifact.id }; step.status = stage.nextStatus;
     if (stage.round && !step.reviewRounds?.some(r => r.id === stage!.round!.id)) step.reviewRounds = [...(step.reviewRounds ?? []), stage.round];
     if (stage.nextStatus === "done") { step.completionSequence = stage.completionSequence; step.endedAt = stage.endedAt; }
@@ -334,6 +340,7 @@ export class GraphRuntime {
     const run = (await this.run(runId)).value; const row = await this.step(run, stepId); const step = structuredClone(row.value);
     const round = step.reviewRounds?.at(-1);
     if (step.status !== "awaiting_review" || !round) return;
+    if (step.frames?.length) return this.recoverSubmission(runId, stepId);
     const reviews = (await this.records.list<Review>("review", runId)).filter(r => r.roundId === round.id);
     const state = projectGraphRound(run, step, round, reviews);
     if (!state.result) return;
@@ -343,41 +350,43 @@ export class GraphRuntime {
     await this.records.update("step", runId, row, step); await this.recoverSubmission(runId, stepId);
   }
   async advance(runId: string): Promise<Snapshot> {
-    return this.lock(runId, async () => {
-      let run = (await this.run(runId)).value;
+    let run = (await this.run(runId)).value;
+    if (run.status !== "running") return this.snapshotValue(runId);
+    this.active(run); await this.materialize(runId);
+    for (const step of await this.records.list<Step>("step", runId)) if (step.frames?.length) await this.recoverSubmission(runId, step.id);
+    for (const step of await this.records.list<Step>("step", runId)) if (step.status === "awaiting_review") await this.settle(runId, step.id);
+    for (let automatic = 0; automatic < 1000; automatic++) {
+      run = (await this.run(runId)).value;
       if (run.status !== "running") return this.snapshotValue(runId);
-      this.active(run); await this.materialize(runId);
-      for (const step of await this.records.list<Step>("step", runId)) if (step.frames?.length) await this.recoverSubmission(runId, step.id);
-      for (const step of await this.records.list<Step>("step", runId)) if (step.status === "awaiting_review") await this.settle(runId, step.id);
-      for (let automatic = 0; automatic < 1000; automatic++) {
-        run = (await this.run(runId)).value;
-        const steps = await this.records.list<Step>("step", runId); const order = this.creationOrder(run, steps);
-        const done = steps.filter(s => s.status === "done"); const sequences = new Set<number>();
-        for (const s of done) {
-          if (!Number.isSafeInteger(s.completionSequence) || s.completionSequence! < 1 || sequences.has(s.completionSequence!)) throw failure("INVALID_STATE", "Missing or duplicate graph completion sequence");
-          sequences.add(s.completionSequence!);
-        }
-        const source = done.filter(s => !this.frame(run).processedStepIds.includes(s.id)).sort((a, b) => a.completionSequence! - b.completionSequence!)[0];
-        if (source) {
-          const result = source.artifact;
-          if (!result) throw failure("INVALID_STATE", "Completed Step has no result");
-          const row = await this.run(runId); const next = structuredClone(row.value);
-          await this.dispatch(next, source.source!.actionId, result.mode === "produce" ? { kind: "artifact", id: result.id } : { kind: "collect", items: result.items });
-          this.frame(next).processedStepIds.push(source.id); await this.saveRun(row, next); await this.materialize(runId); continue;
-        }
-        const collect = steps.filter(s => (s.status === "pending" || s.status === "running") && this.action(run, s).collect).sort((a, b) => order.get(a.id)! - order.get(b.id)!)[0];
-        if (!collect) return this.snapshotValue(runId);
-        const row = await this.step(run, collect.id); const updated = structuredClone(row.value);
-        const items: Record<string, string[]> = Object.create(null);
-        for (const sourceId of this.action(run, collect).collect!) {
-          items[sourceId] = [...new Set(done.filter(s => s.source!.actionId === sourceId && s.artifact?.mode === "produce").sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(s => (s.artifact as { id: string }).id))];
-        }
-        const sequence = await this.reserveCompletion(runId);
-        updated.status = "done"; updated.startedAt ??= now(); updated.endedAt = now(); updated.completionSequence = sequence; updated.artifact = { mode: "collect", items };
-        await this.records.update("step", runId, row, updated);
+      const steps = await this.records.list<Step>("step", runId); const order = this.creationOrder(run, steps);
+      const done = steps.filter(s => s.status === "done"); const sequences = new Set<number>();
+      for (const s of done) {
+        if (!Number.isSafeInteger(s.completionSequence) || s.completionSequence! < 1 || sequences.has(s.completionSequence!)) throw failure("INVALID_STATE", "Missing or duplicate graph completion sequence");
+        sequences.add(s.completionSequence!);
       }
-      throw failure("GRAPH_AUTOMATIC_LIMIT", "Automatic graph work exceeded 1000 operations; inspect the graph for a collect cycle");
-    });
+      const source = done.filter(s => !this.frame(run).processedStepIds.includes(s.id)).sort((a, b) => a.completionSequence! - b.completionSequence!)[0];
+      if (source) {
+        const result = source.artifact;
+        if (!result) throw failure("INVALID_STATE", "Completed Step has no result");
+        const row = await this.run(runId); const next = structuredClone(row.value);
+        if (next.status !== "running") return this.snapshotValue(runId);
+        if (this.frame(next).processedStepIds.includes(source.id)) continue;
+        await this.dispatch(next, source.source!.actionId, result.mode === "produce" ? { kind: "artifact", id: result.id } : { kind: "collect", items: result.items });
+        this.frame(next).processedStepIds.push(source.id); await this.saveRun(row, next); await this.materialize(runId); continue;
+      }
+      const collect = steps.filter(s => (s.status === "pending" || s.status === "running") && this.action(run, s).collect).sort((a, b) => order.get(a.id)! - order.get(b.id)!)[0];
+      if (!collect) return this.snapshotValue(runId);
+      const row = await this.step(run, collect.id); const updated = structuredClone(row.value);
+      if (updated.status !== "pending" && updated.status !== "running") continue;
+      const items: Record<string, string[]> = Object.create(null);
+      for (const sourceId of this.action(run, collect).collect!) {
+        items[sourceId] = [...new Set(done.filter(s => s.source!.actionId === sourceId && s.artifact?.mode === "produce").sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(s => (s.artifact as { id: string }).id))];
+      }
+      const sequence = await this.reserveCompletion(runId);
+      updated.status = "done"; updated.startedAt ??= now(); updated.endedAt = now(); updated.completionSequence = sequence; updated.artifact = { mode: "collect", items };
+      await this.records.update("step", runId, row, updated);
+    }
+    throw failure("GRAPH_AUTOMATIC_LIMIT", "Automatic graph work exceeded 1000 operations; inspect the graph for a collect cycle");
   }
   async enter(runId: string, stepId: string) {
     const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.read");
@@ -398,110 +407,110 @@ export class GraphRuntime {
     return { snapshot: await this.snapshotValue(runId), step };
   }
   async report(runId: string, stepId: string, input: GraphReport) {
-    return this.lock(runId, async () => {
-      await this.advance(runId); const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.submit");
-      const row = await this.step(run, stepId); const step = structuredClone(row.value); const action = this.action(run, step);
-      if (!action.artifact || step.status !== "running") throw failure("STEP_NOT_RUNNING", `Step ${stepId} is ${step.status}; enter it before reporting`);
-      if ([input.text, input.content, input.contentRef].filter(v => v !== undefined).length !== 1) throw failure("INVALID_ARGUMENT", "Provide exactly one Artifact body");
-      if (step.reviewRounds?.length && !input.revisionSummary?.trim()) throw failure("REVISION_SUMMARY_REQUIRED", "A revised Artifact requires a revision summary");
-      if (!step.reviewRounds?.length && input.revisionSummary !== undefined) throw failure("INVALID_ARGUMENT", "Revision summary requires a previous Review");
-      const body: Body = input.text !== undefined ? { content: { model: structuredClone(action.artifact.model), payload: { contentType: action.artifact.payload.contentType, content: input.text } } } : input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) };
-      if (body.content && (body.content.model.definedBy !== action.artifact.model.definedBy || !isDeepStrictEqual(JSON.parse(body.content.model.definition), JSON.parse(action.artifact.model.definition)))) throw failure("ARTIFACT_CONTRACT_MISMATCH", "Report cannot replace the frozen Artifact model");
-      let checked: Awaited<ReturnType<typeof validateGraphBody>>;
-      try { checked = await validateGraphBody(body, action.artifact, this.reader); }
-      catch (error) {
-        if (body.content) {
-          step.validation = { sha256: createHash("sha256").update(body.content.payload.content).digest("hex"), checkedAt: now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error) }] };
-          await this.records.update("step", runId, row, step);
-        }
-        throw error;
+    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.submit");
+    const row = await this.step(run, stepId); const step = structuredClone(row.value); const action = this.action(run, step);
+    if (!action.artifact || step.status !== "running") throw failure("STEP_NOT_RUNNING", `Step ${stepId} is ${step.status}; enter it before reporting`);
+    if (step.frames?.length) throw Object.assign(failure("RECOVERY_REQUIRED", "A saved submission must be recovered before reporting again"), { details: { runId, stepId, artifactId: step.frames[0].submissionFrame.artifact.id, recoveryCommand: `memsphere run status --run ${runId}` } });
+    if ([input.text, input.content, input.contentRef].filter(v => v !== undefined).length !== 1) throw failure("INVALID_ARGUMENT", "Provide exactly one Artifact body");
+    if (step.reviewRounds?.length && !input.revisionSummary?.trim()) throw failure("REVISION_SUMMARY_REQUIRED", "A revised Artifact requires a revision summary");
+    if (!step.reviewRounds?.length && input.revisionSummary !== undefined) throw failure("INVALID_ARGUMENT", "Revision summary requires a previous Review");
+    const body: Body = input.text !== undefined ? { content: { model: structuredClone(action.artifact.model), payload: { contentType: action.artifact.payload.contentType, content: input.text } } } : input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) };
+    if (body.content && (body.content.model.definedBy !== action.artifact.model.definedBy || !isDeepStrictEqual(JSON.parse(body.content.model.definition), JSON.parse(action.artifact.model.definition)))) throw failure("ARTIFACT_CONTRACT_MISMATCH", "Report cannot replace the frozen Artifact model");
+    let checked: Awaited<ReturnType<typeof validateGraphBody>>;
+    try { checked = await validateGraphBody(body, action.artifact, this.reader); }
+    catch (error) {
+      if (body.content) {
+        step.validation = { sha256: createHash("sha256").update(body.content.payload.content).digest("hex"), checkedAt: now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error) }] };
+        await this.records.update("step", runId, row, step);
       }
-      const dependencies = [...new Map(Object.values(step.inputs ?? {}).flat().map(r => [`${r.kind}:${r.id}`, r])).values()];
-      for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
-      const artifact: Artifact = { id: newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
-        ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : {}) };
-      const round = createGraphRound(run, this.procedure(run), action, artifact.id);
-      const submissionFrame: SubmissionFrame = { artifact, nextStatus: round ? "awaiting_review" : "done", ...(round ? { round } : {}) };
-      step.validation = { sha256: checked.sha256, artifactId: artifact.id, checkedAt: now(), status: "passed", issues: [] };
-      step.frames = [{ id: newId("frame"), type: "submission", submissionFrame }];
-      await this.records.update("step", runId, row, step);
-      try { await this.recoverSubmission(runId, stepId); const snapshot = await this.advance(runId); return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact }; }
-      catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}`, message: "Submission identity saved; recover status before repeating report" } }); }
-    });
+      throw error;
+    }
+    const dependencies = [...new Map(Object.values(step.inputs ?? {}).flat().map(r => [`${r.kind}:${r.id}`, r])).values()];
+    for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
+    const artifact: Artifact = { id: newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
+      ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : {}) };
+    const round = createGraphRound(run, this.procedure(run), action, artifact.id);
+    const submissionFrame: SubmissionFrame = { artifact, nextStatus: round ? "awaiting_review" : "done", ...(round ? { round } : {}) };
+    step.validation = { sha256: checked.sha256, artifactId: artifact.id, checkedAt: now(), status: "passed", issues: [] };
+    step.frames = [{ id: newId("frame"), type: "submission", submissionFrame }];
+    await this.records.update("step", runId, row, step);
+    try { await this.recoverSubmission(runId, stepId); const snapshot = await this.advance(runId); return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact }; }
+    catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}`, message: "Submission identity saved; recover status before repeating report" } }); }
   }
   async submitReview(runId: string, stepId: string, roundId: string, actorId: string | "runner", vote: ArtifactReviewVoteValue, comments: ArtifactReviewComment[] = [], summary?: string, delegationNote?: string, guard?: { expectedRevision?: number; attemptId?: string; human?: boolean }) {
     requireGraphVote(vote);
-    return this.lock(runId, async () => {
-      await this.advance(runId); const run = (await this.run(runId)).value; this.active(run);
-      const step = (await this.step(run, stepId)).value; const round = step.reviewRounds?.at(-1);
-      if (step.status !== "awaiting_review" || !round || round.id !== roundId) throw failure("REVIEW_CONFLICT", "Review round is no longer current");
-      const config = round.reviewConfig; const runner = actorId === "runner";
-      const actor = !runner ? config.reviewers[actorId] : undefined;
-      if (guard?.human && actor?.kind !== "human") throw failure("INVALID_ARGUMENT", "Expected Human Reviewer");
-      if (guard?.expectedRevision !== undefined) {
-        const current = projectGraphRound(run, step, round, await this.records.list<Review>("review", runId));
-        if (current.revision !== guard.expectedRevision) throw failure("REVIEW_CONFLICT", `Review revision changed: ${current.revision}`);
-      }
-      const permissions = runner ? config.runner.permissions : actor?.permissions;
-      if (!permissions?.some(p => p === "decision.decide" || !runner && p === "decision.assess")) throw failure("PERMISSION_DENIED", "Reviewer is not authorized to vote");
-      if (runner) {
-        const all = await this.records.list<Review>("review", runId);
-        if (projectGraphRound(run, step, round, all).status !== "awaiting_runner_vote") throw failure("REVIEW_NOT_READY", "Runner must read all submitted opinions before deciding");
-        if (vote === "abstain") throw failure("INVALID_ARGUMENT", "Runner vote must be approve or request_changes");
-      }
-      if (delegationNote !== undefined) {
-        if (!delegationNote.trim() || actor?.kind !== "human" || !run.permissionConfig?.runner.permissions.includes("decision.decide")) throw failure("PERMISSION_DENIED", "Human delegation requires the Human actor, Runner decision authority, and an authorization note");
-      }
-      if (actor?.kind === "human") {
-        if (!actor.permissions.includes("decision.decide") && comments.some(c => !c.severity || !["blocking", "risk", "suggestion"].includes(c.severity))) throw failure("INVALID_ARGUMENT", "Advisory Human Comment severity is required and must be valid");
-        if ((vote === "request_changes" || vote === "abstain") && !comments.length) throw failure("INVALID_ARGUMENT", `${vote} requires at least one Comment`);
-      }
-      if ((vote === "request_changes" || vote === "abstain") && !comments.length && !summary?.trim()) throw failure("INVALID_ARGUMENT", "Changes/abstention require an explanation");
-      const id = graphReviewId(round.id, actorId); const old = await this.records.get<Review>("review", runId, id);
-      if (guard?.attemptId) {
-        const attempt = old?.value.attempts?.at(-1);
-        if (actor?.kind !== "agent" || old?.value.status !== "running" || attempt?.id !== guard.attemptId || attempt.completion || !attempt.cliReadyAt) throw failure("REVIEW_CONFLICT", "Current Agent attempt requires its CLI handshake");
-      }
-      if (old?.value.status === "submitted") throw failure("REVIEW_CONFLICT", "Review was already submitted");
-      if (delegationNote && old && (old.value.comments.length || old.value.vote)) throw failure("REVIEW_CONFLICT", "Human Draft contains an opinion; do not overwrite it");
-      const material = (await this.records.require<Artifact>("artifact", runId, round.artifactId)).value;
-      const digest = (await validateGraphBody(material, this.action(run, step).artifact!, this.reader)).sha256;
-      const storedComments = storeGraphComments(comments, round.artifactId, digest);
-      const value: Review = { ...(old?.value ?? { id, roundId, artifactId: round.artifactId, reviewer: runner ? { role: "runner" as const } : { role: "reviewer" as const, actorId }, createdAt: now(), comments: [] }),
-        status: "submitted", endedAt: now(), comments: storedComments, vote: { value: vote, ...(summary?.trim() ? { summary } : {}), ...(delegationNote ? { delegationNote } : {}) } };
-      const attempt = value.attempts?.at(-1);
-      if (attempt && !attempt.completion) attempt.completion = { kind: "completed", at: value.endedAt! };
-      if (old) await this.records.update("review", runId, old, value); else await this.records.create("review", runId, value);
-      await this.settle(runId, stepId); return this.advance(runId);
-    });
+    const run = (await this.run(runId)).value; this.active(run);
+    const step = (await this.step(run, stepId)).value; const round = step.reviewRounds?.at(-1);
+    if (step.status !== "awaiting_review" || !round || round.id !== roundId) throw failure("REVIEW_CONFLICT", "Review round is no longer current");
+    const config = round.reviewConfig; const runner = actorId === "runner";
+    const actor = !runner ? config.reviewers[actorId] : undefined;
+    if (guard?.human && actor?.kind !== "human") throw failure("INVALID_ARGUMENT", "Expected Human Reviewer");
+    if (guard?.expectedRevision !== undefined) {
+      const current = projectGraphRound(run, step, round, await this.records.list<Review>("review", runId));
+      if (current.revision !== guard.expectedRevision) throw failure("REVIEW_CONFLICT", `Review revision changed: ${current.revision}`);
+    }
+    const permissions = runner ? config.runner.permissions : actor?.permissions;
+    if (!permissions?.some(p => p === "decision.decide" || !runner && p === "decision.assess")) throw failure("PERMISSION_DENIED", "Reviewer is not authorized to vote");
+    if (runner) {
+      const all = await this.records.list<Review>("review", runId);
+      if (projectGraphRound(run, step, round, all).status !== "awaiting_runner_vote") throw failure("REVIEW_NOT_READY", "Runner must read all submitted opinions before deciding");
+      if (vote === "abstain") throw failure("INVALID_ARGUMENT", "Runner vote must be approve or request_changes");
+    }
+    if (delegationNote !== undefined) {
+      if (!delegationNote.trim() || actor?.kind !== "human" || !run.permissionConfig?.runner.permissions.includes("decision.decide")) throw failure("PERMISSION_DENIED", "Human delegation requires the Human actor, Runner decision authority, and an authorization note");
+    }
+    if (actor?.kind === "human") {
+      if (!actor.permissions.includes("decision.decide") && comments.some(c => !c.severity || !["blocking", "risk", "suggestion"].includes(c.severity))) throw failure("INVALID_ARGUMENT", "Advisory Human Comment severity is required and must be valid");
+      if ((vote === "request_changes" || vote === "abstain") && !comments.length) throw failure("INVALID_ARGUMENT", `${vote} requires at least one Comment`);
+    }
+    if ((vote === "request_changes" || vote === "abstain") && !comments.length && !summary?.trim()) throw failure("INVALID_ARGUMENT", "Changes/abstention require an explanation");
+    const id = graphReviewId(round.id, actorId); const old = await this.records.get<Review>("review", runId, id);
+    if (guard?.attemptId) {
+      const attempt = old?.value.attempts?.at(-1);
+      if (actor?.kind !== "agent" || old?.value.status !== "running" || attempt?.id !== guard.attemptId || attempt.completion || !attempt.cliReadyAt) throw failure("REVIEW_CONFLICT", "Current Agent attempt requires its CLI handshake");
+    }
+    if (old?.value.status === "submitted") throw failure("REVIEW_CONFLICT", "Review was already submitted");
+    if (delegationNote && old && (old.value.comments.length || old.value.vote)) throw failure("REVIEW_CONFLICT", "Human Draft contains an opinion; do not overwrite it");
+    const material = (await this.records.require<Artifact>("artifact", runId, round.artifactId)).value;
+    const digest = (await validateGraphBody(material, this.action(run, step).artifact!, this.reader)).sha256;
+    const storedComments = storeGraphComments(comments, round.artifactId, digest);
+    const value: Review = { ...(old?.value ?? { id, roundId, artifactId: round.artifactId, reviewer: runner ? { role: "runner" as const } : { role: "reviewer" as const, actorId }, createdAt: now(), comments: [] }),
+      status: "submitted", endedAt: now(), comments: storedComments, vote: { value: vote, ...(summary?.trim() ? { summary } : {}), ...(delegationNote ? { delegationNote } : {}) } };
+    const attempt = value.attempts?.at(-1);
+    if (attempt && !attempt.completion) attempt.completion = { kind: "completed", at: value.endedAt! };
+    if (old) await this.records.update("review", runId, old, value); else await this.records.create("review", runId, value);
+    try { await this.settle(runId, stepId); return await this.advance(runId); }
+    catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, reviewId: id, roundId, recoveryCommand: `memsphere run status --run ${runId}`, message: "Review saved; recover status before repeating the vote" } }); }
   }
   ready(snapshot: Snapshot) { const order = this.creationOrder(snapshot.run, snapshot.steps); return snapshot.steps.filter(s => (s.status === "pending" || s.status === "running") && this.action(snapshot.run, s).artifact).sort((a, b) => order.get(a.id)! - order.get(b.id)!); }
   async finish(runId: string) {
-    return this.lock(runId, async () => {
-      const snapshot = await this.advance(runId); if (snapshot.run.status === "done") return snapshot.run; this.active(snapshot.run);
-      if (snapshot.steps.some(s => s.status !== "done") || this.frame(snapshot.run).pendingSteps.length || this.frame(snapshot.run).joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
-      const row = await this.run(runId); const value = { ...row.value, status: "done" as const, endedAt: now() };
-      await this.records.update("run", runId, row, value); return value;
-    });
+    await this.advance(runId);
+    const row = await this.run(runId), snapshot = await this.snapshotValue(runId);
+    if (!isDeepStrictEqual(snapshot.run, row.value)) throw failure("REVISION_CONFLICT", "Run changed while checking graph completion");
+    if (snapshot.run.status === "done") return snapshot.run; this.active(snapshot.run);
+    if (snapshot.steps.some(s => s.status !== "done" || !this.frame(snapshot.run).processedStepIds.includes(s.id)) || this.frame(snapshot.run).pendingSteps.length || this.frame(snapshot.run).joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
+    const value = { ...row.value, status: "done" as const, endedAt: now() };
+    await this.records.update("run", runId, row, value); return value;
   }
   async abandon(runId: string, reason?: string, source: "cli" | "view" = "cli") {
-    return this.lock(runId, async () => {
-      const row = await this.run(runId);
-      if (row.value.status === "done") throw failure("RUN_FINISHED", "Completed Run cannot be abandoned");
-      if (row.value.status !== "abandoned") await this.records.update("run", runId, row, { ...row.value, status: "abandoned", endedAt: now(), abandonment: { source, ...(reason ? { reason } : {}) } });
-      // The terminal Run is saved first, so an interrupted cancellation cannot accept votes.
-      for (const review of await this.records.list<Review>("review", runId)) {
-        if (review.status === "submitted" || review.status === "cancelled") continue;
-        const current = await this.records.require<Review>("review", runId, review.id); const value = structuredClone(current.value);
-        value.status = "cancelled"; value.endedAt = now();
-        const attempt = value.attempts?.at(-1);
-        if (attempt && !attempt.completion) {
-          attempt.completion = { kind: "cancelled", at: now(), stopReason: "run_abandoned" };
-          if (attempt.workerPid && attempt.workerPid !== process.pid) await terminateProcessTree(attempt.workerPid).catch(() => undefined);
-        }
-        await this.records.update("review", runId, current, value);
+    const row = await this.run(runId);
+    if (row.value.status === "done") throw failure("RUN_FINISHED", "Completed Run cannot be abandoned");
+    if (row.value.status !== "abandoned") await this.records.update("run", runId, row, { ...row.value, status: "abandoned", endedAt: now(), abandonment: { source, ...(reason ? { reason } : {}) } });
+    // The terminal Run is saved first, so an interrupted cancellation cannot accept votes.
+    for (const review of await this.records.list<Review>("review", runId)) {
+      if (review.status === "submitted" || review.status === "cancelled") continue;
+      const current = await this.records.require<Review>("review", runId, review.id); const value = structuredClone(current.value);
+      if (value.status === "submitted" || value.status === "cancelled") continue;
+      value.status = "cancelled"; value.endedAt = now();
+      const attempt = value.attempts?.at(-1);
+      let workerPid: number | undefined;
+      if (attempt && !attempt.completion) {
+        attempt.completion = { kind: "cancelled", at: now(), stopReason: "run_abandoned" };
+        workerPid = attempt.workerPid;
       }
-      return (await this.run(runId)).value;
-    });
+      await this.records.update("review", runId, current, value);
+      if (workerPid && workerPid !== process.pid) await terminateProcessTree(workerPid).catch(() => undefined);
+    }
+    return (await this.run(runId)).value;
   }
 }

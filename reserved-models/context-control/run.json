@@ -594,7 +594,7 @@
                   "idleTimeoutMs": {
                     "type": "integer",
                     "title": "空闲超时",
-                    "description": "空闲超时的毫秒数。",
+                    "description": "ACP 事件静默超时的毫秒数；省略表示不限制。",
                     "minimum": 1
                   },
                   "maxRuntimeMs": {
@@ -610,8 +610,7 @@
                   "command",
                   "args",
                   "env",
-                  "startupTimeoutMs",
-                  "idleTimeoutMs"
+                  "startupTimeoutMs"
                 ],
                 "additionalProperties": false
               }

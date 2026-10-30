@@ -85,7 +85,8 @@ test("Installed system definitions remain the source of truth and damaged files 
   const path = join(root, "models/registrations/system/definitions/raw/memsphere/run/artifact.json");
   const source = '\uFEFF {"description":"From persistent Store"}\r\n';
   await writeFile(path, source);
-  assert.equal((await (await createProjectModelHost({}, { root })).definition("memsphere/run/artifact.json")).source, source);
+  await assert.rejects((await createProjectModelHost({}, { root })).definition("memsphere/run/artifact.json"), { code: "MODEL_DEFINITION_HASH_MISMATCH" });
+  assert.equal(await readFile(path, "utf8"), source);
   await assert.rejects(installBundledSystemModels({}, { root }), /conflict/);
   await rm(path);
   const host = await createProjectModelHost({}, { root });

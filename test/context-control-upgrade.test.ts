@@ -158,3 +158,20 @@ test("graph model upgrade preserves existing records and revisions", async t => 
   assert.deepEqual(await reopened.stores.step.get({}, `${run.id}/${report.step.id}`), beforeStep);
   assert.deepEqual(await reopened.outputs(run.id), [report.artifact.id]);
 });
+
+
+test("making idle timeout optional upgrades the known definition without rewriting Runs", async t => {
+  const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!;
+  const run = await s.start("idle timeout migration");
+  const path = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
+  const old = JSON.parse(await readFile(path, "utf8"));
+  const agent = old.definitions.PermissionConfig.properties.actors.additionalProperties.properties.agent;
+  agent.required.push("idleTimeoutMs");
+  agent.properties.idleTimeoutMs.description = "空闲超时的毫秒数。";
+  await publishFixtureDefinition(f.root, "memsphere/context_control/run.json", JSON.stringify(old));
+  const before = await s.stores.run.get({}, run.id);
+  const result = await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root));
+  assert.equal(result?.records, 0);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.run.get({}, run.id), before);
+});

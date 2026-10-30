@@ -14,7 +14,7 @@ export type AgentReviewProviderLaunch = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   startupTimeoutMs: number;
-  idleTimeoutMs: number;
+  idleTimeoutMs: number | null;
   maxRuntimeMs: number | null;
   promptVersion: string;
   model?: string;
