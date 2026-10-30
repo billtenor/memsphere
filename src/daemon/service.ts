@@ -1,6 +1,6 @@
 import { createServer, createConnection } from "node:net";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, rm, chmod } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, chmod } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Server as HttpServer } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
@@ -101,132 +101,140 @@ export async function stopDaemon(home = resolveMemsphereHome()) {
 export async function runDaemon(home = resolveMemsphereHome()) {
   await mkdir(root(home), { recursive: true });
   await withNativeFileLock(join(root(home), "daemon-instance.lock"), async () => {
-    const state: State = { protocol: 1, pid: process.pid, instanceId: randomUUID(), token: randomBytes(32).toString("hex"), endpoint: endpoint(home) };
-    let view: HttpServer | undefined, viewError: string | undefined;
-    let opening: Promise<void> | undefined;
-    let stopping = false, busy = false, scanOffset = 0;
-    let viewInfo: { host: string; port: number; settingsToken?: string } | undefined;
-    const closeView = async () => { await opening; const server = view; view = undefined; viewInfo = undefined; if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
-    const doOpenView = async () => {
-      if (view) return;
-      const intent = await readServiceIntent(home);
-      if (intent.view.desiredState !== "running" || !intent.view.configPath) return;
-      try {
-        const config = await readViewConfig(intent.view.configPath);
-        const { getViewServiceStatus, stopViewService } = await import("../view/service.js");
-        const previous = await getViewServiceStatus(config);
-        if (previous.running && previous.state) {
-          let verified = false;
-          if (process.platform === "linux") {
-            const args = (await readFile(`/proc/${previous.state.pid}/cmdline`, "utf8")).split("\0");
-            const flag = args.indexOf("--config");
-            verified = args.some((arg, i) => arg === "view" && args[i + 1] === "serve") && flag >= 0 && args[flag + 1] === config.configPath && previous.state.configPath === config.configPath;
+    // POSIX socket limits apply to the entire pathname, including a deep Home.
+    // mkdtemp creates a private 0700 directory; clients discover it through Home state.
+    const socketDirectory = process.platform !== "win32" && Buffer.byteLength(endpoint(home)) > 90
+      ? await mkdtemp("/tmp/memsphere-daemon-") : undefined;
+    try {
+      const state: State = { protocol: 1, pid: process.pid, instanceId: randomUUID(), token: randomBytes(32).toString("hex"), endpoint: socketDirectory ? join(socketDirectory, "daemon.sock") : endpoint(home) };
+      let view: HttpServer | undefined, viewError: string | undefined;
+      let opening: Promise<void> | undefined;
+      let stopping = false, busy = false, scanOffset = 0;
+      let viewInfo: { host: string; port: number; settingsToken?: string } | undefined;
+      const closeView = async () => { await opening; const server = view; view = undefined; viewInfo = undefined; if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
+      const doOpenView = async () => {
+        if (view) return;
+        const intent = await readServiceIntent(home);
+        if (intent.view.desiredState !== "running" || !intent.view.configPath) return;
+        try {
+          const config = await readViewConfig(intent.view.configPath);
+          const { getViewServiceStatus, stopViewService } = await import("../view/service.js");
+          const previous = await getViewServiceStatus(config);
+          if (previous.running && previous.state) {
+            let verified = false;
+            if (process.platform === "linux") {
+              const args = (await readFile(`/proc/${previous.state.pid}/cmdline`, "utf8")).split("\0");
+              const flag = args.indexOf("--config");
+              verified = args.some((arg, i) => arg === "view" && args[i + 1] === "serve") && flag >= 0 && args[flag + 1] === config.configPath && previous.state.configPath === config.configPath;
+            }
+            if (!verified) throw new Error("Cannot verify the legacy View process; stop it with its original CLI before takeover");
+            await stopViewService(config);
           }
-          if (!verified) throw new Error("Cannot verify the legacy View process; stop it with its original CLI before takeover");
-          await stopViewService(config);
-        }
-        const { createViewServer } = await import("../commands/view.js");
-        const settingsToken = config.view.operatorToken ?? randomBytes(24).toString("hex");
-        const server = createViewServer(config, { settingsToken });
-        await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(config.view.port, config.view.host, () => { server.removeListener("error", reject); resolve(); }); });
-        view = server; viewError = undefined;
-        const address = server.address();
-        viewInfo = { settingsToken, host: config.view.host, port: typeof address === "object" && address ? address.port : config.view.port };
-        server.on("error", () => { viewError = "View service error"; void closeView(); });
-      } catch (e) { viewError = (e as Error).message; }
-    };
-    const openView = () => opening ??= doOpenView().finally(() => { opening = undefined; });
-    for (const row of await listTasks(home)) if (row.value.status === "running") await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message: "Daemon exited during task execution; notification may have been sent. Explicit retry required." } }, home);
-    const active = new Map<string, { row: TaskRow; sending: boolean }>();
-    const executionErrors = new Map<string, { id: string; error: string }>();
-    const processTask = async (initial: TaskRow) => {
-      let row = initial;
-      let stage: "wait" | "render" | "send" = "wait";
-      const save = async (changes: Parameters<typeof updateTask>[1]) => { const updated = await updateTask(row, changes, home); row = { ...updated, value: { ...row.value, ...changes } }; return row; };
-      try {
-        const claimed = row.value.status === "queued";
-        if (claimed) {
-          await save({ status: "running", daemonInstanceId: state.instanceId });
-        }
-        active.set(row.id, { row, sending: false });
-        const runner = (await readRunnerAgents(home))[row.value.recipient.agentType];
-        if (!runner?.identity_enabled || !runner.async_enabled) { await save({ status: "cancelled", error: { stage: "cancel", code: "runner_disabled", message: "Runner identity/asynchronous execution disabled" } }); return; }
-        const config = await readConfigAt(row.value.input.configPath);
-        if (config.project?.name !== row.value.input.project) throw new Error("Task Project changed");
-        const context = await inspectReview(config, row.value.input.reviewId);
-        if (context.run.id !== row.value.input.runId || context.review.currentRoundId !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed" } }); return; }
-        if (claimed) await dispatchArtifactReviewAgents({ config, run: context.run, workspaceRoot: row.value.input.cwd });
-        if (!reviewReady(context)) return;
-        stage = "render";
-        const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId);
-        const latest = await inspectReview(config, row.value.input.reviewId);
-        if (latest.round.id !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed before sending" } }); return; }
-        if (!reviewReady(latest)) return;
-        const enabled = (await readRunnerAgents(home))[row.value.recipient.agentType];
-        if (!enabled?.identity_enabled || !enabled.async_enabled) { await save({ status: "cancelled", error: { stage: "cancel", code: "runner_disabled", message: "Runner disabled before sending" } }); return; }
-        stage = "send";
-        active.get(row.id)!.sending = true;
-        await sendQueue(row.value.recipient.agentCommand, row.value.recipient.sessionId, body, row.value.input.cwd);
-        await save({ status: "completed", error: undefined });
-      } catch (error) {
+          const { createViewServer } = await import("../commands/view.js");
+          const settingsToken = config.view.operatorToken ?? randomBytes(24).toString("hex");
+          const server = createViewServer(config, { settingsToken });
+          await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(config.view.port, config.view.host, () => { server.removeListener("error", reject); resolve(); }); });
+          view = server; viewError = undefined;
+          const address = server.address();
+          viewInfo = { settingsToken, host: config.view.host, port: typeof address === "object" && address ? address.port : config.view.port };
+          server.on("error", () => { viewError = "View service error"; void closeView(); });
+        } catch (e) { viewError = (e as Error).message; }
+      };
+      const openView = () => opening ??= doOpenView().finally(() => { opening = undefined; });
+      for (const row of await listTasks(home)) if (row.value.status === "running") await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message: "Daemon exited during task execution; notification may have been sent. Explicit retry required." } }, home);
+      const active = new Map<string, { row: TaskRow; sending: boolean }>();
+      const executionErrors = new Map<string, { id: string; error: string }>();
+      const processTask = async (initial: TaskRow) => {
+        let row = initial;
+        let stage: "wait" | "render" | "send" = "wait";
+        const save = async (changes: Parameters<typeof updateTask>[1]) => { const updated = await updateTask(row, changes, home); row = { ...updated, value: { ...row.value, ...changes } }; return row; };
         try {
-          await save({ status: "failed", error: { stage, code: "task_failed", message: active.get(row.id)?.sending ? "Queue failed; use explicit retry (outcome may be unknown)" : (error as Error).message.slice(0, 500) } });
-        } catch {
-          // A notification may already have been sent. Never schedule this row again
-          // in this instance when even its failure cannot be persisted.
-          executionErrors.set(row.id, { id: row.id, error: "TASK_STATE_WRITE_FAILED: scheduling suspended; notification outcome may be unknown. Repair storage and restart daemon before explicit retry." });
-        }
-      } finally { active.delete(row.id); }
-    };
-    const tick = async () => {
-      if (busy || stopping) return;
-      busy = true;
-      try { const rows = (await listTasks(home)).filter(r => !executionErrors.has(r.id) && (r.value.status === "queued" || r.value.status === "running" && r.value.daemonInstanceId === state.instanceId)); const batch = [...rows.slice(scanOffset), ...rows.slice(0, scanOffset)].slice(0, 8); scanOffset = rows.length ? (scanOffset + batch.length) % rows.length : 0; await Promise.all(batch.map(processTask)); }
-      catch { /* Keep control service available; status queries validate task records. */ }
-      finally { busy = false; }
-    };
-    const server = createServer(socket => {
-      let buffer = ""; socket.setTimeout(15000, () => socket.destroy());
-      socket.on("error", () => undefined);
-      socket.on("data", async chunk => {
-        buffer += chunk.toString();
-        if (buffer.length > 65536) { socket.destroy(); return; }
-        if (!buffer.includes("\n")) return;
-        const input = buffer.slice(0, buffer.indexOf("\n")); buffer = "";
-        try {
-          const request = JSON.parse(input);
-          if (request.protocol !== 1 || request.instanceId !== state.instanceId || typeof request.token !== "string" || request.token.length !== state.token.length || !timingSafeEqual(Buffer.from(request.token), Buffer.from(state.token))) throw new Error("Daemon protocol/authentication mismatch; restart with a compatible CLI");
-          if (request.command === "status") await opening;
-          if (request.command === "view-start") await openView();
-          else if (request.command === "view-stop") await closeView();
-          else if (request.command === "view-restart") { await closeView(); await openView(); }
-          else if (request.command === "notify") void tick();
-          else if (request.command !== "status" && request.command !== "stop") throw new Error("Unknown daemon command");
-          const counts: Record<string, number> = {}; for (const row of await listTasks(home)) counts[row.value.status] = (counts[row.value.status] ?? 0) + 1;
-          socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, view: { ...(await readServiceIntent(home)).view, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
-          if (request.command === "stop") void shutdown();
-        } catch (e) { socket.end(JSON.stringify({ error: (e as Error).message }) + "\n"); }
+          const claimed = row.value.status === "queued";
+          if (claimed) {
+            await save({ status: "running", daemonInstanceId: state.instanceId });
+          }
+          active.set(row.id, { row, sending: false });
+          const runner = (await readRunnerAgents(home))[row.value.recipient.agentType];
+          if (!runner?.identity_enabled || !runner.async_enabled) { await save({ status: "cancelled", error: { stage: "cancel", code: "runner_disabled", message: "Runner identity/asynchronous execution disabled" } }); return; }
+          const config = await readConfigAt(row.value.input.configPath);
+          if (config.project?.name !== row.value.input.project) throw new Error("Task Project changed");
+          const context = await inspectReview(config, row.value.input.reviewId);
+          if (context.run.id !== row.value.input.runId || context.review.currentRoundId !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed" } }); return; }
+          if (claimed) await dispatchArtifactReviewAgents({ config, run: context.run, workspaceRoot: row.value.input.cwd });
+          if (!reviewReady(context)) return;
+          stage = "render";
+          const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId);
+          const latest = await inspectReview(config, row.value.input.reviewId);
+          if (latest.round.id !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed before sending" } }); return; }
+          if (!reviewReady(latest)) return;
+          const enabled = (await readRunnerAgents(home))[row.value.recipient.agentType];
+          if (!enabled?.identity_enabled || !enabled.async_enabled) { await save({ status: "cancelled", error: { stage: "cancel", code: "runner_disabled", message: "Runner disabled before sending" } }); return; }
+          stage = "send";
+          active.get(row.id)!.sending = true;
+          await sendQueue(row.value.recipient.agentCommand, row.value.recipient.sessionId, body, row.value.input.cwd);
+          await save({ status: "completed", error: undefined });
+        } catch (error) {
+          try {
+            await save({ status: "failed", error: { stage, code: "task_failed", message: active.get(row.id)?.sending ? "Queue failed; use explicit retry (outcome may be unknown)" : (error as Error).message.slice(0, 500) } });
+          } catch {
+            // A notification may already have been sent. Never schedule this row again
+            // in this instance when even its failure cannot be persisted.
+            executionErrors.set(row.id, { id: row.id, error: "TASK_STATE_WRITE_FAILED: scheduling suspended; notification outcome may be unknown. Repair storage and restart daemon before explicit retry." });
+          }
+        } finally { active.delete(row.id); }
+      };
+      const tick = async () => {
+        if (busy || stopping) return;
+        busy = true;
+        try { const rows = (await listTasks(home)).filter(r => !executionErrors.has(r.id) && (r.value.status === "queued" || r.value.status === "running" && r.value.daemonInstanceId === state.instanceId)); const batch = [...rows.slice(scanOffset), ...rows.slice(0, scanOffset)].slice(0, 8); scanOffset = rows.length ? (scanOffset + batch.length) % rows.length : 0; await Promise.all(batch.map(processTask)); }
+        catch { /* Keep control service available; status queries validate task records. */ }
+        finally { busy = false; }
+      };
+      const server = createServer(socket => {
+        let buffer = ""; socket.setTimeout(15000, () => socket.destroy());
+        socket.on("error", () => undefined);
+        socket.on("data", async chunk => {
+          buffer += chunk.toString();
+          if (buffer.length > 65536) { socket.destroy(); return; }
+          if (!buffer.includes("\n")) return;
+          const input = buffer.slice(0, buffer.indexOf("\n")); buffer = "";
+          try {
+            const request = JSON.parse(input);
+            if (request.protocol !== 1 || request.instanceId !== state.instanceId || typeof request.token !== "string" || request.token.length !== state.token.length || !timingSafeEqual(Buffer.from(request.token), Buffer.from(state.token))) throw new Error("Daemon protocol/authentication mismatch; restart with a compatible CLI");
+            if (request.command === "status") await opening;
+            if (request.command === "view-start") await openView();
+            else if (request.command === "view-stop") await closeView();
+            else if (request.command === "view-restart") { await closeView(); await openView(); }
+            else if (request.command === "notify") void tick();
+            else if (request.command !== "status" && request.command !== "stop") throw new Error("Unknown daemon command");
+            const counts: Record<string, number> = {}; for (const row of await listTasks(home)) counts[row.value.status] = (counts[row.value.status] ?? 0) + 1;
+            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, view: { ...(await readServiceIntent(home)).view, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
+            if (request.command === "stop") void shutdown();
+          } catch (e) { socket.end(JSON.stringify({ error: (e as Error).message }) + "\n"); }
+        });
       });
-    });
-    if (process.platform !== "win32") await rm(state.endpoint, { force: true });
-    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(state.endpoint, resolve); });
-    if (process.platform !== "win32") await chmod(state.endpoint, 0o600);
-    const restoringView = openView();
-    await atomicWriteJson(statePath(home), state);
-    await restoringView;
-    const timer = setInterval(() => void tick(), 1000);
-    const shutdown = async () => {
-      if (stopping) return; stopping = true; clearInterval(timer);
-      while (busy) await delay(50);
-      await closeView();
-      for (const row of await listTasks(home)) if (!executionErrors.has(row.id) && row.value.status === "running" && row.value.daemonInstanceId === state.instanceId) await updateTask(row, { status: "queued", daemonInstanceId: undefined }, home);
-      await new Promise<void>(resolve => server.close(() => resolve()));
-      await rm(statePath(home), { force: true });
       if (process.platform !== "win32") await rm(state.endpoint, { force: true });
-    };
-    process.once("SIGTERM", () => void shutdown()); process.once("SIGINT", () => void shutdown());
-    void tick();
-    await new Promise<void>(resolve => server.once("close", resolve));
+      await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(state.endpoint, resolve); });
+      if (process.platform !== "win32") await chmod(state.endpoint, 0o600);
+      const restoringView = openView();
+      await atomicWriteJson(statePath(home), state);
+      await restoringView;
+      const timer = setInterval(() => void tick(), 1000);
+      const shutdown = async () => {
+        if (stopping) return; stopping = true; clearInterval(timer);
+        while (busy) await delay(50);
+        await closeView();
+        for (const row of await listTasks(home)) if (!executionErrors.has(row.id) && row.value.status === "running" && row.value.daemonInstanceId === state.instanceId) await updateTask(row, { status: "queued", daemonInstanceId: undefined }, home);
+        await new Promise<void>(resolve => server.close(() => resolve()));
+        await rm(statePath(home), { force: true });
+        if (process.platform !== "win32") await rm(state.endpoint, { force: true });
+      };
+      process.once("SIGTERM", () => void shutdown()); process.once("SIGINT", () => void shutdown());
+      void tick();
+      await new Promise<void>(resolve => server.once("close", resolve));
+    } finally {
+      if (socketDirectory) await rm(socketDirectory, { recursive: true, force: true });
+    }
   });
 }
 export function sendQueue(command: string, sessionId: string, body: string, cwd: string) {

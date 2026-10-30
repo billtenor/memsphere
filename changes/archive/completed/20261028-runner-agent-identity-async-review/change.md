@@ -342,3 +342,10 @@ Agent 意见收齐后，Runner 可独立阅读、处置并提交本人的 approv
 需求记录已归档，产品实现验收通过；本记录的completed_at不代表PR已创建、CI已完成或已合入master，原Run继续交付流程。Traex真实接收并继续和Windows实跑仍为合入前验证门禁，不因Human本轮通过而豁免。POSIX长socket路径及诊断、queue未知结果结构化错误码、失败Assignment内联指引等保留后续。完整交付范围、证据位置和边界见 delivery-report.md。
 
 长期需求、方案、开发计划、锁盘点与交付报告随代码保留；本目录其余原始验收附件仍留本地及Run Artifact，不因归档纳入Git。另按Human要求交付 `changes/active/20261029-graph-run-backtracking/change.md`，仅需求概述，不实现回溯。
+
+
+### 验收后 CI 修复记录（2026-10-30）
+
+PR #125：https://github.com/billtenor/memsphere/pull/125，保持Draft并保留合入门禁。跨平台CI发现并修复Reviewer目录别名造成受限CLI误拒、测试将macOS路径名误判敏感字段、Project准备路径断言，以及Windows清理时的瞬时EBUSY。进一步为POSIX超长Home增加私有短socket路径回退，处理此前accepted-followup在macOS真实CI中的启动失败；具体边界见implementation-plan.md新增CI修订。它们是已确认功能的跨平台修复，不新增产品范围。
+
+实现验收及交付报告的通过票针对各自冻结候选，历史验证仍按原commit解释；后续修复及完整CI状态由同一Run的CI跟进Artifact继续记录。真实Windows打包daemon/View smoke已有成功记录，最终head仍需核对；Traex真实接收继续尚未完成。默认CI预算取消和CI change guard需如实保留，未通过修改或弱化CI保护来消除失败。

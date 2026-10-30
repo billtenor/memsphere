@@ -139,7 +139,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   } finally {
     await activity.close();
     await cliRuntime?.cleanup().catch(() => undefined);
-    if (attemptDirectory) await rm(attemptDirectory, { recursive: true, force: true });
+    if (attemptDirectory) await rm(attemptDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 

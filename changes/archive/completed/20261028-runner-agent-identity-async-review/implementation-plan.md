@@ -539,3 +539,14 @@ Agent 意见收齐后，Runner 可独立阅读、处置并提交本人的 approv
 模型结构不新增状态或字段：整体轮次在 Human 待验收时仍可为 pending，Agent 等待完成与整体结算分离；已有 Review/vote、commentDispositions 记录两条线各自进展。Graph 和旧 Flow 同步等待、daemon、CLI 即时返回统一使用 artifactReviewWaitReady，Runner 就绪使用同一 Agent 完成判定。旧 Flow 保留此前明确排除改造的真实 JSON 写锁。
 
 验证覆盖 Agent 执行时 Human 草稿更新不释放等待、全部 Agent 完成而 Human 未投时同步返回/异步发送、无 Agent 同步异步立即返回且无任务、重复 wait 无重复通知、Runner 在 Human 未提交时决定及修订、Human 最终验收不能绕过、旧轮投票冲突，以及既有发送失败/恢复/去重。
+
+
+### CI 交付修订：跨平台路径与清理（2026-10-30）
+
+macOS `/var` 与 `/private/var`、Windows短路径与长路径可能指向同一目录。Reviewer Attempt创建后用realpath统一Provider/ACP cwd、受限CLI工作目录与临时目录变量，保留会话边界校验；测试覆盖别名目录中的正式提交与重试。Project准备测试按实际目录身份校验，隐私测试检查字段而不把`/private/`路径名误作敏感数据。
+
+Windows已结束进程的目录句柄可能短暂残留；Attempt最终清理使用Node rm内置maxRetries=10、retryDelay=100，仅重试清理中的瞬时文件系统错误，不限制Agent或工具执行时长。
+
+POSIX daemon控制socket全路径超过90字节时，改在`/tmp/memsphere-daemon-<随机>`的私有0700目录创建0600 socket，避开sun_path长度限制及长TMPDIR。每个daemon实例独立随机目录，原Home的daemon.json保存真实endpoint，客户端仍从该Home读取instanceId/token并认证，服务意图及任务仍保留原Home；短路径及Windows命名管道不变。正常关闭、重启及初始化抛错时finally清理临时目录；强杀残留目录继续按已有运维边界跟踪。使用私有随机目录，不在公共/tmp中暴露共享可写控制端点。回归覆盖超长Home、两个Home隔离、权限及重启后旧目录消失。
+
+本轮未更改CI配置或保护规则。默认5分钟作业预算耗尽需如实记录，使用仓库既有full profile完成全面验证，不将取消当通过；最终仍按最新head核对CI状态。

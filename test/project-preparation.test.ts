@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
@@ -22,7 +22,7 @@ test("Only the creating call sees an unpublished Project; other calls cannot use
   const started = new Promise<void>(resolve => { ready = resolve; });
   const resumed = new Promise<void>(resolve => { release = resolve; });
   const creation = withNewProjectDirectory(f.home, "new-project", f.root, async () => {
-    assert.equal((await readProjectRegistry(f.home)).projects["new-project"].root, f.root);
+    assert.equal((await readProjectRegistry(f.home)).projects["new-project"].root, await realpath(f.root));
     await assertProjectPrepared(f.root);
     await writeFile(join(f.root, "project.json"), JSON.stringify({ format_version: 1, name: "new-project", created_at: new Date().toISOString() }));
     await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" } }));
@@ -41,7 +41,7 @@ test("Only the creating call sees an unpublished Project; other calls cannot use
     assert.equal((await readFile(projectPreparationPath(f.root), "utf8")).length > 0, true);
   } finally { release(); await creation; }
   await assertProjectPrepared(f.root);
-  assert.equal((await resolveRegisteredProject("new-project", (await readProjectRegistry(f.home)).projects)).paths.root, f.root);
+  assert.equal((await resolveRegisteredProject("new-project", (await readProjectRegistry(f.home)).projects)).paths.root, await realpath(f.root));
 });
 
 test("Failed preparation removes only its own directory and never registers a Project", async t => {
@@ -98,7 +98,7 @@ test("Private bootstrap resolves a Project through an aliased parent directory",
   const root = join(alias, "project");
   await withNewProjectDirectory(f.home, "aliased", root, async () => {
     const registry = await readProjectRegistry(f.home);
-    assert.equal(registry.projects.aliased.root, f.root);
+    assert.equal(registry.projects.aliased.root, await realpath(f.root));
     await assertProjectPrepared(f.root);
   });
   await assertProjectPrepared(f.root);

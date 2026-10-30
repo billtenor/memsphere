@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { businessFixture } from "./helpers/business-data.js";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
@@ -12,18 +12,25 @@ const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行�
 
 test("daemon survives CLI exit, restores View intent, and isolates separate Homes", { timeout: 60000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), "mem-daemon-"));
-  const homes = [join(directory, "a"), join(directory, "b")];
+  const homes = [join(directory, "deep-".repeat(16)), join(directory, "b")];
   const call = (home: string, ...args: string[]) => exec(process.execPath, [cli, ...args], { env: { ...process.env, MEMSPHERE_HOME: home } });
   t.after(async () => { for (const home of homes) await call(home, "daemon", "stop").catch(() => undefined); await rm(directory, { recursive: true, force: true }); });
   for (const home of homes) await mkdir(home);
   const results = await Promise.all(homes.map(home => call(home, "daemon", "start")));
   const first = JSON.parse(results[0].stdout), second = JSON.parse(results[1].stdout);
   assert.notEqual(first.pid, second.pid);
+  const firstState = JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8"));
+  if (process.platform !== "win32") {
+    assert.ok(Buffer.byteLength(firstState.endpoint) < 100);
+    assert.equal((await stat(dirname(firstState.endpoint))).mode & 0o777, 0o700);
+    assert.equal((await stat(firstState.endpoint)).mode & 0o777, 0o600);
+  }
   const repeated = JSON.parse((await call(homes[0], "daemon", "start")).stdout);
   assert.equal(repeated.instanceId, first.instanceId);
   await writeFile(join(homes[0], ".runtime", "daemon-services.json"), JSON.stringify({ version: 1, view: { desiredState: "running", configPath: join(directory, "missing-config") } }));
   const restarted = JSON.parse((await call(homes[0], "daemon", "restart")).stdout);
   assert.notEqual(restarted.instanceId, first.instanceId);
+  if (process.platform !== "win32") await assert.rejects(stat(dirname(firstState.endpoint)), { code: "ENOENT" });
   assert.equal(restarted.view.desiredState, "running");
   assert.equal(restarted.view.running, false);
   assert.ok(restarted.view.error);
