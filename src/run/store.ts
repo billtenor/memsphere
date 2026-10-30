@@ -13,6 +13,8 @@ import {
   artifactReviewDispositionValues,
   artifactReviewSeverityValues,
   artifactReviewVoteValues,
+  artifactReviewAgentsSubmitted,
+  artifactReviewWaitReady,
   artifactReviewRoundControlPlane,
   authorizeArtifactReviewActor,
   createArtifactReviewAssignments,
@@ -1996,8 +1998,7 @@ export async function waitForArtifactReview(input: {
   while (true) {
     if (input.signal?.aborted) throw input.signal.reason ?? new Error("Artifact Review wait aborted");
     const context = await readArtifactReviewForRunner(input);
-    if (context.round.assignments.some((assignment) => assignment.status === "failed")) return context;
-    if (context.review.status !== "pending") return context;
+    if (artifactReviewWaitReady(context.review, context.round)) return context;
     await sleep(interval, input.signal);
   }
 }
@@ -2587,7 +2588,7 @@ export async function submitArtifactReviewRunnerVote(input: {
       }
       throw new Error(`Runner has already voted in Artifact Review Round: ${round.id}`);
     }
-    if (review.status !== "awaiting_runner_vote" || round.status !== "awaiting_runner_vote") {
+    if (!["pending", "awaiting_runner_vote"].includes(review.status) || !artifactReviewAgentsSubmitted(round)) {
       throw new Error(`Artifact Review Round is not awaiting a Runner vote: ${round.id}`);
     }
     if (input.vote === "request_changes" && !comment) {
@@ -2650,7 +2651,8 @@ async function settleArtifactReviewRound(
   createdArtifactFiles: string[],
   now: string
 ): Promise<void> {
-  if (round.assignments.some((assignment) => assignment.status !== "submitted")) return;
+  const allSubmitted = round.assignments.every(assignment => assignment.status === "submitted");
+  if (!artifactReviewAgentsSubmitted(round)) return;
 
   const identityDecisionVotes = round.votes.filter(
     (vote) => vote.subject.kind === "actor" && vote.binding === "decision"
@@ -2665,7 +2667,7 @@ async function settleArtifactReviewRound(
     (vote) => vote.subject.kind === "runner" && vote.binding === "decision"
   );
 
-  if (!identityDecisionRejected && runnerAuthorization.allowed && !runnerVote) {
+  if (allSubmitted && !identityDecisionRejected && runnerAuthorization.allowed && !runnerVote) {
     round.status = "awaiting_runner_vote";
     review.status = "awaiting_runner_vote";
     return;

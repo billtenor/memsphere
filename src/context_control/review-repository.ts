@@ -7,7 +7,7 @@ import { access } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import * as legacy from "../run/store.js";
 import type { ArtifactReview, ArtifactReviewComment, ArtifactReviewRound } from "../artifact-review.js";
-import { artifactReviewAssignmentId, artifactReviewDispositionValues } from "../artifact-review.js";
+import { artifactReviewAssignmentId, artifactReviewDispositionValues, artifactReviewWaitReady } from "../artifact-review.js";
 import { createControlPlaneSnapshot } from "../control-plane/index.js";
 import { openContextControl } from "../project/context-control.js";
 import { decodeGraphContent, mimeType } from "./graph-content.js";
@@ -120,7 +120,7 @@ export async function waitForArtifactReview(input: Parameters<typeof legacy.wait
     input.signal?.throwIfAborted();
     await use(input, (g, id) => g.advance(id.runId));
     const result = await readArtifactReviewForRunner(input);
-    if (result.review.status !== "pending" || result.round.assignments.some(a => a.status === "failed")) return result;
+    if (artifactReviewWaitReady(result.review, result.round)) return result;
     await delay(interval, undefined, { signal: input.signal });
   }
 }

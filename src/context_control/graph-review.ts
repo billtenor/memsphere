@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { authorizeArtifactOperation, createControlPlaneSnapshot, type ArtifactControlPlane, type ControlPlaneConfig, type PermissionId } from "../control-plane/index.js";
-import { evaluateArtifactReviewRound, type ArtifactReviewAssignment, type ArtifactReviewComment, type ArtifactReviewRound, type ArtifactReviewVoteValue } from "../artifact-review.js";
+import { artifactReviewAgentsSubmitted, evaluateArtifactReviewRound, type ArtifactReviewAssignment, type ArtifactReviewComment, type ArtifactReviewRound, type ArtifactReviewVoteValue } from "../artifact-review.js";
 import type { GraphAction, GraphProcedureMemory } from "../memory/ast.js";
 import type { Review, ReviewRound, Run, Step } from "./types.js";
 import { failure } from "./errors.js";
@@ -77,7 +77,7 @@ export function graphRoundControlPlane(run: Run, step: Step, round: ReviewRound)
   };
 }
 export function projectGraphRound(run: Run, step: Step, round: ReviewRound, reviews: Review[], artifactDigest = ""): ArtifactReviewRound {
-  reviews = reviews.filter(review => review.roundId === round.id);
+  reviews = reviews.filter(review => review.roundId === round.id).sort((a, b) => a.id.localeCompare(b.id));
   const cp = graphRoundControlPlane(run, step, round);
   const assignments: ArtifactReviewAssignment[] = Object.entries(round.reviewConfig.reviewers).map(([actorId, actor]) => {
     const review = reviews.find(r => r.id === graphReviewId(round.id, actorId));
@@ -118,6 +118,9 @@ export function projectGraphRound(run: Run, step: Step, round: ReviewRound, revi
     const humanRejected = dto.votes.some(v => v.binding === "decision" && v.subject.kind === "actor" && v.value !== "approve");
     if (!humanRejected && round.reviewConfig.runner.permissions.includes("decision.decide") && !runner) dto.status = "awaiting_runner_vote";
     else { dto.result = evaluateArtifactReviewRound(dto, runner?.endedAt ?? reviews.map(r => r.endedAt ?? r.createdAt).sort().at(-1) ?? round.createdAt); dto.status = dto.result!.status; }
+  } else if (artifactReviewAgentsSubmitted(dto) && runner?.vote?.value === "request_changes") {
+    dto.result = evaluateArtifactReviewRound(dto, runner.endedAt!);
+    dto.status = dto.result!.status;
   }
   return dto;
 }

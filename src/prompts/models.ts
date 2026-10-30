@@ -310,7 +310,6 @@ export type ReviewNextActionPromptModel =
       runId: string;
       reviewId: string;
       roundId: string;
-      agentReviewsPending: boolean;
       assignments: Array<{
         assignmentId: string;
         actorId: string;

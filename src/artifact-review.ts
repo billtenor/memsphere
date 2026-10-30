@@ -349,9 +349,22 @@ export function authorizeArtifactReviewActor(input: {
   });
 }
 
+/** Human participation is independent of the Agent execution/waiting line. */
+export function artifactReviewAgentsSubmitted(round: ArtifactReviewRound): boolean {
+  return round.assignments.every(a => a.actorKind !== "agent" || a.status === "submitted");
+}
+
+export function artifactReviewWaitReady(review: Pick<ArtifactReview<unknown>, "status">, round: ArtifactReviewRound): boolean {
+  return review.status !== "pending" || artifactReviewAgentsSubmitted(round)
+    || round.assignments.some(a => a.actorKind === "agent" && a.status === "failed");
+}
+
 export function evaluateArtifactReviewRound(round: ArtifactReviewRound, now: string): ArtifactReviewRoundResult | undefined {
   const submitted = round.assignments.filter((assignment) => assignment.status === "submitted");
-  if (submitted.length !== round.assignments.length) return undefined;
+  // Runner revisions can proceed without waiting for Human acceptance of a rejected candidate.
+  const runnerRejected = artifactReviewAgentsSubmitted(round)
+    && round.votes.some(v => v.subject.kind === "runner" && v.binding === "decision" && v.value === "request_changes");
+  if (submitted.length !== round.assignments.length && !runnerRejected) return undefined;
 
   const decisionVotes = round.votes.filter((vote) => vote.binding === "decision");
   const advisoryVotes = round.votes.filter((vote) => vote.binding === "advisory");

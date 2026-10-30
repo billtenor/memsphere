@@ -7,7 +7,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { runReviewSubmitForHumanCommand } from "../src/commands/run.js";
 import { parseControlPlaneConfig } from "../src/control-plane/index.js";
-import { currentArtifactReview, readRun, reportRun, startRun } from "../src/run/store.js";
+import { currentArtifactReview, readRun, reportRun, startRun, waitForArtifactReview, submitArtifactReviewRunnerVote } from "../src/run/store.js";
 import { runGit } from "../src/git.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { reviewConfiguration } from "./helpers/review.js";
@@ -70,6 +70,15 @@ flow:
       });
       return { started, review: currentArtifactReview(pending)! };
     };
+
+    for (const vote of ["approve", "request_changes"] as const) {
+      const independent = await createReview(`independent ${vote}`);
+      const context = await waitForArtifactReview({ runsRoot, reviewId: independent.review.id });
+      assert.equal(context.round.assignments[0].status, "draft");
+      const decided = await submitArtifactReviewRunnerVote({ runsRoot, reviewId: context.review.id, roundId: context.round.id, vote, comment: vote === "request_changes" ? "Revise without waiting for Human" : undefined });
+      assert.equal(decided.review.status, vote === "approve" ? "pending" : "awaiting_revision");
+      assert.equal(decided.round.assignments[0].status, "draft");
+    }
 
     const jsonCase = await createReview("json receipt");
     const commentsPath = join(root, "comments.json");

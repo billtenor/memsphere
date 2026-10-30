@@ -453,7 +453,7 @@ export class GraphRuntime {
     if (!permissions?.some(p => p === "decision.decide" || !runner && p === "decision.assess")) throw failure("PERMISSION_DENIED", "Reviewer is not authorized to vote");
     if (runner) {
       const all = await this.records.list<Review>("review", runId);
-      if (projectGraphRound(run, step, round, all).status !== "awaiting_runner_vote") throw failure("REVIEW_NOT_READY", "Runner must read all submitted opinions before deciding");
+      if (!projectGraphRound(run, step, round, all).assignments.every(a => a.actorKind !== "agent" || a.status === "submitted")) throw failure("REVIEW_NOT_READY", "Runner must read all Agent opinions before deciding");
       if (vote === "abstain") throw failure("INVALID_ARGUMENT", "Runner vote must be approve or request_changes");
     }
     if (delegationNote !== undefined) {

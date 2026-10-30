@@ -5,6 +5,7 @@ import { renderPrompt } from "../prompts/renderer.js";
 import { buildArtifactReviewSummaryPromptModel, buildArtifactReviewNextActionPromptModel } from "../prompts/index.js";
 import { renderRunOutput } from "../prompts/run-output.js";
 import { resolvePromptLocale } from "../prompts/locale.js";
+import { artifactReviewWaitReady } from "../artifact-review.js";
 
 export async function inspectReview(config: MemsphereConfig, reviewId: string) {
   if (reviewId.startsWith("graph-review-")) {
@@ -16,7 +17,7 @@ export async function inspectReview(config: MemsphereConfig, reviewId: string) {
 }
 export type ReviewContext = Awaited<ReturnType<typeof inspectReview>>;
 export function reviewReady(context: ReviewContext) {
-  return context.review.status !== "pending" || context.round.assignments.some(a => a.status === "failed");
+  return artifactReviewWaitReady(context.review, context.round);
 }
 export function reviewResumeNotification(project: string, reviewId: string) {
   const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";

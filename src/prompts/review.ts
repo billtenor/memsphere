@@ -1,5 +1,7 @@
 import {
   repeatedArtifactReviewAdvisories,
+  artifactReviewAgentsSubmitted,
+  artifactReviewRoundControlPlane,
   type ArtifactReview,
   type ArtifactReviewRound
 } from "../artifact-review.js";
@@ -124,6 +126,11 @@ export function buildArtifactReviewNextActionPromptModel(
   if (review.status === "awaiting_revision") return { kind: "revision", runId };
   const failed = round.assignments.find((assignment) => assignment.status === "failed");
   if (failed) return { kind: "none" };
+  if (!artifactReviewAgentsSubmitted(round)) return { kind: "wait", reviewId: review.id };
+  if (!round.votes.some(v => v.subject.kind === "runner")
+    && artifactReviewRoundControlPlane(review, round).permissions.runner.effective.includes("decision.decide")) {
+    return { kind: "runner_vote", reviewId: review.id, roundId: round.id };
+  }
   const humanAssignments = round.assignments.filter(
     (assignment) => (assignment.actorKind ?? "human") === "human"
       && assignment.status !== "submitted"
@@ -135,10 +142,6 @@ export function buildArtifactReviewNextActionPromptModel(
       runId,
       reviewId: review.id,
       roundId: round.id,
-      agentReviewsPending: round.assignments.some(
-        (assignment) => assignment.actorKind === "agent" && assignment.status !== "submitted"
-          && assignment.status !== "cancelled"
-      ),
       assignments: humanAssignments.map((assignment) => ({
         assignmentId: assignment.id ?? assignment.actorId,
         actorId: assignment.actorId,

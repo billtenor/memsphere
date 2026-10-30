@@ -132,7 +132,6 @@ const reviewNextActionSchema = z.discriminatedUnion("kind", [
     runId: z.string(),
     reviewId: z.string(),
     roundId: z.string(),
-    agentReviewsPending: z.boolean(),
     assignments: z.array(z.object({
       assignmentId: z.string(),
       actorId: z.string(),

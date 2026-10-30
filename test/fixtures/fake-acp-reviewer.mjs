@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import { access } from "node:fs/promises";
 
 const mode = process.argv[2] || "approve";
 const sessions = new Set();
@@ -55,10 +56,16 @@ const app = acp
         await sendProgress(client, params.sessionId, index++);
       }
     }
-    if (mode === "approve" || mode === "request_changes") {
+    if (mode === "gated-approve") {
+      while (!signal.aborted) {
+        try { await access(process.env.REVIEW_TEST_GATE); break; }
+        catch { await delay(25); }
+      }
+    }
+    if (mode === "approve" || mode === "request_changes" || mode === "gated-approve") {
       try {
         await sendReviewActivity(client, params.sessionId);
-        await completeReview(mode, client, params.sessionId);
+        await completeReview(mode === "gated-approve" ? "approve" : mode, client, params.sessionId);
       } catch (error) {
         process.stderr.write(`fake reviewer completion failed: ${error?.stack || error}\n`);
         throw error;

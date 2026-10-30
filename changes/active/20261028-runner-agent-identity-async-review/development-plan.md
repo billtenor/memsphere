@@ -23,3 +23,16 @@
 
 
 修订4：按Human限定，仅移除ValueStore单记录可独立承担的调用方锁；新增跨进程同/异会话和CAS冲突测试，更新方案、盘点和新候选。其他跨记录/跨资源问题暂不改造；原始证据和逐轮验收材料留Run，不进入Git提交清单。
+
+
+### 2026-10-30 Human 修订：Agent 等待与 Human 验收分线
+
+同步和异步 review wait 共用相同就绪判定，仅等待本轮 Agent Assignment：全部 Agent 正式提交或任一 Agent 执行失败时返回/发送继续通知；Human 的草稿、提交、投票内容不参与该判定。没有 Agent 要等待时立即返回，异步模式也不登记任务；已可返回的同轮重复 wait 不生成新任务。终态/轮次变化仍沿现有取消与返回规则处理。
+
+Agent 意见收齐后，Runner 可独立阅读、处置并提交本人的 approve/request_changes，不等待 Human。approve 保留最终 Human 正式投票门禁，不将缺票视为批准；request_changes 可结束当前候选并进入修订，不要求 Human 为已被 Runner 否决的候选补票。Human 提前提交的有效票保留在原候选，不提前释放 Agent 等待，也不迁移到修订候选。新候选开启后旧轮 Human 提交按既有轮次冲突拒绝。
+
+继续提示顺序为 Agent 执行/重试 → Runner 处置与决定 → Human 最终验收；不再在 Agent 尚未完成时提示先收 Human 票。Human 仍可自主提前投票，其操作不阻塞 Agent 执行、同步等待或异步唤醒。最终 unanimous 通过仍要求全部必需参与者正式提交并通过适用决策票；仅 Runner 要求修改允许提前进入修订，不允许缺 Human 票提前通过。
+
+模型结构不新增状态或字段：整体轮次在 Human 待验收时仍可为 pending，Agent 等待完成与整体结算分离；已有 Review/vote、commentDispositions 记录两条线各自进展。Graph 和旧 Flow 同步等待、daemon、CLI 即时返回统一使用 artifactReviewWaitReady，Runner 就绪使用同一 Agent 完成判定。旧 Flow 保留此前明确排除改造的真实 JSON 写锁。
+
+验证覆盖 Agent 执行时 Human 草稿更新不释放等待、全部 Agent 完成而 Human 未投时同步返回/异步发送、无 Agent 同步异步立即返回且无任务、重复 wait 无重复通知、Runner 在 Human 未提交时决定及修订、Human 最终验收不能绕过、旧轮投票冲突，以及既有发送失败/恢复/去重。

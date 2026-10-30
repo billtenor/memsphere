@@ -30,24 +30,30 @@ test("daemon survives CLI exit, restores View intent, and isolates separate Home
   assert.equal(JSON.parse((await call(homes[1], "daemon", "status")).stdout).instanceId, second.instanceId);
 });
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" | "cas-conflict" = "success") {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" | "cas-conflict" = "success", includeAgent = true) {
   const f = await businessFixture(t, {});
   const bin = join(f.directory, "bin"); await mkdir(bin);
+  const gate = join(f.directory, "review-gate");
+  const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
+  const providers = { codex: { env: { REVIEW_TEST_GATE: gate } } };
+  const provider = join(bin, "codex-acp");
+  await writeFile(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) { console.log("fake-acp test"); process.exit(0); } process.env.MEMSPHERE_HOME = ${JSON.stringify(f.home)}; process.argv[2] = "gated-approve"; import(${JSON.stringify(resolve("test/fixtures/fake-acp-reviewer.mjs"))});\n`);
+  await chmod(provider, 0o755);
   const queue = join(f.directory, "queue.json");
   const queueLog = join(f.directory, "queue-attempts.ndjson");
   const fake = join(bin, "codex");
   await writeFile(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="cas-conflict") { const path = ${JSON.stringify(join(f.home, "data", "daemon-tasks"))}; for(const file of fs.readdirSync(path).filter(x=>x.startsWith("task-") && x.endsWith(".json"))) { const record = path+"/"+file; const row=JSON.parse(fs.readFileSync(record,"utf8")); row.revision++; fs.writeFileSync(record+".tmp",JSON.stringify(row)); fs.renameSync(record+".tmp",record); } } if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await chmod(fake, 0o755);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] } } } }));
-  await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: true } } }));
+  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
+  await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents, acp_providers: providers }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}:${process.env.PATH}` };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
-  f.beforeCleanup(async () => { await call("daemon", "stop"); });
+  f.beforeCleanup(async () => { await completeAgent(true).catch(() => undefined); await call("daemon", "stop"); });
   const procedure = join(f.directory, "graph.yaml");
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [async-test]\ndefines: [Async test]\nmode: graph\nactions:\n  - !action\n    id: work\n    description: Produce\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Candidate\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n      review: [approval]\n`);
   const bindings = join(f.directory, "bindings.json");
-  await writeFile(bindings, JSON.stringify({ reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } }, slots: { "async-test::approval": { actors: ["human"] } } }));
+  await writeFile(bindings, JSON.stringify({ reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } }, slots: { "async-test::approval": { actors: includeAgent ? ["human", "agent"] : ["human"] } } }));
   const started = JSON.parse((await call("run", "start", "--file", procedure, "--name", "Async", "--review-config", bindings, "--output", "json")).stdout);
   await call("continue", "report", "--artifact", "candidate");
   const { openContextControl } = await import("../src/project/context-control.js");
@@ -56,13 +62,36 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   const step = snapshot.steps.find(s => s.reviewRounds?.length)!;
   const reviewId = `graph-review-${started.runId}__${step.id}`;
   const reviewState = () => readArtifactReviewForRunner({ runsRoot: join(f.root, "runs"), reviewId });
-  const voteHuman = async (vote: "approve" | "request_changes") => {
+  const completeAgent = async (allowManual = false) => {
+    if (!includeAgent) return;
+    await writeFile(gate, "ready");
+    const current = await reviewState();
+    if (allowManual && current.round.assignments.find(a => a.actorId === "agent")!.status === "queued") {
+      const api = await import("../src/context_control/review-repository.js");
+      const input = { runsRoot: join(f.root, "runs"), reviewId, roundId: current.round.id, actorId: "agent" };
+      const claimed = await api.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid });
+      if (claimed) {
+        const attempt = { ...input, attemptId: claimed.attempt.id };
+        await api.markArtifactReviewAgentCliReady(attempt);
+        await api.submitArtifactReviewAgentAssignment({ ...attempt, vote: "approve" });
+      }
+    }
+    for (let i = 0; i < 400; i++) {
+      const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
+      if (assignment.status === "submitted") return;
+      if (assignment.status === "failed") assert.fail(JSON.stringify(assignment.attempts));
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.fail("Agent did not submit");
+  };
+  const voteHuman = async (vote: "approve" | "request_changes", complete = true) => {
+    if (complete) await completeAgent(true);
     const comments = join(f.directory, "human-comments.json");
     await writeFile(comments, JSON.stringify(vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }]));
     return call("continue", "review", "submit-for-human", "--assignment", "human", "--vote", vote, "--comments-file", comments, "--authorization-note", "Isolated fixture vote");
   };
-  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } } }));
-  return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync };
+  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } }, acp_providers: providers }));
+  return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync, completeAgent };
 }
 
 test("asynchronous review wait returns immediately and sends only a continuation command to its original session", { timeout: 90000 }, async t => {
@@ -72,12 +101,14 @@ test("asynchronous review wait returns immediately and sends only a continuation
   assert.match(wait.stdout, /已登记异步等待/);
   const again = await call("continue", "review", "wait");
   assert.equal(/task-[a-f0-9-]+/.exec(wait.stdout)![0], /task-[a-f0-9-]+/.exec(again.stdout)![0]);
-  const comments = join(f.directory, "comments.json"); await writeFile(comments, "[]");
-  await call("continue", "review", "submit-for-human", "--assignment", "human", "--vote", "approve", "--comments-file", comments, "--authorization-note", "Test fixture authorized vote");
+  await f.completeAgent();
+  assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
+  assert.ok((await f.reviewState()).round.assignments.find(a => a.actorId === "agent")!.attempts?.at(-1)?.sessionId);
   let sent: string[] | undefined;
   for (let i = 0; i < 200; i++) { try { sent = JSON.parse(await readFile(queue, "utf8")); break; } catch { await new Promise(resolve => setTimeout(resolve, 25)); } }
   assert.ok(sent, "daemon should deliver the review result");
   assert.equal(sent[0], "queue"); assert.equal(sent[2], "origin-session");
+  assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
   const sync = await call("continue", "review", "wait");
   assert.equal(sent[4], notification(f.reviewId));
   assert.ok(sync.stdout.includes(f.reviewId));
@@ -327,10 +358,22 @@ test("pending wait uses synchronous execution when the caller configuration disa
   assert.equal(finished, false);
   assert.deepEqual(await listTasks(f.home), []);
   assert.equal((await daemonStatus(f.home)).running, false);
-  await f.voteHuman("approve");
+  await f.completeAgent();
   const result = await waiting;
+  assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
   assert.ok(result.stdout.includes(f.reviewId));
   assert.doesNotMatch(result.stdout, /已登记|Memsphere 自动消息/);
+});
+
+for (const async of [false, true]) test(`Human-only wait returns immediately with async=${async} and never registers a task`, { timeout: 30000 }, async t => {
+  const f = await reviewFixture(t, "success", false);
+  await f.setAsync(async);
+  const result = await f.call("continue", "review", "wait");
+  assert.doesNotMatch(result.stdout, /已登记/);
+  assert.match(result.stdout, /run review vote/);
+  assert.equal((await f.reviewState()).round.assignments[0].status, "draft");
+  const { listTasks } = await import("../src/daemon/tasks.js");
+  assert.deepEqual(await listTasks(f.home), []);
 });
 
 test("a completed historical wait does not block a fresh pending wait in the same round", { timeout: 90000 }, async t => {
