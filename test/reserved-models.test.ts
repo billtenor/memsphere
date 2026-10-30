@@ -101,7 +101,7 @@ test("Catalog asset paths reject traversal, source-category substitution and sym
 
 test("Home models are separately catalogued, reject collisions, bad paths and malformed sources", () => {
   const catalog = readReservedModelCatalog();
-  assert.deepEqual(catalog.homeModels.map(m => m.id), ["memsphere/command-state.json"]);
+  assert.deepEqual(catalog.homeModels.map(m => m.id), ["memsphere/command-state.json", "memsphere/daemon-task.json"]);
   assert.ok(!catalog.systemModels.some(m => m.registration.modelRef === "memsphere/command-state.json"));
   fixture((root, manifest, save) => { manifest.home_models.push(manifest.home_models[0]); save(); assert.throws(() => readReservedModelCatalog(root), /Duplicate/); });
   fixture((root, manifest, save) => { manifest.home_models[0].id = manifest.system_models[0].registration.modelRef; save(); assert.throws(() => readReservedModelCatalog(root), /Duplicate/); });

@@ -1,4 +1,5 @@
-import type { ZhCNViewMessageKey } from "./zh-CN.js";
+import type {
+ ZhCNViewMessageKey } from "./zh-CN.js";
 
 export const enViewPluralMessages = {
   "memory.count": { one: "{count} memory", other: "{count} memories" },
@@ -19,6 +20,10 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.runners": "Runner Agents",
+  "settings.runnerIdentity": "Enable Agent identity",
+  "settings.runnerAsync": "Enable asynchronous execution",
+
   "settings.optionalActorName": "Optional; defaults to ID",
   "settings.registrationMigrationRequired": "Existing model registrations require revalidation and explicit migration confirmation.",
   "settings.modelRegistrationStorage": "Model registration storage",

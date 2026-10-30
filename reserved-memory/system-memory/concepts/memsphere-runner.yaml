@@ -1,0 +1,14 @@
+!concept
+syntax: memsphere-20261027-stable
+names:
+  - memsphere-runner
+  - Runner Agent 身份与后台任务
+defines:
+  - Runner 身份来自当前调用进程的白名单环境变量，Codex 使用 CODEX_THREAD_ID，Traex 使用 TRAECLI_THREAD_ID；缺失、冲突或非法会话 ID 不猜测目标。
+  - Home CommandState 使用 agentType-sessionId 直接拼接 data_id，保留当前 Project、Run、Step 和读取记账；Continue 无需也不接受额外 ID。身份未开启或无法识别时使用原生命令显式定位，Continue 拒绝执行。
+  - DaemonTask 是 Home 通用后台任务，首期 type 为 review-wait，保存输入、接收会话、status、error、认领与时间，不保存结果正文或独立 delivery。queue 成功后 completed；轮次变更或开关关闭取消，失败提供查询与显式 retry。
+  - daemon 只恢复 queued 任务；崩溃遗留 running 置为 failed 与 recovery 阶段错误，提示可能已经投递，不自动重发。优雅停止可把仍在等待的任务退回 queued，发送中的任务有界等待。
+  - review wait 先判断结果是否可返回；可返回时直接输出完整结果，否则按当前 Runner 配置选择异步登记或同步等待，不接受单次同步参数。任务固定原会话和轮次，过期轮次不误投，接收会话不能由命令参数覆盖。
+  - daemon 重启恢复 View 的期望启停状态；首次不启动 View，操作系统开机自启动服务暂不安装，机器重启后须显式或由 View/异步命令启动 daemon 才恢复。
+  - Memsphere 发往 Agent 会话的 queue 通知只有三行：来源标记“[Memsphere 自动消息]”、“请执行命令以继续：”、显式定位 Project 与 Review 的 review wait 命令；不携带结果、失败详情、Human 指令或授权。Agent 执行命令后通过工具响应读取当前正式结果。
+  - 异步等待仅对 queued/running 活动任务去重；历史 completed/failed/cancelled 记录保留，当前仍需等待时可创建新任务，不自动重放历史通知。

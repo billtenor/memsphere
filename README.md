@@ -491,10 +491,14 @@ Managed 系统记忆升级使用专用 ChangeSet 校验并发布。Embedded 在�
 ```bash
 memsphere run start --file graph.yaml --name "业务分析"
 memsphere run step enter --run R --step S  # 多个待执行实例时选择
-memsphere continue C report --artifact-file result.json
-memsphere continue C review wait
-memsphere continue C review vote --vote approve
+memsphere continue report --artifact-file result.json
+memsphere continue review wait
+memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Step 在依赖满足时提前创建，enter 幂等，Continue 固定同一 Step 至完成。正式评审还支持 `continue C review resolve` 处置意见和 `continue C review submit-for-human` 记录已明确授权的 Human 票，参数与权限沿用对应原生命令。入口 Action 负责准备业务材料，启动不接收结构化业务 input。graph 使用模型 Store；已有 Project 按提示显式 `project models initialize` 升级。完整语法、model/payload 契约与示例见 [graph 流程](docs/procedure-graph-syntax.md)。
+Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex/Traex 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知仅包含 `[Memsphere 自动消息]`、“请执行命令以继续：”和显式定位 Project/Review 的 wait 命令，结果由再次执行命令获取。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
+
+`memsphere daemon start/status/stop/restart` 管理 Home 后台进程。View 仍用 `view start/status/stop/restart` 管理；停止 View 不影响等待任务，daemon 重启恢复之前的 View 启停意图。不安装操作系统开机自启服务。
+
+Step 在依赖满足时提前创建，enter 幂等，Continue 固定同一 Step 至完成。正式评审还支持 `continue review resolve` 处置意见和 `continue review submit-for-human` 记录已明确授权的 Human 票，参数与权限沿用对应原生命令。入口 Action 负责准备业务材料，启动不接收结构化业务 input。graph 使用模型 Store；已有 Project 按提示显式 `project models initialize` 升级。完整语法、model/payload 契约与示例见 [graph 流程](docs/procedure-graph-syntax.md)。

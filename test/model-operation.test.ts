@@ -4,8 +4,22 @@ import { readFile, writeFile, mkdir, symlink, rename } from "node:fs/promises";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { businessFixture, snapshotTree } from "./helpers/business-data.js";
-import { assertModelOperationStamp, commitModelOperation, optionalFileBytes, readModelOperationStamp, recoverModelOperation, withProjectModelWrite, withProjectSettingsLock } from "../src/project/model-operation.js";
+import { assertModelOperationStamp, commitModelOperation, optionalFileBytes, readModelOperationStamp, recoverModelOperation, withModelMaintenance } from "../src/project/model-operation.js";
 import { createProjectModelHost } from "../src/project/models.js";
+import { withNativeFileLock } from "../src/file-lock.js";
+
+test("model transactions that change config hold its file lock and can roll back without reacquiring it", async t => {
+  const f = await setup(t);
+  const configPath = join(f.root, "config.json");
+  const after = Buffer.from(JSON.stringify({ ...JSON.parse(f.config.toString()), modelsDirectory: "next-models" }));
+  await assert.rejects(withModelMaintenance(f.root, () => commitModelOperation(f.root, "config-test", [
+    { path: configPath, before: f.config, after }
+  ], { afterPending: () => withNativeFileLock(join(f.root, ".runtime", "config.json.lock"), async () => {}, { timeoutMs: 50 }) })), { code: "LOCK_TIMEOUT" });
+  assert.deepEqual(await readFile(configPath), f.config);
+  assert.match(await readModelOperationStamp(f.root), /:recovered$/);
+  await withModelMaintenance(f.root, () => commitModelOperation(f.root, "config-test", [{ path: configPath, before: f.config, after }]));
+  assert.deepEqual(await readFile(configPath), after);
+});
 
 async function worker(t: TestContext, root: string, request: object) {
   const child = fork(new URL("./fixtures/model-operation-worker.ts", import.meta.url), [root, JSON.stringify(request)], { execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
@@ -45,7 +59,7 @@ test("Model writes through an aliased Project root target the same physical Proj
   const alias = join(f.directory, "project-alias");
   await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
   const path = join(alias, "models/json-schema/draft-07/existing.json");
-  await withProjectModelWrite(alias, () => commitModelOperation(alias, "model.update", [
+  await withModelMaintenance(alias, () => commitModelOperation(alias, "model.update", [
     { path, before: Buffer.from("before\n"), after: Buffer.from("updated\n") }
   ]));
   assert.equal(await readFile(f.definition, "utf8"), "updated\n");
@@ -57,7 +71,7 @@ test("Interrupted model writes through an aliased Project root roll back in the 
   const alias = join(f.directory, "project-alias");
   await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
   const path = join(alias, "models/json-schema/draft-07/existing.json");
-  await assert.rejects(withProjectModelWrite(alias, () => commitModelOperation(alias, "model.update", [
+  await assert.rejects(withModelMaintenance(alias, () => commitModelOperation(alias, "model.update", [
     { path, before: Buffer.from("before\n"), after: Buffer.from("interrupted\n") }
   ], { afterFile: async () => { throw new Error("interrupted write"); } })), /interrupted write/);
   assert.equal(await readFile(f.definition, "utf8"), "before\n");
@@ -110,7 +124,7 @@ test("Failure rolls back all published files and retains a changed stamp to reje
   const f = await setup(t);
   const stamp = await readModelOperationStamp(f.root);
   const created = join(f.root, "models/json-schema/draft-07/new/deep.json");
-  await assert.rejects(withProjectModelWrite(f.root, () => commitModelOperation(f.root, "failure", [
+  await assert.rejects(withModelMaintenance(f.root, () => commitModelOperation(f.root, "failure", [
     { path: f.definition, before: Buffer.from("before\n"), after: Buffer.from("after\n") },
     { path: created, before: undefined, after: Buffer.from("created\n") }
   ], { afterFile: async index => { if (index === 1) throw new Error("injected failure"); } })), /injected failure/);
@@ -125,16 +139,17 @@ test("Recovery preserves external newer content and keeps the Project unavailabl
   const writing = await worker(t, f.root, { mode: "write", pause: "file-0" });
   writing.start(); await writing.next("paused"); writing.child.kill("SIGKILL"); await writing.exit;
   await writeFile(f.definition, "external newer content\n");
-  await assert.rejects(withProjectSettingsLock(f.root, () => recoverModelOperation(f.root)), { code: "MODEL_OPERATION_CONFLICT" });
+  await assert.rejects(recoverModelOperation(f.root), { code: "MODEL_OPERATION_CONFLICT" });
   assert.equal(await readFile(f.definition, "utf8"), "external newer content\n");
   await assert.rejects(readModelOperationStamp(f.root), { code: "MODEL_OPERATION_PENDING" });
   await writeFile(f.definition, "before\n");
-  await withProjectModelWrite(f.root, async () => {});
+  await withModelMaintenance(f.root, async () => {});
   assert.match(await readModelOperationStamp(f.root), /:recovered$/);
 });
 
 test("Conflicts and targets outside model roots fail before any journal or target write", async t => {
   const f = await setup(t);
+  await withModelMaintenance(f.root, async () => {}); // Create the permanent admission inode, not a journal.
   const snapshot = await snapshotTree(f.root);
   await assert.rejects(commitModelOperation(f.root, "wrong-before", [{ path: f.definition, before: Buffer.from("wrong"), after: Buffer.from("bad") }]), { code: "MODEL_OPERATION_CONFLICT" });
   await assert.rejects(commitModelOperation(f.root, "out-of-scope", [{ path: join(f.root, "memory/forbidden.json"), before: undefined, after: Buffer.from("bad") }]), { code: "MODEL_OPERATION_DAMAGED" });
@@ -151,7 +166,7 @@ test("A symlink cannot redirect a journal write or recovery into another directo
 
 test("Completed staging state stays readable after Project publication without acting on old paths", async t => {
   const f = await setup(t);
-  await withProjectModelWrite(f.root, () => commitModelOperation(f.root, "create-project", [{ path: f.definition, before: Buffer.from("before\n"), after: Buffer.from("published\n") }]));
+  await withModelMaintenance(f.root, () => commitModelOperation(f.root, "create-project", [{ path: f.definition, before: Buffer.from("before\n"), after: Buffer.from("published\n") }]));
   const published = join(f.directory, "published"); await rename(f.root, published);
   assert.match(await readModelOperationStamp(published), /:committed$/);
   await recoverModelOperation(published);
@@ -161,8 +176,45 @@ test("Completed staging state stays readable after Project publication without a
 test("ordinary model operations cannot write business records and the narrow upgrade cannot target Store metadata", async t => {
   const f = await businessFixture(t); await f.createStore();
   const path = join(f.root, "data/records/record.json");
-  await assert.rejects(withProjectModelWrite(f.root, () => commitModelOperation(f.root, "model.update", [{ path, before: undefined, after: Buffer.from("{}") }])) , { code: "MODEL_OPERATION_DAMAGED" });
+  await assert.rejects(withModelMaintenance(f.root, () => commitModelOperation(f.root, "model.update", [{ path, before: undefined, after: Buffer.from("{}") }])) , { code: "MODEL_OPERATION_DAMAGED" });
   const { openContextControl } = await import("../src/project/context-control.js"); await openContextControl(f.root, true);
   const metadata = join(f.root, "data/context_control/runs/.memsphere-json-store/invalid.json");
-  await assert.rejects(withProjectModelWrite(f.root, () => commitModelOperation(f.root, "context-control.outputs-upgrade", [{ path: metadata, before: undefined, after: Buffer.from("{}") }])) , { code: "MODEL_OPERATION_DAMAGED" });
+  await assert.rejects(withModelMaintenance(f.root, () => commitModelOperation(f.root, "context-control.outputs-upgrade", [{ path: metadata, before: undefined, after: Buffer.from("{}") }])) , { code: "MODEL_OPERATION_DAMAGED" });
+});
+
+for (const running of ["write", "recover"] as const) {
+  test(`Journal admission rejects a second writer and recovery while ${running} is active`, { timeout: 30_000 }, async t => {
+    const f = await setup(t);
+    if (running === "recover") {
+      const interrupted = await worker(t, f.root, { mode: "write", pause: "file-0" });
+      interrupted.start(); await interrupted.next("paused");
+      interrupted.child.kill("SIGKILL"); await interrupted.exit;
+    }
+    const active = await worker(t, f.root, { mode: running, pause: "pending" });
+    active.start(); await active.next("paused");
+    const before = await snapshotTree(f.root);
+    const alias = join(f.directory, "active-alias");
+    await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
+    await assert.rejects(withModelMaintenance(alias, async () => { assert.fail("Busy request must not run preflight"); }), { code: "MODEL_OPERATION_BUSY" });
+    await assert.rejects(recoverModelOperation(f.root), { code: "MODEL_OPERATION_BUSY" });
+    const other = await worker(t, f.root, { mode: "new-write" });
+    other.start(); const result = await other.next("result"); await other.exit;
+    assert.equal(result.code, "MODEL_OPERATION_BUSY");
+    assert.deepEqual(await snapshotTree(f.root), before, "Rejected requests must not change the active journal or files");
+    active.child.send("continue");
+    assert.equal((await active.next("result")).ok, true); await active.exit;
+    await withModelMaintenance(f.root, async () => {});
+    assert.match(await readModelOperationStamp(f.root), running === "write" ? /:committed$/ : /:recovered$/);
+  });
+}
+
+test("Maintenance proceeds while the obsolete Project settings lock is held", async t => {
+  const f = await setup(t);
+  await mkdir(join(f.root, ".runtime"), { recursive: true });
+  await withNativeFileLock(join(f.root, ".runtime/settings.lock"), async () => {
+    await withModelMaintenance(f.root, () => commitModelOperation(f.root, "no-project-lock", [
+      { path: f.definition, before: Buffer.from("before\n"), after: Buffer.from("updated\n") }
+    ]));
+    assert.equal(await readFile(f.definition, "utf8"), "updated\n");
+  });
 });

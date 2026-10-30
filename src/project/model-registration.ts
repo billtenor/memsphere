@@ -10,7 +10,7 @@ import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { DefaultDataManager } from "../data/management/data-manager.js";
 import { DefaultDataExtensionRegistry } from "../data/management/extension-registry.js";
 import { atomicWriteJson } from "../persistence.js";
-import { commitModelOperation, optionalFileBytes, recoverModelOperation, withProjectModelWrite, type ModelFileChange } from "./model-operation.js";
+import { commitModelOperation, optionalFileBytes, recoverModelOperation, withModelMaintenance, type ModelFileChange } from "./model-operation.js";
 import type { ModelRuntime } from "../data/api/model-runtime.js";
 import { checkModelDefinition } from "./model-validation.js";
 import { discoverModelIds, assertModelPath } from "./model-storage-paths.js";
@@ -20,7 +20,7 @@ import { validateModelStoragePaths, within } from "./model-storage-paths.js";
 import {
   MODEL_REGISTRATION_MODEL, MODEL_ID_UPGRADES, IMPORTED_MODEL_DEFINITIONS_STORE,
   DEFAULT_MODEL_REGISTRATION_CONFIG, SYSTEM_JSON_SCHEMA_MODELS_STORE,
-  validateModelRegistration, type ModelOrigin, type ModelRegistration, type ModelRegistrationConfig, type ProjectModelInput
+  modelDefinitionHash, validateModelRegistration, type ModelOrigin, type ModelRegistration, type ModelRegistrationConfig, type ProjectModelInput
 } from "./model-registration-contract.js";
 import { readBundledSystemModels } from "../reserved/models.js";
 import { modelDefinitionStore } from "./system-model-store.js";
@@ -47,6 +47,12 @@ async function registrationBootstrap(context: Context, directory: string) {
   try { definition = JSON.parse(source.replace(/^\uFEFF/, "")); }
   catch (error) { throw new TypeError(`Installed system registration definition is damaged: ${filename}`, { cause: error }); }
   validateJsonSchemaDefinition(definition);
+  // Additive compatibility for installations whose persisted bootstrap schema
+  // predates definition hashes. The persisted definition is not rewritten here.
+  const schema = definition as { properties?: Record<string, unknown> };
+  if (schema.properties && !schema.properties.definition_sha256) {
+    definition = { ...schema, properties: { ...schema.properties, definition_sha256: (modelRegistrationSchema as { properties: Record<string, unknown> }).properties.definition_sha256 } };
+  }
   return modelRegistrationBinding(definition, source);
 }
 const registry = new DefaultDataExtensionRegistry([filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension]);
@@ -159,7 +165,7 @@ export async function readModelRegistrations(context: Context, input: ProjectMod
   }
   return { records: records.filter(r => !duplicates.has(r.registration.modelRef)), diagnostics, initialized, paths };
 }
-export function withModelRegistrationLock<T>(root: string, action: () => Promise<T>): Promise<T> { return withProjectModelWrite(root, action); }
+export function withModelRegistrationMaintenance<T>(root: string, action: () => Promise<T>): Promise<T> { return withModelMaintenance(root, action); }
 export async function prepareModelRegistrationMigration(context: Context, input: ProjectModelInput, target: ModelRegistrationConfig, options: {
   migrate?: boolean;
 } = {}) {
@@ -384,13 +390,13 @@ export type ModelUpgradeResult = Omit<ModelInitializationResult, "system"> & {
   changed: boolean; updated: number;
   system: { status: "installed" | "upgraded" | "unchanged"; created: number; updated: number; retained: number };
 };
-/** Caller owns Project settings lock (or an unpublished Project staging root). */
+/** Maintenance admission is owned by the recovery journal. */
 export async function initializeProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions = {}) {
-  return await planProjectModelRegistrations(context, input, options, false) as ModelInitializationResult;
+  return withModelMaintenance(input.root, async () => await planProjectModelRegistrations(context, input, options, false) as ModelInitializationResult, context.signal);
 }
-/** Caller owns the Project settings lock, just as for initialize. Never changes business values. */
+/** Maintenance admission is owned by the recovery journal. Never changes business values. */
 export async function upgradeProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions = {}) {
-  return await planProjectModelRegistrations(context, input, options, true) as ModelUpgradeResult;
+  return withModelMaintenance(input.root, async () => await planProjectModelRegistrations(context, input, options, true) as ModelUpgradeResult, context.signal);
 }
 async function planProjectModelRegistrations(context: Context, input: ProjectModelInput, options: ModelInitializationOptions, upgrading: boolean) {
   await recoverModelOperation(input.root);
@@ -530,7 +536,7 @@ async function planProjectModelRegistrations(context: Context, input: ProjectMod
       } else {
         if (origin === "market") throw new TypeError(`Imported model has no published registration: ${id}`);
         const value = definition as Record<string, unknown>;
-        const registration: ModelRegistration = { modelRef: id, storage: "store", store_id: storeId,
+        const registration: ModelRegistration = { modelRef: id, definition_sha256: modelDefinitionHash(source), storage: "store", store_id: storeId,
           ...(typeof value.title === "string" && value.title.trim() ? { name: value.title } : {}),
           ...(typeof value.description === "string" ? { description: value.description } : {}) };
         const seed = confirmedSeedDefinitions[id];

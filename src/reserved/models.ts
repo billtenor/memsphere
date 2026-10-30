@@ -7,7 +7,7 @@ import { validateJsonSchemaDefinition } from "../data/extensions/json-schema-met
 import { RAW_MODEL, RawModelRuntime } from "../data/extensions/raw/index.js";
 import { portableNameKey, validateFilename, validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
 import { bytesContent } from "../data/extensions/shared/payload.js";
-import { IMPORTED_MODEL_DEFINITIONS_STORE, SYSTEM_JSON_SCHEMA_MODELS_STORE, SYSTEM_RAW_MODELS_STORE, validateModelRegistration, type ModelRegistration } from "../project/model-registration-contract.js";
+import { IMPORTED_MODEL_DEFINITIONS_STORE, SYSTEM_JSON_SCHEMA_MODELS_STORE, SYSTEM_RAW_MODELS_STORE, validateModelRegistration, modelDefinitionHash, type ModelRegistration } from "../project/model-registration-contract.js";
 import { validateModelSchemaReferences } from "../project/model-schema-references.js";
 
 const registrationSchema = z.unknown().transform(value => { validateModelRegistration(value); return value; });
@@ -102,7 +102,7 @@ export function readReservedModelCatalog(sourceRoot = bundledReservedModelsRoot(
     }
     if (entry.metaModel === JSON_SCHEMA_DRAFT_07) validateJsonSchemaDefinition(loaded.definition);
     else new RawModelRuntime({ data: { id: registration.modelRef, model: RAW_MODEL, payload: { contentType: "application/json", content: bytesContent(Buffer.from(loaded.source)) } }, definition: loaded.definition });
-    return { sourcePath: join(root, entry.source), source: loaded.source, definition: structuredClone(loaded.definition), metaModel: entry.metaModel, registration: structuredClone(registration) };
+    return { sourcePath: join(root, entry.source), source: loaded.source, definition: structuredClone(loaded.definition), metaModel: entry.metaModel, registration: { ...structuredClone(registration), definition_sha256: modelDefinitionHash(loaded.source) } };
   };
   const systemModels = manifest.system_models.map(entry => readEntry(entry, "system"));
   const marketPackages = manifest.market_packages.map(pack => {

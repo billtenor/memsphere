@@ -1,3 +1,4 @@
+import { withFileLock } from "../src/persistence.js";
 import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { access, chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
@@ -649,6 +650,24 @@ test("Embedded System Memory repair rejects dirty targets and stale preparations
     }
 
     await runGit(["restore", "--", ".memsphere/memory/concepts/memsphere-framework.yaml"], { cwd: workspace });
+    const first = await prepareEmbeddedSystemMemoryRepair("embedded-cas");
+    const overlapping = await prepareEmbeddedSystemMemoryRepair("embedded-cas");
+    assert(first && overlapping);
+    let ready!: () => void, release!: () => void;
+    const started = new Promise<void>(resolve => { ready = resolve; });
+    const resumed = new Promise<void>(resolve => { release = resolve; });
+    const activeRepair = applyEmbeddedSystemMemoryRepair(first, { afterApply: async () => {
+      ready(); await resumed;
+      await writeFile(targetPath, `${bundled}\n# newer external edit\n`);
+      throw Error("receipt failure");
+    } });
+    const failedRepair = assert.rejects(activeRepair, /rollback was incomplete/);
+    await started;
+    try {
+      await assert.rejects(applyEmbeddedSystemMemoryRepair(overlapping), { code: "MEMORY_REPAIR_BUSY" });
+    } finally { release(); await failedRepair; }
+    assert.match(await readFile(targetPath, "utf8"), /newer external edit/);
+    await runGit(["restore", "--", ".memsphere/memory/concepts/memsphere-framework.yaml"], { cwd: workspace });
     const rollbackPrepared = await prepareEmbeddedSystemMemoryRepair("embedded-cas");
     assert(rollbackPrepared);
     await writeFile(
@@ -980,10 +999,10 @@ test("concurrent creation of one Project preserves the winning Project Root", as
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    const results = await Promise.allSettled([
+    const results = await withFileLock(join(home, ".runtime", "projects", "shared.lock"), () => Promise.allSettled([
       projectCreateCommand("shared", {}),
       projectCreateCommand("shared", {})
-    ]);
+    ]));
     assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
     assert.equal(results.filter((result) => result.status === "rejected").length, 1);
     const registry = await readProjectRegistry(home);

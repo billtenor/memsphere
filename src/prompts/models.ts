@@ -1,6 +1,7 @@
 import type { PromptLocale } from "./locale.js";
 
 export type PromptInputMap = {
+  "run.async-wait": { taskId: string };
   "run.graph-selection": { runId: string; steps: Array<{ id: string; description: string; actor: string; artifact: string }>; command: string };
   "run.graph-waiting": { runId: string; message: string; command: string };
   "run.graph-step": { runId: string; stepId: string; instruction: string; human: boolean; rules: string; materials: string; artifact: string; command: string };

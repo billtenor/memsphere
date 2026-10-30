@@ -65,6 +65,11 @@
       "minLength": 1,
       "pattern": "\\S",
       "description": "保存模型定义的 Store ID。storage 为 store 时必填，以 store_id 与 modelRef 读取定义；storage 为 builtin 时不得填写。不得另存重复的定义 ID。"
+    },
+    "definition_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "已发布模型定义原始内容的 SHA-256；读取时必须匹配。旧登记缺失时首次使用自动补齐。"
     }
   },
   "examples": [

@@ -90,61 +90,52 @@ export class GraphRuntime {
     try { return await this.advance(run.id); }
     catch (error) { throw Object.assign(error as object, { details: { runId: run.id, recoveryCommand: `memsphere run status --run ${run.id}`, message: "Run saved; recover it instead of starting a duplicate" } }); }
   }
-  async snapshot(runId: string): Promise<Snapshot> { return this.lock(runId, () => this.snapshotValue(runId)); }
-  /** Coordinate a short Review update with graph submission and completion recovery. */
+  async snapshot(runId: string): Promise<Snapshot> { return this.snapshotValue(runId); }
+  /** Personal Review writes use their own record revision; graph recovery is separate. */
   async mutateReview<T>(runId: string, stepId: string, roundId: string, actor: string, action: (value: Review, run: Run, step: Step) => Promise<T>): Promise<T> {
-    return this.lock(runId, async () => {
-      await this.advance(runId);
-      const run = (await this.run(runId)).value; this.active(run);
-      const step = (await this.step(run, stepId)).value;
-      if (step.status !== "awaiting_review" || step.reviewRounds?.at(-1)?.id !== roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer active");
-      const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actor));
-      if (row.value.roundId !== roundId || row.value.artifactId !== step.reviewRounds.at(-1)!.artifactId || row.value.reviewer.actorId !== actor) throw failure("INVALID_STATE", "Personal Review identity mismatch");
-      const value = structuredClone(row.value);
-      const result = await action(value, run, step);
-      await this.records.update("review", runId, row, value);
-      return result;
-    });
+    const run = (await this.run(runId)).value; this.active(run);
+    const step = (await this.step(run, stepId)).value;
+    if (step.status !== "awaiting_review" || step.reviewRounds?.at(-1)?.id !== roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer active");
+    const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actor));
+    if (row.value.roundId !== roundId || row.value.artifactId !== step.reviewRounds.at(-1)!.artifactId || row.value.reviewer.actorId !== actor) throw failure("INVALID_STATE", "Personal Review identity mismatch");
+    const value = structuredClone(row.value);
+    const result = await action(value, run, step);
+    await this.records.update("review", runId, row, value);
+    return result;
   }
   async recordReviewStop(runId: string, stepId: string, roundId: string, actorId: string, attemptId: string, stopReason: string) {
-    return this.lock(runId, async () => {
-      const run = (await this.run(runId)).value;
-      const step = (await this.step(run, stepId)).value;
-      if (!step.reviewRounds?.some(r => r.id === roundId)) throw failure("NOT_FOUND", "Review Round not found");
-      const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actorId));
-      const value = structuredClone(row.value), attempt = value.attempts?.at(-1);
-      if (value.status !== "submitted" || attempt?.id !== attemptId) throw failure("REVIEW_CONFLICT", "Submitted Agent attempt does not match");
-      attempt.completion = { ...(attempt.completion ?? { at: now(), kind: "completed" as const }), stopReason };
-      await this.records.update("review", runId, row, value);
-    });
+    const run = (await this.run(runId)).value;
+    const step = (await this.step(run, stepId)).value;
+    if (!step.reviewRounds?.some(r => r.id === roundId)) throw failure("NOT_FOUND", "Review Round not found");
+    const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actorId));
+    const value = structuredClone(row.value), attempt = value.attempts?.at(-1);
+    if (value.status !== "submitted" || attempt?.id !== attemptId) throw failure("REVIEW_CONFLICT", "Submitted Agent attempt does not match");
+    attempt.completion = { ...(attempt.completion ?? { at: now(), kind: "completed" as const }), stopReason };
+    await this.records.update("review", runId, row, value);
   }
   async resolveComment(runId: string, stepId: string, roundId: string, resolution: { commentId: string; value: import("../artifact-review.js").ArtifactReviewDispositionValue; note: string; validationSummary?: string }) {
-    return this.lock(runId, async () => {
-      const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "decision.decide");
-      const row = await this.step(run, stepId); const step = structuredClone(row.value);
-      const round = step.reviewRounds?.find(r => r.id === roundId);
-      if (!round) throw failure("NOT_FOUND", "Review Round not found");
-      const review = (await this.records.list<Review>("review", runId)).find(r => r.roundId === roundId && r.status === "submitted" && r.comments.some(c => c.id === resolution.commentId));
-      if (!review || !review.reviewer.actorId || round.reviewConfig.reviewers[review.reviewer.actorId]?.permissions.includes("decision.decide")) throw failure("NOT_FOUND", "Submitted advisory comment not found");
-      if (!resolution.note.trim() || resolution.value === "accepted-fixed" && !resolution.validationSummary?.trim()) throw failure("INVALID_ARGUMENT", "Resolution requires a note and accepted-fixed requires validation evidence");
-      round.resolutions = [...(round.resolutions ?? []).filter(r => r.reviewId !== review.id || r.commentId !== resolution.commentId), { ...resolution, reviewId: review.id, updatedAt: now() }];
-      await this.records.update("step", runId, row, step);
-    });
+    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "decision.decide");
+    const row = await this.step(run, stepId); const step = structuredClone(row.value);
+    const round = step.reviewRounds?.find(r => r.id === roundId);
+    if (!round) throw failure("NOT_FOUND", "Review Round not found");
+    const review = (await this.records.list<Review>("review", runId)).find(r => r.roundId === roundId && r.status === "submitted" && r.comments.some(c => c.id === resolution.commentId));
+    if (!review || !review.reviewer.actorId || round.reviewConfig.reviewers[review.reviewer.actorId]?.permissions.includes("decision.decide")) throw failure("NOT_FOUND", "Submitted advisory comment not found");
+    if (!resolution.note.trim() || resolution.value === "accepted-fixed" && !resolution.validationSummary?.trim()) throw failure("INVALID_ARGUMENT", "Resolution requires a note and accepted-fixed requires validation evidence");
+    round.resolutions = [...(round.resolutions ?? []).filter(r => r.reviewId !== review.id || r.commentId !== resolution.commentId), { ...resolution, reviewId: review.id, updatedAt: now() }];
+    await this.records.update("step", runId, row, step);
   }
   async bindingSnapshot(runId: string) {
     const snapshot = await this.snapshot(runId);
     return { runId, bindings: snapshot.run.reviewConfig?.reviewBindings ?? {}, rounds: snapshot.steps.flatMap(step => (step.reviewRounds ?? []).map(round => ({ stepId: step.id, roundId: round.id, bindings: round.reviewConfig.bindings }))) };
   }
   async updateBinding(runId: string, slot: string, value: { actorIds: string[] } | { skip: true }) {
-    return this.lock(runId, async () => {
-      const row = await this.run(runId); const run = structuredClone(row.value); this.active(run); this.authorize(run, "decision.decide");
-      if (!run.reviewConfig || !Object.hasOwn(run.reviewConfig.reviewBindings, slot)) throw failure("NOT_FOUND", `Review Slot is not declared: ${slot}`);
-      if ("actorIds" in value && (!value.actorIds.length || new Set(value.actorIds).size !== value.actorIds.length)) throw failure("INVALID_ARGUMENT", "Provide distinct Reviewer Actors or skip");
-      run.reviewConfig.reviewBindings[slot] = structuredClone(value);
-      for (const action of this.procedure(run).actions) if (action.artifact?.review?.some(local => `${this.procedure(run).names[0]}::${local}` === slot)) createGraphRound(run, this.procedure(run), action, "preflight");
-      await this.records.update("run", runId, row, run);
-      return this.bindingSnapshot(runId);
-    });
+    const row = await this.run(runId); const run = structuredClone(row.value); this.active(run); this.authorize(run, "decision.decide");
+    if (!run.reviewConfig || !Object.hasOwn(run.reviewConfig.reviewBindings, slot)) throw failure("NOT_FOUND", `Review Slot is not declared: ${slot}`);
+    if ("actorIds" in value && (!value.actorIds.length || new Set(value.actorIds).size !== value.actorIds.length)) throw failure("INVALID_ARGUMENT", "Provide distinct Reviewer Actors or skip");
+    run.reviewConfig.reviewBindings[slot] = structuredClone(value);
+    for (const action of this.procedure(run).actions) if (action.artifact?.review?.some(local => `${this.procedure(run).names[0]}::${local}` === slot)) createGraphRound(run, this.procedure(run), action, "preflight");
+    await this.records.update("run", runId, row, run);
+    return this.bindingSnapshot(runId);
   }
   private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.run(runId)).value;
@@ -378,14 +369,22 @@ export class GraphRuntime {
     });
   }
   async enter(runId: string, stepId: string) {
-    return this.lock(runId, async () => {
-      await this.advance(runId); const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.read");
-      const row = await this.step(run, stepId); const step = structuredClone(row.value);
-      if (!this.action(run, step).artifact) throw failure("INVALID_ARGUMENT", "collect is executed by Memsphere, not enter");
-      if (step.status === "done") throw failure("STEP_FINISHED", `Step is done: ${stepId}`);
-      if (step.status === "pending") { step.status = "running"; step.startedAt = now(); await this.records.update("step", runId, row, step); }
-      return { snapshot: await this.snapshotValue(runId), step };
-    });
+    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.read");
+    const row = await this.step(run, stepId); const step = structuredClone(row.value);
+    if (!this.action(run, step).artifact) throw failure("INVALID_ARGUMENT", "collect is executed by Memsphere, not enter");
+    if (step.status === "done") throw failure("STEP_FINISHED", `Step is done: ${stepId}`);
+    if (step.status === "pending") {
+      step.status = "running"; step.startedAt = now();
+      try { await this.records.update("step", runId, row, step); }
+      catch (error) {
+        if ((error as { code?: string }).code !== "REVISION_CONFLICT") throw error;
+        const current = (await this.step(run, stepId)).value;
+        if (current.status !== "running") throw error;
+        // Concurrent entry reuses the winner's identity and start time.
+        return { snapshot: await this.snapshotValue(runId), step: current };
+      }
+    }
+    return { snapshot: await this.snapshotValue(runId), step };
   }
   async report(runId: string, stepId: string, input: GraphReport) {
     return this.lock(runId, async () => {

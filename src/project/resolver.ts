@@ -1,3 +1,4 @@
+import { assertProjectPrepared } from "./preparation.js";
 import { readFile, realpath } from "node:fs/promises";
 import { dirname, resolve, sep } from "node:path";
 import { homePaths } from "../home.js";
@@ -58,6 +59,7 @@ export async function resolveRegisteredProject(
   } catch (error) {
     throw new Error(`Project "${name}" root is missing: ${registered.root}`, { cause: error });
   }
+  await assertProjectPrepared(root);
   const paths = projectPaths(root);
   const manifest = projectManifestSchema.parse(JSON.parse(await readFile(paths.manifestPath, "utf8")));
   if (manifest.name !== name) throw new Error(`Project manifest name "${manifest.name}" does not match Registry name "${name}"`);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
 
 export const MODEL_REGISTRATION_MODEL = "memsphere/model-registration.json";
@@ -21,6 +22,7 @@ export const IMPORTED_MODEL_DEFINITIONS_STORE = "models/imported/json-schema/dra
 export type ModelOrigin = "project" | "system" | "market" | "app";
 export type ModelRegistration = {
   modelRef: string;
+  definition_sha256?: string;
   name?: string;
   description?: string;
   package?: string;
@@ -52,7 +54,7 @@ export function validateModelRegistration(value: unknown): asserts value is Mode
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new TypeError("Invalid model registration: expected object");
   const v = value as Record<string, unknown>;
-  const keys = new Set(["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id"]);
+  const keys = new Set(["modelRef", "name", "description", "package", "package_name", "tags", "storage", "store_id", "definition_sha256"]);
   for (const key of Object.keys(v))
     if (!keys.has(key))
       throw new TypeError(`Unknown model registration field: ${key}`);
@@ -60,6 +62,8 @@ export function validateModelRegistration(value: unknown): asserts value is Mode
     if ((key === "modelRef" || v[key] !== undefined) && (typeof v[key] !== "string" || !(v[key] as string).trim()))
       throw new TypeError(`Invalid model registration ${key}`);
   assertModelRef(v.modelRef as string);
+  if (v.definition_sha256 !== undefined && (typeof v.definition_sha256 !== "string" || !/^[a-f0-9]{64}$/.test(v.definition_sha256)))
+    throw new TypeError("Invalid model definition_sha256");
   if (v.description !== undefined && typeof v.description !== "string")
     throw new TypeError("Invalid model registration description");
   if (v.storage !== "builtin" && v.storage !== "store")
@@ -73,3 +77,6 @@ export function validateModelRegistration(value: unknown): asserts value is Mode
   if (v.tags !== undefined && (!Array.isArray(v.tags) || v.tags.some(t => typeof t !== "string" || !t.trim()) || new Set(v.tags).size !== v.tags.length))
     throw new TypeError("Invalid model registration tags");
 }
+
+/** Hash the exact published UTF-8 bytes, preserving whitespace and BOM. */
+export const modelDefinitionHash = (source: string | Uint8Array): string => createHash("sha256").update(source).digest("hex");

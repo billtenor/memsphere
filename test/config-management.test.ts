@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { withNativeFileLock } from "../src/file-lock.js";
 import type { MemsphereConfig } from "../src/config.js";
 import {
   ConfigRevisionConflictError,
@@ -72,6 +73,28 @@ async function fixtureConfig() {
   const projectDocument = await readProjectConfigDocument(configPath, resolved);
   return { dir, home, configPath, globalConfigPath, resolved, globalDocument, projectDocument };
 }
+
+test("ordinary config saves ignore the old Project gate and conflicting saves preserve the winner", async () => {
+  const f = await fixtureConfig();
+  try {
+    await mkdir(join(f.resolved.scopeRoot, ".runtime"), { recursive: true });
+    await withNativeFileLock(join(f.resolved.scopeRoot, ".runtime", "settings.lock"), async () => {
+      const results = await Promise.allSettled(["first/models", "second/models"].map(modelsDirectory => writeProjectConfigDraft({
+        document: f.projectDocument, expectedRevision: f.projectDocument.revision,
+        draft: { ...editableProjectConfigDraft(f.projectDocument), modelsDirectory }, globalConfigPath: f.globalConfigPath
+      })));
+      const winners = results.filter(result => result.status === "fulfilled");
+      assert.equal(winners.length, 1);
+      const loser = results.find(result => result.status === "rejected");
+      assert.ok(loser?.status === "rejected" && loser.reason instanceof ConfigRevisionConflictError);
+      const latest = await readProjectConfigDocument(f.configPath, f.resolved);
+      assert.ok(winners[0].status === "fulfilled");
+      assert.equal(latest.raw.modelsDirectory, winners[0].value.raw.modelsDirectory);
+      await writeGlobalConfigDraft({ document: f.globalDocument, expectedRevision: f.globalDocument.revision,
+        draft: { ...editableGlobalConfigDraft(f.globalDocument), language: "en" } });
+    });
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
 
 test("global and Project config documents have independent revisions and drafts", async () => {
   const fixture = await fixtureConfig();
@@ -281,7 +304,8 @@ test("registration directory switches require explicit migration, preserve bytes
     await assert.rejects(save(saved.revision, false), error => !!error && typeof error === "object" && "code" in error && error.code === "MODEL_REGISTRATION_MIGRATION_REQUIRED");
     assert.equal((await readProjectConfigDocument(fixture.configPath, fixture.resolved)).revision, saved.revision);
     await assert.rejects(save("stale", true), ConfigRevisionConflictError);
-    saved = await save(saved.revision, true);
+    await mkdir(join(saved.scopeRoot, ".runtime"), { recursive: true });
+    saved = await withNativeFileLock(join(saved.scopeRoot, ".runtime", "settings.lock"), () => save(saved.revision, true));
     assert.equal(saved.raw.modelRegistration?.storeId, "new");
     assert.deepEqual(await readFile(join(saved.scopeRoot, "models/next-registration/initialized.json")), oldManifest);
     assert.deepEqual(await readFile(join(oldDirectory, "initialized.json")), oldManifest);
@@ -323,5 +347,23 @@ test("Project settings reject model directories overlapping any business Store b
       assert.equal(await readFile(fixture.configPath, "utf8"), source);
       assert.deepEqual(await snapshotTree(dataPath), before);
     }
+  } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("Runner Agent settings persist independently of ACP and Project permissions", async () => {
+  const fixture = await fixtureConfig();
+  try {
+    const originalProject = await readFile(fixture.configPath, "utf8");
+    const document = await readGlobalConfigDocument(fixture.globalConfigPath);
+    const draft = editableGlobalConfigDraft(document);
+    draft.runner_agents = { codex: { identity_enabled: true, async_enabled: true } };
+    const validation = validateGlobalConfigDraft(document, draft);
+    assert.equal(validation.valid, true);
+    await writeGlobalConfigDraft({ document, expectedRevision: document.revision, draft });
+    const updated = await readGlobalConfigDocument(fixture.globalConfigPath);
+    assert.deepEqual(editableGlobalConfigDraft(updated).runner_agents, draft.runner_agents);
+    assert.deepEqual(updated.raw.acp_providers, document.raw.acp_providers);
+    assert.equal(await readFile(fixture.configPath, "utf8"), originalProject);
+    assert.equal(validateGlobalConfigDraft(updated, { ...draft, runner_agents: { codex: { identity_enabled: false, async_enabled: true } } }).valid, false);
   } finally { await rm(fixture.dir, { recursive: true, force: true }); }
 });

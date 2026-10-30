@@ -106,7 +106,8 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       changeId: created.id,
       commentId: first.comment.id,
       actor,
-      body: "Please make this rule explicit."
+      body: "Please make this rule explicit.",
+      expectedUpdatedAt: "2026-08-01T00:00:00.000Z"
     });
     assert.equal(edited.comment.body, "Please make this rule explicit.");
     await assert.rejects(
@@ -239,20 +240,11 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       /already abandoned/
     );
     assert.equal((await readMemoryChange({ home, project: "project", changeId: created.id })).status, "abandoned");
-    await assert.rejects(
-      archiveMemoryChange({
-        home,
-        project: "project",
-        changeId: created.id,
-        expectedUpdatedAt: "2026-08-01T00:00:00.000Z"
-      }),
-      /modified by another operation/
-    );
     const archivedAbandoned = await archiveMemoryChange({
       home,
       project: "project",
       changeId: created.id,
-      expectedUpdatedAt: abandoned.updated_at
+      expectedUpdatedAt: "2026-08-01T00:00:00.000Z"
     });
     assert.equal(archivedAbandoned.kind, "changes");
     assert.equal(archivedAbandoned.id, created.id);

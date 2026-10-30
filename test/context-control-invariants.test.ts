@@ -6,7 +6,7 @@ import { checkModelDefinition } from "../src/project/model-validation.js";
 import { readContextControlModels } from "../src/context_control/model-assets.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { businessFixture } from "./helpers/business-data.js";
-import { withProjectModelWrite } from "../src/project/model-operation.js";
+import { withModelMaintenance } from "../src/project/model-operation.js";
 import { upgradeContextControlOutputs } from "../src/project/context-control-upgrade.js";
 
 const time = "2026-10-27T00:00:00.000Z";
@@ -51,7 +51,7 @@ for (const status of ["failed", "cancelled"]) test(`known model upgrade preserve
   await service.stores.step.create({}, `${r.id}/s`, value);
   const before = await service.stores.step.get({}, `${r.id}/s`);
   for (const entity of ["run", "step"]) await writeFile(join(f.root, `models/json-schema/draft-07/memsphere/context_control/${entity}.json`), await readFile(new URL(`./fixtures/context-control-${entity}-before-graph.json`, import.meta.url), "utf8"));
-  assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
   const reopened = (await openContextControl(f.root))!;
   assert.deepEqual(await reopened.stores.step.get({}, `${r.id}/s`), before);
   assert.equal((await reopened.snapshot(r.id)).steps[0].status, status);
@@ -72,7 +72,7 @@ for (const entity of ["run", "step"] as const) test(`generic ${entity} writes, c
   const path = join(f.root, `models/json-schema/draft-07/memsphere/context_control/${entity}.json`);
   const old = await readFile(new URL(`./fixtures/context-control-${entity}-before-graph.json`, import.meta.url), "utf8");
   await writeFile(path, old);
-  await assert.rejects(withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)));
+  await assert.rejects(withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)));
   assert.equal(await readFile(path, "utf8"), old);
 });
 
@@ -92,10 +92,10 @@ for (const nextStatus of ["done", "awaiting_review"] as const) test(`submission 
   const schemaPath = join(f.root, "models/json-schema/draft-07/memsphere/context_control/step.json");
   const prior = await readFile(new URL("./fixtures/context-control-step-before-review-invariant.json", import.meta.url), "utf8");
   await writeFile(schemaPath, prior);
-  await assert.rejects(withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)), /discriminated.*round/);
+  await assert.rejects(withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)), /discriminated.*round/);
   assert.equal(await readFile(schemaPath, "utf8"), prior);
   await writeFile(path, JSON.stringify(before));
-  assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
   assert.deepEqual(await (await openContextControl(f.root))!.stores.step.get({}, key), before);
 });
 
@@ -112,9 +112,9 @@ for (const conflict of ["different", "duplicate", "schema"] as const) test(`subm
   await assert.rejects(store.get({}, key), /sole recovery intent/);
   const schemaPath = join(f.root, "models/json-schema/draft-07/memsphere/context_control/step.json");
   const previous = await readFile(new URL("./fixtures/context-control-step-before-review-invariant.json", import.meta.url), "utf8"); await writeFile(schemaPath, previous);
-  await assert.rejects(withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)), /sole recovery intent/);
+  await assert.rejects(withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)), /sole recovery intent/);
   assert.equal(await readFile(schemaPath, "utf8"), previous);
   await writeFile(path, JSON.stringify(before));
-  assert.equal((await withProjectModelWrite(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
   assert.deepEqual(await (await openContextControl(f.root))!.stores.step.get({}, key), before);
 });

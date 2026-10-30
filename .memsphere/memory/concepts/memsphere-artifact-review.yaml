@@ -5,6 +5,8 @@ names:
   - Artifact Review
   - 产物评审
 defines:
+  - "review wait 已就绪时直接返回结果；仍需等待时按 Runner 配置选择异步登记或同步等待，无需命令参数选择。重复异步调用仅复用活动任务，历史终态不阻止新的必要等待。"
+  - "review-wait 任务固定轮次与接收 Agent 会话，queue 成功才 completed；失败和取消通过 status/error 表达，通知仅含来源标记与继续执行的 wait 命令，完整结果由该命令读取，不保存 result 或 delivery。"
   - 流程执行 Run 中针对某次不可变 Artifact Submission 的正式评审，用于让 Human 或 Agent 从不同视角检查产物。
   - Review Slot 是 Procedure 声明的评审视角；Binding 是 Run 中评审视角与实际 Actor 的对应关系。
   - Round 是围绕同一份 Submission 的一轮评审，关联当时的材料、参与者与评审配置；Assignment 是其中分配给单个 Reviewer 的评审任务。

@@ -89,7 +89,7 @@ test("Run header finishes exploration, archives it, and restores it without reop
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!, run = await service.start("页面结束归档");
   const a = (await service.report(run.id, { name: "交付", content: textContent("可交付正文") })).artifact;
   const commandStore = (await openCommandStates(true, f.home))!;
-  await commandStore.create({}, "context-lifecycle", {id:"context-lifecycle",commandGroup:"run",groupId:run.id,status:"active",parameters:{project:"test-project"},state:{}});
+  await commandStore.create({}, "codex-lifecycle", {id:"codex-lifecycle",agentType:"codex",sessionId:"lifecycle",updatedAt:new Date().toISOString(),commandGroup:"run",groupId:run.id,status:"active",parameters:{project:"test-project"},state:{}});
   const server = createViewServer(await readProjectConfig("test-project", f.home));
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, browser = await browserScope();
@@ -102,7 +102,7 @@ test("Run header finishes exploration, archives it, and restores it without reop
     await page.getByRole("dialog").getByRole("button", { name: "结束运行", exact: true }).click();
     await page.getByRole("button", { name: "归档", exact: true }).first().waitFor();
     assert.equal((await service.findRun(run.id))!.status, "done");
-    assert.equal((await commandStore.get({},"context-lifecycle"))!.value.status,"closed");
+    assert.equal((await commandStore.get({},"codex-lifecycle"))!.value.status,"closed");
     await page.getByRole("button", { name: "归档", exact: true }).first().click();
     await page.getByRole("dialog").getByRole("button", { name: "归档", exact: true }).click();
     await page.waitForURL(`${origin}/projects/test-project/tasks?status=done`);
@@ -115,7 +115,7 @@ test("Run header finishes exploration, archives it, and restores it without reop
     await page.getByRole("button", { name: "归档", exact: true }).first().waitFor();
     const restored = (await service.findRun(run.id))!;
     assert.equal(restored.archived, false); assert.equal(restored.status, "done");
-    assert.equal((await commandStore.get({},"context-lifecycle"))!.value.status,"closed");
+    assert.equal((await commandStore.get({},"codex-lifecycle"))!.value.status,"closed");
     assert.equal(await page.getByRole("button", { name: "结束运行", exact: true }).count(), 0);
     await page.getByRole("button", { name: "交付 v1", exact: true }).click();
     await page.getByText("可交付正文", { exact: true }).waitFor();

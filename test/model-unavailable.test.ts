@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { listModels, readModel } from "../src/project/model-service.js";
-import { businessFixture, snapshotTree } from "./helpers/business-data.js";
+import { businessFixture, snapshotTree, publishFixtureDefinition } from "./helpers/business-data.js";
 
 // These rule combinations previously each drove the same unavailable screen.
 // The contract here is the saved model's availability, read rejection and bytes;
@@ -34,7 +34,7 @@ for (const [id, schema] of cases) {
     const f = await businessFixture(t, { [id]: schema });
     const source = JSON.stringify(schema, null, 2);
     const path = join(f.root, "models/json-schema/draft-07", id);
-    await writeFile(path, source);
+    await publishFixtureDefinition(f.root, id, source);
     const before = await snapshotTree(f.root);
     const catalog = await listModels({}, f.root);
     assert.equal(catalog.items.find(model => model.id === id)?.status, "unavailable");

@@ -1,4 +1,4 @@
-import { closeRunCommandStates, openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, type CommandStateRow } from "../home/command-state-store.js";
+import { assertSessionTarget, currentCommandState, closeRunCommandStates, openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, type CommandStateRow } from "../home/command-state-store.js";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
 import { Option } from "commander";
@@ -12,7 +12,7 @@ import { emitCommandResult } from "./cli-errors.js";
 import { graphCommand } from "./procedure-graph.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
 
-export type Options = { authorization?: string; contextId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
+export type Options = { authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
 function strictObject(value: unknown, allowed: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("INVALID_ARGUMENT", "Expected an object");
@@ -52,11 +52,17 @@ export async function tryContextCommand(operation: string, options: object): Pro
   }
   if (o.step || o.assignment || o.actor) throw failure("INVALID_ARGUMENT", "Legacy identity/step options are not supported here");
   const s = service!; const runId = run.id; let result: unknown;
+  if (["report", "external-add", "artifact-tag", "outputs-update", "finish", "abandon", "review-create"].includes(operation)) await assertSessionTarget(config.project!.name, runId);
+  if (operation === "enter") {
+    const context = await createCommandState(config.project!.name, runId);
+    if (!context) throw failure("AGENT_SESSION_REQUIRED", "Enable Agent identity to bind this Run");
+    emitCommandResult({ runId, sessionId: context.sessionId, nextCommand: "memsphere continue --help" }, o.output); return true;
+  }
   if (operation === "report") {
     let window: CommandStateRow | undefined;
     try {
-      if (o.contextId) window = await requireCommandState(o.contextId);
-      else { const rows = (await findCommandStates(config.project!.name, runId)).filter(r => r.value.status === "active"); if (rows.length === 1) window = rows[0]; }
+      if (o.sessionStateId) window = await requireCommandState(o.sessionStateId);
+      else window = await currentCommandState();
     } catch { /* Auxiliary window never blocks submission. */ }
     let r: Awaited<ReturnType<typeof s.report>>;
     try { r = await s.report(runId, await reportInput(o)); }
@@ -79,7 +85,7 @@ export async function tryContextCommand(operation: string, options: object): Pro
     if (r.candidates.length) warnings.push("Some previous/read materials are not declared dependencies; review candidates if relevant");
     result = { runId, artifactId: r.artifact.id, stepId: r.step.id, artifactStatus: r.artifact.status, stepStatus: r.step.status, tags: r.artifact.tags, candidates: r.candidates, ...(warnings.length ? { warnings } : {}) };
   } else if (operation === "status" || operation === "show") {
-    const snapshot = await s.snapshot(runId); const commandStates = await findCommandStates(config.project!.name, runId); result = o.root !== undefined ? scopedSnapshot(snapshot, [requireOption(o.root, "--root")]) : { ...snapshot, commandStates: commandStates.map(r => ({ contextId: r.value.id, status: r.value.status })) };
+    const snapshot = await s.snapshot(runId); const commandStates = await findCommandStates(config.project!.name, runId); result = o.root !== undefined ? scopedSnapshot(snapshot, [requireOption(o.root, "--root")]) : { ...snapshot, commandStates: commandStates.map(r => ({ sessionId: r.value.sessionId, status: r.value.status })) };
   } else if (operation === "artifact-show" || operation === "external-show") {
     const ref = operation === "artifact-show" ? { kind: "artifact" as const, id: requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact") } : { kind: "external" as const, id: requireOption(o.external, "--external") };
     const body = ref.kind === "artifact" ? await s.readArtifact(runId, ref.id) : await s.readExternal(runId, ref.id);
@@ -143,9 +149,9 @@ export async function startExploration(options: object) {
   const run = await s.start(requireOption(o.name, "--name"), config.language);
   try {
     const context = await createCommandState(config.project!.name, run.id);
-    emitCommandResult({ ...run, contextId: context.id, nextCommand: `memsphere continue ${context.id} --help` }, o.output);
+    emitCommandResult({ ...run, ...(context ? { sessionId: context.sessionId } : {}), nextCommand: context ? "memsphere continue --help" : `memsphere run show --run ${run.id}` }, o.output);
   } catch (error) {
-    if (error instanceof Error) error.message += `. Run ${run.id} was created; query memsphere --project ${config.project!.name} run status --run ${run.id}. No usable contextId is confirmed by this failed receipt.`;
+    if (error instanceof Error) error.message += `. Run ${run.id} was created; query memsphere --project ${config.project!.name} run status --run ${run.id}. This failed receipt does not confirm a usable session binding.`;
     throw Object.assign(error as object, { details: { runId: run.id, message: "Run was created; CommandState creation failed. Query run status with this runId." } });
   }
 }
@@ -156,6 +162,7 @@ export function registerExplorationCommands(run: import("commander").Command) {
   const repeated = (value: string, previous: string[] = []) => [...previous, value];
   const scoped = (c: import("commander").Command) => output(c.requiredOption("--run <id>"));
   output(find(run, "start"));
+  scoped(run.command("enter").description("Bind this Agent session to an existing free exploration Run.")).action(o => contextOnlyCommand("enter", o));
   output(find(run, "report"))
     .option("--name <name>", "free exploration Artifact name")
     .option("--file <path>", "free exploration structured report; exclusive with --artifact/--artifact-file")

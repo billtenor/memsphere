@@ -11,7 +11,7 @@ import { atomicWriteJson } from "../persistence.js";
 import { readBundledMarketModelPackages } from "../reserved/models.js";
 import { exampleRelocationBaseline } from "./example-relocation-baseline.js";
 import { projectConfigSchema, projectManifestSchema } from "./model.js";
-import { readModelRegistrations, withModelRegistrationLock } from "./model-registration.js";
+import { readModelRegistrations, withModelRegistrationMaintenance } from "./model-registration.js";
 import type { ProjectModelInput } from "./model-registration-contract.js";
 import { validateModelStoragePaths, assertModelPath, discoverModelIds, canonicalPath } from "./model-storage-paths.js";
 import { createProjectModelHost } from "./models.js";
@@ -267,7 +267,7 @@ async function receipt(backup: string, plan: ExampleRelocationPlan, status: Relo
 /** Explicit, fixed-scope write. Callers never invoke this from model discovery or Project creation. */
 export async function applyExampleRelocation(context: Context, value: unknown, hooks: ExampleRelocationHooks = {}): Promise<RelocationReceipt> {
   const plan = parsePlan(value);
-  return withModelRegistrationLock(plan.project.root, async () => {
+  return withModelRegistrationMaintenance(plan.project.root, async () => {
     await recoverModelOperation(plan.project.root);
     const backupRoot = join(plan.paths.backupDirectory, CHANGE, plan.operationId);
     const current = await assertTargetMapping(plan);
@@ -369,7 +369,7 @@ export async function restoreExampleRelocation(context: Context, backupRoot: str
   const initial = await loadBackup(backupRoot).catch(error => {
     throw Object.assign(error, { backup: resolve(backupRoot), restoreCommand: restoreCommand(resolve(backupRoot)) });
   });
-  return withModelRegistrationLock(initial.plan.project.root, async () => {
+  return withModelRegistrationMaintenance(initial.plan.project.root, async () => {
     await recoverModelOperation(initial.plan.project.root);
     try {
       context.signal?.throwIfAborted();

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { commitModelOperation, optionalFileBytes, recoverModelOperation, withProjectModelWrite, withProjectSettingsLock } from "../../src/project/model-operation.js";
+import { commitModelOperation, optionalFileBytes, recoverModelOperation, withModelMaintenance } from "../../src/project/model-operation.js";
 
 const root = process.argv[2];
 const request = JSON.parse(process.argv[3]) as { mode: "write" | "recover" | "new-write"; pause?: string };
@@ -14,8 +14,8 @@ process.on("message", async message => {
   if (message === "continue") { resume(); return; }
   if (message !== "start") return;
   try {
-    if (request.mode === "recover") await withProjectSettingsLock(root, () => recoverModelOperation(root, hooks));
-    else await withProjectModelWrite(root, async () => {
+    if (request.mode === "recover") await recoverModelOperation(root, hooks);
+    else await withModelMaintenance(root, async () => {
       if (request.mode === "new-write") {
         // The new request must see the restored definition before doing its own preflight.
         if ((await readFile(join(root, "models/json-schema/draft-07/existing.json"), "utf8")) !== "before\n") throw new Error("Preflight ran before recovery");

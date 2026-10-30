@@ -3,6 +3,7 @@ import test from "node:test";
 import { businessFixture } from "./helpers/business-data.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { textContent } from "../src/context_control/types.js";
+import { graphMemorySyntax } from "../src/memory/syntax.js";
 
 test("finish adopts current derived outputs, and archiving/restoring preserves evidence and terminal status", async t => {
   const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!, run = await s.start("完成与归档");
@@ -40,4 +41,23 @@ test("explicit empty delivery excludes current outputs and finish validates sele
   assert.deepEqual(await s.outputs(run.id), [a.id]);
   await s.finish(run.id, []); assert.deepEqual(await s.outputs(run.id), []);
   const before = await s.stores.run.get({}, run.id); await s.finish(run.id, []); assert.deepEqual(await s.stores.run.get({}, run.id), before);
+});
+
+
+test("Context Control finish keeps Graph completion checks and explicit output selection", async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  const start = await service.withGraph(g => g.start({ name: "Graph finish routing", procedure: {
+    tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["finish-route"], defines: ["Completion routing"],
+    actions: [{ tag: "!action", id: "A", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } } }],
+  } }));
+  await assert.rejects(service.finish(start.run.id, []), { code: "GRAPH_INCOMPLETE" });
+  const report = await service.withGraph(async g => {
+    await g.enter(start.run.id, start.steps[0].id);
+    return g.report(start.run.id, start.steps[0].id, { text: "result" });
+  });
+  assert.equal((await service.finish(start.run.id, [report.artifact.id])).status, "done");
+  const before = await service.stores.run.get({}, start.run.id);
+  await service.finish(start.run.id);
+  assert.deepEqual(await service.stores.run.get({}, start.run.id), before);
+  assert.deepEqual((await service.snapshot(start.run.id)).outputArtifactIds, [report.artifact.id]);
 });

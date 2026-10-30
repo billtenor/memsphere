@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { openBusinessStore, serviceError } from "./business-stores.js";
 import { createProjectModelHost } from "./models.js";
-import { withProjectSettingsLock } from "./model-operation.js";
 import { validateFilename } from "../data/extensions/shared/filesystem.js";
 import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
 
@@ -60,31 +59,27 @@ async function inspect(root: string, storeId: string, expectedModel?: string) {
   })).digest("hex");
   return { opened, target: { storeId, modelRef: opened.binding.model, fingerprint } };
 }
-export function freezeModelArtifactTargets(root: string, declarations: Array<{ store: string; model?: string }>) {
-  return withProjectSettingsLock(root, async () => {
-    const targets: Record<string, ModelArtifactTarget> = {};
-    for (const declaration of declarations) {
-      const { target } = await inspect(root, declaration.store, declaration.model);
-      targets[declaration.store] = target;
-    }
-    return targets;
-  });
+export async function freezeModelArtifactTargets(root: string, declarations: Array<{ store: string; model?: string }>) {
+  const targets: Record<string, ModelArtifactTarget> = {};
+  for (const declaration of declarations) {
+    const { target } = await inspect(root, declaration.store, declaration.model);
+    targets[declaration.store] = target;
+  }
+  return targets;
 }
-/** Check and write under the same Project lock; no nested settings-lock acquisition. */
-export function processModelArtifact(root: string, target: ModelArtifactTarget, value: unknown,
+/** Check the opened target, then finish using that Store/runtime snapshot. */
+export async function processModelArtifact(root: string, target: ModelArtifactTarget, value: unknown,
   commit?: { runId: string; stepExecutionId: string; digest: string; dataId?: string }): Promise<ModelArtifactReceipt | undefined> {
-  return withProjectSettingsLock(root, async () => {
-    const current = await inspect(root, target.storeId, target.modelRef);
-    if (current.target.fingerprint !== target.fingerprint)
-      throw serviceError("MODEL_ARTIFACT_TARGET_CHANGED", `Model Artifact target changed: ${target.storeId}; restore the original binding and model before retrying`);
-    current.opened.runtime.reflect(value);
-    if (!commit) return undefined;
-    const dataId = commit.dataId ?? `${commit.runId}--${commit.stepExecutionId}`;
-    validateModelArtifactDataId(dataId);
-    const store = current.opened.store;
-    if (store.kind !== "ValueStore" || !store.upsert) throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no atomic upsert");
-    const result = await store.upsert({}, dataId, value);
-    return { ...target, stepExecutionId: commit.stepExecutionId, dataId, digest: commit.digest,
-      committedAt: new Date().toISOString(), ...(result.revision === undefined ? {} : { revision: result.revision }) };
-  });
+  const current = await inspect(root, target.storeId, target.modelRef);
+  if (current.target.fingerprint !== target.fingerprint)
+    throw serviceError("MODEL_ARTIFACT_TARGET_CHANGED", `Model Artifact target changed: ${target.storeId}; restore the original binding and model before retrying`);
+  current.opened.runtime.reflect(value);
+  if (!commit) return undefined;
+  const dataId = commit.dataId ?? `${commit.runId}--${commit.stepExecutionId}`;
+  validateModelArtifactDataId(dataId);
+  const store = current.opened.store;
+  if (store.kind !== "ValueStore" || !store.upsert) throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no atomic upsert");
+  const result = await store.upsert({}, dataId, value);
+  return { ...target, stepExecutionId: commit.stepExecutionId, dataId, digest: commit.digest,
+    committedAt: new Date().toISOString(), ...(result.revision === undefined ? {} : { revision: result.revision }) };
 }

@@ -1,4 +1,8 @@
 export const zhCNViewMessages = {
+  "settings.runners": "Runner Agent",
+  "settings.runnerIdentity": "开启 Agent 身份",
+  "settings.runnerAsync": "开启 Agent 异步执行",
+
   "settings.optionalActorName": "选填，未填时显示 ID",
   "settings.registrationMigrationRequired": "已有模型登记数据，需要重新校验并明确确认迁移。",
   "settings.modelRegistrationStorage": "模型登记存储",

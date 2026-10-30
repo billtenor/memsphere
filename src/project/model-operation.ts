@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { withConfigFileLock } from "../config-file-lock.js";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, rm, rmdir, lstat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
@@ -34,8 +36,8 @@ async function readOperation(root: string): Promise<Operation | undefined> {
   if (!bytes) return undefined;
   try {
     const operation = operationSchema.parse(JSON.parse(bytes.toString("utf8")));
-    // Project creation publishes a fully committed staging tree by directory rename.
-    // Only an unfinished record may act on its original absolute target paths.
+    // Completed journals may move with a Project directory. Only an unfinished
+    // record may act on its original absolute target paths.
     if (operation.root !== await canonicalPath(root) && ["pending", "recovering"].includes(operation.phase)) throw new TypeError("Wrong Project in unfinished operation record");
     for (const change of operation.changes) {
       for (const side of ["before", "after"] as const) {
@@ -70,13 +72,34 @@ export async function withConsistentModelRead<T>(read: () => Promise<T>): Promis
     }
   }
 }
-export async function withProjectSettingsLock<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-  const lock = join(root, ".runtime/settings.lock");
-  await mkdir(dirname(lock), { recursive: true });
-  return withNativeFileLock(lock, action, { signal });
+// This admission claim belongs only to the single recovery journal. It never
+// waits, and kernel ownership disappears when the process exits. Keep the claim
+// inode permanent: the journal itself is atomically replaced on every phase.
+const maintenance = new AsyncLocalStorage<{ root: string; active: boolean }>();
+async function withJournalClaim<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  signal?.throwIfAborted();
+  root = await canonicalPath(root);
+  const parent = maintenance.getStore();
+  if (parent?.active && parent.root === root) return action();
+  const claim = join(root, ".runtime/model-operation.claim");
+  await mkdir(dirname(claim), { recursive: true });
+  let entered = false;
+  try {
+    return await withNativeFileLock(claim, async () => {
+      entered = true;
+      const scope = { root, active: true };
+      try { return await maintenance.run(scope, action); }
+      finally { scope.active = false; }
+    }, { timeoutMs: 0, signal });
+  } catch (error) {
+    if (!entered && (error as { code?: string }).code === "LOCK_TIMEOUT")
+      throw failure("MODEL_OPERATION_BUSY", "A model maintenance operation or recovery is running; retry after it finishes", { record: statePath(root) });
+    throw error;
+  }
 }
-export async function withProjectModelWrite<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
-  return withProjectSettingsLock(root, async () => {
+/** Claim journal execution before recovery and preflight; overlapping requests fail immediately. */
+export async function withModelMaintenance<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  return withJournalClaim(root, async () => {
     await recoverModelOperation(root);
     return action();
   }, signal);
@@ -125,8 +148,17 @@ async function apply(path: string, bytes: Buffer | undefined) {
   else await atomicWriteFile(path, bytes.toString("utf8"));
 }
 
-/** Caller owns settings lock. Never replays the interrupted business request. */
+/** Recovery claims the same journal as writers. Never replays the interrupted request. */
 export async function recoverModelOperation(root: string, hooks: ModelOperationHooks = {}): Promise<void> {
+  return withJournalClaim(root, async () => {
+    const operation = await readOperation(root);
+    const configPath = await canonicalPath(join(root, "config.json"));
+    const execute = () => recoverModelOperationUnlocked(root, hooks);
+    return operation?.changes.some(change => change.path === configPath)
+      ? withConfigFileLock(join(root, "config.json"), execute) : execute();
+  });
+}
+async function recoverModelOperationUnlocked(root: string, hooks: ModelOperationHooks): Promise<void> {
   const operation = await readOperation(root);
   if (!operation || operation.phase === "committed" || operation.phase === "recovered") return;
   const allowed = await allowedPaths(root, operation);
@@ -153,7 +185,16 @@ export async function recoverModelOperation(root: string, hooks: ModelOperationH
 }
 
 /** Preflight every path and conflict before publishing any pending state or target bytes. */
-export async function commitModelOperation(root: string, kind: string, changes: ModelFileChange[], hooks: ModelOperationHooks = {}) {
+export async function commitModelOperation(root: string, kind: string, changes: ModelFileChange[], hooks: ModelOperationHooks = {}): Promise<void> {
+  return withJournalClaim(root, async () => {
+    await recoverModelOperation(root);
+    const configPath = resolve(root, "config.json");
+    const execute = () => commitModelOperationUnlocked(root, kind, changes, hooks);
+    return changes.some(change => resolve(change.path) === configPath)
+      ? withConfigFileLock(configPath, execute) : execute();
+  });
+}
+async function commitModelOperationUnlocked(root: string, kind: string, changes: ModelFileChange[], hooks: ModelOperationHooks) {
   if (!changes.length) return;
   // The Registry root is trusted and may have an aliased ancestor (e.g. macOS
   // /var -> /private/var). Normalize that prefix only; aliases inside model
@@ -198,7 +239,7 @@ export async function commitModelOperation(root: string, kind: string, changes: 
     // Commit marker publication may have completed even if its final fsync reported an error.
     const saved = await readOperation(root);
     if (saved?.operationId === operation.operationId && saved.phase === "committed") return;
-    try { await recoverModelOperation(root); }
+    try { await recoverModelOperationUnlocked(root, {}); }
     catch (cause) { throw failure("MODEL_RECOVERY_REQUIRED", "Model write failed and recovery requires attention", { record: statePath(root), error: String(error), recoveryError: String(cause) }); }
     throw error;
   }

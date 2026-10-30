@@ -1,17 +1,22 @@
-import { randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import type { Context } from "../data/api/context.js";
 import { createProjectModelHost, MODEL_DEFINITIONS_STORE } from "./models.js";
-import { readModelRegistrations, validateModelRegistration, type ModelRegistration, type ModelOrigin, IMPORTED_MODEL_DEFINITIONS_STORE } from "./model-registration.js";
+import { readModelRegistrations, createModelRegistrationStore, modelDefinitionHash, validateModelRegistration, type ModelRegistration, type ModelOrigin, IMPORTED_MODEL_DEFINITIONS_STORE } from "./model-registration.js";
 import { assertModelRef } from "./model-registration-contract.js";
 import { readBundledSystemModels } from "../reserved/models.js";
 import { checkModelDefinition, type ModelCheck } from "./model-validation.js";
 import { assertModelPath } from "./model-storage-paths.js";
 import { readBusinessProject, validateBusinessBindings, openBusinessStore, serviceError } from "./business-stores.js";
-import { assertModelOperationStamp, readModelOperationStamp, optionalFileBytes, commitModelOperation, withProjectModelWrite, withConsistentModelRead, type ModelFileChange } from "./model-operation.js";
+import { assertModelOperationStamp, readModelOperationStamp, optionalFileBytes, withConsistentModelRead, type ModelFileChange } from "./model-operation.js";
 import { JsonPayloadSerializer } from "../data/extensions/json-serializer/index.js";
+import { bytesContent } from "../data/extensions/shared/payload.js";
+import { withConfigFileLock } from "../config-file-lock.js";
+import { modelDefinitionStore } from "./system-model-store.js";
+import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
+import { atomicWriteJson } from "../persistence.js";
 import { paginateItems, compareStrings, type PaginationOptions } from "../pagination.js";
 
 export type ModelManagementFields = Pick<ModelRegistration, "name" | "description" | "package" | "package_name" | "tags">;
@@ -21,7 +26,6 @@ export function assertWritableModelRef(ref: string) {
   assertModelRef(ref);
   if (readBundledSystemModels().some(model => model.registration.modelRef === ref)) throw serviceError("SYSTEM_MODEL_READ_ONLY", `System model is read-only: ${ref}`);
 }
-const json = (value: unknown) => Buffer.from(`${JSON.stringify(value, null, 2)}\n`);
 export function parseModelSource(source: string): unknown {
   try { return JSON.parse(source.replace(/^\uFEFF/, "")); }
   catch (cause) { throw serviceError("INPUT_INVALID", "Definition file is not valid JSON", { cause: String(cause) }); }
@@ -110,7 +114,7 @@ export async function mutateModel(context: Context, root: string, operation: "cr
     const source = input.source ?? previous!.source;
     const definition = operation === "delete" ? previous!.definition : parseModelSource(source);
     const original = previous?.registration ?? { modelRef: ref, storage: "store" as const, store_id: MODEL_DEFINITIONS_STORE };
-    const registration = operation === "delete" ? original : mergeRegistration(original, input);
+    const registration = operation === "delete" ? original : { ...mergeRegistration(original, input), definition_sha256: modelDefinitionHash(source) };
     if (operation !== "delete") await checkModelDefinition(context, { modelRef: ref, metaModel: previous?.metaModel, source, definition });
     const inUse = Object.entries(project.dataStores ?? {}).filter(([, binding]) => binding.model === ref).map(([id]) => id);
     if (inUse.length && (operation === "delete" || previous && !isDeepStrictEqual(previous.definition, definition)))
@@ -119,36 +123,53 @@ export async function mutateModel(context: Context, root: string, operation: "cr
       && registration.package_name && record.registration.package_name && registration.package_name !== record.registration.package_name)
       throw serviceError("MODEL_PACKAGE_NAME_CONFLICT", `Inconsistent package name: ${registration.package}`);
     const record = state.records.find(record => record.registration.modelRef === ref);
-    const recordId = record?.id ?? randomUUID();
-    const registrationPath = join(state.paths.registrationDirectory, market ? "imported" : "project", `${recordId}.json`);
+    // A stable ID makes concurrent first registration contend on one ValueStore
+    // record. Existing registrations retain their original identity.
+    const key = createHash("sha256").update(ref).digest("hex").slice(0, 32);
+    const recordId = record?.id ?? `${key.slice(0, 8)}-${key.slice(8, 12)}-${key.slice(12, 16)}-${key.slice(16, 20)}-${key.slice(20)}`;
+    const registrationDirectory = join(state.paths.registrationDirectory, market ? "imported" : "project");
+    const registrationPath = join(registrationDirectory, `${recordId}.json`);
     const changes: ModelFileChange[] = [];
-    const add = async (path: string, after: Buffer | undefined) => {
-      const before = await optionalFileBytes(path);
-      if (before === undefined ? after !== undefined : after === undefined || !before.equals(after)) changes.push({ path, before, after });
-    };
-    if (operation === "delete") {
-      await add(definitionPath, undefined);
-      if (record) await add(registrationPath, undefined);
-      if (market && record) {
-        const path = join(state.paths.registrationDirectory, "published-imports.json");
-        const publication = JSON.parse(await readFile(path, "utf8")) as { recordIds: string[] };
-        await add(path, json({ ...publication, recordIds: publication.recordIds.filter(id => id !== recordId) }));
+    if (operation === "delete" || operation === "create" || input.source !== undefined) changes.push({ path: definitionPath, before: await optionalFileBytes(definitionPath), after: operation === "delete" ? undefined : Buffer.from(source) });
+    if (operation === "delete" || !record || !isDeepStrictEqual(original, registration)) changes.push({ path: registrationPath, before: await optionalFileBytes(registrationPath), after: operation === "delete" ? undefined : Buffer.from(JSON.stringify(registration)) });
+    await assertModelOperationStamp(root, stamp);
+    if (!input.dryRun) {
+      const registry = await createModelRegistrationStore(context, `registrations/${market ? "imported" : "project"}`, registrationDirectory);
+      const row = await registry.get(context, recordId);
+      if (record && !row) throw serviceError("REVISION_CONFLICT", "Model registration disappeared");
+      if (!record && row) throw serviceError("ALREADY_EXISTS", `Model already exists: ${ref}`);
+      // A fresh read after preflight may include the authorized legacy hash
+      // backfill, but must not silently overwrite other concurrent metadata.
+      if (record && row) {
+        const { definition_sha256: _oldHash, ...before } = record.registration;
+        const { definition_sha256: _newHash, ...current } = row.value as ModelRegistration;
+        if (!isDeepStrictEqual(before, current) || record.registration.definition_sha256 !== undefined && record.registration.definition_sha256 !== (row.value as ModelRegistration).definition_sha256)
+          throw serviceError("REVISION_CONFLICT", "Model registration changed during validation");
       }
-    } else {
-      if (operation === "create" || input.source !== undefined) await add(definitionPath, Buffer.from(source));
-      if (!record || !isDeepStrictEqual(original, registration)) {
-        const bytes = await optionalFileBytes(registrationPath);
-        const envelope = bytes ? JSON.parse(bytes.toString("utf8")) as { revision: number; [key: string]: unknown } : undefined;
-        if (envelope && (!Number.isSafeInteger(envelope.revision) || envelope.revision === Number.MAX_SAFE_INTEGER)) throw serviceError("REVISION_OVERFLOW", "Registration revision overflow");
-        await add(registrationPath, json(envelope ? { ...envelope, revision: envelope.revision + 1, updatedAt: Date.now(), value: registration }
-          : { id: recordId, revision: 1, createdAt: Date.now(), updatedAt: Date.now(), value: registration }));
+      const definitions = modelDefinitionStore(market ? IMPORTED_MODEL_DEFINITIONS_STORE : MODEL_DEFINITIONS_STORE, JSON_SCHEMA_DRAFT_07, definitionDirectory);
+      if (operation === "delete") {
+        await definitions.delete(context, ref);
+        if (row) await registry.delete(context, recordId, { expectedRevision: row.revision });
+        if (market) {
+          const publicationPath = join(state.paths.registrationDirectory, "published-imports.json");
+          await withConfigFileLock(publicationPath, async () => {
+            const publication = JSON.parse(await readFile(publicationPath, "utf8")) as { recordIds: string[] };
+            await atomicWriteJson(publicationPath, { ...publication, recordIds: publication.recordIds.filter(id => id !== recordId) });
+          }, context.signal);
+        }
+      } else {
+        if (operation === "create" || input.source !== undefined) {
+          const data = { id: ref, model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: bytesContent(Buffer.from(source)) } };
+          if (operation === "create") await definitions.create(context, data);
+          else await definitions.update(context, data);
+        }
+        if (!row) await registry.create(context, recordId, registration);
+        else if (!isDeepStrictEqual(row.value, registration)) await registry.update(context, recordId, registration, { expectedRevision: row.revision });
       }
     }
-    await assertModelOperationStamp(root, stamp);
-    if (!input.dryRun) await commitModelOperation(root, `model.${operation}`, changes);
     return { operation: `model.${operation}`, modelRef: ref, ...(operation !== "delete" ? { registration } : {}), ...(input.dryRun ? { dryRun: true, files: changes.map(change => change.path) } : {}) };
   };
-  return input.dryRun ? execute() : withProjectModelWrite(root, execute, context.signal);
+  return execute();
 }
 type ModelValidationOptions = { source?: string; check?: ModelCheck; checkData?: boolean; stores?: string[] };
 export function validateModel(context: Context, root: string, ref: string, options: ModelValidationOptions = {}) {

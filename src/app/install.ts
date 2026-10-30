@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, resolve } from "node:path";
 import semver from "semver";
-import { createAppMemoryChange, publishMemoryChange, validateMemoryChange, withAppMemoryReservation } from "../memory/changeset.js";
+import { createAppMemoryChange, publishMemoryChange, validateMemoryChange } from "../memory/changeset.js";
 import { validateMemoryRoot } from "../validation.js";
 import { atomicWriteFile } from "../persistence.js";
 import { gitOutputRaw } from "../git.js";
@@ -104,16 +104,16 @@ export async function installApp(context: ProjectContext, directory: string, con
       installedAt: new Date().toISOString(), enabled: false, config: configuration, memories: operation.memories,
       descriptors: pkg.descriptors, bindings: {}, operationId: operation.id };
     app.bindings = bindings(app, project);
-    await withAppMemoryReservation(project, async () => {
-      // A regular Memory publish may have completed during package preparation.
-      // Reserve only after rechecking its result under the shared mutation lock.
+    await (async () => {
+      // Check the current targets before recording this App operation.
+      // Final publication rechecks ownership and targets at the write boundary.
       for (const memory of pkg.memories) {
         const current = await readFile(resolve(project.memoryRoot, memory.path)).catch(error => { if (isMissing(error)) return undefined; throw error; });
         if (current && (!pending || digest(current) !== memory.digest)) throw new AppError("APP_MEMORY_CONFLICT", `Memory target changed before reservation: ${memory.path}`);
       }
       state.operations[pkg.manifest.id] = operation;
       await writeAppState(project, state);
-    });
+    })();
     try {
       if (pkg.memories.length) {
         if (!operation.changeId) {

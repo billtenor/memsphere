@@ -1,3 +1,5 @@
+import { withMemoryWriteAccess } from "../src/memory/write-access.js";
+import { withFileLock } from "../src/persistence.js";
 import { managedProjectFixture } from "./helpers/project.js";
 import assert from "node:assert/strict";
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -154,10 +156,17 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
 
     const concurrentA = await editMemories({ references: ["concepts/concurrent-a"] });
     const concurrentB = await editMemories({ references: ["concepts/concurrent-b"] });
-    await Promise.all([
-      publishMemoryChange(concurrentA.change.id),
-      publishMemoryChange(concurrentB.change.id)
-    ]);
+    await withMemoryWriteAccess(memoryRoot, async () => {
+      await assert.rejects(publishMemoryChange(concurrentA.change.id), { code: "MEMORY_PUBLISH_BUSY" });
+      // Candidate operations do not participate in publication admission.
+      const independent = await editMemories({ references: ["concepts/independent"] });
+      assert.deepEqual((await validateMemoryChange(independent.change.id)).issues, []);
+      assert.equal((await readMemoryChange({ home, project: "project", changeId: concurrentB.change.id })).id, concurrentB.change.id);
+    });
+    await withFileLock(join(registry.projects.project.root, ".runtime/memory-publish.lock"), async () => {
+      await publishMemoryChange(concurrentA.change.id);
+      await publishMemoryChange(concurrentB.change.id);
+    });
     assert.match(await readFile(join(memoryRoot, concurrentA.change.targets[0].path), "utf8"), /concurrent-a/);
     assert.match(await readFile(join(memoryRoot, concurrentB.change.targets[0].path), "utf8"), /concurrent-b/);
     assert.deepEqual((await readMemoryFile("concepts", join(memoryRoot, "concepts", "other.yaml"))).entity.names, ["other", "Other Alias"]);
@@ -173,6 +182,8 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("defines: []", "fields:\n  - !ref\n    target: schemas/shared-schema"));
     assert.deepEqual((await validateMemoryChange(dependent.change.id)).issues, []);
     await writeFile(dependentPath, (await readFile(dependentPath, "utf8")).replace("schemas/shared-schema", "schemas/missing"));
+    assert.equal((await readMemoryChange({ home, project: "project", changeId: dependent.change.id })).checkpoint?.valid, true,
+      "Editing the candidate does not automatically invalidate the saved validation result");
     const missingReference = await validateMemoryChange(dependent.change.id);
     assert(missingReference.issues.some((issue) => issue.path === dependentPath && issue.message.includes("was not found")));
     const persistedMissingReference = memoryChangeSetSchema.parse(JSON.parse(await readFile(

@@ -53,6 +53,7 @@ async function historicalOrderImport(root: string, published: boolean) {
 
 test("The retired order package is absent from the market while published historical imports and their bytes remain usable", async () => fixture(async (root) => {
   const legacy = await historicalOrderImport(root, true);
+  await (await createProjectModelHost({}, { root })).definition(legacyModelRef); // authorized legacy hash backfill
   const before = await Promise.all([legacy.definition, legacy.record, legacy.publication].map(path => readFile(path)));
   assert.deepEqual(listModelMarket().map(pack => [pack.id, pack.models.length]), [[packageId, 8]]);
   await assert.rejects(importModelMarketPackage({}, { root }, legacyPackageId), { code: "MODEL_PACKAGE_NOT_FOUND" });
@@ -145,7 +146,7 @@ test("A collision within a supported package preserves the project model and imp
   assert.equal((await readModelRegistrations({}, { root })).records.length, 0);
   const summaries = await (await createProjectModelHost({}, { root })).list();
   assert.equal(summaries.filter(model => model.origin === "market").length, 0);
-  assert.equal(summaries.find(model => model.id === id)!.origin, "project");
+  assert.equal(summaries.find(model => model.id === id)!.errorCode, "MODEL_NOT_REGISTERED");
 }));
 test("A user-modified imported registration rejects the whole repeated import without replacing content", async () => fixture(async (root) => {
   await importModelMarketPackage({}, { root }, packageId, importOptions(root));
@@ -166,7 +167,7 @@ test("Project identity collision refuses import and preserves original definitio
   await writeFile(path, source);
   await assert.rejects(importModelMarketPackage({}, { root }, packageId, importOptions(root)), { code: "MODEL_PACKAGE_CONFLICT" });
   assert.equal(await readFile(path, "utf8"), source);
-  assert.equal((await (await createProjectModelHost({}, { root })).definition(modelRef)).origin, "project");
+  await assert.rejects((await createProjectModelHost({}, { root })).definition(modelRef), { code: "MODEL_NOT_REGISTERED" });
 }));
 test("An interrupted publication blocks partial reads and rolls back before a clean retry", async () => fixture(async (root) => {
   await assert.rejects(importModelMarketPackage({}, { root }, packageId, { ...importOptions(root), beforePublish: async () => {

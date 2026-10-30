@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerDaemonCommands, registerWaitTaskCommands } from "./daemon/commands.js";
 import { registerContinueCommand } from "./commands/continue.js";
 import { registerExplorationCommands } from "./commands/context-control.js";
 import { projectUpgradeCommand } from "./commands/project-upgrade.js";
@@ -102,8 +103,22 @@ program.hook("preAction", () => {
   if (selected) process.env.MEMSPHERE_PROJECT = selected;
 });
 
+registerDaemonCommands(program);
 registerModelCommands(program);
 registerDataCommands(program);
+
+program
+  .command("debug-thread-id")
+  .description("Print the Codex thread ID inherited from the calling environment.")
+  .action(() => {
+    const threadId = process.env.CODEX_THREAD_ID?.trim();
+    if (!threadId) {
+      console.error("CODEX_THREAD_ID is not set; no Codex thread is associated with this process.");
+      process.exitCode = 1;
+      return;
+    }
+    console.log(threadId);
+  });
 
 const project = program
   .command("project")
@@ -477,11 +492,12 @@ const runReview = run
   .command("review")
   .description("Manage formal Procedure Review or light free exploration feedback.");
 
-runReview
+const reviewWait = runReview
   .command("wait")
   .description("Wait until assigned reviews are submitted or the current round is decided.")
-  .requiredOption("--review <id>", "artifact review id")
+  .option("--review <id>", "artifact review id")
   .action(runReviewWaitCommand);
+registerWaitTaskCommands(reviewWait);
 
 runReview
   .command("vote")

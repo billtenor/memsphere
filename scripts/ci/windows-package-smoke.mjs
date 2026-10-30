@@ -44,6 +44,8 @@ run(cli, ["run", "report", "--run", runId, "--artifact", "Windows packaged CLI p
 const completed = JSON.parse(run(cli, ["run", "show", "--run", runId, "--output", "json"], project));
 if (completed.status !== "done") throw new Error(`Windows smoke Run did not complete: ${completed.status}`);
 
+run(cli, ["daemon", "start"], project);
+run(cli, ["daemon", "status"], project);
 const startedView = run(cli, ["view", "start"], project);
 const origin = startedView.match(/https?:\/\/[^\s]+/)?.[0];
 if (!origin) throw new Error(`View start did not return an origin:\n${startedView}`);
@@ -52,8 +54,11 @@ const response = await fetch(origin);
 if (!response.ok) throw new Error(`View request failed with HTTP ${response.status}`);
 run(cli, ["view", "restart"], project);
 run(cli, ["view", "status"], project);
+run(cli, ["daemon", "restart"], project);
+run(cli, ["view", "status"], project);
 run(cli, ["view", "stop"], project);
 run(cli, ["view", "status"], project);
+run(cli, ["daemon", "stop"], project);
 
 function run(command, args, cwd = workspace) {
   const result = crossSpawn.sync(command, args, {

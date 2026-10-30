@@ -4,7 +4,7 @@ import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "project" | "participants" | "models";
+type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -30,6 +30,7 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   appearance: { scope: "global", module: "appearance" },
   packages: { scope: "global", module: "appearance" },
   composition: { scope: "global", module: "appearance" },
+  runners: { scope: "global", module: "runners" },
   providers: { scope: "global", module: "providers" },
   project: { scope: "project", module: "overview" },
   models: { scope: "project", module: "models" },
@@ -103,6 +104,7 @@ class SettingsApplication {
   #operatorTokenDraft = "";
   #operatorTokenError = "";
   #providerDetection: JsonObject = {};
+  #runnerDetection: JsonObject = {};
   #detecting = false;
   #expandedProviders = new Set<string>();
   #expandedParticipants = new Set<string>();
@@ -247,6 +249,7 @@ class SettingsApplication {
         ["general", this.t("settings.general", "常规")],
         ["view", this.t("settings.viewService", "界面服务")],
         ["appearance", this.t("settings.appearance", "界面与主题")],
+        ["runners", this.t("settings.runners", "Runner Agent")],
         ["providers", this.t("settings.providers", "ACP 提供方")]
       ]],
       ["project", `${this.t("navigation.project", "项目")} · ${this.#currentProject}`, [
@@ -272,6 +275,7 @@ class SettingsApplication {
       general: this.t("settings.general", "通用设置"),
       view: this.t("settings.viewService", "界面服务"),
       appearance: this.t("settings.appearance", "界面与主题"),
+      runners: this.t("settings.runners", "Runner Agent"),
       providers: this.t("settings.providers", "模型提供商"),
       project: this.t("navigation.project", "当前项目"),
       models: this.t("settings.models", "模型存储"),
@@ -308,11 +312,12 @@ class SettingsApplication {
     const notice = scope.notice ? `<div class="settings-notice" role="status">${escapeHtml(scope.notice)}</div>` : "";
     const panel = this.#module === "general" ? this.generalHtml(scope)
       : this.#module === "view" ? this.viewHtml(scope)
+      : this.#module === "runners" ? this.runnersHtml(scope)
       : this.#module === "providers" ? this.providersHtml(scope)
       : this.#module === "participants" ? this.participantsHtml(scope)
       : this.#module === "models" ? this.modelsHtml(scope)
       : this.overviewHtml(scope);
-    const actions = ["general", "view", "providers", "participants", "models"].includes(this.#module)
+    const actions = ["general", "view", "runners", "providers", "participants", "models"].includes(this.#module)
       ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button>${this.#module === "models" ? `<button class="btn" data-action="discard-project">${escapeHtml(this.t("settings.discard", "放弃修改"))}</button>` : ""}<button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
     return `<div class="settings-layout">${status}${notice}${panel}${actions}</div>`;
   }
@@ -664,6 +669,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
       else if (name === "back") { this.state.confirmation = null; this.render(); }
       else if (name === "back-global") { this.#scopes.global.confirmation = null; this.render(); }
       else if (name === "back-project") { this.#scopes.project.confirmation = null; this.render(); }
+      else if (name === "detect-runners") await this.detectRunners();
       else if (name === "detect") await this.detectProviders();
       else if (name === "save-operator-token") await this.saveOperatorToken(false);
       else if (name === "clear-operator-token") await this.saveOperatorToken(true);
@@ -702,6 +708,14 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   ): void {
     const scope = this.#scopes[scopeName];
     const draft = scope.draft!;
+    if (path.startsWith("runner.")) {
+      const [, agent, key] = path.split(".");
+      const options = (draft.runner_agents ??= {})[agent] ??= { identity_enabled: false, async_enabled: false };
+      options[key] = (field as HTMLInputElement).checked;
+      if (!options.identity_enabled) options.async_enabled = false;
+      this.render();
+      return;
+    }
     if (path === "language") draft.language = value;
     else if (path === "modelsDirectory") draft.modelsDirectory = value;
     else if (path.startsWith("modelRegistration.")) {
@@ -1028,6 +1042,22 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
         ? this.t("settings.operatorTokenSaved", "固定令牌已保存，重启 View 后生效。")
         : this.t("settings.operatorTokenCleared", "固定令牌已清除；重启 View 后将恢复每次随机生成。");
     }
+    this.render();
+  }
+
+  runnersHtml(scope: ScopeState): string {
+    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.runners", "Runner Agent"))}</h3><button class="btn" data-action="detect-runners">${escapeHtml(this.t("settings.autoDetect", "自动检测"))}</button>${["codex", "traex"].map(agent => {
+      const result = this.#runnerDetection[agent];
+      const installed = result?.status === "installed";
+      const options = scope.draft?.runner_agents?.[agent] ?? {};
+      return `<div class="settings-participant"><h4>${escapeHtml(agent)}</h4><p>${escapeHtml(result ? result.status : this.t("settings.pendingDetection", "需要检测"))}</p><label><input type="checkbox" data-field="runner.${agent}.identity_enabled"${options.identity_enabled ? " checked" : ""}${installed ? "" : " disabled"}>${escapeHtml(this.t("settings.runnerIdentity", "开启 Agent 身份"))}</label><label><input type="checkbox" data-field="runner.${agent}.async_enabled"${options.async_enabled ? " checked" : ""}${installed && options.identity_enabled ? "" : " disabled"}>${escapeHtml(this.t("settings.runnerAsync", "开启 Agent 异步执行"))}</label></div>`;
+    }).join("")}${this.errorsHtml(scope)}</section>`;
+  }
+  async detectRunners(): Promise<void> {
+    const response = await this.settingsFetch("/api/settings/global/runner-agents/detect", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const payload = await response.json() as JsonObject;
+    if (!response.ok) throw new Error(payload.error ?? "Runner detection failed");
+    this.#runnerDetection = Object.fromEntries(payload.results.map((result: JsonObject) => [result.id, result]));
     this.render();
   }
 

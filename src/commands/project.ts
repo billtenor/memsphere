@@ -1,9 +1,11 @@
+import { withNewProjectDirectory, assertProjectPrepared } from "../project/preparation.js";
+import { withMemoryWriteAccess } from "../memory/write-access.js";
 import { createHash } from "node:crypto";
-import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat } from "node:fs/promises";
+import { copyFile, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { homePaths, resolveMemsphereHome } from "../home.js";
-import { atomicWriteFile, atomicWriteJson, withFileLock } from "../persistence.js";
+import { atomicWriteFile, atomicWriteJson } from "../persistence.js";
 import { gitOutput, runGit } from "../git.js";
 import { projectConfigSchema, projectManifestSchema, assertProjectName, type ProjectConfigFile } from "../project/model.js";
 import { ensureMemoryDirectories, validateMemoryRoot } from "../validation.js";
@@ -45,32 +47,18 @@ export async function projectCreateCommand(
   const name = assertProjectName(nameInput);
   const home = resolveMemsphereHome();
   const root = resolve(homePaths(home).projectsRoot, name);
-  await withProjectLock(home, name, async () => {
-    await preflightNewProject({ home, name, root, bind: options.bind });
-    const stagingRoot = `${root}.creating-${process.pid}-${Date.now()}`;
-    let moved = false;
-    let registered = false;
-    let registryWritten = false;
-    try {
-      const config = options.embedded
-        ? await createEmbeddedProject(stagingRoot, options.embedded)
-        : await createManagedProject(stagingRoot);
-      const { initializeProjectModelRegistrations } = await import("../project/model-registration.js");
-      const models = await initializeProjectModelRegistrations({}, { root: stagingRoot });
-      config.modelRegistration = models.config;
-      await writeProjectMetadata(stagingRoot, name, config);
-      await rename(stagingRoot, root);
-      moved = true;
-      await registerCreatedProject(home, name, root, options.bind);
-      registryWritten = true;
-      if (options.embedded) await bootstrapEmbeddedSystemMemory(name);
-      else await bootstrapManagedSystemMemory(name);
-      registered = true;
-    } finally {
-      await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
-      if (registryWritten && !registered) await rollbackCreatedRegistration(home, name, root);
-      if (moved && !registered) await rm(root, { recursive: true, force: true }).catch(() => undefined);
-    }
+  await preflightNewProject({ home, name, root, bind: options.bind });
+  await withNewProjectDirectory(home, name, root, async () => {
+    const config = options.embedded
+      ? await createEmbeddedProject(root, options.embedded)
+      : await createManagedProject(root);
+    const { initializeProjectModelRegistrations } = await import("../project/model-registration.js");
+    const models = await initializeProjectModelRegistrations({}, { root });
+    config.modelRegistration = models.config;
+    await writeProjectMetadata(root, name, config);
+    if (options.embedded) await bootstrapEmbeddedSystemMemory(name);
+    else await bootstrapManagedSystemMemory(name);
+    await registerCreatedProject(home, name, root, options.bind);
   });
   console.log(`Created Project: ${name}`);
   console.log(`Project Root: ${root}`);
@@ -301,7 +289,7 @@ export async function prepareEmbeddedSystemMemoryRepair(
 ): Promise<EmbeddedSystemMemoryRepairPreparation | undefined> {
   return withSelectedProject(projectName, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    return withProjectLock(context.home, context.primary.name, () => prepareSelectedEmbeddedSystemMemoryRepair(context));
+    return prepareSelectedEmbeddedSystemMemoryRepair(context);
   });
 }
 
@@ -409,7 +397,7 @@ export async function applyEmbeddedSystemMemoryRepair(
   try {
     return await withSelectedProject(prepared.project, async () => {
       const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-      return withProjectLock(context.home, prepared.project, () => applySelectedEmbeddedSystemMemoryRepair(context, prepared, options));
+      return withEmbeddedRepairClaim(context.primary.memoryRoot, () => applySelectedEmbeddedSystemMemoryRepair(context, prepared, options));
     });
   } catch (error) {
     await rm(prepared.stagingRoot, { recursive: true, force: true }).catch(() => undefined);
@@ -435,11 +423,15 @@ async function applySelectedEmbeddedSystemMemoryRepair(
       throw new Error("Embedded System Memory repair context changed after preparation; retry the command");
     }
     await assertEmbeddedRepairSnapshotsCurrent(prepared);
-    const applied: EmbeddedRepairTarget[] = [];
+    const applied: Array<{ target: EmbeddedRepairTarget; written: EmbeddedFileSnapshot }> = [];
     try {
       for (const target of prepared.targets) {
+        if (!sameEmbeddedSnapshot(await snapshotEmbeddedFile(prepared.memoryRoot, target.path), target.snapshot))
+          throw new Error(`Embedded System Memory target changed during repair: ${target.reference}`);
+        const written: EmbeddedFileSnapshot = target.operation === "delete" ? { exists: false }
+          : await snapshotEmbeddedFile(prepared.stagingRoot, target.path);
         await applyEmbeddedRepairTarget(prepared.memoryRoot, prepared.stagingRoot, target);
-        applied.push(target);
+        applied.push({ target, written });
       }
       const validation = await validateMemoryRoot(prepared.memoryRoot);
       if (validation.issues.length > 0) {
@@ -451,8 +443,8 @@ async function applySelectedEmbeddedSystemMemoryRepair(
       await options.afterApply?.();
     } catch (error) {
       const rollbackErrors: unknown[] = [];
-      for (const target of applied.reverse()) {
-        await restoreEmbeddedRepairTarget(prepared.memoryRoot, target)
+      for (const { target, written } of applied.reverse()) {
+        await restoreEmbeddedRepairTarget(prepared.memoryRoot, target, written)
           .catch((rollbackError) => rollbackErrors.push(rollbackError));
       }
       if (rollbackErrors.length > 0) {
@@ -476,7 +468,7 @@ async function applySelectedEmbeddedSystemMemoryRepair(
 async function runEmbeddedSystemMemoryRepair(projectName?: string): Promise<SystemMemoryRepairResult> {
   return withSelectedProject(projectName, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    return withProjectLock(context.home, context.primary.name, () => runSelectedEmbeddedSystemMemoryRepair(context));
+    return runSelectedEmbeddedSystemMemoryRepair(context);
   });
 }
 
@@ -484,7 +476,7 @@ async function runSelectedEmbeddedSystemMemoryRepair(
   context: Awaited<ReturnType<typeof resolveProjectContext>>
 ): Promise<SystemMemoryRepairResult> {
   const prepared = await prepareSelectedEmbeddedSystemMemoryRepair(context);
-  if (prepared) return applySelectedEmbeddedSystemMemoryRepair(context, prepared);
+  if (prepared) return withEmbeddedRepairClaim(context.primary.memoryRoot, () => applySelectedEmbeddedSystemMemoryRepair(context, prepared));
   if (context.primary.config.store.type !== "embedded") {
     throw new Error(`Project "${context.primary.name}" uses Managed Memory; Embedded System Memory repair requires an Embedded Project`);
   }
@@ -778,7 +770,11 @@ async function applyEmbeddedRepairTarget(
   await atomicWriteFile(destination, content, info.mode & 0o777);
 }
 
-async function restoreEmbeddedRepairTarget(memoryRoot: string, target: EmbeddedRepairTarget): Promise<void> {
+async function restoreEmbeddedRepairTarget(memoryRoot: string, target: EmbeddedRepairTarget, written: EmbeddedFileSnapshot): Promise<void> {
+  const current = await snapshotEmbeddedFile(memoryRoot, target.path);
+  if (sameEmbeddedSnapshot(current, target.snapshot)) return;
+  if (!sameEmbeddedSnapshot(current, written))
+    throw Object.assign(new Error(`Rollback conflict; newer Memory preserved: ${target.path}`), { code: "MEMORY_REPAIR_CONFLICT" });
   const destination = join(memoryRoot, target.path);
   if (!target.snapshot.exists) {
     await rm(destination, { force: true });
@@ -820,16 +816,6 @@ function isCode(error: unknown, code: string): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
-async function rollbackCreatedRegistration(home: string, name: string, root: string): Promise<void> {
-  await updateProjectRegistry(home, (registry) => {
-    if (registry.projects[name]?.root === root) delete registry.projects[name];
-    for (const [key, binding] of Object.entries(registry.workspaces)) {
-      if (binding.primary === name) delete registry.workspaces[key];
-      else binding.mounted = binding.mounted.filter((mounted) => mounted !== name);
-    }
-  }).catch(() => undefined);
-}
-
 export async function projectCloneCommand(
   source: string,
   options: BindOption & { name?: string; branch?: string; upstream?: string } = {}
@@ -837,33 +823,22 @@ export async function projectCloneCommand(
   const name = assertProjectName(options.name?.trim() ?? "");
   const home = resolveMemsphereHome();
   const root = resolve(homePaths(home).projectsRoot, name);
-  await withProjectLock(home, name, async () => {
-    await preflightNewProject({ home, name, root, bind: options.bind });
-    const stagingRoot = `${root}.creating-${process.pid}-${Date.now()}`;
-    let moved = false;
-    let registered = false;
-    try {
-      await mkdir(stagingRoot, { recursive: true });
-      const memoryRoot = projectPaths(stagingRoot).memoryRoot;
-      const cloneArgs = ["clone", ...(options.branch ? ["--branch", options.branch] : []), "--", source, memoryRoot];
-      await runGit(cloneArgs);
-      const revision = await gitOutput(["rev-parse", "HEAD"], memoryRoot).catch(() => "");
-      if (!revision) throw new Error("cannot clone a completely empty Memory repository; create its root commit first");
-      const branch = options.branch ?? await gitOutput(["branch", "--show-current"], memoryRoot);
-      if (!branch) throw new Error("cloned Memory repository is not on a branch");
-      const validation = await import("../validation.js").then(({ validateMemoryRoot }) => validateMemoryRoot(memoryRoot));
-      if (validation.issues.length > 0) throw new Error(`cloned repository is not a valid Memory Store: ${validation.issues[0].message}`);
-      await writeProjectMetadata(stagingRoot, name, {
-        store: { type: "managed", branch, ...(options.upstream ? { upstream: options.upstream } : {}), published_revision: revision }
-      });
-      await rename(stagingRoot, root);
-      moved = true;
-      await registerCreatedProject(home, name, root, options.bind);
-      registered = true;
-    } finally {
-      await rm(stagingRoot, { recursive: true, force: true }).catch(() => undefined);
-      if (moved && !registered) await rm(root, { recursive: true, force: true }).catch(() => undefined);
-    }
+  await preflightNewProject({ home, name, root, bind: options.bind });
+  await withNewProjectDirectory(home, name, root, async () => {
+    await mkdir(root, { recursive: true });
+    const memoryRoot = projectPaths(root).memoryRoot;
+    const cloneArgs = ["clone", ...(options.branch ? ["--branch", options.branch] : []), "--", source, memoryRoot];
+    await runGit(cloneArgs);
+    const revision = await gitOutput(["rev-parse", "HEAD"], memoryRoot).catch(() => "");
+    if (!revision) throw new Error("cannot clone a completely empty Memory repository; create its root commit first");
+    const branch = options.branch ?? await gitOutput(["branch", "--show-current"], memoryRoot);
+    if (!branch) throw new Error("cloned Memory repository is not on a branch");
+    const validation = await import("../validation.js").then(({ validateMemoryRoot }) => validateMemoryRoot(memoryRoot));
+    if (validation.issues.length > 0) throw new Error(`cloned repository is not a valid Memory Store: ${validation.issues[0].message}`);
+    await writeProjectMetadata(root, name, {
+      store: { type: "managed", branch, ...(options.upstream ? { upstream: options.upstream } : {}), published_revision: revision }
+    });
+    await registerCreatedProject(home, name, root, options.bind);
   });
   console.log(`Cloned Project: ${name}`);
   console.log(`Project Root: ${root}`);
@@ -875,23 +850,26 @@ export async function projectRegisterCommand(rootInput: string, options: BindOpt
   const manifest = projectManifestSchema.parse(JSON.parse(await readFile(paths.manifestPath, "utf8")));
   projectConfigSchema.parse(JSON.parse(await readFile(paths.configPath, "utf8")));
   const home = resolveMemsphereHome();
-  await withProjectLock(home, manifest.name, async () => {
-    const registry = await readProjectRegistry(home);
+  const workspace = options.bind ? await resolveWorkspaceIdentity() : undefined;
+  await updateProjectRegistry(home, async registry => {
+    await assertProjectPrepared(root);
     const existing = registry.projects[manifest.name];
     if (existing && await pathExists(existing.root)) {
       const current = await realpath(existing.root);
       if (current !== root) throw new Error(`Project "${manifest.name}" is already registered at ${current}`);
       throw new Error(`Project "${manifest.name}" is already registered`);
     }
-    if (options.bind) await assertWorkspaceUnbound(registry);
-    await registerCreatedProject(home, manifest.name, root, options.bind);
+    if (workspace && registry.workspaces[workspace.key]) throw new Error("Workspace is already bound to a Primary Project");
+    registry.projects[manifest.name] = { root };
+    if (workspace) registry.workspaces[workspace.key] = { primary: manifest.name, mounted: [] };
   });
   console.log(`Registered Project: ${manifest.name}`);
   console.log(`Project Root: ${root}`);
 }
 
-function withProjectLock<T>(home: string, name: string, action: () => Promise<T>): Promise<T> {
-  return withFileLock(resolve(homePaths(home).runtimeRoot, "projects", `${name}.lock`), action);
+/** Repair and publication share admission for the actual worktree/Memory directory. */
+function withEmbeddedRepairClaim<T>(memoryRoot: string, action: () => Promise<T>): Promise<T> {
+  return withMemoryWriteAccess(memoryRoot, action, "MEMORY_REPAIR_BUSY");
 }
 
 export async function projectListCommand(options: OutputOption & PaginationOptions = {}): Promise<void> {
@@ -1136,8 +1114,8 @@ async function projectHealth(memoryRoot: string, config: ProjectConfigFile): Pro
 export async function projectModelsInitializeCommand(nameInput?: string, options: OutputOption = {}): Promise<void> {
   const result = await withSelectedProject(nameInput, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-    const { initializeProjectModelRegistrations, withModelRegistrationLock } = await import("../project/model-registration.js");
-    return withModelRegistrationLock(context.primary.paths.root, async () => {
+    const { initializeProjectModelRegistrations, withModelRegistrationMaintenance } = await import("../project/model-registration.js");
+    return withModelRegistrationMaintenance(context.primary.paths.root, async () => {
       const current = projectConfigSchema.parse(JSON.parse(await readFile(context.primary.paths.configPath, "utf8")));
       const initialized = await initializeProjectModelRegistrations({}, { root: context.primary.paths.root, modelsDirectory: current.modelsDirectory, modelRegistration: current.modelRegistration }, { config: { path: context.primary.paths.configPath, value: current } });
       const { upgradeContextControlOutputs } = await import("../project/context-control-upgrade.js");

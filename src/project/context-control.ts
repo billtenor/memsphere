@@ -11,6 +11,7 @@ import { withNativeFileLock } from "../file-lock.js";
 import { ContextControl, failure, type Stores, type RunLock, type ContentReader } from "../context_control/service.js";
 import { ENTITIES, modelId, storeId, definitionHash, readContextControlModels } from "../context_control/model-assets.js";
 import { createBusinessStore, openBusinessStore, readBusinessProject } from "./business-stores.js";
+import { checkModelDefinition } from "./model-validation.js";
 import { mutateModel } from "./model-service.js";
 import { createProjectModelHost } from "./models.js";
 
@@ -49,7 +50,9 @@ async function openContextControlUnlocked(root: string, legacyUpgrade: boolean):
   }
   const stores = {} as Stores;
   for (const entity of ENTITIES) {
-    const opened = await openBusinessStore({}, root, storeId(entity));
+    const oldSource = legacyUpgrade ? (await (await createProjectModelHost({}, { root, ...config })).source(modelId(entity))).source : undefined;
+    const runtime = oldSource === undefined ? undefined : (await checkModelDefinition({}, { modelRef: modelId(entity), source: oldSource, definition: JSON.parse(oldSource.replace(/^\uFEFF/, "")) })).runtime;
+    const opened = await openBusinessStore({}, root, storeId(entity), { runtime });
     if (opened.store.kind !== "ValueStore" || opened.binding.model !== modelId(entity)) throw failure("STORE_INCOMPATIBLE", `Wrong context control Store: ${storeId(entity)}`);
     stores[entity] = opened.store;
   }

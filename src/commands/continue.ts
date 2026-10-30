@@ -1,5 +1,5 @@
 import { Command, Option } from "commander";
-import { requireCommandState } from "../home/command-state-store.js";
+import { currentCommandState } from "../home/command-state-store.js";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { failure } from "../context_control/service.js";
@@ -23,18 +23,17 @@ const operations: Array<[string[], string, string[]]> = [
 ];
 /** Shares native option parsers and the same business handler; never shells out to another CLI. */
 export function registerContinueCommand(program: Command, nativeRun: Command) {
-  const continuation = program.command("continue <context-id> [command...]").description("Continue production in an existing free exploration Run or graph Step; use native run commands to read it.").helpOption(false).allowUnknownOption();
+  const continuation = program.command("continue [command...]").description("Continue production in an existing free exploration Run or graph Step; use native run commands to read it.").helpOption(false).allowUnknownOption();
   const router = new Command("continue").helpOption(false);
   const help = async (target: Command) => {
     const context = await load();
-    console.log(`contextId: ${context.id}\ncommandGroup: ${context.commandGroup}\nproject: ${context.parameters.project}\nrun: ${context.groupId}`);
+    console.log(`sessionId: ${context.sessionId}\ncommandGroup: ${context.commandGroup}\nproject: ${context.parameters.project}\nrun: ${context.groupId}`);
     if (context.parameters.step) console.log(`step: ${context.parameters.step}`);
     if (!context.available) { console.log(`No further transitions (${context.runStatus}). Use ordinary run status/show commands.`); return; }
-    console.log(target === router ? context.parameters.step ? "Available: report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <context-id> <command> --help" : "Available: report, review create, external add, artifact tag, outputs update, finish, abandon\nContent, Artifact IDs, comments and dependencies remain explicit.\nUse: memsphere continue <context-id> <command> --help" : target.helpInformation());
+    console.log(target === router ? context.parameters.step ? "Available: report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <command> --help" : "Available: report, review create, external add, artifact tag, outputs update, finish, abandon\nContent, Artifact IDs, comments and dependencies remain explicit.\nUse: memsphere continue <command> --help" : target.helpInformation());
   };
   const load = async () => {
-    const id = continuation.processedArgs[0] as string;
-    const row = await requireCommandState(id);
+    const row = (await currentCommandState(true))!;
     const project = row.value.parameters.project;
     if (!project) throw failure("INVALID_STATE", "CommandState has no project");
     const selected = program.opts().project;
@@ -51,7 +50,8 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     return { ...row.value, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: step?.status ?? run.status, available: row.value.status === "active" && run.status === "running" && step?.status !== "done" };
   };
   continuation.action(async () => {
-    const tail = continuation.args.slice(1);
+    const tail = continuation.args;
+    await load();
     if (!tail.length || tail[0] === "--help" || tail[0] === "-h") { await help(router); return; }
     const configure = (command: Command) => { command.exitOverride(); command.configureOutput({ outputError() {} }); command.commands.forEach(configure); };
     configure(router);
@@ -82,7 +82,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         if (!stepId || !context.roundId) throw failure("INVALID_ARGUMENT", "This command requires a graph Step Review");
         const commands = await import("./run.js");
         const review = graphReviewHandle(context.groupId, stepId);
-        if (operation === "review-wait") await commands.runReviewWaitCommand({ review });
+        if (operation === "review-wait") await commands.runReviewWaitCommand({ review, ...options });
         else if (operation === "review-vote") await commands.runReviewVoteCommand({ ...options, review, round: context.roundId } as Parameters<typeof commands.runReviewVoteCommand>[0]);
         else if (operation === "review-retry") await commands.runReviewRetryCommand({ ...options, review });
         else if (operation === "review-resolve") await commands.runReviewResolveCommand({ ...options, review, round: context.roundId } as Parameters<typeof commands.runReviewResolveCommand>[0]);
@@ -90,7 +90,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         return;
       }
       if (context.parameters.step && operation !== "report") throw failure("INVALID_ARGUMENT", "Use the Step report or review commands shown by its current prompt");
-      await contextOnlyCommand(operation, { ...options, run: context.groupId, ...(context.parameters.step ? { step: context.parameters.step } : {}), contextId: context.id });
+      await contextOnlyCommand(operation, { ...options, run: context.groupId, ...(context.parameters.step ? { step: context.parameters.step } : {}), sessionStateId: context.id });
     });
   }
 }

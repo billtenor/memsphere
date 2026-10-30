@@ -4,6 +4,8 @@ names:
   - memsphere-procedure
   - Procedure
 defines:
+  - "Continue 仅在开启 Agent 身份并识别当前会话时可用，命令为 memsphere continue report 或 review wait，不接收独立 context ID；状态通过 agentType-sessionId 定位，保留具体 Run/Step 绑定。"
+  - "身份模式下 review wait 与 status 不 enter 后继或修改会话绑定，前台 report/vote 接纳后可正式进入唯一后继；后台通知只说明结果及显式下一步。"
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
   - 在个性化软件的语义资产中，Procedure 把反复出现的工作组织为可执行、可检查、可复用的运行入口，并通过 Run 与 Artifact 留下过程和结果。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，并通过 flow 安排有序 Action、分支、循环和对子流程的调用。

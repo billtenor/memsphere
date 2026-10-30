@@ -1,3 +1,4 @@
+import { currentProjectPreparation } from "./preparation.js";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
@@ -24,7 +25,7 @@ export function emptyProjectRegistry(): ProjectRegistry {
   return { format_version: 1, projects: {}, workspaces: {} };
 }
 
-export async function readProjectRegistry(home?: string): Promise<ProjectRegistry> {
+async function readPersistedProjectRegistry(home?: string): Promise<ProjectRegistry> {
   const path = homePaths(home).registryPath;
   try {
     return projectRegistrySchema.parse(JSON.parse(await readFile(path, "utf8")));
@@ -34,13 +35,22 @@ export async function readProjectRegistry(home?: string): Promise<ProjectRegistr
   }
 }
 
+/** Only the creating call can resolve its unpublished Project during bootstrap. */
+export async function readProjectRegistry(home?: string): Promise<ProjectRegistry> {
+  const paths = homePaths(home);
+  const registry = await readPersistedProjectRegistry(paths.home);
+  const preparation = currentProjectPreparation(paths.home);
+  if (preparation) registry.projects[preparation.name] = { root: preparation.root };
+  return registry;
+}
+
 export async function updateProjectRegistry(
   home: string | undefined,
   update: (registry: ProjectRegistry) => void | Promise<void>
 ): Promise<ProjectRegistry> {
   const paths = homePaths(home);
   return withFileLock(resolve(paths.runtimeRoot, "registry.lock"), async () => {
-    const registry = await readProjectRegistry(paths.home);
+    const registry = await readPersistedProjectRegistry(paths.home);
     await update(registry);
     const validated = projectRegistrySchema.parse(registry);
     await atomicWriteJson(paths.registryPath, validated);

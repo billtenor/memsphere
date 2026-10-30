@@ -1,19 +1,19 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolve } from "node:path";
-import { withProjectSettingsLock, readModelOperationStamp } from "./model-operation.js";
+import { readModelOperationStamp } from "./model-operation.js";
 
 const current = new AsyncLocalStorage<string>();
-/** A short Project operation, never an Agent/LLM lifetime. Lock order: Project, Run, record. */
+/** Check model availability; operations coordinate through Run locks and record CAS. */
 export function withContextControlAccess<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
   const key = resolve(root);
   if (current.getStore() === key) return action();
-  return withProjectSettingsLock(root, () => current.run(key, async () => {
+  return current.run(key, async () => {
     await readModelOperationStamp(root);
     return action();
-  }), signal);
+  });
 }
-/** For a caller that already owns the Project model/settings lock. */
+/** For model upgrade internals that intentionally read while publication is pending. */
 export function underContextControlAccess<T>(root: string, action: () => Promise<T>): Promise<T> {
   return current.run(resolve(root), action);
 }

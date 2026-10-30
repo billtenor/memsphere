@@ -581,3 +581,35 @@ test("Settings edits an unnamed Actor with a dotted ID without losing its draft"
     assert.equal(await person.locator("summary strong").textContent(), "person.dotted");
   }, "person.dotted");
 });
+
+test("Runner settings require installation detection and preserve identity/async dependencies after saving", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-runner-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+    await page.route("**/api/settings/global/runner-agents/detect", route => route.fulfill({ json: { results: [{ id: "codex", status: "installed" }, { id: "traex", status: "missing" }] } }));
+    await page.goto(`${origin}/projects/demo/settings/runners`);
+    const identity = () => page.locator('[data-field="runner.codex.identity_enabled"]');
+    const asynchronous = () => page.locator('[data-field="runner.codex.async_enabled"]');
+    await identity().waitFor();
+    assert.equal(await identity().isDisabled(), true);
+    await page.getByRole("button", { name: "自动检测", exact: true }).click();
+    await page.waitForFunction(() => !(document.querySelector('[data-field="runner.codex.identity_enabled"]') as HTMLInputElement)?.disabled);
+    assert.equal(await page.locator('[data-field="runner.traex.identity_enabled"]').isDisabled(), true);
+    await identity().check(); await asynchronous().check(); await identity().uncheck();
+    assert.equal(await asynchronous().isChecked(), false); assert.equal(await asynchronous().isDisabled(), true);
+    await identity().check(); await asynchronous().check();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).waitFor();
+    await page.reload(); await identity().waitFor();
+    assert.equal(await identity().isChecked(), true); assert.equal(await asynchronous().isChecked(), true);
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    const saved = JSON.parse(await readFile(join(config.homeRoot!, "config.json"), "utf8"));
+    assert.deepEqual(saved.acp_providers, { codex: { idle_timeout_ms: 90000 } });
+  } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
+});

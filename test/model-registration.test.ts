@@ -139,8 +139,8 @@ test("Identity initialization never rewrites cross-model refs or ordinary annota
   assert.equal(await readFile(join(directory, "reference.json"), "utf8"), source);
   const host = await createProjectModelHost({}, { root });
   assert.equal((await host.list()).find(model => model.id === "reference.json")?.status, "unavailable");
-  await assert.rejects(host.definition("reference.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
-  await assert.rejects(host.runtime("reference.json"), { code: "MODEL_REFERENCE_UNSUPPORTED" });
+  await assert.rejects(host.definition("reference.json"), { code: "MODEL_NOT_REGISTERED" });
+  await assert.rejects(host.runtime("reference.json"), { code: "MODEL_NOT_REGISTERED" });
 }));
 
 test("Registry Store writes enforce storage conditions as business validation, including bootstrap", async () => fixture(async (root) => {

@@ -1,9 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
+import { withMemoryWriteAccess } from "./write-access.js";
+import { withConfigFileLock } from "../config-file-lock.js";
 import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, posix, relative, resolve, sep } from "node:path";
 import { z } from "zod";
-import { atomicReplaceDirectoryWithCommit, atomicWriteJson, withFileLock } from "../persistence.js";
+import { atomicReplaceDirectoryWithCommit, atomicWriteJson } from "../persistence.js";
 import { archiveChangeDirectory, type ArchiveEntry } from "../archive/store.js";
 import { gitHashObject, gitOutput, gitOutputRaw, runGit } from "../git.js";
 import { memoryKinds, type MemoryKind } from "./kinds.js";
@@ -260,7 +262,7 @@ export class MemoryChangePreviewCache {
     changeId: string;
     use: (preview: MemoryChangePreview) => Promise<T>;
   }): Promise<T> {
-    const entry = await withMemoryChangeCheckpointLock(input, async () => {
+    const entry = await (async () => {
       const prepared = await prepareMemoryChangePreview(input);
       await this.#invalidateOlderVersions(prepared.changeKey, prepared.cacheKey);
       let current = this.#entries.get(prepared.cacheKey);
@@ -287,7 +289,7 @@ export class MemoryChangePreviewCache {
       current.refs += 1;
       current.lastUsed = Date.now();
       return current;
-    });
+    })();
     try {
       return await input.use(entry.preview);
     } finally {
@@ -337,10 +339,10 @@ export async function withMemoryChangePreview<T>(input: {
   changeId: string;
   use: (preview: MemoryChangePreview) => Promise<T>;
 }): Promise<T> {
-  const preview = await withMemoryChangeCheckpointLock(input, async () => {
+  const preview = await (async () => {
     const prepared = await prepareMemoryChangePreview(input);
     return materializePreparedMemoryChangePreview(prepared);
-  });
+  })();
   try {
     return await input.use(preview);
   } finally {
@@ -355,7 +357,7 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
   changeId: string;
   use: (snapshot: MemoryChangeReviewSnapshot) => Promise<T>;
 }): Promise<T> {
-  return withMemoryChangeCheckpointLock(input, async () => {
+  return (async () => {
     const prepared = await prepareMemoryChangePreview(input);
     const preview = await materializePreparedMemoryChangePreview(prepared);
     let baseRoot: string | undefined;
@@ -380,7 +382,7 @@ export async function withMemoryChangeReviewSnapshot<T>(input: {
       await rm(preview.memoryRoot, { recursive: true, force: true });
       if (baseRoot) await rm(baseRoot, { recursive: true, force: true });
     }
-  });
+  })();
 }
 
 export async function withMemoryChangeDetailSnapshot<T>(input: {
@@ -390,7 +392,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
   changeId: string;
   use: (snapshot: MemoryChangeDetailSnapshot) => Promise<T>;
 }): Promise<T> {
-  return withMemoryChangeCheckpointLock(input, async () => {
+  return (async () => {
     const context = await resolveProjectContext({
       home: input.home,
       project: input.project,
@@ -481,19 +483,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
       await rm(previewRoot, { recursive: true, force: true });
       await Promise.all(scopeRevisionRoots.map((root) => rm(root, { recursive: true, force: true })));
     }
-  });
-}
-
-export async function withMemoryChangeCheckpointLock<T>(
-  input: { home?: string; project: string; memoryScope?: "workspace" | "canonical" },
-  action: () => Promise<T>
-): Promise<T> {
-  const context = await resolveProjectContext({
-    home: input.home,
-    project: input.project,
-    memoryScope: input.memoryScope
-  });
-  return withFileLock(memoryMutationLock(context.primary), action);
+  })();
 }
 
 async function prepareMemoryChangePreview(input: {
@@ -621,16 +611,13 @@ export async function createSystemUpgradeMemoryChange(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   const { context, targets } = input;
   const { primary: project, workspace } = context;
-  return withFileLock(memoryMutationLock(project), async () => {
+  {
     if (!targets.length) throw new Error("Cannot create an empty system_upgrade ChangeSet");
     const protectsRemoval = targets.some(target => target.operation === "delete" && Boolean(target.approvedContentDigest));
     if (project.config.store.type === "managed" && protectsRemoval) await assertManagedHealthy(project);
     const base = project.config.store.type === "managed" ? project.config.store.published_revision
       : await gitOutput(["rev-parse", "HEAD"], workspace.path);
     const branch = project.config.store.type === "embedded" ? await assertSystemUpgradeGitBase(context, base, undefined, protectsRemoval) : undefined;
-    const active = (await listProjectChanges(project)).find(change => change.status === "active" && change.intent === "system_upgrade"
-      && change.system_upgrade?.instance_key === workspace.instanceKey);
-    if (active) throw new Error(`Retry with project upgrade --change ${active.id}`);
     const change = newChange(project, workspace.key, { baseRevision: base });
     change.intent = "system_upgrade";
     change.system_upgrade = { source_digest: input.sourceDigest, instance_key: workspace.instanceKey,
@@ -679,13 +666,13 @@ export async function createSystemUpgradeMemoryChange(input: {
       throw error;
     }
     return { change, candidateRoot };
-  });
+  }
 }
 
 export async function validateSystemUpgradeRetry(input: {
   context: ProjectContext; changeId: string; targets: SystemUpgradeMemoryTarget[]; sourceDigest: string;
 }): Promise<MemoryChangeSet> {
-  return withFileLock(memoryMutationLock(input.context.primary), async () => {
+  {
     const change = await readChange(input.context.primary, input.changeId);
     assertSystemUpgradeOwner(change, input.context);
     if (change.system_upgrade!.source_digest !== input.sourceDigest
@@ -695,7 +682,7 @@ export async function validateSystemUpgradeRetry(input: {
     const validation = await validateSystemUpgradeLocked(input.context, change);
     if (validation.issues.length) throw new Error("System upgrade validation failed");
     return readChange(input.context.primary, change.id);
-  });
+  }
 }
 
 async function validateSystemUpgradeLocked(context: ProjectContext, change: MemoryChangeSet): Promise<MemoryChangeValidationResult> {
@@ -756,7 +743,7 @@ async function validateSystemUpgradeLocked(context: ProjectContext, change: Memo
 /** Managed publication is available only to the internal upgrade orchestration. */
 export async function publishSystemUpgradeMemoryChange(changeId: string, options: { context: ProjectContext; message?: string }): Promise<MemoryChangeSet> {
   const context = options.context;
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  return withMemoryWriteAccess(context.primary.memoryRoot, async () => {
     const change = await readChange(context.primary, changeId);
     assertSystemUpgradeOwner(change, context);
     assertManaged(context.primary);
@@ -785,11 +772,11 @@ export async function editMemories(input: {
     }
   }
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), () => editMemoriesLocked(input, context));
+  return (() => editMemoriesInternal(input, context))();
 }
 
-/** Internal helper for callers that already hold this project's mutation lock. */
-async function editMemoriesLocked(
+/** Internal candidate editing; concurrent updates use last-write-wins semantics. */
+async function editMemoriesInternal(
   input: Parameters<typeof editMemories>[0],
   context: ProjectContext
 ): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
@@ -842,11 +829,6 @@ async function editMemoriesLocked(
   return { change, candidateRoot };
 }
 
-/** Internal App asset import, using the same validated candidate/apply boundary as other imports. */
-export function withAppMemoryReservation<T>(project: ResolvedProject, reserve: () => Promise<T>): Promise<T> {
-  return withFileLock(memoryMutationLock(project), reserve);
-}
-
 export async function createAppMemoryChange(input: {
   appId: string; operationId: string; packageDigest: string;
   ownership?: AppOwnership;
@@ -855,7 +837,7 @@ export async function createAppMemoryChange(input: {
 }): Promise<MemoryChangeSet> {
   const context = input.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const project = context.primary;
-  return withFileLock(memoryMutationLock(project), async () => {
+  {
     const workspace = context.workspace;
     const baseRevision = project.config.store.type === "managed" ? project.config.store.published_revision
       : await gitOutput(["rev-parse", "HEAD"], workspace.path);
@@ -880,7 +862,7 @@ export async function createAppMemoryChange(input: {
     }
     await writeChange(project, change);
     return change;
-  });
+  }
 }
 
 export async function createMarketMemoryChange(input: {
@@ -890,32 +872,20 @@ export async function createMarketMemoryChange(input: {
   targets: Array<{ reference: string; path: string; source: Buffer }>;
 }): Promise<MemoryChangeSet> {
   if (input.targets.length === 0) throw new Error("market import requires at least one Memory");
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
       memoryScope: "canonical"
     })).primary;
     const actor = memoryChangeActorSchema.parse(input.actor);
-    const existing = (await listProjectChangesBestEffort(project)).changes.find((change) => (
-      change.status === "active"
-      && change.intent === "market_import"
-    ));
     const identity = await canonicalChangeIdentity(project);
-    const change = existing ?? newChange(project, identity.workspace.key, {
-        origin: "view",
-        actor,
-        baseRevision: identity.baseRevision
-      });
-    if (existing?.claim) {
-      throw new Error("cannot import another market Memory while the ChangeSet is claimed; finish the claim, then import again");
-    }
-    if (!existing) {
-      change.intent = "market_import";
-      change.store_type = project.config.store.type;
-      if (identity.source) change.source_worktree = identity.source;
-    }
+    const change = newChange(project, identity.workspace.key, {
+      origin: "view", actor, baseRevision: identity.baseRevision
+    });
+    change.intent = "market_import";
+    change.store_type = project.config.store.type;
+    if (identity.source) change.source_worktree = identity.source;
     const candidateRoot = marketCandidateRoot(project, change.id);
     const writtenCandidates: string[] = [];
     try {
@@ -956,14 +926,10 @@ export async function createMarketMemoryChange(input: {
       await writeChange(project, change);
       return change;
     } catch (error) {
-      if (existing) {
-        await Promise.all(writtenCandidates.map((candidate) => rm(candidate, { force: true }).catch(() => undefined)));
-      } else {
-        await rm(join(project.paths.changesRoot, change.id), { recursive: true, force: true }).catch(() => undefined);
-      }
+      await rm(join(project.paths.changesRoot, change.id), { recursive: true, force: true }).catch(() => undefined);
       throw error;
     }
-  });
+  }
 }
 
 /** Internal-only edit entrypoint for a caller that already resolved canonical identity and storage path. */
@@ -979,7 +945,7 @@ export async function editMemoriesByIdentity(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   if (input.targets.length === 0) throw new Error("provide at least one Memory identity target");
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     if (input.changeId) await readOrdinaryChange(context.primary, input.changeId);
     assertManaged(context.primary);
     const workspace = await resolveWorkspaceIdentity();
@@ -1039,7 +1005,7 @@ export async function editMemoriesByIdentity(input: {
     change.updated_at = new Date().toISOString();
     await writeChange(context.primary, change);
     return { change, candidateRoot };
-  });
+  }
 }
 
 /** Internal-only deletion entrypoint for a caller that already verified historical path and canonical identity. */
@@ -1050,7 +1016,7 @@ export async function deleteMemoriesByIdentity(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   if (input.targets.length === 0) throw new Error("provide at least one Memory identity target");
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     if (input.changeId) await readOrdinaryChange(context.primary, input.changeId);
     assertManaged(context.primary);
     const workspace = await resolveWorkspaceIdentity();
@@ -1106,7 +1072,7 @@ export async function deleteMemoriesByIdentity(input: {
     change.updated_at = new Date().toISOString();
     await writeChange(context.primary, change);
     return { change, candidateRoot };
-  });
+  }
 }
 
 export async function editEmbeddedMemories(references: string[]): Promise<EmbeddedMemoryEditResult> {
@@ -1151,7 +1117,7 @@ export async function renameMemory(input: {
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string }> {
   assertCanonicalMemoryName(input.newName);
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     assertManaged(context.primary);
     const workspace = await resolveWorkspaceIdentity();
     const change = input.changeId ? await readOrdinaryChange(context.primary, input.changeId) : await createChange(context.primary, workspace.key);
@@ -1172,15 +1138,13 @@ export async function renameMemory(input: {
     change.updated_at = new Date().toISOString();
     await writeChange(context.primary, change);
     return { change, candidateRoot };
-  });
+  }
 }
 
 export async function checkpointWorkspaceChanges(): Promise<number> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     const workspace = await resolveWorkspaceIdentity();
-    const upgrade = (await listProjectChanges(context.primary)).find(change => change.intent === "system_upgrade" && change.status === "active" && change.system_upgrade?.instance_key === workspace.instanceKey);
-    if (upgrade) assertOrdinaryChange(upgrade);
     if (context.primary.config.store.type !== "managed") return 0;
     const workspaceChanges = resolve(workspace.path, ".memsphere-work", "changes");
     let entries;
@@ -1194,8 +1158,7 @@ export async function checkpointWorkspaceChanges(): Promise<number> {
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
       const change = await readChange(context.primary, entry.name).catch(() => undefined);
-      if (!change || change.status !== "active" || change.workspace_key !== workspace.key) continue;
-      assertOrdinaryChange(change);
+      if (!change || change.status !== "active" || change.workspace_key !== workspace.key || change.intent === "system_upgrade") continue;
       const source = join(workspaceChanges, entry.name, "memory");
       if (!await exists(source)) continue;
       const recovery = recoveryRoot(context.primary, entry.name);
@@ -1207,12 +1170,12 @@ export async function checkpointWorkspaceChanges(): Promise<number> {
       saved += 1;
     }
     return saved;
-  });
+  }
 }
 
 export async function resumeMemoryChange(changeId: string): Promise<string> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     assertManaged(context.primary);
     const workspace = await resolveWorkspaceIdentity();
     const change = await readOrdinaryChange(context.primary, changeId);
@@ -1223,7 +1186,7 @@ export async function resumeMemoryChange(changeId: string): Promise<string> {
     await rm(candidate, { recursive: true, force: true });
     await cp(recovery, candidate, { recursive: true });
     return candidate;
-  });
+  }
 }
 
 export async function publishMemoryChange(
@@ -1233,7 +1196,7 @@ export async function publishMemoryChange(
 ): Promise<MemoryChangeSet> {
   const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = initialContext.workspace;
-  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+  return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
     const change = await readOrdinaryChange(context.primary, changeId);
     if (context.primary.config.store.type === "embedded") {
@@ -1262,7 +1225,7 @@ export async function failMemoryChange(
   error: unknown
 ): Promise<MemoryChangeSet> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     assertManaged(context.primary);
     const workspace = await resolveWorkspaceIdentity();
     const change = await readOrdinaryChange(context.primary, changeId);
@@ -1280,7 +1243,7 @@ export async function failMemoryChange(
     });
     await writeChange(context.primary, failed);
     return failed;
-  });
+  }
 }
 
 export async function validateMemoryChange(
@@ -1289,7 +1252,7 @@ export async function validateMemoryChange(
 ): Promise<MemoryChangeValidationResult> {
   const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = initialContext.workspace;
-  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+  {
     const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
     if (context.primary.config.store.type === "managed") {
       await assertManagedHealthy(context.primary);
@@ -1420,7 +1383,7 @@ export async function validateMemoryChange(
     } finally {
       await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
     }
-  }, { onWait: options.onLockWait });
+  }
 }
 
 async function resolveSingleManagedActive(project: ResolvedProject, workspace: WorkspaceIdentity): Promise<string> {
@@ -1682,10 +1645,10 @@ async function captureEmbeddedWorkingChange(
       await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
       const projectChanges = listed.changes;
       const completedChangeIds: string[] = [];
-      const upgrade = projectChanges.find((candidate) => candidate.intent === "system_upgrade" && candidate.status === "active" && candidate.system_upgrade?.instance_key === workspace.instanceKey);
-      if (upgrade) throw new Error(`Use memsphere memory change validate ${upgrade.id} for this system_upgrade worktree`);
+      const upgrades = projectChanges.filter(candidate => candidate.intent === "system_upgrade" && candidate.status === "active" && candidate.system_upgrade?.instance_key === workspace.instanceKey);
+      if (upgrades.length) throw new Error(`Use memsphere memory change validate <change-id> for this system_upgrade worktree: ${upgrades.map(change => change.id).join(", ")}`);
       const matches = projectChanges.filter((candidate) => (
-        candidate.intent !== "system_upgrade"
+        candidate.intent !== "system_upgrade" && candidate.intent !== "market_import" && candidate.intent !== "app_install"
         &&
         candidate.status === "active"
         && candidate.store_type === "embedded"
@@ -1981,10 +1944,10 @@ export async function listMemoryChanges(input: {
     project: input.project,
     memoryScope: input.memoryScope
   });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     const changes = await listProjectChanges(context.primary, true);
     return sortMemoryChanges(changes);
-  });
+  }
 }
 
 export async function listMemoryChangesBestEffort(input: {
@@ -2000,13 +1963,13 @@ export async function listMemoryChangesBestEffort(input: {
     project: input.project,
     memoryScope: input.memoryScope
   });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     const result = await listProjectChangesBestEffort(context.primary);
     return {
       changes: sortMemoryChanges(result.changes),
       failures: result.failures.sort((left, right) => right.id.localeCompare(left.id))
     };
-  });
+  }
 }
 
 export async function readMemoryChange(input: {
@@ -2020,7 +1983,7 @@ export async function readMemoryChange(input: {
     project: input.project,
     memoryScope: input.memoryScope
   });
-  return withFileLock(memoryMutationLock(context.primary), () => readReconciledChange(context.primary, input.changeId));
+  return (() => readReconciledChange(context.primary, input.changeId))();
 }
 
 export async function createViewMemoryChange(input: {
@@ -2034,7 +1997,7 @@ export async function createViewMemoryChange(input: {
     project: input.project,
     memoryScope: "canonical"
   });
-  return withFileLock(memoryMutationLock(context.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
@@ -2062,7 +2025,7 @@ export async function createViewMemoryChange(input: {
     if (identity.source) change.source_worktree = identity.source;
     await writeChange(project, change);
     return change;
-  });
+  }
 }
 
 export async function addMemoryChangeScope(input: {
@@ -2072,15 +2035,14 @@ export async function addMemoryChangeScope(input: {
   reference: string;
   expectedUpdatedAt?: string;
 }): Promise<MemoryChangeSet> {
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
       memoryScope: "canonical"
     })).primary;
     const change = await readOrdinaryChange(project, input.changeId);
-    assertMutableChange(change, input.expectedUpdatedAt);
+    assertMutableChange(change);
     if (change.claim) {
       throw new Error("cannot add Memory while the ChangeSet is claimed; finish the claim, add Memory, then claim again");
     }
@@ -2101,7 +2063,7 @@ export async function addMemoryChangeScope(input: {
       await writeChange(project, change);
     }
     return change;
-  });
+  }
 }
 
 export async function abandonMemoryChange(input: {
@@ -2110,21 +2072,20 @@ export async function abandonMemoryChange(input: {
   changeId: string;
   expectedUpdatedAt?: string;
 }): Promise<MemoryChangeSet> {
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
       memoryScope: "canonical"
     })).primary;
     const change = await readReconciledChange(project, input.changeId);
-    assertMutableChange(change, input.expectedUpdatedAt);
+    assertMutableChange(change);
     change.status = "abandoned";
     delete change.claim;
     change.updated_at = new Date().toISOString();
     await writeChange(project, change);
     return change;
-  });
+  }
 }
 
 export async function archiveMemoryChange(input: {
@@ -2133,8 +2094,7 @@ export async function archiveMemoryChange(input: {
   changeId: string;
   expectedUpdatedAt?: string;
 }): Promise<ArchiveEntry> {
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
@@ -2142,15 +2102,12 @@ export async function archiveMemoryChange(input: {
     })).primary;
     const change = await readReconciledChange(project, input.changeId);
     if (change.status === "active") throw new Error("only terminal ChangeSets can be archived");
-    if (input.expectedUpdatedAt && change.updated_at !== input.expectedUpdatedAt) {
-      throw new Error(`ChangeSet ${change.id} was modified by another operation`);
-    }
     return archiveChangeDirectory({
       archiveRoot: project.paths.archiveRoot,
       changesRoot: project.paths.changesRoot,
       id: change.id
     });
-  });
+  }
 }
 
 export async function createMemoryChangeComment(input: {
@@ -2166,15 +2123,14 @@ export async function createMemoryChangeComment(input: {
   body: string;
   expectedUpdatedAt?: string;
 }): Promise<{ change: MemoryChangeSet; comment: MemoryChangeComment }> {
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
       memoryScope: "canonical"
     })).primary;
     const change = await readOrdinaryChange(project, input.changeId);
-    assertMutableChange(change, input.expectedUpdatedAt);
+    assertMutableChange(change);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const body = input.body.trim();
     if (!body) throw new Error("Comment body is required");
@@ -2202,7 +2158,7 @@ export async function createMemoryChangeComment(input: {
     change.updated_at = now;
     await writeChange(project, change);
     return { change, comment };
-  });
+  }
 }
 
 export async function updateMemoryChangeComment(input: {
@@ -2215,15 +2171,14 @@ export async function updateMemoryChangeComment(input: {
   withdraw?: boolean;
   expectedUpdatedAt?: string;
 }): Promise<{ change: MemoryChangeSet; comment: MemoryChangeComment }> {
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
       memoryScope: "canonical"
     })).primary;
     const change = await readOrdinaryChange(project, input.changeId);
-    assertMutableChange(change, input.expectedUpdatedAt);
+    assertMutableChange(change);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const comment = change.comments.find((item) => item.id === input.commentId);
     if (!comment) throw new Error(`Comment not found: ${input.commentId}`);
@@ -2242,7 +2197,7 @@ export async function updateMemoryChangeComment(input: {
     change.updated_at = now;
     await writeChange(project, change);
     return { change, comment };
-  });
+  }
 }
 
 export async function deleteMemoryChangeComment(input: {
@@ -2253,15 +2208,14 @@ export async function deleteMemoryChangeComment(input: {
   actor: MemoryChangeActor;
   expectedUpdatedAt?: string;
 }): Promise<MemoryChangeSet> {
-  const initial = await resolveProjectContext({ home: input.home, project: input.project, memoryScope: "canonical" });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const project = (await resolveProjectContext({
       home: input.home,
       project: input.project,
       memoryScope: "canonical"
     })).primary;
     const change = await readOrdinaryChange(project, input.changeId);
-    assertMutableChange(change, input.expectedUpdatedAt);
+    assertMutableChange(change);
     const actor = memoryChangeActorSchema.parse(input.actor);
     const index = change.comments.findIndex((item) => item.id === input.commentId);
     if (index < 0) throw new Error(`Comment not found: ${input.commentId}`);
@@ -2272,16 +2226,15 @@ export async function deleteMemoryChangeComment(input: {
     change.updated_at = new Date().toISOString();
     await writeChange(project, change);
     return change;
-  });
+  }
 }
 
 export async function claimMemoryChange(input: {
   changeId: string;
   force?: boolean;
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string; warnings: string[] }> {
-  const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = await resolveWorkspaceIdentity();
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     const change = await readOrdinaryChange(context.primary, input.changeId);
     if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
@@ -2330,7 +2283,7 @@ export async function claimMemoryChange(input: {
           : context.primary.memoryRoot,
       warnings
     };
-  });
+  }
 }
 
 export async function finishMemoryChange(input: {
@@ -2338,9 +2291,8 @@ export async function finishMemoryChange(input: {
   commentIds?: string[];
   reason?: "fixed" | "rejected";
 }): Promise<MemoryChangeSet> {
-  const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = await resolveWorkspaceIdentity();
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     const change = await readOrdinaryChange(context.primary, input.changeId);
     assertClaimOwner(change, context.primary.name, workspace);
@@ -2369,12 +2321,11 @@ export async function finishMemoryChange(input: {
     change.updated_at = now;
     await writeChange(context.primary, change);
     return change;
-  });
+  }
 }
 
 export async function completeMemoryChange(changeId: string): Promise<MemoryChangeSet> {
-  const initial = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
-  return withFileLock(memoryMutationLock(initial.primary), async () => {
+  {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     const change = await readOrdinaryChange(context.primary, changeId);
     if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
@@ -2387,7 +2338,7 @@ export async function completeMemoryChange(changeId: string): Promise<MemoryChan
     change.updated_at = new Date().toISOString();
     await writeChange(context.primary, change);
     return change;
-  });
+  }
 }
 
 async function canonicalChangeIdentity(project: ResolvedProject): Promise<{
@@ -2416,11 +2367,8 @@ async function canonicalChangeIdentity(project: ResolvedProject): Promise<{
   };
 }
 
-function assertMutableChange(change: MemoryChangeSet, expectedUpdatedAt?: string): void {
+function assertMutableChange(change: MemoryChangeSet): void {
   if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
-  if (expectedUpdatedAt && change.updated_at !== expectedUpdatedAt) {
-    throw new Error(`ChangeSet ${change.id} was modified by another operation`);
-  }
 }
 
 function assertSameChangeActor(expected: MemoryChangeActor, actual: MemoryChangeActor): void {
@@ -2565,7 +2513,7 @@ export async function recoverMemory(
 ): Promise<{ change?: MemoryChangeSet; candidateRoot?: string }> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
-  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+  return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
     return recoverMemoryLocked(context.primary, reference, mode);
@@ -2651,11 +2599,11 @@ export async function syncMemory(
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
   const source = await prepareSync(initialContext.primary);
-  return withFileLock(memoryMutationLock(initialContext.primary), async () => {
+  return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
     return syncMemoryLocked(context.primary, source, context);
-  }, { onWait: options.onLockWait });
+  });
 }
 
 type PreparedSync = { upstream: string; mergeParent: string };
@@ -2712,7 +2660,7 @@ async function syncMemoryLocked(
       if (!published) createPaths.set(reference, path);
       return reference;
     });
-    const result = await editMemoriesLocked({ references, createPaths }, context);
+    const result = await editMemoriesInternal({ references, createPaths }, context);
     for (const candidate of candidates) {
       const target = result.change.targets.find((item) => item.path === candidate.path);
       if (!target) throw new Error(`Sync ChangeSet target is missing: ${candidate.path}`);
@@ -2989,8 +2937,12 @@ function mapEffectiveValidationIssue(
 async function updatePublishedRevision(project: ResolvedProject): Promise<string> {
   assertManaged(project);
   const revision = await gitOutput(["rev-parse", "HEAD"], project.memoryRoot);
-  const nextConfig = projectConfigSchema.parse({ ...project.config, store: { ...project.config.store, published_revision: revision } });
-  await atomicWriteJson(project.paths.configPath, nextConfig);
+  await withConfigFileLock(project.paths.configPath, async () => {
+    const current = projectConfigSchema.parse(JSON.parse(await readFile(project.paths.configPath, "utf8")));
+    if (current.store.type !== "managed") throw new Error("Project is no longer managed");
+    const nextConfig = projectConfigSchema.parse({ ...current, store: { ...current.store, published_revision: revision } });
+    await atomicWriteJson(project.paths.configPath, nextConfig);
+  });
   return revision;
 }
 
@@ -3173,10 +3125,6 @@ const assertManagedHealthy = assertManagedProjectHealthy;
 
 function assertManaged(project: ResolvedProject): asserts project is ResolvedProject & { config: { store: { type: "managed"; branch: string; upstream?: string; published_revision: string }; control_plane?: ResolvedProject["config"]["control_plane"] } } {
   if (project.config.store.type !== "managed") throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
-}
-
-function memoryMutationLock(project: ResolvedProject): string {
-  return join(project.paths.runtimeRoot, "memory-publish.lock");
 }
 
 async function readChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {

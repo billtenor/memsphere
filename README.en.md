@@ -489,10 +489,14 @@ Managed System Memory changes are validated and published through a dedicated Ch
 ```bash
 memsphere run start --file graph.yaml --name "Business analysis"
 memsphere run step enter --run R --step S  # choose when multiple Steps are ready
-memsphere continue C report --artifact-file result.json
-memsphere continue C review wait
-memsphere continue C review vote --vote approve
+memsphere continue report --artifact-file result.json
+memsphere continue review wait
+memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Dependencies create pending Step instances before production. Enter is idempotent; Continue stays bound to one Step until completion. Formal reviews also support `continue C review resolve` and `continue C review submit-for-human`, with the native commands’ explicit authorization, options and permission checks. An entry Action prepares business materials; startup accepts no structured business input. Graph runs use model Stores; existing Projects explicitly upgrade with `project models initialize` when prompted. See the [graph syntax and examples](docs/procedure-graph-syntax.md) for model/payload contracts.
+Continue uses the calling Agent session. Detect Codex/Traex under Settings → Runner Agent and enable identity first; use native `run` commands when no session is recognized. `review wait` returns available results immediately; otherwise Runner settings choose asynchronous registration or synchronous waiting, without a `--sync` option. Queue notifications contain only `[Memsphere 自动消息]`, `请执行命令以继续：`, and a wait command identifying the Project and Review. Run that command to read current results. Repeated calls reuse active tasks; terminal history does not block a new necessary wait. Use `run review wait status --review R` to inspect tasks and `run review wait retry --review R --round ROUND` to retry a failed delivery explicitly.
+
+Manage the Home background process with `memsphere daemon start/status/stop/restart`. View retains `view start/status/stop/restart`; stopping View leaves waiting tasks active, and restarting the daemon restores the previous View running/stopped intent. No operating-system boot service is installed.
+
+Dependencies create pending Step instances before production. Enter is idempotent; Continue stays bound to one Step until completion. Formal reviews also support `continue review resolve` and `continue review submit-for-human`, with the native commands’ explicit authorization, options and permission checks. An entry Action prepares business materials; startup accepts no structured business input. Graph runs use model Stores; existing Projects explicitly upgrade with `project models initialize` when prompted. See the [graph syntax and examples](docs/procedure-graph-syntax.md) for model/payload contracts.
