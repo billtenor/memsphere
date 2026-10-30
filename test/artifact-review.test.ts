@@ -235,3 +235,20 @@ test("Runner delegated comments file parser accepts only the strict public shape
   assert.throws(() => parseRunnerDelegatedComments([{ body: " " }]), /non-empty/);
   assert.throws(() => parseRunnerDelegatedComments([{ body: "ok", anchor: { target: "x" } }]), /submissionId/);
 });
+
+test("sync and async wait readiness ignores every Human assignment state", async () => {
+  const { artifactReviewWaitReady } = await import("../src/artifact-review.js");
+  const { snapshot, controlPlane } = fixture();
+  const assignments = createArtifactReviewAssignments({ snapshot, controlPlane, now: "2026-10-30T00:00:00.000Z" }).assignments;
+  const round: ArtifactReviewRound = { id: "independent-lines", sequence: 1, submissionId: "candidate", status: "pending", revision: 1, createdAt: "2026-10-30T00:00:00.000Z", assignments, votes: [] };
+  const human = assignments.find(a => a.actorKind === "human")!, agent = assignments.find(a => a.actorKind === "agent")!;
+  for (const humanStatus of ["draft", "submitted", "cancelled"] as const) {
+    human.status = humanStatus;
+    for (const agentStatus of ["queued", "running", "failed", "submitted"] as const) {
+      agent.status = agentStatus;
+      assert.equal(artifactReviewWaitReady({ status: "pending" }, round), ["failed", "submitted"].includes(agentStatus), `${humanStatus}/${agentStatus}`);
+    }
+  }
+  round.assignments = [human];
+  assert.equal(artifactReviewWaitReady({ status: "pending" }, round), true);
+});

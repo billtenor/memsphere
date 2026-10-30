@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import test from "node:test";
+import { registerFixtureDefinition, writeRegisteredFixtureFile as writeFile } from "./helpers/model-fixture.js";
 import { createViewServer } from "../src/commands/view.js";
 import type { MemsphereConfig } from "../src/config.js";
 
@@ -50,6 +51,7 @@ test("Model APIs isolate Projects and immediately follow saved model directory c
       body: JSON.stringify({ expectedRevision: settings.diskRevision, config: { ...settings.config, modelsDirectory: "custom" } }) });
     assert.equal(saved.status, 200);
     assert.equal((await saved.json()).resolvedPaths.modelsDirectory, join(root, "custom"));
+    await registerFixtureDefinition(root, "new.json", newSource);
     assert.equal((await (await definition("alpha", "new.json")).json()).source, newSource);
     assert.equal((await definition("alpha", "sales/order.json")).status, 404);
     assert.equal((await definition("beta", "sales/order.json")).status, 200);

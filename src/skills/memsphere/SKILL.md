@@ -48,7 +48,7 @@ Managed Memory 通过受控 ChangeSet 修改。Embedded CLI 使用当前 Git wor
 
 ### 自由探索：保留和交付成果
 
-启动回执给出 Run ID 和 `contextId`。跨 Shell 使用同一 ID；`memsphere continue <contextId> --help` 列出可继续生产的操作，原生 `memsphere run` 命令也可用。查询和读取使用原生命令；这里的 Continue 用于自由探索生产；graph 的 Continue 固定 Step，见下文。旧 flow、ChangeSet 与 ACP 保持各自入口。
+启动回执给出 Run ID；开启 Runner 身份并识别到当前 Agent 会话时自动绑定，`memsphere continue --help` 列出可用操作。Continue 无独立 ID，跨 CLI 进程按 Agent 类型与 session ID 定位；身份未开启、会话缺失或冲突时拒绝 Continue，使用原生 run 命令。可用 `run enter --run R` 或 graph 的 `run step enter --run R --step S` 显式切换上下文。
 
 **Artifact（产物）**是一份围绕明确目的组织、可独立阅读或使用，且值得供后续引用、评审、修订或交付保留的结果。它可以是阶段版本，但这一版应表达结果、依据与适用边界，不能只有标题或占位符。同一用途下紧密相关的内容合并，需要分别引用、评审或演进时再拆分；文件数、消息数和保存次数不决定产物数。
 
@@ -92,7 +92,7 @@ flow 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-f
 
 依赖满足时 Memsphere 立即创建 pending Step。只有一个可执行 Step 时自动 enter；多个时先读返回的概述列表，再执行 `memsphere run step enter --run R --step S`。enter 首次将该实例转为 running，重复 enter 复用同一实例、开始时间和 Continue 上下文；`run step show --run R --step S` 只读。
 
-进入后只完成当前 Step。使用返回的 `memsphere continue C report --artifact-file <file>` 上报，原生入口必须显式带 `--run R --step S`。C 固定 Project、Run、Step；不会随工作进度改绑到后继实例。评审时按提示执行 `continue C review wait`，阅读全部正式意见后执行 `continue C review vote --vote approve` 或附修改理由的 request_changes；Agent Reviewer 失败时遵守下文显式 retry 规则，可使用 `continue C review retry --assignment <actor>`。意见处置使用 `continue C review resolve --comment <id> --disposition <value> --note <text>`（accepted-fixed 另需验证摘要）；取得本人明确授权后可使用 `continue C review submit-for-human --assignment <actor> --vote <value> --comments-file <file> --authorization-note <text>`。这些入口自动固定当前 Run/Step/轮次，不允许传参改绑，沿用原生命令全部权限与受托审计。
+进入后只完成当前 Step。使用返回的 `memsphere continue report --artifact-file <file>` 上报，原生入口必须显式带 `--run R --step S`。会话状态固定 Project、Run、Step；不会随工作进度改绑到后继实例。评审时按提示执行 `continue review wait`，阅读全部正式意见后执行 `continue review vote --vote approve` 或附修改理由的 request_changes；Agent Reviewer 失败时遵守下文显式 retry 规则，可使用 `continue review retry --assignment <actor>`。意见处置使用 `continue review resolve --comment <id> --disposition <value> --note <text>`（accepted-fixed 另需验证摘要）；取得本人明确授权后可使用 `continue review submit-for-human --assignment <actor> --vote <value> --comments-file <file> --authorization-note <text>`。这些入口自动固定当前 Run/Step/轮次，不允许传参改绑，沿用原生命令全部权限与受托审计。
 
 要求修改后在同一 Step 提交新 Artifact，必须附 `--revision-summary` 或 `--revision-summary-file`；保留旧候选与轮次。完成该 Step 后才返回新的可执行 Step 列表。跨 Step 并发由宿主 Agent 框架组织，不要求 Memsphere 调度 Agent。Human Action 必须先等待 Human 实际完成，Runner 再向同一 Step 提交，不能把 Human Review 的投票当成生产结果。
 
@@ -117,10 +117,11 @@ memsphere run report --run <id> --artifact-file <local-copy>
 #### 推进正式 Review
 
 - report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须用受限 `memsphere-review` 会话命令提交意见和 Vote；普通文本回复不是正式投票。
-- `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
+- `review wait` 先判断当前结果是否可返回；可返回时直接输出完整结果，否则按当前 Runner 配置选择异步或同步，不使用 `--sync`。异步开启后，只复用 queued/running 活动任务；历史终态记录保留，新的必要等待创建新任务。登记成功后可以结束当前回合直到 queue 通知唤醒。通知格式固定为 `[Memsphere 自动消息]`、`请执行命令以继续：`、显式定位 Project/Review 的 wait 命令三行，不携带结果，也不是 Human 指令、授权或投票；执行该命令读取当前正式结果并继续同一个 Run，旧通知不得覆盖当前会话绑定。任务状态用原生 `run review wait status --review R` 查询，failed 可用 `retry --review R --round ROUND` 显式重试发送，可能重复投递；通知发送失败不再自动发送第二条。身份模式 wait/status 不进入后继 Step，按工具响应的原生 enter 命令继续。同步 `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
 - Agent Assignment 首次失败时，Runner 用 `run review retry --review <id> --assignment <id>` 重试一次并继续 wait；再次失败时报告 Provider/Attempt/错误，取得 Human 对继续重试的授权后再执行。调试启动可按需使用 `debug.agent_review` 与 `run try-run`，后者只生成启动材料，不执行 Reviewer 或认领 Assignment。
-- 进入 `awaiting_runner_vote` 后，阅读全部意见，由 Runner 显式 `run review vote --review <id> --round <id> --vote approve`，或 `--vote request_changes --comment <reason>`。建议票不能替代 Runner 决定，也不扩大 Human 授权或豁免适用规则；需记录处置理由时用 `run review resolve`。修正后用完整 Artifact 和 `--revision-summary-file <file>` 原子重报。
-- 待提交 Human Assignment 出现时立即向相应 Human 收集“通过 / 要求修改 / 弃权”；通过意见可选，要求修改需意见，弃权需原因，可与后台 Agent 并行收集。普通讨论和问题不是正式投票。明确的执行性投票在目标、所需意见均清楚且 CLI 已给出当前 Review/Round 代提交语境时，就是代提交授权，不再问同义确认。
+- 同步和异步 `review wait` 只等待 Agent：全部 Agent 提交或任一 Agent 失败即返回/通知；没有 Agent 时立即返回，Human 草稿和投票不影响等待。Agent 等待就绪不表示整体评审通过；Human 的最终验收门禁单独保留。
+- Agent 意见收齐后，阅读、处置全部 Agent 意见，由 Runner 按提示显式 `run review vote --review <id> --round <id> --vote approve`，或 `--vote request_changes --comment <reason>`，无需等待 Human。整体状态可以仍为 pending。Runner 要求修改时直接进入修订，不要求 Human 先为旧候选补票；修正后用完整 Artifact 和 `--revision-summary-file <file>` 原子重报。建议票不能替代 Runner 决定，也不扩大 Human 授权或豁免适用规则；处置用 `run review resolve`。
+- Agent 处理完成且 Runner 确认候选后，再向相应 Human 收集“通过 / 要求修改 / 弃权”；通过意见可选，要求修改需意见，弃权需原因。Human 自主提前提交的票仍按原候选保存，不提前结束 Agent 等待，不迁移到修订候选。普通讨论和问题不是正式投票。明确的执行性投票在目标、所需意见均清楚且 CLI 已给出当前 Review/Round 代提交语境时，就是代提交授权，不再问同义确认。
 - 代提交前核对当前 Run/Round/Assignment 与 Human Draft 无冲突；意见写为严格 JSON array（无意见用 `[]`），使用返回的 `run review submit-for-human`，提供 `--comments-file` 与 `--authorization-note-file`。不覆盖 Human 草稿或已有票；成功后继续 wait，并在需要时另投 Runner 票。具体参数查该命令 Help。
 - 后续轮次需换参与者时，先 `run binding show --run <id>`，再 `run binding update --run <id> --slot <procedure::slot> --actor <id>` 或 `--skip`。只选 Run 已冻结 Actor；不改当前/历史轮次。正式 Artifact 意见绑定当时 Submission；Memory 修改意见另走 ChangeSet。
 
@@ -209,7 +210,7 @@ View 的模型市场提供精选模型的显式导入；未导入模型不在 Pr
 
 ## 配置运行环境与 View
 
-一个 Memsphere Home 运行一个 View 服务，用 `view start/status/restart/stop` 管理，Project 选择器切换展示目标。
+每个 Memsphere Home 运行统一 daemon，用 `daemon start/status/stop/restart` 管理。View 用 `view start/status/restart/stop` 管理，启停意图持久化，daemon 重启恢复；停止 View 不影响异步任务。首次启动 daemon 不开启 View；未安装 OS 自启动服务。Home 配置中的 Runner Agent 可探测 Codex/Traex，分别开启身份和异步执行，缺省关闭。Project 选择器切换展示目标。
 
 Home config.json 的 language 支持 zh-CN/en，缺省 zh-CN，同时影响 Agent 工作语言和固定 UI 文案；Run 冻结启动时工作语言，配置保存后的新页面使用新 UI 语言。
 

@@ -481,7 +481,7 @@ const procedureGraphStyles = `
 
 .pg-info{display:grid;grid-template-columns:70px minmax(0,1fr);gap:8px;margin:12px 0;font-size:12px}.pg-info dt{color:var(--mem-view-color-text-muted)}.pg-info dd{margin:0;overflow-wrap:anywhere}.pg-dependency{padding:8px 0 16px;border-bottom:1px solid var(--mem-view-color-border)}.pg-values{padding-left:20px;margin:8px 0;line-height:1.7}.pg-values li+li{margin-top:8px}.pg-dialog summary{cursor:pointer;font-size:12px}.pg-dialog details{margin-top:12px}
 
-.pg .pg-condition{padding:1px 5px;font-size:10px;line-height:1.5}.pg 
+.pg .pg-condition{padding:1px 5px;font-size:10px;line-height:1.5}.pg
 
 .pg-dialog .pg-action-details{padding:0 24px 20px;font-size:13px;line-height:1.65}
 .pg-detail-group{padding:20px 0;border-bottom:1px solid var(--mem-view-color-border)}

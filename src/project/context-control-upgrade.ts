@@ -1,10 +1,11 @@
+import { readModelRegistrations, modelDefinitionHash } from "./model-registration.js";
 import { automaticOutputs, outputOverrides } from "../context_control/outputs.js";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { readBusinessProject, openBusinessStore } from "./business-stores.js";
+import { readBusinessProject, openBusinessStore, getBusinessBinding } from "./business-stores.js";
 import { createProjectModelHost } from "./models.js";
 import { validateModelStoragePaths } from "./model-storage-paths.js";
-import { commitModelOperation, optionalFileBytes, type ModelOperationHooks } from "./model-operation.js";
+import { commitModelOperation, optionalFileBytes, withModelMaintenance, type ModelOperationHooks } from "./model-operation.js";
 import { underContextControlAccess } from "./context-control-access.js";
 import { openContextControl } from "./context-control.js";
 import { definitionHash, readContextControlModels, storeId } from "../context_control/model-assets.js";
@@ -19,12 +20,12 @@ const previous = {
 };
 // Known pre-graph release and the locally installed graph review candidates.
 const beforeGraph = {
-  run: ["594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
+  run: ["8b4604ece26b05fc674f5de3ff24a8dc95a9650fbbedbbefcad81783128b676b", "594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
   step: ["a8bcdf5da03ef45a813c4d956c545067686e49cee99047426fb0a3c4fa63eecd", "9a39b10e98c9d5a3f2d48d4caf8dad5f18e0b1b04cebd45ab8014ffecf295a9a", "43f43c0a5470b3f07f43702a9ac7c6d83a23a7678230a8a2816b989e5ded1053", "7dc7c88dd1d0908628385179c460c523e9ee4ca184156238fd665242c077056c"]
 };
-/** Caller owns the Project settings lock. This is one known release conversion, not generic schema migration. */
+/** Journal admission protects this known release conversion, not generic schema migration. */
 export function upgradeContextControlOutputs(root: string, hooks: ModelOperationHooks = {}) {
-  return underContextControlAccess(root, async () => {
+  return withModelMaintenance(root, () => underContextControlAccess(root, async () => {
     const config = await readBusinessProject(root);
     if (!config.dataStores?.[storeId("run")]) return undefined;
     const assets = readContextControlModels();
@@ -34,7 +35,7 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
     let oldRun = false, oldArchive = false;
     const additive = [] as typeof assets;
     for (const asset of assets) {
-      const installed = await host.definition(asset.id);
+      const installed = { definition: JSON.parse((await host.source(asset.id)).source.replace(/^\uFEFF/, "")) };
       if (isDeepStrictEqual(installed.definition, asset.definition)) continue;
       if (asset.entity in beforeGraph && beforeGraph[asset.entity as keyof typeof beforeGraph].includes(definitionHash(installed.definition))) {
         additive.push(asset);
@@ -54,7 +55,9 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
     // Publish definitions only after every existing record satisfies the new model.
     // In particular, unsupported historical Step states are never silently renamed.
     for (const asset of additive) {
-      const opened = await openBusinessStore({}, root, storeId(asset.entity));
+      const oldSource = (await host.source(asset.id)).source;
+      const oldModel = await checkModelDefinition({}, { modelRef: asset.id, source: oldSource, definition: JSON.parse(oldSource.replace(/^\uFEFF/, "")) });
+      const opened = await openBusinessStore({}, root, storeId(asset.entity), { runtime: oldModel.runtime! });
       if (opened.store.kind !== "ValueStore") throw failure("STORE_INCOMPATIBLE", `Expected ValueStore: ${asset.id}`);
       const { runtime } = await checkModelDefinition({}, { modelRef: asset.id, definition: asset.definition, source: asset.source });
       let cursor: string | undefined;
@@ -88,7 +91,7 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
         cursor = page.nextCursor;
       } while (cursor);
       const runs = await service.listRuns();
-      const opened = await openBusinessStore({}, root, storeId("run"));
+      const opened = { store: service.stores.run, binding: config.dataStores![storeId("run")]!, directory: (await getBusinessBinding(root, storeId("run"))).directory };
       if (opened.store.kind !== "ValueStore" || opened.binding.factory !== "memsphere/filesystem-json") throw failure("UNSUPPORTED_CAPABILITY", "This upgrade requires filesystem-json");
       const asset = assets.find(a => a.entity === "run")!;
       const { runtime } = await checkModelDefinition({}, { modelRef: asset.id, definition: asset.definition, source: asset.source });
@@ -124,7 +127,18 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
         count++;
       }
     }
+    const registrations = await readModelRegistrations({}, { root, ...config });
+    for (const asset of assets) {
+      const definition = changes.find(change => change.path === join(paths.modelsDirectory, asset.id));
+      if (!definition) continue;
+      const record = registrations.records.find(record => record.registration.modelRef === asset.id);
+      if (!record || record.origin !== "project") throw failure("MODEL_INCOMPATIBLE", `Missing context model registration: ${asset.id}`);
+      const path = join(paths.registrationDirectory, "project", `${record.id}.json`);
+      const before = (await optionalFileBytes(path))!;
+      const row = JSON.parse(before.toString("utf8"));
+      changes.push({ path, before, after: Buffer.from(JSON.stringify({ ...row, revision: row.revision + 1, updatedAt: Date.now(), value: { ...row.value, definition_sha256: modelDefinitionHash(definition.after) } }, null, 2) + "\n") });
+    }
     await commitModelOperation(root, CONTEXT_OUTPUTS_UPGRADE, changes, hooks);
     return { changed: true, records: count };
-  });
+  }));
 }

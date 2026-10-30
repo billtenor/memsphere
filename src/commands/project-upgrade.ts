@@ -6,7 +6,7 @@ import { resolveProjectContext } from "../project/resolver.js";
 import { validateMemoryRoot } from "../validation.js";
 import { readBundledSystemMemories, readReservedMemoryManifest, bundledReservedMemoryRoot, reservedSystemMemoryRemovalTombstones } from "../reserved/store.js";
 import { assertSystemUpgradeWorkspace, createSystemUpgradeMemoryChange, validateSystemUpgradeRetry, publishSystemUpgradeMemoryChange, readMemoryChange, type SystemUpgradeMemoryTarget } from "../memory/changeset.js";
-import { upgradeProjectModelRegistrations, withModelRegistrationLock } from "../project/model-registration.js";
+import { upgradeProjectModelRegistrations, withModelRegistrationMaintenance } from "../project/model-registration.js";
 import { readSystemMemoryUpgradeTargets, prepareEmbeddedSystemMemoryRepair, applyEmbeddedSystemMemoryRepair } from "./project.js";
 import { emitCommandResult, errorCode } from "./cli-errors.js";
 
@@ -52,7 +52,7 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
       plan = { targets, created: targets.filter(t => t.operation === "create").length, updated: targets.filter(t => t.operation === "update").length, deleted: targets.filter(t => t.operation === "delete").length };
     } else plan = await readSystemMemoryUpgradeTargets(context.primary.name);
     stage = "models";
-    const models = await withModelRegistrationLock(context.primary.paths.root, async () => {
+    const models = await withModelRegistrationMaintenance(context.primary.paths.root, async () => {
       const config = projectConfigSchema.parse(JSON.parse(await readFile(context.primary.paths.configPath, "utf8")));
       return upgradeProjectModelRegistrations({}, { root: context.primary.paths.root, memoryRoot: context.primary.memoryRoot, modelsDirectory: config.modelsDirectory, modelRegistration: config.modelRegistration }, { config: { path: context.primary.paths.configPath, value: config } });
     });

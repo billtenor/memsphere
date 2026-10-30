@@ -78,8 +78,7 @@ function rejectedOperations(changeId: string, home: string) {
     ["fail", () => changes.failMemoryChange(changeId, "validate", new Error("failure"))],
     ["comment create", () => changes.createMemoryChangeComment({ ...common, actor, memoryReference: reference, path, body: "comment" })],
     ["comment update", () => changes.updateMemoryChangeComment({ ...common, actor, commentId: "missing", body: "comment" })],
-    ["comment delete", () => changes.deleteMemoryChangeComment({ ...common, actor, commentId: "missing" })],
-    ["workspace checkpoint", () => changes.checkpointWorkspaceChanges()]
+    ["comment delete", () => changes.deleteMemoryChangeComment({ ...common, actor, commentId: "missing" })]
   ] as const;
 }
 
@@ -96,8 +95,6 @@ for (const store of ["managed", "embedded"] as const) {
     for (const cwd of [linked, main]) {
       process.chdir(cwd);
       for (const [name, operation] of rejectedOperations(created.change.id, context.home)) {
-        // checkpointWorkspaceChanges scans only its own instance; another worktree has no such candidate.
-        if (name === "workspace checkpoint" && cwd === main) { assert.equal(await operation(), 0); continue; }
         await assert.rejects(operation, undefined, `${cwd}: ${name}`);
         assert.equal(await readFile(file, "utf8"), original, `${name} changed record`);
         assert.equal(await readFile(join(context.primary.memoryRoot, path), "utf8"), originalMemory, `${name} changed Memory`);
@@ -316,3 +313,17 @@ test("Embedded upgrades without retired-entry removal retain their existing base
   await changes.assertSystemUpgradeWorkspace(context, change.id);
   assert.deepEqual((await changes.validateMemoryChange(change.id)).issues, []);
 }));
+
+
+for (const store of ["managed", "embedded"] as const) {
+  test(`${store}: multiple active system upgrades can coexist in one worktree`, async () => fixture(store, async (_main, linked) => {
+    process.chdir(linked);
+    const context = await resolveProjectContext();
+    if (store === "embedded") await writeFile(join(context.primary.memoryRoot, path), content);
+    const first = await changes.createSystemUpgradeMemoryChange({ context, targets, sourceDigest: "bundle-v1" });
+    const second = await changes.createSystemUpgradeMemoryChange({ context, targets, sourceDigest: "bundle-v1" });
+    assert.notEqual(first.change.id, second.change.id);
+    const active = await changes.listMemoryChanges({ project: "test", home: context.home });
+    assert.equal(active.filter(change => change.intent === "system_upgrade" && change.status === "active").length, 2);
+  }));
+}

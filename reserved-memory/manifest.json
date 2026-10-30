@@ -30,7 +30,8 @@
       "procedures/memsphere-tutorial-chapter-03-review-experience.yaml",
       "concepts/memsphere-app.yaml",
       "statements/memsphere-app-usage-rules.yaml",
-      "statements/memsphere-exploration-artifact-rules.yaml"
+      "statements/memsphere-exploration-artifact-rules.yaml",
+      "concepts/memsphere-runner.yaml"
     ],
     "remove": [
       {

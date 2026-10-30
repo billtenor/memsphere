@@ -1,17 +1,19 @@
 # 自由探索 CLI
 
-没有预定义 Procedure 时，使用 `memsphere run start --name "任务名称" --output json`，回执返回 Run ID 和前文 contextId。前文自动创建，跨 Shell 显式传同一 C；`run status --run R` 找回已有 ID。全局 Continue 本轮仅支持自由探索，旧流程、ChangeSet 和 ACP 保持原入口。
+先在 Home 的 Runner Agent 设置中启用身份。Continue 从当前 Codex/Traex 会话自动定位状态，不接受独立 contextId；无身份时使用原生命令。run enter 或 run step enter 显式切换上下文。
+
+没有预定义 Procedure 时，使用 `memsphere run start --name "任务名称" --output json`，回执返回 Run ID；身份开启时按会话建立 Continue 上下文，flow、ChangeSet 和 ACP 保持原入口。
 
 ```bash
-memsphere continue C --help
+memsphere continue --help
 memsphere run artifact show --run R --artifact A --out input.md
-memsphere continue C report --name "方案" --artifact-file plan.md --content-type text/markdown --depends-on artifact:A
-memsphere continue C external add --source "用户补充" --content "约束说明"
-memsphere continue C review create --artifact B --reviewer human --comment "修改要求一" --comment "修改要求二"
-memsphere continue C report --revised-from B --artifact-file revised.md
+memsphere continue report --name "方案" --artifact-file plan.md --content-type text/markdown --depends-on artifact:A
+memsphere continue external add --source "用户补充" --content "约束说明"
+memsphere continue review create --artifact B --reviewer human --comment "修改要求一" --comment "修改要求二"
+memsphere continue report --revised-from B --artifact-file revised.md
 memsphere run outputs list --run R
-memsphere continue C outputs update --remove A --add B_NEW
-memsphere continue C finish --authorization "用户已检查当前成果并明确确认结束"
+memsphere continue outputs update --remove A --add B_NEW
+memsphere continue finish --authorization "用户已检查当前成果并明确确认结束"
 ```
 
 - 完整成果准备好后直接 report，不预建产物或声明开始工作；系统关联 Step。文本、--artifact-file、结构化 --file 互斥。结构化只接收 name、content/contentRef、dependencies、tags、revisedFrom、revisedSummary，系统身份字段拒绝。Schema 局部草稿仍走原流程。

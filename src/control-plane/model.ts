@@ -19,7 +19,7 @@ export type AgentActorRuntime = {
     env: Record<string, string>;
     model?: string;
     startupTimeoutMs: number;
-    idleTimeoutMs: number;
+    idleTimeoutMs: number | null;
     maxRuntimeMs: number | null;
   };
 };

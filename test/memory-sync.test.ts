@@ -3,7 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { setTimeout as delay } from "node:timers/promises";
+import { withMemoryWriteAccess } from "../src/memory/write-access.js";
 import { memorySyncPublishCommand } from "../src/commands/memory.js";
 import { projectCloneCommand } from "../src/commands/project.js";
 import { editMemories, publishMemoryChange, syncMemory, validateMemoryChange } from "../src/memory/changeset.js";
@@ -91,22 +91,10 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
       assert.equal(JSON.parse(await readFile(configPath, "utf8")).store.published_revision, revisionBefore);
       assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
     }
-    let pendingSync: ReturnType<typeof syncMemory> | undefined;
-    let syncSettled = false;
-    let syncWaiting!: () => void;
-    const syncQueued = new Promise<void>((resolve) => { syncWaiting = resolve; });
-    await withFileLock(join(projectRoot, ".runtime", "memory-publish.lock"), async () => {
-      pendingSync = syncMemory({ onLockWait: syncWaiting }).finally(() => { syncSettled = true; });
-      await Promise.race([
-        syncQueued,
-        delay(5_000, undefined, { ref: false }).then(() => {
-          throw new Error("timed out waiting for sync to queue behind the publish lock");
-        })
-      ]);
-      assert.equal(syncSettled, false);
+    await withMemoryWriteAccess(memoryRoot, async () => {
+      await assert.rejects(syncMemory(), { code: "MEMORY_PUBLISH_BUSY" });
     });
-    assert(pendingSync);
-    const merged = await pendingSync;
+    const merged = await withFileLock(join(projectRoot, ".runtime", "memory-publish.lock"), () => syncMemory());
     assert(merged.revision);
     assert.equal((await runGit(["rev-list", "--parents", "-n", "1", merged.revision], { cwd: memoryRoot })).stdout.split(" ").length, 3);
 

@@ -1,3 +1,8 @@
+import { currentIdentity, readRunnerAgents, detectRunnerAgents, checkQueueCapability } from "../runner/identity.js";
+import { currentCommandState, assertSessionTarget } from "../home/command-state-store.js";
+import { inspectReview, renderReviewResult, reviewReady } from "../daemon/review.js";
+import { ensureDaemon, daemonControl } from "../daemon/service.js";
+import { registerTask } from "../daemon/tasks.js";
 import { tryContextCommand, startExploration, contextRunList } from "./context-control.js";
 import { graphCommand, startGraphIfApplicable, printGraphStart, printGraphReviewOutput } from "./procedure-graph.js";
 import type { Snapshot as GraphSnapshot } from "../context_control/types.js";
@@ -53,6 +58,7 @@ import {
   listRuns,
   normalizeRunName,
   readRun,
+  readArtifactReviewForRunner,
   repeatRun,
   resolveArtifactReviewComment,
   retryArtifactReviewAgentAssignment,
@@ -351,17 +357,31 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const reviewId = options.review?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
   const config = await readConfig();
-  const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  const located = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
+  await assertSessionTarget(config.project!.name, located.run.id, reviewId.startsWith("graph-review-") ? located.review.stepId : undefined);
   await dispatchArtifactReviewAgents({ config, run: located.run });
-  const context = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
-  if (await printGraphReviewOutput(context.review, context.round, context.run.id)) return;
-  printRunOutput({
-    kind: "review",
-    run: context.run,
-    review: context.review,
-    round: context.round,
-    runsRoot: config.runsRoot
-  });
+  const identity = await currentIdentity();
+  const context = await inspectReview(config, reviewId);
+  if (reviewReady(context)) {
+    if (identity) console.log(await renderReviewResult(config, context));
+    else if (!await printGraphReviewOutput(context.review, context.round, context.run.id)) printRunOutput({ kind: "review", run: context.run, review: context.review, round: context.round, runsRoot: config.runsRoot });
+    return;
+  }
+  const runner = identity && (await readRunnerAgents())[identity.agentType];
+  if (runner?.async_enabled) {
+    const detected = (await detectRunnerAgents()).find(d => d.type === identity!.agentType);
+    if (!detected?.path || detected.status !== "installed") throw new Error("RUNNER_UNAVAILABLE: install the Runner Agent or disable asynchronous execution in settings");
+    await checkQueueCapability(detected.path);
+    await ensureDaemon();
+    const task = await registerTask({ input: { project: config.project!.name, runId: context.run.id, ...(reviewId.startsWith("graph-review-") ? { stepId: context.review.stepId } : {}), reviewId, roundId: context.round.id, configPath: config.configPath, cwd: process.cwd() }, recipient: { agentType: identity!.agentType, sessionId: identity!.sessionId, agentCommand: detected.path } });
+    await daemonControl("notify");
+    console.log(renderPrompt("run.async-wait", resolvePromptLocale(context.run.language), { taskId: task.id }));
+    return;
+  }
+  const result = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  if (identity) { console.log(await renderReviewResult(config, result)); return; }
+  if (await printGraphReviewOutput(result.review, result.round, result.run.id)) return;
+  printRunOutput({ kind: "review", run: result.run, review: result.review, round: result.round, runsRoot: config.runsRoot });
 }
 
 export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<void> {
@@ -379,6 +399,8 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
     ? await readFile(options.commentFile, "utf8")
     : options.comment;
   const config = await readConfig();
+  const target = await inspectReview(config, reviewId);
+  await assertSessionTarget(config.project!.name, target.run.id, reviewId.startsWith("graph-review-") ? target.review.stepId : undefined);
   const context = await submitArtifactReviewRunnerVote({
     runsRoot: config.runsRoot,
     reviewId,

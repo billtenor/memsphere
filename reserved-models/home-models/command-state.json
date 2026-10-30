@@ -7,7 +7,7 @@
     "id": {
       "type": "string",
       "title": "命令状态标识",
-      "description": "入口自动生成的稳定标识，对外作为前文 ID 使用；后续查询和继续执行沿用同一 ID。",
+      "description": "agentType-sessionId，与 Store data_id 一致，不作为 Continue 参数",
       "minLength": 1,
       "pattern": "\\S"
     },
@@ -48,6 +48,19 @@
       "description": "由 commandGroup 解释和校验的内部状态。通用 Runtime 保留整个 JSON 对象，动态子字段不提供字段级反射；不自动转为 CLI 参数。",
       "properties": {},
       "additionalProperties": true
+    },
+    "agentType": {
+      "enum": [
+        "codex",
+        "traex"
+      ]
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "updatedAt": {
+      "type": "string"
     }
   },
   "required": [
@@ -56,26 +69,10 @@
     "groupId",
     "status",
     "parameters",
-    "state"
+    "state",
+    "agentType",
+    "sessionId",
+    "updatedAt"
   ],
-  "additionalProperties": false,
-  "examples": [
-    {
-      "id": "context-001",
-      "commandGroup": "run",
-      "groupId": "run-001",
-      "status": "active",
-      "parameters": {
-        "project": "memsphere"
-      },
-      "state": {
-        "lastArtifactId": "artifact-A",
-        "reads": {
-          "external:source-D": {
-            "readAt": "2026-10-25T06:01:00Z"
-          }
-        }
-      }
-    }
-  ]
+  "additionalProperties": false
 }

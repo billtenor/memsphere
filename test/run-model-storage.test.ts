@@ -9,7 +9,7 @@ import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { startRun, reportRun } from "../src/run/store.js";
 import { prepareRunData, readRunContent, runDataModels, runDataStore, runDataStoreIds } from "../src/project/run-data.js";
 import { installBundledSystemModels } from "../src/project/system-models.js";
-import type { ProjectModelInput } from "../src/project/model-registration.js";
+import { createModelRegistrationStore, readModelRegistrations, modelDefinitionHash, type ProjectModelInput } from "../src/project/model-registration.js";
 
 function projectInput(root: string, selected = "a"): ProjectModelInput {
   return { root, modelRegistration: { storeId: selected, stores: {
@@ -24,6 +24,10 @@ async function install(root: string, selected: string, description: string) {
   const path = join(root, `registrations-${selected}`, "system/definitions/raw/memsphere/run/artifact.json");
   const source = ` {"description":${JSON.stringify(description)}}\n`;
   await writeFile(path, source);
+  const registration = (await readModelRegistrations({}, project)).records.find(r => r.registration.modelRef === "memsphere/run/artifact.json")!;
+  const store = await createModelRegistrationStore({}, selected, join(root, `registrations-${selected}`, "system/registrations"));
+  const row = (await store.get({}, registration.id))!;
+  await store.update({}, row.id, { ...registration.registration, definition_sha256: modelDefinitionHash(source) }, { expectedRevision: row.revision });
   return { project, source };
 }
 
@@ -123,8 +127,8 @@ test("Damaged persisted raw definitions fail model access while Run content Stor
     await writeFile(join(root, "registrations-a/system/definitions/raw/memsphere/run/artifact.json"), '{"unsupported":true}');
     const roots = { runsRoot: join(root, "runs"), archiveRoot: join(root, "archives") };
     const manager = prepareRunData({ ...roots, project });
-    await assert.rejects(manager.getRuntime({}, runDataModels.artifact), /Unsupported raw model definition property/);
-    await assert.rejects(manager.getModel({}, runDataModels.artifact), /Unsupported raw model definition property/);
+    await assert.rejects(manager.getRuntime({}, runDataModels.artifact), { code: "MODEL_DEFINITION_HASH_MISMATCH" });
+    await assert.rejects(manager.getModel({}, runDataModels.artifact), { code: "MODEL_DEFINITION_HASH_MISMATCH" });
     const store = await runDataStore(roots.runsRoot, "artifact");
     const { bytesContent, readAll } = await import("../src/data/extensions/shared/payload.js");
     const bytes = Buffer.from([0, 255, 195, 10, 13, 127]);

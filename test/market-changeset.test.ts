@@ -155,22 +155,19 @@ test("active Market ChangeSet details expose the candidate before Project activa
   });
 });
 
-test("Managed Market imports aggregate in one active ChangeSet", async () => {
+test("Managed Market imports create independent active ChangeSets", async () => {
   await withManagedMarket(async (fixture) => {
     const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
     const second = await createImport(fixture, "statements/memsphere-general-development-rules");
     const duplicate = await createImport(fixture, "statements/memsphere-general-testing-rules");
 
-    assert.equal(second.change.id, first.change.id);
-    assert.equal(duplicate.change.id, first.change.id);
-    assert.deepEqual(
-      new Set(duplicate.change.targets.map((target) => target.reference)),
-      new Set([...first.plan.targets, ...second.plan.targets].map((target) => target.reference))
-    );
+    assert.equal(new Set([first.change.id, second.change.id, duplicate.change.id]).size, 3);
+    assert.deepEqual(duplicate.change.targets.map(target => target.reference), first.change.targets.map(target => target.reference));
+    assert.equal(second.change.status, "active");
   });
 });
 
-test("appending a Managed Market import invalidates its validated checkpoint", async () => {
+test("a new Managed Market import preserves the previous validated checkpoint", async () => {
   await withManagedMarket(async (fixture) => {
     const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
     await claimMemoryChange({ changeId: first.change.id });
@@ -183,8 +180,9 @@ test("appending a Managed Market import invalidates its validated checkpoint", a
     await finishMemoryChange({ changeId: first.change.id });
 
     const expanded = await createImport(fixture, "statements/memsphere-general-development-rules");
-    assert.equal(expanded.change.id, first.change.id);
+    assert.notEqual(expanded.change.id, first.change.id);
     assert.equal(expanded.change.checkpoint, undefined);
+    assert((await readMemoryChange({ home: fixture.home, project: fixture.project, changeId: first.change.id })).checkpoint);
   });
 });
 
@@ -224,7 +222,7 @@ test("Embedded Market publish applies without committing or completing the Chang
   });
 });
 
-test("additional Embedded Market imports can be applied through the same active ChangeSet", async () => {
+test("additional Embedded Market imports use independent active ChangeSets", async () => {
   await withEmbeddedMarket(async (fixture) => {
     const first = await createImport(fixture, "statements/memsphere-general-testing-rules");
     await claimMemoryChange({ changeId: first.change.id });
@@ -233,7 +231,7 @@ test("additional Embedded Market imports can be applied through the same active 
     await finishMemoryChange({ changeId: first.change.id });
 
     const second = await createImport(fixture, "statements/memsphere-general-development-rules");
-    assert.equal(second.change.id, first.change.id);
+    assert.notEqual(second.change.id, first.change.id);
     await validateAndRelease(second.change.id);
     assert.equal((await publishMemoryChange(second.change.id)).status, "active");
     assert.match(await readFile(join(fixture.memoryRoot, first.plan.targets[0]!.path), "utf8"), /!statement/);
@@ -254,7 +252,7 @@ test("Embedded Market publish rejects a target personalized after its previous a
       Buffer.from("\n# personalized\n")
     ]));
 
-    const expanded = await createImport(fixture, "statements/memsphere-general-delivery-rules");
+    const expanded = await createImport(fixture, "statements/memsphere-general-testing-rules");
     await validateAndRelease(expanded.change.id);
     await assert.rejects(publishMemoryChange(expanded.change.id), /uncommitted changes/);
   });

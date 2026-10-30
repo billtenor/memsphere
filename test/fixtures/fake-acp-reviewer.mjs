@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 import crossSpawn from "cross-spawn";
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
+import { access } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 
 const mode = process.argv[2] || "approve";
 const sessions = new Set();
@@ -17,13 +20,21 @@ const app = acp
       agentInfo: { name: "memsphere-fake-reviewer", version: "1.0.0" }
     };
   })
-  .onRequest(acp.methods.agent.session.new, () => {
+  .onRequest(acp.methods.agent.session.new, ({ params }) => {
+    if (process.env.MEMSPHERE_WORKSPACE_ROOT) {
+      assert.equal(realpathSync(params.cwd), realpathSync(process.cwd()));
+      assert.equal(params.cwd, process.env.MEMSPHERE_WORKSPACE_ROOT);
+      for (const name of ["TMPDIR", "TMP", "TEMP"]) assert.equal(process.env[name], params.cwd);
+    }
     const sessionId = `fake-${randomUUID()}`;
     sessions.add(sessionId);
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client, signal }) => {
     if (!sessions.has(params.sessionId)) throw new Error(`unknown session: ${params.sessionId}`);
+    if (mode === "exit-zero") process.exit(0);
+    if (mode === "exit-error") process.exit(7);
+    if (mode === "exit-signal") process.kill(process.pid, "SIGTERM");
     if (mode === "internal-error") {
       process.stderr.write("provider diagnostic: reconnecting\n");
       throw new Error("synthetic provider failure");
@@ -42,10 +53,16 @@ const app = acp
         await sendProgress(client, params.sessionId, index++);
       }
     }
-    if (mode === "approve" || mode === "request_changes") {
+    if (mode === "gated-approve") {
+      while (!signal.aborted) {
+        try { await access(process.env.REVIEW_TEST_GATE); break; }
+        catch { await delay(25); }
+      }
+    }
+    if (mode === "approve" || mode === "request_changes" || mode === "gated-approve") {
       try {
         await sendReviewActivity(client, params.sessionId);
-        await completeReview(mode, client, params.sessionId);
+        await completeReview(mode === "gated-approve" ? "approve" : mode, client, params.sessionId);
       } catch (error) {
         process.stderr.write(`fake reviewer completion failed: ${error?.stack || error}\n`);
         throw error;

@@ -1,26 +1,26 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { resolve } from "node:path";
-import { withProjectSettingsLock, readModelOperationStamp, assertModelOperationStamp, withConsistentModelRead } from "./model-operation.js";
+import { readModelOperationStamp, assertModelOperationStamp, withConsistentModelRead } from "./model-operation.js";
 
 const current = new AsyncLocalStorage<string>();
-/** A short Project operation, never an Agent/LLM lifetime. Lock order: Project, Run, record. */
+/** Check model availability; operations coordinate through record uniqueness and CAS. */
 export function withContextControlAccess<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
   const key = resolve(root);
   if (current.getStore() === key) return action();
-  return withProjectSettingsLock(root, () => current.run(key, async () => {
+  return current.run(key, async () => {
     await readModelOperationStamp(root);
     return action();
-  }), signal);
+  });
 }
-/** For a caller that already owns the Project model/settings lock. */
+/** For model upgrade internals that intentionally read while publication is pending. */
 export function underContextControlAccess<T>(root: string, action: () => Promise<T>): Promise<T> {
   return current.run(resolve(root), action);
 }
 export const isContextControlStore = (id: string) => /^context_control\/(runs|steps|artifacts|externals|reviews)$/.test(id);
 
 /** Pure View reads use optimistic model consistency, without queueing behind unrelated Run writes.
- * Callers must not recover or mutate records inside this scope. Run locks still protect snapshots.
+ * Callers must not recover or mutate records inside this scope. Mutations use record CAS.
  */
 export function withContextControlViewRead<T>(root: string, read: () => Promise<T>): Promise<T> {
   return withConsistentModelRead(async () => {

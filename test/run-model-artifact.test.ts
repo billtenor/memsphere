@@ -11,7 +11,7 @@ import test, { type TestContext } from "node:test";
 import { archiveRun, restoreRun } from "../src/archive/store.js";
 import { buildRunCurrentStepPromptModel } from "../src/prompts/run.js";
 import { renderPrompt } from "../src/prompts/index.js";
-import { businessFixture } from "./helpers/business-data.js";
+import { businessFixture, publishFixtureDefinition } from "./helpers/business-data.js";
 import { initializeProjectModelRegistrations } from "../src/project/model-registration.js";
 import { readData, listData, upsertData } from "../src/project/data-service.js";
 import { FilesystemJsonValueStoreFactory } from "../src/data/extensions/filesystem-json-valuestore/index.js";
@@ -21,6 +21,7 @@ import { reviewConfiguration } from "./helpers/review.js";
 import { procedureMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { serializeMemoryYaml } from "../src/memory/serializer.js";
+import { withNativeFileLock } from "../src/file-lock.js";
 
 const action = (review = false, type = "object", format = "json") => `  - !action
     action: Produce a model value.
@@ -57,6 +58,19 @@ test("model Artifact retains immutable full snapshot independently of business u
   await assert.rejects(f.report(run.id));
 });
 
+test("model Artifact target freezing and publication complete while the old Project lock is held", async t => {
+  const f = await fixture(t);
+  await fs.mkdir(join(f.root, ".runtime"), { recursive: true });
+  await withNativeFileLock(join(f.root, ".runtime", "settings.lock"), async () => {
+    const run = await f.start();
+    const done = await f.report(run.id);
+    assert.equal(done.status, "done");
+    const receipt = done.events[0].artifact.modelData!;
+    assert.equal(receipt.revision, 1);
+    assert.deepEqual((await readData({}, f.root, "records", receipt.dataId)).value, { name: "original", count: 1 });
+  });
+});
+
 test("model validation failure keeps execution identity stable for corrected report", async t => {
   const f = await fixture(t); const run = await f.start();
   await assert.rejects(f.report(run.id, '{"name":"invalid","count":-1}'));
@@ -81,10 +95,10 @@ test("repeated Calls and loop iterations allocate distinct data identities", asy
 
 test("model changes before report are rejected and restoring model allows same-run retry", async t => {
   const f = await fixture(t); const run = await f.start(); const path = join(f.root, "models/json-schema/draft-07/record.json");
-  const previous = await fs.readFile(path); await fs.writeFile(path, '{"type":"string"}');
+  const previous = await fs.readFile(path); await publishFixtureDefinition(f.root, "record.json", '{"type":"string"}');
   await assert.rejects(f.report(run.id), { code: "MODEL_ARTIFACT_TARGET_CHANGED" });
   assert.deepEqual(await listData({}, f.root, "records"), { items: [] });
-  await fs.writeFile(path, previous); assert.equal((await f.report(run.id)).status, "done");
+  await publishFixtureDefinition(f.root, "record.json", previous.toString()); assert.equal((await f.report(run.id)).status, "done");
 });
 
 test("model scalar values preserve type in both snapshot and business Store", async t => {
@@ -179,11 +193,11 @@ test("model change while review is pending blocks acceptance until the original 
   const review = currentArtifactReview(run)!;
   await submitArtifactReviewHumanAssignmentForRunner({ runsRoot: f.runsRoot, runId: run.id, reviewId: review.id, roundId: review.currentRoundId, assignmentId: "human", vote: "approve", comments: [], authorizationNote: "Fixture Human approves." });
   const path = join(f.root, "models/json-schema/draft-07/record.json");
-  const original = await fs.readFile(path); await fs.writeFile(path, JSON.stringify({ ...JSON.parse(original.toString()), description: "changed" }));
+  const original = await fs.readFile(path); await publishFixtureDefinition(f.root, "record.json", JSON.stringify({ ...JSON.parse(original.toString()), description: "changed" }));
   await assert.rejects(submitArtifactReviewRunnerVote({ runsRoot: f.runsRoot, reviewId: review.id, roundId: review.currentRoundId, vote: "approve" }), { code: "MODEL_ARTIFACT_TARGET_CHANGED" });
   assert.deepEqual(await listData({}, f.root, "records"), { items: [] });
   assert.equal((await readRun(f.runsRoot, run.id)).status, "running");
-  await fs.writeFile(path, original);
+  await publishFixtureDefinition(f.root, "record.json", original.toString());
   await submitArtifactReviewRunnerVote({ runsRoot: f.runsRoot, reviewId: review.id, roundId: review.currentRoundId, vote: "approve" });
   assert.equal((await readRun(f.runsRoot, run.id)).status, "done");
 });

@@ -1,3 +1,4 @@
+import { withConfigFileLock } from "./config-file-lock.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -8,8 +9,8 @@ import {
   type AcpProviderConfigFile,
   type ProjectControlPlaneConfigFile
 } from "./control-plane/index.js";
-import { atomicWriteJson, withFileLock } from "./persistence.js";
-import { readModelOperationStamp, withProjectSettingsLock } from "./project/model-operation.js";
+import { atomicWriteJson } from "./persistence.js";
+import { readModelOperationStamp } from "./project/model-operation.js";
 import { projectConfigSchema, type ProjectConfigFile } from "./project/model.js";
 import {
   normalizeInstalledViewPackagePaths,
@@ -54,6 +55,7 @@ export type EditableGlobalConfigDraft = {
   view_theme?: GlobalViewThemeConfig;
   view_composition?: ViewCompositionConfig;
   acp_providers?: AcpProviderConfigFile;
+  runner_agents?: import("./runner/identity.js").RunnerAgents;
 };
 
 export type EditableProjectConfigDraft = {
@@ -130,6 +132,7 @@ export async function readProjectConfigDocument(
 
 export function editableGlobalConfigDraft(document: GlobalConfigDocument): EditableGlobalConfigDraft {
   return {
+    ...(document.raw.runner_agents === undefined ? {} : { runner_agents: structuredClone(document.raw.runner_agents) }),
     ...(document.raw.language === undefined ? {} : { language: document.raw.language }),
     ...(document.raw.view === undefined ? {} : { view: {
       host: document.raw.view.host,
@@ -167,6 +170,7 @@ export function validateGlobalConfigDraft(
   projects: ProjectConfigReference[] = []
 ): GlobalConfigDraftValidation {
   const candidateInput = {
+    ...(draft.runner_agents === undefined ? {} : { runner_agents: structuredClone(draft.runner_agents) }),
     ...(draft.language === undefined ? {} : { language: draft.language }),
     ...(draft.view === undefined ? {} : { view: {
       ...structuredClone(draft.view),
@@ -245,8 +249,7 @@ export async function writeGlobalConfigDraft(input: {
   draft: EditableGlobalConfigDraft;
   projects?: ProjectConfigReference[] | (() => Promise<ProjectConfigReference[]>);
 }): Promise<GlobalConfigDocument> {
-  const lockPath = join(dirname(input.document.configPath), ".runtime", "settings.lock");
-  return withFileLock(lockPath, async () => {
+  return withConfigFileLock(input.document.configPath, async () => {
     const latest = await readGlobalConfigDocument(input.document.configPath);
     assertExpectedRevision(input.expectedRevision, latest.revision);
     const projects = typeof input.projects === "function" ? await input.projects() : input.projects;
@@ -262,8 +265,7 @@ export async function writeGlobalOperatorToken(input: {
   expectedRevision: string;
   token?: string;
 }): Promise<GlobalConfigDocument> {
-  const lockPath = join(dirname(input.document.configPath), ".runtime", "settings.lock");
-  return withFileLock(lockPath, async () => {
+  return withConfigFileLock(input.document.configPath, async () => {
     const latest = await readGlobalConfigDocument(input.document.configPath);
     assertExpectedRevision(input.expectedRevision, latest.revision);
     const view = latest.raw.view ?? { host: "127.0.0.1", port: 0 };
@@ -287,8 +289,8 @@ export async function writeProjectConfigDraft(input: {
   globalConfigPath: string;
   migrateModelRegistrations?: boolean;
 }): Promise<ProjectConfigDocument> {
-  const globalLockPath = join(dirname(input.globalConfigPath), ".runtime", "settings.lock");
-  return withFileLock(globalLockPath, () => withProjectSettingsLock(input.document.scopeRoot, async () => {
+  // Registration migration is performed after the operator has stopped writes.
+  return withConfigFileLock(input.globalConfigPath, () => withConfigFileLock(input.document.configPath, async () => {
     await readModelOperationStamp(input.document.scopeRoot);
     const [latest, global] = await Promise.all([
       readProjectConfigDocument(input.document.configPath, input.document.resolved),
@@ -377,6 +379,7 @@ export function parseProjectConfigSource(source: string): ProjectConfigFile {
 
 function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDraft {
   return {
+    ...(global.runner_agents === undefined ? {} : { runner_agents: structuredClone(global.runner_agents) }),
     ...(global.language === undefined ? {} : { language: global.language }),
     ...(global.view === undefined ? {} : { view: { host: global.view.host, port: global.view.port } }),
     ...(global.view_packages === undefined

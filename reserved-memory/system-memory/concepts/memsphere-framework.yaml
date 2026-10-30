@@ -4,6 +4,8 @@ names:
   - memsphere-framework
   - Memsphere
 defines:
+  - "Home runner_agents 独立配置 Codex/Traex 的 identity_enabled 与 async_enabled，缺省关闭；安装探测与 ACP Reviewer Provider 和 Project Runner 权限分开。"
+  - "每个 Home 的统一 daemon 管理 View 与 DaemonTask；daemon start/status/stop/restart 使用本机控制端点，View 意图持久化，daemon 重启恢复 running/stopped 选择，View stop 不影响任务。"
   - Memsphere CLI 要求 Node.js 22 或更高版本；开发与 CI 统一使用 Node 22 LTS。
   - Project 模型定义与登记分开保存。模型和元模型 ID 统一为带 .json 后缀的相对路径，例如 sales/order.json、memsphere/model-registration.json、json-schema/draft-07.json、raw.json；Store ID 和 Factory ID 不改名。项目原始 JSON 定义使用 filesystem DataStore，默认目录和 Store ID 为 models/json-schema/draft-07。相对 modelsDirectory 以 Registry 登记的 Project 根目录解析，绝对路径直接使用，改变目录不自动迁移原文件。
   - 模型登记使用持久化的 memsphere/model-registration.json。启动登记 Runtime 只读取其固定定义，不依赖自己的登记记录；系统区完全未安装时仅借发行定义读取登记数据，列表不补造系统模型，读取未安装系统 ID 报缺失并提示显式初始化。登记字段为 modelRef、name、description、package、package_name、tags、storage、store_id；modelRef、storage 必填。storage=store 必须指向定义 DataStore，不能指向登记 ValueStore；storage=builtin 不带 store_id。全部系统模型的定义和登记字段只读，普通模型命令不能创建、覆盖、修改或删除。
@@ -57,5 +59,5 @@ defines:
   - Actor 的 name 为选填；省略、空字符串或纯空白时，需要展示名称的位置统一使用 Actor id；有效名称沿用去除首尾空白后的显示行为。Human Actor 禁止配置 system_prompt（含空字符串和纯空白）；设置页不提供此输入，Agent 切为 Human 时删除草稿中的该字段。Agent 可选 system_prompt，显式提供空白字符串无效。新 Project 配置的校验不改写冻结 Run 历史快照。
   - filesystem JSON ValueStore 的 data_id 支持可移植的分层相对路径，a/b 映射到 a/b.json，列表和通用 data 操作使用完整 ID；旧扁平键及删除版本高水位保留。读取缺失数据不创建父目录，路径穿越、大小写别名和符号链接父目录拒绝。
   - 上下文控制自由探索使用已注册的五个项目模型及业务 Store，发行资产在 reserved-models/context-control，首次自由探索启动装配，不把它们新增为系统只读模型。旧流程存储保留；领域数据不依赖文件路径，前端仍扩展现有 Run 模块。
-  - 全局 continue 通过 Home CommandState 承接有状态命令组，本轮仅支持自由探索 Run；旧 Procedure、Schema、正式 Review 和 ChangeSet 保留原入口。成果从产物图推导，Run 只保存 outputOverrides 人工增删；report 和 redo 不更新 Run。已知旧记录通过 project models initialize 的受限升级执行，五个项目模型与 Home 模型分别装载。
+  - 全局 continue 通过 Home 会话 CommandState 承接自由探索或 graph Run 的当前生产上下文；flow、Schema 和 ChangeSet 保留原入口。成果从产物图推导，Run 只保存 outputOverrides 人工增删；report 和 redo 不更新 Run。已知旧记录通过 project models initialize 的受限升级执行，五个项目模型与 Home 模型分别装载。
   - Procedure 的 flow 与 graph 并行执行；graph 使用上下文控制模型 Store 和固定依赖材料，不接管宿主 Agent 框架的跨 Step 并发，也不提供启动时业务 State。

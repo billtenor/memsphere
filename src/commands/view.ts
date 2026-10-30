@@ -1,3 +1,5 @@
+import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
+import { detectRunnerAgents } from "../runner/identity.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
@@ -187,37 +189,35 @@ type MemoryLoadError = {
 
 export async function viewStartCommand(): Promise<void> {
   const config = await readViewStartupConfig();
-  const state = await startViewService(config);
-  console.log(`memsphere view running at ${viewServiceUrl(state)}`);
-  console.log(`pid: ${state.pid}`);
-  if (state.settingsToken) console.log(`settings token: ${state.settingsToken}`);
+  await writeViewIntent("running", config.configPath);
+  await ensureDaemon();
+  const result = await daemonControl("view-start");
+  if (result.view.error) throw new Error(result.view.error);
+  printDaemonView(result);
 }
-
 export async function viewStopCommand(): Promise<void> {
-  const config = await readViewServiceConfig();
-  const status = await stopViewService(config);
-  console.log(status.running ? "memsphere view is still running" : "memsphere view stopped");
+  await writeViewIntent("stopped");
+  await daemonControl("view-stop");
+  console.log("memsphere view stopped; daemon tasks continue");
 }
-
 export async function viewRestartCommand(): Promise<void> {
   const config = await readViewStartupConfig();
-  const state = await restartViewService(config);
-  console.log(`memsphere view restarted at ${viewServiceUrl(state)}`);
-  console.log(`pid: ${state.pid}`);
-  if (state.settingsToken) console.log(`settings token: ${state.settingsToken}`);
+  await writeViewIntent("running", config.configPath);
+  await ensureDaemon();
+  const result = await daemonControl("view-restart");
+  if (result.view.error) throw new Error(result.view.error);
+  printDaemonView(result);
+}
+export async function viewStatusCommand(): Promise<void> {
+  printDaemonView(await daemonStatus());
 }
 
-export async function viewStatusCommand(): Promise<void> {
-  const config = await readViewServiceConfig();
-  const status = await getViewServiceStatus(config);
-  if (!status.running || !status.state) {
-    console.log("memsphere view stopped");
-    return;
-  }
-  console.log(`memsphere view running at ${viewServiceUrl(status.state)}`);
-  console.log(`pid: ${status.state.pid}`);
-  console.log(`started: ${status.state.startedAt}`);
-  if (status.state.settingsToken) console.log(`settings token: ${status.state.settingsToken}`);
+function printDaemonView(result: { running: boolean; pid?: number; view: { running?: boolean; desiredState: string; host?: string; port?: number; error?: string; settingsToken?: string } }) {
+  console.log(result.view.running ? `memsphere view running at http://${result.view.host}:${result.view.port}` : "memsphere view stopped");
+  console.log(`daemon: ${result.running ? "running" : "stopped"}; View desired: ${result.view.desiredState}`);
+  if (result.pid) console.log(`pid: ${result.pid}`);
+  if (result.view.settingsToken) console.log(`settings token: ${result.view.settingsToken}`);
+  if (result.view.error) console.log(`View error: ${result.view.error}`);
 }
 
 export async function viewServeCommand(options: ViewServeOptions): Promise<void> {
@@ -694,6 +694,12 @@ async function handleRequest(
     return;
   }
 
+  if (url.pathname === "/api/settings/global/runner-agents/detect" && request.method === "POST") {
+    if (!authorizeSettingsRequest(request, response, config, options, true)) return;
+    sendJson(response, 200, { results: await detectRunnerAgents() });
+    return;
+  }
+
   if (url.pathname === "/api/settings/global/acp-providers/detect" && request.method === "POST") {
     if (!authorizeSettingsRequest(request, response, config, options, true)) return;
     const body = await readJsonBody<{ expectedRevision?: unknown; config?: unknown }>(request, 128 * 1024);
@@ -926,8 +932,8 @@ async function handleRequest(
     const controller = new AbortController();
     request.once("aborted", () => controller.abort());
     try {
-      const { withModelRegistrationLock, initializeProjectModelRegistrations } = await import("../project/model-registration.js");
-      const result = await withModelRegistrationLock(initial.scopeRoot, async () => {
+      const { withModelRegistrationMaintenance, initializeProjectModelRegistrations } = await import("../project/model-registration.js");
+      const result = await withModelRegistrationMaintenance(initial.scopeRoot, async () => {
         const document = await readCurrentProjectSettingsDocument(config);
         if (!document) throw new Error("Project is not available");
         if (typeof body.expectedRevision !== "string" || body.expectedRevision !== document.revision) throw new ConfigRevisionConflictError(String(body.expectedRevision), document.revision);

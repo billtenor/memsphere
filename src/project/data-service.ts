@@ -15,7 +15,7 @@ import { queryJsonPath } from "../data/operations/json-path.js";
 import { openBusinessStore, serviceError, readBusinessProject } from "./business-stores.js";
 import { createProjectModelHost } from "./models.js";
 import { assertModelRef } from "./model-registration-contract.js";
-import { assertModelOperationStamp, withProjectSettingsLock } from "./model-operation.js";
+import { assertModelOperationStamp } from "./model-operation.js";
 import { encodeListCursor, decodeListCursor, parseListLimit, type PaginationOptions } from "../pagination.js";
 
 type Opened = Awaited<ReturnType<typeof openBusinessStore>>;
@@ -114,7 +114,7 @@ export async function writeData(context: Context, root: string, storeId: string,
     }
     return { operation: `data.${operation}`, id, modelRef: opened.binding.model, ...(result ? metadata(result) : {}) };
   };
-  return options.dryRun ? execute() : withContextControlAccess(root, execute, context.signal);
+  return options.dryRun || !isContextControlStore(storeId) ? execute() : withContextControlAccess(root, execute, context.signal);
 }
 export async function upsertData(context: Context, root: string, storeId: string, id: string, input: DataInput, options: { dryRun?: boolean } = {}) {
   const execute = async () => {
@@ -127,7 +127,7 @@ export async function upsertData(context: Context, root: string, storeId: string
     const record = await opened.store.upsert(context, id, input.value);
     return { operation: "data.upsert", id, modelRef: opened.binding.model, ...metadata(record) };
   };
-  return options.dryRun ? execute() : withContextControlAccess(root, execute, context.signal);
+  return options.dryRun || !isContextControlStore(storeId) ? execute() : withContextControlAccess(root, execute, context.signal);
 }
 
 export async function deleteData(context: Context, root: string, storeId: string, id: string, options: { expectedRevision?: number; dryRun?: boolean } = {}) {
@@ -142,7 +142,7 @@ export async function deleteData(context: Context, root: string, storeId: string
     const deleted = await opened.store.delete(context, id, { expectedRevision: options.expectedRevision });
     return { operation: "data.delete", id, modelRef: opened.binding.model, deleted };
   };
-  return options.dryRun ? execute() : withContextControlAccess(root, execute, context.signal);
+  return options.dryRun || !isContextControlStore(storeId) ? execute() : withContextControlAccess(root, execute, context.signal);
 }
 export async function editData(context: Context, root: string, storeId: string, id: string, patch: unknown, options: { expectedRevision?: number; dryRun?: boolean } = {}) {
   const opened = await openBusinessStore(context, root, storeId); assertId(opened, id); requireCas(opened, options.expectedRevision, true);
@@ -154,6 +154,12 @@ export async function editData(context: Context, root: string, storeId: string, 
   const value = applyJsonPatch(record.value, patch);
   await prepareInput(context, opened, id, { kind: "value", value });
   if (options.dryRun) return { operation: "data.edit", id, modelRef: opened.binding.model, expectedRevision: record.revision, dryRun: true };
+  // Ordinary business operations keep the Store/runtime snapshot they opened.
+  // Rebinding affects later operations; the record revision protects this edit.
+  if (!isContextControlStore(storeId)) {
+    const saved = await opened.store.update(context, id, value, { expectedRevision: record.revision });
+    return { operation: "data.edit", id, modelRef: opened.binding.model, ...metadata(saved) };
+  }
   return withContextControlAccess(root, async () => {
     const current = await openBusinessStore(context, root, storeId);
     if (current.store.kind !== "ValueStore" || !isSameBinding(opened, current)) throw serviceError("REVISION_CONFLICT", "Store binding changed during edit");

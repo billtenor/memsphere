@@ -14,7 +14,7 @@ export type AgentReviewProviderLaunch = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   startupTimeoutMs: number;
-  idleTimeoutMs: number;
+  idleTimeoutMs: number | null;
   maxRuntimeMs: number | null;
   promptVersion: string;
   model?: string;
@@ -50,6 +50,8 @@ function commonLaunch(
   providerEnv: Record<string, string> = {}
 ): AgentReviewProviderLaunch {
   const agent = input.actor.agent;
+  const sessionEnv = { ...agent.env, ...providerEnv, ...input.sessionEnv };
+  delete sessionEnv.CODEX_THREAD_ID; delete sessionEnv.TRAECLI_THREAD_ID;
   return {
     provider,
     command: agent.command,
@@ -57,9 +59,7 @@ function commonLaunch(
     cwd: resolve(input.workspaceRoot),
     env: {
       ...safeProviderEnvironment(process.env),
-      ...agent.env,
-      ...providerEnv,
-      ...input.sessionEnv
+      ...sessionEnv
     },
     startupTimeoutMs: agent.startupTimeoutMs,
     idleTimeoutMs: agent.idleTimeoutMs,

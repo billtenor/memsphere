@@ -146,7 +146,7 @@ test("Agent configuration defaults Provider-owned runtime details", () => {
     env: {},
     model: "review-model",
     startupTimeoutMs: 60000,
-    idleTimeoutMs: 120000,
+    idleTimeoutMs: null,
     maxRuntimeMs: null
   });
 });
@@ -316,4 +316,19 @@ test("Frozen historical snapshots retain their Human prompt without rewriting hi
   const before = JSON.stringify(snapshot);
   assert.equal(controlPlaneSnapshotSchema.parse(snapshot).actors.human.systemPrompt, "Historical prompt");
   assert.equal(JSON.stringify(snapshot), before);
+});
+
+
+test("Provider idle and total timeouts accept null and reject zero", () => {
+  for (const timeouts of [{}, { idle_timeout_ms: null, max_runtime_ms: null }]) {
+    const parsed = parseControlPlaneConfig({ ...rawConfig, acp_providers: { traex: timeouts } });
+    const snapshot = createControlPlaneSnapshot(parsed);
+    assert.equal(snapshot.actors.agent.kind, "agent");
+    if (snapshot.actors.agent.kind !== "agent") throw new Error("expected agent");
+    assert.equal(snapshot.actors.agent.agent.idleTimeoutMs, null);
+    assert.equal(snapshot.actors.agent.agent.maxRuntimeMs, null);
+  }
+  for (const field of ["idle_timeout_ms", "max_runtime_ms"]) {
+    assert.throws(() => parseControlPlaneConfig({ ...rawConfig, acp_providers: { traex: { [field]: 0 } } }));
+  }
 });

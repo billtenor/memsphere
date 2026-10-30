@@ -1,10 +1,29 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { withNativeFileLock } from "../src/file-lock.js";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openContextControl } from "../src/project/context-control.js";
 import { businessFixture } from "./helpers/business-data.js";
 import { textContent } from "../src/context_control/types.js";
+
+test("Context Control ignores former Project and Run gates for recovery and independent writes", async t => {
+  const { root } = await businessFixture(t, {});
+  const service = (await openContextControl(root, true))!;
+  const a = await service.start("A"), b = await service.start("B");
+  await mkdir(join(root, ".runtime", "context-control"), { recursive: true });
+  await withNativeFileLock(join(root, ".runtime", "settings.lock"), async () => {
+    const reopened = (await openContextControl(root))!;
+    const runLock = join(root, ".runtime", "context-control", `${createHash("sha256").update(a.id).digest("hex")}.lock`);
+    await withNativeFileLock(runLock, async () => {
+      assert.equal((await reopened.snapshot(a.id)).run.id, a.id);
+      const result = await reopened.report(b.id, { name: "independent", content: textContent("B") });
+      assert.equal(result.step.status, "done");
+      assert.equal((await reopened.snapshot(b.id)).artifacts.length, 1);
+    });
+  });
+});
 
 test("free exploration persists model-backed create/read/report and immutable revisions across reopening", async t => {
   const { root } = await businessFixture(t, {});
@@ -124,7 +143,7 @@ function barrier() {
   return { entered, release, wait: async () => { enter(); await released; } };
 }
 for (const terminal of ["finish", "abandon"] as const) for (const reportFirst of [true, false]) {
-  test(`report versus ${terminal} respects Run ordering when ${reportFirst ? "report" : terminal} holds the lock first`, async t => {
+  test(`report versus ${terminal} allows an admitted report to finish when ${reportFirst ? "report" : terminal} is paused`, async t => {
     const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
     const second = (await openContextControl(root))!; const run = await service.start("终态竞争");
     const rootArtifact = (await service.report(run.id, { name: "根", content: textContent("根正文") })).artifact;
@@ -134,15 +153,17 @@ for (const terminal of ["finish", "abandon"] as const) for (const reportFirst of
     const end = () => terminal === "finish" ? (reportFirst ? second : service).finish(run.id, [rootArtifact.id]) : (reportFirst ? second : service).abandon(run.id);
     const report = () => (reportFirst ? service : second).report(run.id, { target: target.id, content: textContent("新正文") });
     const first = reportFirst ? report() : end(); await gate.entered;
-    const next = reportFirst ? end() : report(); const checked = reportFirst ? next : assert.rejects(next, { code: "RUN_FINISHED" });
-    gate.release(); await first; await checked; store.update = update;
+    const next = reportFirst ? end() : report();
+    try { await next; } finally { gate.release(); }
+    await first; store.update = update;
     const snapshot = await service.snapshot(run.id);
     assert.equal(snapshot.run.status, terminal === "finish" ? "done" : "abandoned");
-    assert.equal(snapshot.artifacts.find(a => a.id === target.id)!.status, reportFirst ? "submitted" : "draft");
+    assert.equal(snapshot.artifacts.find(a => a.id === target.id)!.status, "submitted");
+    await assert.rejects(second.report(run.id, { name: "late", content: textContent("late") }), { code: "RUN_FINISHED" });
   });
 }
 for (const readFirst of [true, false]) {
-  test(`report versus accounting ${readFirst ? "preserves a prior read" : "rejects a late read without changing submitted history"}`, async t => {
+  test(`report versus accounting ${readFirst ? "preserves a prior read" : "allows accounting while submission has not written the Artifact"}`, async t => {
     const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!; const other = (await openContextControl(root))!;
     const run = await service.start("读取竞争"); const source = (await service.report(run.id, { name: "来源", content: textContent("来源") })).artifact;
     const target = await service.createArtifact(run.id, { name: "目标" }); const gate = barrier();
@@ -150,12 +171,19 @@ for (const readFirst of [true, false]) {
     const update = store.update.bind(store); store.update = async (...args) => { await gate.wait(); return update(...args); };
     const read = () => (readFirst ? service : other).recordRead(run.id, target.id, { kind: "artifact", id: source.id });
     const report = () => (readFirst ? other : service).report(run.id, { target: target.id, content: textContent("完成") });
-    const first = readFirst ? read() : report(); await gate.entered; const next = readFirst ? report() : read(); gate.release();
+    const first = readFirst ? read() : report(); await gate.entered;
+    let next;
+    if (readFirst) {
+      gate.release(); await first; next = report();
+    } else {
+      next = read();
+      try { await next; } finally { gate.release(); } // A paused Artifact write must not block a different Step record.
+    }
     const firstResult = await first; const nextResult = await next; store.update = update;
     const warnings = readFirst ? firstResult : nextResult;
-    assert.ok(Array.isArray(warnings)); assert.equal(warnings.length, readFirst ? 0 : 1);
+    assert.ok(Array.isArray(warnings)); assert.equal(warnings.length, 0);
     const step = (await service.snapshot(run.id)).steps.find(step => step.id === target.stepId)!;
-    assert.equal(step.status, "done"); assert.equal(!!step.reads?.[`artifact:${source.id}`], readFirst);
+    assert.equal(step.status, "done"); assert.ok(step.reads?.[`artifact:${source.id}`]);
   });
 }
 

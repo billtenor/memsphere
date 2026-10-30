@@ -6,13 +6,80 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { createBusinessStore, removeBusinessStore, getBusinessBinding, openBusinessStore } from "../src/project/business-stores.js";
-import { writeData, readData, hasData, listData, editData, deleteData, validateData, exportData } from "../src/project/data-service.js";
+import { writeData, upsertData, readData, hasData, listData, editData, deleteData, validateData, exportData } from "../src/project/data-service.js";
+import { withNativeFileLock } from "../src/file-lock.js";
+import { withConfigFileLock } from "../src/config-file-lock.js";
+import { FilesystemJsonValueStoreFactory } from "../src/data/extensions/filesystem-json-valuestore/index.js";
 import { businessFixture, snapshotTree } from "./helpers/business-data.js";
 import { filesystemWorker } from "./helpers/filesystem-process.js";
 import { initializeProjectModelRegistrations } from "../src/project/model-registration.js";
 import { runGit } from "../src/git.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { projectConfigSchema } from "../src/project/model.js";
+
+test("Store binding mutations share the config file lock while ordinary CRUD remains independent", async (t) => {
+  const { root, createStore } = await businessFixture(t);
+  await createStore();
+  await withConfigFileLock(join(root, "config.json"), async () => {
+    await writeData({}, root, "records", "item", "create", { kind: "value", value: { name: "independent", count: 1 } });
+    await assert.rejects(removeBusinessStore({ signal: AbortSignal.timeout(100) }, root, "records"), { name: "TimeoutError" });
+    await assert.rejects(createBusinessStore({ signal: AbortSignal.timeout(100) }, root, "later", {
+      model: "record.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: "data/later" }
+    }), { name: "TimeoutError" });
+    assert.equal((await hasData({}, root, "records", "item")).exists, true);
+  });
+  await removeBusinessStore({}, root, "records");
+  await assert.rejects(readData({}, root, "records", "item"), { code: "STORE_NOT_FOUND" });
+});
+
+test("ordinary business CRUD completes while the Project settings lock is held", async (t) => {
+  const { root, directory, createStore } = await businessFixture(t);
+  await createStore();
+  await createStore("files", "record.json", "data");
+  const context = { signal: AbortSignal.timeout(3000) };
+  await withNativeFileLock(join(root, ".runtime", "settings.lock"), async () => {
+    for (const [store, id] of [["records", "item"], ["files", "item.json"]]) {
+      await writeData(context, root, store, id, "create", { kind: "value", value: { name: "first", count: 1 } });
+      await writeData(context, root, store, id, "update", { kind: "value", value: { name: "updated", count: 2 } });
+      if (store === "records") {
+        await upsertData(context, root, store, id, { kind: "value", value: { name: "upserted", count: 3 } });
+        await editData(context, root, store, id, [{ op: "replace", path: "/count", value: 4 }]);
+      }
+      assert.equal((await hasData(context, root, store, id)).exists, true);
+      assert.equal((await listData(context, root, store)).items.length, 1);
+      assert.equal((await readData(context, root, store, id)).value !== undefined, true);
+      await exportData(context, root, store, id, "json", join(directory, `${store}-export.json`));
+      assert.equal((await deleteData(context, root, store, id)).deleted, true);
+    }
+  });
+});
+
+test("an edit completes in its opened Store after the binding changes", async (t) => {
+  const { root, createStore } = await businessFixture(t);
+  await createStore();
+  await writeData({}, root, "records", "item", "create", { kind: "value", value: { name: "old", count: 1 } });
+  const oldStore = await openBusinessStore({}, root, "records");
+  const originalOpen = FilesystemJsonValueStoreFactory.prototype.openExisting;
+  let switched = false;
+  t.mock.method(FilesystemJsonValueStoreFactory.prototype, "openExisting", async function (...args: Parameters<typeof originalOpen>) {
+    const store = await originalOpen.apply(this, args);
+    const originalGet = store.get.bind(store);
+    store.get = async (...getArgs) => {
+      const record = await originalGet(...getArgs);
+      if (!switched) {
+        switched = true;
+        await removeBusinessStore({}, root, "records");
+        await createStore("records", "record.json", "value", { directory: "data/new-records" });
+      }
+      return record;
+    };
+    return store;
+  });
+  assert.equal((await editData({}, root, "records", "item", [{ op: "replace", path: "/count", value: 2 }])).revision, 2);
+  assert.equal(switched, true);
+  assert.deepEqual((await oldStore.store.get({}, "item") as { value: unknown }).value, { name: "old", count: 2 });
+  assert.equal((await hasData({}, root, "records", "item")).exists, false);
+});
 
 test("business ValueStore hierarchical records remain editable and readable after re-registering the directory", async (t) => {
   const { root, createStore } = await businessFixture(t); await createStore();
@@ -319,7 +386,7 @@ test("JSON DataStore supports structured values and queries without advertising 
 });
 
 test("candidate validation without installed systems or Stores does not create Project files", async (t) => {
-  const { root } = await businessFixture(t); const before = await snapshotTree(root);
+  const { root, registerModels } = await businessFixture(t); await registerModels(); const before = await snapshotTree(root);
   assert.equal((await validateData({}, root, { modelRef: "record.json", value: { name: "candidate", count: 1 }, hasValue: true })).valid, true);
   assert.deepEqual(await snapshotTree(root), before);
 });

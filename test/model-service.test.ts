@@ -131,7 +131,7 @@ test("unavailable definitions can be replaced or deleted but metadata-only chang
     await mutateModel({}, f.root, "delete", ref);
     await assert.rejects(fs.readFile(location(f.root, ref)), { code: "ENOENT" });
   }
-  await fs.writeFile(location(f.root, "bound.json"), '{"type":"string"}');
+  await mutateModel({}, f.root, "create", "bound.json", { source: '{"type":"string"}' });
   await createBusinessStore({}, f.root, "bound", { model: "bound.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: "data/bound" } });
   await fs.writeFile(location(f.root, "bound.json"), "{broken");
   await assert.rejects(mutateModel({}, f.root, "delete", "bound.json"), assertCode("MODEL_IN_USE"));
@@ -140,6 +140,7 @@ test("unavailable definitions can be replaced or deleted but metadata-only chang
 
 test("definition-only diagnostics permit unsupported candidates and saved definitions without granting normal access", async t => {
   const f = await businessFixture(t, { "advanced.json": { anyOf: [{ type: "string" }, { type: "number" }] } });
+  await f.registerModels();
   const before = await snapshotTree(f.root);
   const saved = await validateModel({}, f.root, "advanced.json", { check: "definition" });
   assert.deepEqual(saved.checks, { definition: "passed", runtime: "not_checked" });

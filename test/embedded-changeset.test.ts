@@ -451,23 +451,13 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       }
     });
     await snapshotStarted;
-    let validationSettled = false;
-    let validationWaiting!: () => void;
-    const validationQueued = new Promise<void>((resolve) => { validationWaiting = resolve; });
-    const concurrentValidation = validateMemoryChange(undefined, { onLockWait: validationWaiting }).then((result) => {
-      validationSettled = true;
-      return result;
-    });
-    await Promise.race([
-      validationQueued,
-      delay(5_000, undefined, { ref: false }).then(() => {
-        throw new Error("timed out waiting for validation to queue behind the checkpoint lock");
-      })
-    ]);
-    assert.equal(validationSettled, false, "validation must wait until Review snapshot creation releases the checkpoint lock");
-    releaseSnapshot();
-    await heldSnapshot;
-    assert.equal((await concurrentValidation).checkpointDigest, expanded.checkpointDigest);
+    try {
+      const concurrentValidation = await validateMemoryChange();
+      assert.equal(concurrentValidation.checkpointDigest, expanded.checkpointDigest);
+    } finally {
+      releaseSnapshot();
+      await heldSnapshot;
+    }
 
 
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), "!concept\nnames: [Broken\n");

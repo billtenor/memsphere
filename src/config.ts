@@ -1,3 +1,4 @@
+import { runnerAgentsSchema } from "./runner/identity.js";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
@@ -81,6 +82,7 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
 export const globalConfigSchema = z.object({
   language: z.enum(promptLocales).optional(),
   acp_providers: acpProviderConfigSchema.optional(),
+  runner_agents: runnerAgentsSchema.optional(),
   view: z.object({
     host: z.string().min(1),
     port: z.number().int().min(0).max(65535),

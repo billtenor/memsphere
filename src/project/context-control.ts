@@ -1,16 +1,13 @@
 import { withContextControlAccess } from "./context-control-access.js";
 import { readModelOperationStamp } from "./model-operation.js";
-import { mkdir } from "node:fs/promises";
-import { join } from "node:path";
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { Context } from "../data/api/context.js";
 import { JsonPayloadSerializer } from "../data/extensions/json-serializer/index.js";
 import { readAll } from "../data/extensions/shared/payload.js";
-import { withNativeFileLock } from "../file-lock.js";
-import { ContextControl, failure, type Stores, type RunLock, type ContentReader } from "../context_control/service.js";
+import { ContextControl, failure, type Stores, type ContentReader } from "../context_control/service.js";
 import { ENTITIES, modelId, storeId, definitionHash, readContextControlModels } from "../context_control/model-assets.js";
 import { createBusinessStore, openBusinessStore, readBusinessProject } from "./business-stores.js";
+import { checkModelDefinition } from "./model-validation.js";
 import { mutateModel } from "./model-service.js";
 import { createProjectModelHost } from "./models.js";
 
@@ -49,15 +46,12 @@ async function openContextControlUnlocked(root: string, legacyUpgrade: boolean):
   }
   const stores = {} as Stores;
   for (const entity of ENTITIES) {
-    const opened = await openBusinessStore({}, root, storeId(entity));
+    const oldSource = legacyUpgrade ? (await (await createProjectModelHost({}, { root, ...config })).source(modelId(entity))).source : undefined;
+    const runtime = oldSource === undefined ? undefined : (await checkModelDefinition({}, { modelRef: modelId(entity), source: oldSource, definition: JSON.parse(oldSource.replace(/^\uFEFF/, "")) })).runtime;
+    const opened = await openBusinessStore({}, root, storeId(entity), { runtime });
     if (opened.store.kind !== "ValueStore" || opened.binding.model !== modelId(entity)) throw failure("STORE_INCOMPATIBLE", `Wrong context control Store: ${storeId(entity)}`);
     stores[entity] = opened.store;
   }
-  const lock: RunLock = async (runId, action, signal) => {
-    const dir = join(root, ".runtime", "context-control"); await mkdir(dir, { recursive: true });
-    const key = createHash("sha256").update(runId).digest("hex");
-    return withNativeFileLock(join(dir, `${key}.lock`), action, { signal });
-  };
   const contentReader: ContentReader = async (ref, context) => {
     const opened = await openBusinessStore(context, root, ref.storeId);
     const row = await opened.store.get(context, ref.dataId);
@@ -66,7 +60,7 @@ async function openContextControlUnlocked(root: string, legacyUpgrade: boolean):
     const content = await new JsonPayloadSerializer().serialize(context, opened.runtime.descriptor, row.value);
     return { bytes: await readAll(context, content), contentType: "application/json" };
   };
-  return new ContextControl(stores, lock, contentReader);
+  return new ContextControl(stores, contentReader);
 }
 
 export async function initializeContextControl(root: string) {

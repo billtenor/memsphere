@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { appDataComposition, appProjectFromRoot } from "../app/composition.js";
 import { filesystemJsonValueStoreExtension } from "../data/extensions/index.js";
 import { assertModelPath, discoverModelIds } from "./model-storage-paths.js";
-import { readModelRegistrations, IMPORTED_MODEL_DEFINITIONS_STORE, type ModelRegistration, type ModelOrigin, type ProjectModelInput } from "./model-registration.js";
+import { readModelRegistrations, createModelRegistrationStore, modelDefinitionHash, IMPORTED_MODEL_DEFINITIONS_STORE, type ModelRegistration, type ModelOrigin, type ProjectModelInput } from "./model-registration.js";
 import type { Context } from "../data/api/context.js";
 import type { Data } from "../data/api/data.js";
 import type { DataStore } from "../data/api/data-store.js";
@@ -135,6 +135,32 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
     if (!pending) {
       pending = (async () => {
         const saved = await snapshot(id);
+        const registered = registrations.get(id);
+        if (!registered) throw Object.assign(new TypeError(`Model has no registration: ${id}`), { code: "MODEL_NOT_REGISTERED" });
+        if (registered.origin !== "app") {
+          const hash = modelDefinitionHash(saved.source);
+          if (registered.registration.definition_sha256 === undefined) {
+            const record = registrationState.records.find(record => record.registration.modelRef === id)!;
+            const area = record.origin === "system" ? "system/registrations" : record.origin === "market" ? "imported" : "project";
+            const registry = await createModelRegistrationStore(context, `registration/${area}`, resolve(paths.registrationDirectory, area));
+            const row = await registry.get(context, record.id);
+            if (!row) throw Object.assign(new Error(`Registration changed: ${id}`), { code: "MODEL_READ_CONFLICT" });
+            if (row.revision === undefined) throw Object.assign(new Error(`Registration has no revision: ${id}`), { code: "UNSUPPORTED_CAPABILITY" });
+            const value = row.value as ModelRegistration;
+            if (value.modelRef !== id || value.store_id !== registered.registration.store_id) throw Object.assign(new Error(`Registration changed: ${id}`), { code: "MODEL_READ_CONFLICT" });
+            if (value.definition_sha256 !== undefined) registered.registration = value;
+            else {
+              try {
+                const updated = await registry.update(context, record.id, { ...value, definition_sha256: hash }, { expectedRevision: row.revision });
+                registered.registration = updated.value as ModelRegistration;
+              } catch (error) {
+                if ((error as { code?: string }).code === "REVISION_CONFLICT") throw Object.assign(new Error(`Registration changed: ${id}`), { code: "MODEL_READ_CONFLICT" });
+                throw error;
+              }
+            }
+          }
+          if (registered.registration.definition_sha256 !== hash) throw Object.assign(new TypeError(`Model definition does not match its published registration: ${id}`), { code: "MODEL_DEFINITION_HASH_MISMATCH" });
+        }
         let definition: unknown;
         try { definition = JSON.parse(saved.source.replace(/^\uFEFF/, "")); }
         catch (cause) {

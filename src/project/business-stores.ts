@@ -1,3 +1,4 @@
+import { withConfigFileLock } from "../config-file-lock.js";
 import { mkdir, readFile, readdir, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Config } from "../data/api/config.js";
@@ -13,7 +14,7 @@ import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.j
 import { createProjectModelHost } from "./models.js";
 import { projectConfigSchema, businessStoreBindingSchema, type ProjectConfigFile, type BusinessStoreBinding } from "./model.js";
 import { canonicalPath, validateModelStoragePaths, within } from "./model-storage-paths.js";
-import { readModelOperationStamp, assertModelOperationStamp, withProjectSettingsLock, withConsistentModelRead } from "./model-operation.js";
+import { readModelOperationStamp, assertModelOperationStamp, withConsistentModelRead } from "./model-operation.js";
 import { atomicWriteJson } from "../persistence.js";
 import { assertModelRef } from "./model-registration-contract.js";
 import { runGit } from "../git.js";
@@ -184,7 +185,7 @@ export async function createBusinessStore(context: Context, root: string, id: st
     }
     return { operation: "data.store.create", storeId: id, binding, directory };
   };
-  return dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
+  return dryRun ? execute() : withConfigFileLock(join(root, "config.json"), execute, context.signal);
 }
 export async function removeBusinessStore(context: Context, root: string, id: string, dryRun = false) {
   const execute = async () => {
@@ -195,5 +196,5 @@ export async function removeBusinessStore(context: Context, root: string, id: st
     }
     return { operation: "data.store.remove", storeId: id, dataRetained: true, directory: state.directory, ...(dryRun ? { dryRun: true } : {}) };
   };
-  return dryRun ? execute() : withProjectSettingsLock(root, execute, context.signal);
+  return dryRun ? execute() : withConfigFileLock(join(root, "config.json"), execute, context.signal);
 }

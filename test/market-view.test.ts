@@ -56,7 +56,7 @@ async function withMarketView(
   }
 }
 
-test("Memory Market View API aggregates imports and exposes their active ChangeSet", async () => {
+test("Memory Market View API keeps independent imports and exposes each active ChangeSet", async () => {
   await withMarketView(async ({ origin }) => {
     const initial = await marketPayload(origin);
     assert(initial.memories.some((item) => (
@@ -68,16 +68,16 @@ test("Memory Market View API aggregates imports and exposes their active ChangeS
     const second = await importMarket(origin, "statements", "memsphere-general-delivery-rules");
     assert.equal(first.response.status, 201);
     assert.equal(second.response.status, 201);
-    assert.equal(second.payload.change.id, first.payload.change.id);
+    assert.notEqual(second.payload.change.id, first.payload.change.id);
 
     const importing = await marketPayload(origin);
-    for (const reference of [
-      "statements/memsphere-general-testing-rules",
-      "statements/memsphere-general-delivery-rules"
+    for (const [reference, changeId] of [
+      ["statements/memsphere-general-testing-rules", first.payload.change.id],
+      ["statements/memsphere-general-delivery-rules", second.payload.change.id]
     ]) {
       const item = importing.memories.find((candidate) => candidate.reference === reference);
       assert.equal(item?.status, "importing");
-      assert.equal(item?.changeId, first.payload.change.id);
+      assert.equal(item?.changeId, changeId);
     }
   });
 });

@@ -5,6 +5,7 @@ names:
   - Procedure Schema
 format: yaml
 defines:
+  - "Runner 会话身份、DaemonTask、Continue 和异步等待属于宿主运行协议，不是 Procedure YAML 字段，本轮不新增 syntax 关键字。"
   - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
   - Procedure 的 name/names 标识可复用的流程定义；单次执行的 Run 名称不属于 Memory YAML，通过 run start --name 提供。
 asserts:

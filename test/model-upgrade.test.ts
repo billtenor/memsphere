@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { readBundledSystemModels } from "../src/reserved/models.js";
-import { initializeProjectModelRegistrations, upgradeProjectModelRegistrations, readModelRegistrations, withModelRegistrationLock } from "../src/project/model-registration.js";
+import { initializeProjectModelRegistrations, upgradeProjectModelRegistrations, readModelRegistrations, withModelRegistrationMaintenance } from "../src/project/model-registration.js";
 import { createProjectModelHost } from "../src/project/models.js";
 import { RAW_MODEL } from "../src/data/extensions/raw/index.js";
 
@@ -12,7 +12,7 @@ async function fixture(action: (root: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "model-upgrade-"));
   try { await action(root); } finally { await rm(root, { recursive: true, force: true }); }
 }
-const upgrade = (root: string, options = {}) => withModelRegistrationLock(root, () => upgradeProjectModelRegistrations({}, { root }, options));
+const upgrade = (root: string, options = {}) => withModelRegistrationMaintenance(root, () => upgradeProjectModelRegistrations({}, { root }, options));
 const definitionPath = (root: string, model: ReturnType<typeof readBundledSystemModels>[number]) => join(root, "models/registrations/system/definitions", model.metaModel === RAW_MODEL ? "raw" : "json-schema/draft-07", model.registration.modelRef);
 async function envelopeFor(root: string, ref: string) {
   const record = (await readModelRegistrations({}, { root })).records.find(item => item.registration.modelRef === ref)!;
@@ -202,8 +202,8 @@ test("upgrade validates a planned ordinary registration used by an existing Stor
   await mkdir(dirname(record), { recursive: true });
   await writeFile(record, JSON.stringify({ id: "order", revision: 1, createdAt: 1, updatedAt: 1, value: "existing order" }));
   const businessBefore = await readFile(record);
-  // Existing model reads do not require explicit initialization.
-  await (await createProjectModelHost({}, { root })).runtime("order.json");
+  // A definition without a published registration cannot be used.
+  await assert.rejects((await createProjectModelHost({}, { root })).runtime("order.json"), { code: "MODEL_NOT_REGISTERED" });
   const first = await upgrade(root, { config: { path: configPath, value } });
   assert.equal(first.created, 1);
   const registration = await envelopeFor(root, "order.json");

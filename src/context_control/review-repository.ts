@@ -7,7 +7,7 @@ import { access } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import * as legacy from "../run/store.js";
 import type { ArtifactReview, ArtifactReviewComment, ArtifactReviewRound } from "../artifact-review.js";
-import { artifactReviewAssignmentId, artifactReviewDispositionValues } from "../artifact-review.js";
+import { artifactReviewAssignmentId, artifactReviewDispositionValues, artifactReviewWaitReady } from "../artifact-review.js";
 import { createControlPlaneSnapshot } from "../control-plane/index.js";
 import { openContextControl } from "../project/context-control.js";
 import { decodeGraphContent, mimeType } from "./graph-content.js";
@@ -78,7 +78,7 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
     const a = step && g.action(run, step), sr = a && await g.rules(run, a);
     const dto: legacy.RunState = { contractVersion: 3, id: run.id, name: run.name, language: run.language, status: run.status, procedureName: run.memoryRef!.slice("procedures/".length), memoryRoot: "", createdAt: run.createdAt, updatedAt: run.endedAt ?? run.createdAt,
       assertTree: rules.procedure, frozenMemoryRunId: run.id, stack: [], events: [], artifactReviews: reviews,
-      ...(run.permissionConfig ? { controlPlane: createControlPlaneSnapshot({ runner: run.permissionConfig.runner, actors: Object.fromEntries(Object.entries(run.permissionConfig.actors).map(([id, actor]) => [id, actor.kind === "agent" ? { ...actor, agent: { ...actor.agent, maxRuntimeMs: actor.agent.maxRuntimeMs ?? null } } : actor])), acpProviders: {} }) } : {}) };
+      ...(run.permissionConfig ? { controlPlane: createControlPlaneSnapshot({ runner: run.permissionConfig.runner, actors: Object.fromEntries(Object.entries(run.permissionConfig.actors).map(([id, actor]) => [id, actor.kind === "agent" ? { ...actor, agent: { ...actor.agent, idleTimeoutMs: actor.agent.idleTimeoutMs ?? null, maxRuntimeMs: actor.agent.maxRuntimeMs ?? null } } : actor])), acpProviders: {} }) } : {}) };
     if (step && a && sr) dto.stack = [{ type: "procedure", memoryName: dto.procedureName, assertTree: rules.procedure, index: 0, steps: [{ id: step.id, instruction: a.description, actor: a.actor, artifact: a.artifact?.name, type: reviews.find(review => review.stepId === step.id)?.submissions.at(-1)?.artifact.type ?? "string", format: graphFormat(a.artifact?.payload.contentType ?? "text/plain"), assertTree: sr.asserts, suggestTree: sr.suggests, details: [JSON.stringify(a.artifact?.model), JSON.stringify({ artifactAsserts: sr.artifactAsserts, artifactSuggests: sr.artifactSuggests })], reviewPolicy: step.reviewRounds?.at(-1)?.reviewConfig.policy.id }] }];
     return dto;
   });
@@ -120,7 +120,7 @@ export async function waitForArtifactReview(input: Parameters<typeof legacy.wait
     input.signal?.throwIfAborted();
     await use(input, (g, id) => g.advance(id.runId));
     const result = await readArtifactReviewForRunner(input);
-    if (result.review.status !== "pending" || result.round.assignments.some(a => a.status === "failed")) return result;
+    if (artifactReviewWaitReady(result.review, result.round)) return result;
     await delay(interval, undefined, { signal: input.signal });
   }
 }

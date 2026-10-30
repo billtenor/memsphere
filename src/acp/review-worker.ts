@@ -1,7 +1,7 @@
-import { delimiter } from "node:path";
+import { delimiter, join, resolve } from "node:path";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
-import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import {
   claimArtifactReviewAgentAssignment,
   failArtifactReviewAgentAssignment,
@@ -25,6 +25,7 @@ export type AgentReviewWorkerOptions = {
   assignment?: string;
   nodeExecutable?: string;
   cliEntrypoint?: string;
+  workspaceRoot?: string;
   providerResolver?: (id: string | undefined) => AgentReviewProvider;
 };
 
@@ -52,7 +53,9 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     actorId,
     attemptId: claimed.attempt.id
   };
-  const workspaceRoot = (await resolveWorkspaceIdentity()).path;
+  const callerDirectory = resolve(options.workspaceRoot ?? process.cwd());
+  let workspaceRoot = callerDirectory;
+  let attemptDirectory: string | undefined;
   const activity = new AgentActivityRecorder({
     ...common,
     runId: claimed.run.id,
@@ -66,6 +69,11 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
+    const temporaryRoot = join(callerDirectory, "tmp");
+    await mkdir(temporaryRoot, { recursive: true });
+    attemptDirectory = await mkdtemp(join(temporaryRoot, "memsphere-review-"));
+    workspaceRoot = await realpath(attemptDirectory);
+    activity.recordLifecycle("workspace", `Attempt working directory: ${workspaceRoot}`);
     await assertWindowsPrerequisites();
     const actor = claimed.run.controlPlane?.actors[actorId];
     if (!actor || actor.kind !== "agent") throw new Error(`agent_actor_missing: ${actorId}`);
@@ -75,6 +83,9 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       actor,
       workspaceRoot,
       sessionEnv: {
+        TMPDIR: workspaceRoot,
+        TMP: workspaceRoot,
+        TEMP: workspaceRoot,
         MEMSPHERE_CLI: cliRuntime.launcherPath,
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
         ...((claimed.run.memorySnapshot || claimed.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: claimed.run.id } : {}),
@@ -91,7 +102,9 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     });
     const result = await runAgentReviewAcpSession({
       launch,
-      prompt,
+      prompt: `${prompt}\n\n${claimed.run.language === "en"
+        ? "Use the current directory for this Attempt. Read or download Artifacts only when needed and keep local material and temporary files here. No source code is copied into this directory."
+        : "当前目录是本次 Attempt 的独立工作目录。按需读取或下载 Artifact，本地材料和临时文件自行在当前目录组织。此目录未复制代码。"}`,
       reminder: buildArtifactReviewerReminder(
         resolvePromptLocale(claimed.run.language),
         claimed.attempt.promptVersion ?? launch.promptVersion
@@ -126,6 +139,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   } finally {
     await activity.close();
     await cliRuntime?.cleanup().catch(() => undefined);
+    if (attemptDirectory) await rm(attemptDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
@@ -147,6 +161,7 @@ function classifyAgentFailure(error: unknown): ArtifactReviewAgentFailure {
   const timeoutCode = message.match(/^(agent_(?:startup|idle|max_runtime)_timeout):/)?.[1];
   if (timeoutCode) return { stage: "timeout", code: timeoutCode, message, category: "environment" };
   if (message.startsWith("acp_protocol") || message.includes("JSON-RPC")) return { stage: "protocol", code: "acp_protocol_error", message, category: "provider" };
+  if (message.startsWith("agent_connection_closed:")) return { stage: "protocol", code: "agent_connection_closed", message, category: "provider" };
   if (message.startsWith("cli_") || message.startsWith("review_") || message.includes("CLI handshake")) {
     return { stage: "cli", code: message.split(":", 1)[0], message, category: "reviewer" };
   }

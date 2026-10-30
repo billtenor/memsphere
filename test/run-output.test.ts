@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderRunOutput, runOutputPromptIds } from "../src/prompts/run-output.js";
+import type { ArtifactReview, ArtifactReviewRound } from "../src/artifact-review.js";
 import type { RunState, SchemaWritingSnapshot } from "../src/run/store.js";
 
 const action = {
@@ -125,10 +126,10 @@ test("abandoned Run output is terminal and has no next action", () => {
   assert.deepEqual(runOutputPromptIds({ kind: "status", run }, "en"), ["run.abandoned"]);
 });
 
-test("pending Human Review assignments produce localized collection guidance", () => {
+test("Review guidance follows Agent wait, Runner decision and Human acceptance in both languages", () => {
   const run = runningRun();
   run.language = "zh-CN";
-  const round = {
+  const round: ArtifactReviewRound = {
     id: "round-human",
     sequence: 1,
     submissionId: "submission-human",
@@ -158,12 +159,12 @@ test("pending Human Review assignments produce localized collection guidance", (
     }],
     votes: []
   };
-  const review = {
+  const review: ArtifactReview<RunState["events"][number]["artifact"]> = {
     id: "review-human",
     stepId: "flow[1]",
     artifactName: "result",
     policyId: "artifact_acceptance.unanimous",
-    controlPlane: {} as never,
+    controlPlane: { permissions: { runner: { effective: ["artifact.read", "decision.decide"] } } } as never,
     status: "pending" as const,
     currentRoundId: round.id,
     createdAt: "2026-07-25T00:01:00.000Z",
@@ -196,34 +197,58 @@ test("pending Human Review assignments produce localized collection guidance", (
     "run.review-summary",
     "run.review-next-action"
   ]);
-  const chinese = renderRunOutput({ kind: "status", run }, "zh-CN");
-  assert.match(chinese, /向以下 Human 收集本轮正式投票/);
-  assert.match(chinese, /提需方（actor_id=human-1；assignment_id=assignment-human）/);
-  assert.match(chinese, /通过：Comment 可选/);
-  assert.match(chinese, /要求修改：至少需要一条 Comment/);
-  assert.match(chinese, /弃权：至少需要一条说明原因的 Comment/);
-  assert.match(chinese, /Agent Reviewer 仍在后台评审；无需等待其完成/);
-  assert.match(chinese, /“我投通过”.*同时构成本次投票决定和 Runner 代提交授权/s);
-  assert.match(chinese, /不要再次询问同义确认/);
-  assert.match(chinese, /目标不明确.*才完整复述待提交内容并取得确认/s);
-  assert.match(chinese, /submit-for-human --run run-output --review review-human --round round-human/);
-  assert.match(renderRunOutput({ kind: "report", run }, "zh-CN"), /向以下 Human 收集本轮正式投票/);
-  assert.match(renderRunOutput({ kind: "review", run, review, round }, "zh-CN"), /向以下 Human 收集本轮正式投票/);
-
-  const english = renderRunOutput({ kind: "status", run }, "en");
-  assert.match(english, /collect a formal vote for this round/);
-  assert.match(english, /Request changes: at least one Comment is required/);
-  assert.match(english, /that statement is both the formal decision and authorization/);
-  assert.match(english, /do not ask for a synonymous confirmation/);
-
-  round.assignments[0]!.status = "submitted";
-  round.assignments[0]!.submitted = {
-    comments: [],
-    vote: "approve",
-    submittedAt: "2026-07-25T00:02:00.000Z",
-    authorization: {} as never
+  const outputs = (locale: "en" | "zh-CN") => [
+    renderRunOutput({ kind: "status", run }, locale),
+    renderRunOutput({ kind: "report", run }, locale),
+    renderRunOutput({ kind: "review", run, review, round }, locale)
+  ];
+  const human = round.assignments[0]!, agent = round.assignments[1]!;
+  for (const state of ["queued", "running"] as const) {
+    agent.status = state;
+    for (const humanState of ["draft", "submitted"] as const) {
+      human.status = humanState;
+      if (humanState === "submitted") human.submitted = {
+        comments: [], vote: "approve", submittedAt: "2026-07-25T00:02:00.000Z", authorization: {} as never
+      };
+      else delete human.submitted;
+      for (const locale of ["en", "zh-CN"] as const) for (const output of outputs(locale)) {
+        assert.match(output, /memsphere run review wait --review review-human/);
+        assert.doesNotMatch(output, /submit-for-human|run review vote|collect a formal vote|向以下 Human 收集/);
+      }
+    }
+  }
+  human.status = "draft";
+  delete human.submitted;
+  agent.status = "submitted";
+  agent.submitted = {
+    comments: [], vote: "approve", submittedAt: "2026-07-25T00:02:00.000Z", authorization: {} as never
   };
-  const agentOnly = renderRunOutput({ kind: "status", run }, "zh-CN");
-  assert.doesNotMatch(agentOnly, /向以下 Human 收集本轮正式投票/);
-  assert.match(agentOnly, /memsphere run review wait --review review-human/);
+  for (const locale of ["en", "zh-CN"] as const) for (const output of outputs(locale)) {
+    assert.match(output, /run review vote --review review-human --round round-human --vote approve/);
+    assert.doesNotMatch(output, /submit-for-human|collect a formal vote|向以下 Human 收集/);
+  }
+  round.votes.push({
+    id: "runner-decision", subject: { kind: "runner" }, binding: "decision", value: "approve",
+    automatic: false, authorization: {} as never, submittedAt: "2026-07-25T00:03:00.000Z"
+  });
+  assert.equal(review.status, "pending");
+  for (const chinese of outputs("zh-CN")) {
+    assert.match(chinese, /向以下 Human 收集本轮正式投票/);
+    assert.match(chinese, /提需方（actor_id=human-1；assignment_id=assignment-human）/);
+    assert.match(chinese, /通过：Comment 可选/);
+    assert.match(chinese, /要求修改：至少需要一条 Comment/);
+    assert.match(chinese, /弃权：至少需要一条说明原因的 Comment/);
+    assert.doesNotMatch(chinese, /Agent Reviewer 仍在后台评审/);
+    assert.match(chinese, /“我投通过”.*同时构成本次投票决定和 Runner 代提交授权/s);
+    assert.match(chinese, /不要再次询问同义确认/);
+    assert.match(chinese, /目标不明确.*才完整复述待提交内容并取得确认/s);
+    assert.match(chinese, /submit-for-human --run run-output --review review-human --round round-human/);
+  }
+  for (const english of outputs("en")) {
+    assert.match(english, /collect a formal vote for this round/);
+    assert.match(english, /Request changes: at least one Comment is required/);
+    assert.match(english, /that statement is both the formal decision and authorization/);
+    assert.match(english, /do not ask for a synonymous confirmation/);
+    assert.doesNotMatch(english, /Agent Reviewers are still working in the background/);
+  }
 });

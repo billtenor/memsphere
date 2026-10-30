@@ -1,3 +1,8 @@
+import { createHash } from "node:crypto";
+import { mkdir, readFile } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { withNativeFileLock } from "../file-lock.js";
+import { atomicWriteJson } from "../persistence.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import type { MemsphereConfig } from "../config.js";
 import {
@@ -13,6 +18,7 @@ export async function dispatchArtifactReviewAgents(input: {
   config: MemsphereConfig;
   run: RunState;
   runtime?: CliRuntimeDescriptor;
+  workspaceRoot?: string;
   launchWorker?: (assignment: {
     reviewId: string;
     roundId: string;
@@ -32,12 +38,24 @@ export async function dispatchArtifactReviewAgents(input: {
   if (queued.length === 0) return 0;
   if (input.config.debug.agentReview) return 0;
   const runtime = input.runtime ?? currentCliRuntimeDescriptor();
+  const workspaceRoot = resolve(input.workspaceRoot ?? process.cwd());
   await Promise.all(queued.map(async ({ review, round, assignment }) => {
     const assignmentId = artifactReviewAssignmentId(assignment);
     if (input.launchWorker) {
       await input.launchWorker({ reviewId: review.id, roundId: round.id, assignmentId });
       return;
     }
+    const key = createHash("sha256").update(`${review.id}/${round.id}/${assignmentId}`).digest("hex");
+    const directory = join(input.config.scopeRoot, ".runtime", "review-dispatch");
+    await mkdir(directory, { recursive: true });
+    await withNativeFileLock(join(directory, `${key}.lock`), async () => {
+      const current = await readRun(input.config.runsRoot, input.run.id);
+      const currentAssignment = current.artifactReviews?.find(r => r.id === review.id)?.rounds.find(r => r.id === round.id)?.assignments.find(a => artifactReviewAssignmentId(a) === assignmentId);
+      if (currentAssignment?.status !== "queued") return;
+      try {
+        const marker = JSON.parse(await readFile(join(directory, `${key}.json`), "utf8"));
+        try { process.kill(marker.pid, 0); return; } catch { /* previous worker exited */ }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const args = [
       runtime.cliEntrypoint,
       "run", "review", "agent-worker",
@@ -46,10 +64,11 @@ export async function dispatchArtifactReviewAgents(input: {
       "--round", round.id,
       "--assignment", assignmentId,
       "--node-executable", runtime.nodeExecutable,
-      "--cli-entrypoint", runtime.cliEntrypoint
+      "--cli-entrypoint", runtime.cliEntrypoint,
+      "--workspace-root", workspaceRoot
     ];
     const worker = spawnCommand(runtime.nodeExecutable, args, {
-      cwd: process.cwd(),
+      cwd: workspaceRoot,
       detached: true,
       stdio: "ignore",
       windowsHide: true
@@ -59,6 +78,7 @@ export async function dispatchArtifactReviewAgents(input: {
         worker.once("spawn", resolveSpawn);
         worker.once("error", rejectSpawn);
       });
+      await atomicWriteJson(join(directory, `${key}.json`), { pid: worker.pid });
       worker.unref();
     } catch (error) {
       const claimed = await claimArtifactReviewAgentAssignment({
@@ -79,6 +99,7 @@ export async function dispatchArtifactReviewAgents(input: {
         failure: { stage: "spawn", code: "worker_spawn_failed", message }
       });
     }
+    });
   }));
   return queued.length;
 }

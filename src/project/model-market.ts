@@ -11,7 +11,7 @@ import { bytesContent, readAll } from "../data/extensions/shared/payload.js";
 import { atomicWriteJson } from "../persistence.js";
 import { readBundledMarketModelPackages } from "../reserved/models.js";
 import { checkModelDefinition } from "./model-validation.js";
-import { commitModelOperation, optionalFileBytes, recoverModelOperation, type ModelFileChange } from "./model-operation.js";
+import { commitModelOperation, optionalFileBytes, recoverModelOperation, withModelMaintenance, type ModelFileChange } from "./model-operation.js";
 import { validateModelSchemaReferences } from "./model-schema-references.js";
 import { createProjectModelHost } from "./models.js";
 import { createModelRegistrationStore, IMPORTED_MODEL_DEFINITIONS_STORE, pathExists, readModelRegistrations, validateModelRegistration, type ProjectModelInput, type ModelRegistration } from "./model-registration.js";
@@ -29,8 +29,8 @@ export type ModelMarketPackage = {
 export function listModelMarket(sourceRoot?: string): ModelMarketPackage[] {
   return readBundledMarketModelPackages(sourceRoot).map(pack => ({ ...pack, models: pack.models.map(({ sourcePath: _sourcePath, ...model }) => model) }));
 }
-/** Caller serializes this operation with Project settings/config mutation. */
-export async function importModelMarketPackage(context: Context, input: ProjectModelInput, packageId: string, options: {
+/** Journal admission rejects overlapping maintenance requests. */
+async function importModelMarketPackageClaimed(context: Context, input: ProjectModelInput, packageId: string, options: {
   sourceRoot?: string;
   afterStage?: () => Promise<void>;
   beforePublish?: () => Promise<void>;
@@ -93,7 +93,7 @@ export async function importModelMarketPackage(context: Context, input: ProjectM
   return { status: "imported" as const, package: packageId, modelRefs: pack.models.map(model => model.registration.modelRef) };
 }
 /** Explicit recovery of known import candidates; published package content is never removed. */
-export async function cleanupModelMarketCandidates(context: Context, input: ProjectModelInput) {
+async function cleanupModelMarketCandidatesClaimed(context: Context, input: ProjectModelInput) {
   const state = await readModelRegistrations(context, input);
   const root = state.paths.registrationDirectory;
   const stagingRoot = join(root, "staging");
@@ -137,4 +137,12 @@ export async function cleanupModelMarketCandidates(context: Context, input: Proj
     await rm(stage, { recursive: true, force: true });
   }
   return { cleanedModelRefs: [...new Set(cleanedModelRefs)] };
+}
+
+export function importModelMarketPackage(...args: Parameters<typeof importModelMarketPackageClaimed>) {
+  return withModelMaintenance(args[1].root, () => importModelMarketPackageClaimed(...args), args[0].signal);
+}
+
+export function cleanupModelMarketCandidates(...args: Parameters<typeof cleanupModelMarketCandidatesClaimed>) {
+  return withModelMaintenance(args[1].root, () => cleanupModelMarketCandidatesClaimed(...args), args[0].signal);
 }

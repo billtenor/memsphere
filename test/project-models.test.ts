@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { createProjectModelHost, DEFAULT_MODELS_DIRECTORY } from "../src/project/models.js";
+import { registerFixtureDefinition, writeRegisteredFixtureFile as writeFile } from "./helpers/model-fixture.js";
 import { bytesContent } from "../src/data/extensions/shared/payload.js";
 
 async function fixture(fn: (root: string, directory: string) => Promise<void>) {
@@ -20,6 +21,8 @@ test("Project model definitions remain readable files and load through the metam
   await host.store.create({}, { id: "sales/order.json", model: host.store.model,
     payload: { contentType: "application/json", content: bytesContent(Buffer.from(source)) } });
   assert.equal(await readFile(join(directory, "sales/order.json"), "utf8"), source);
+  await assert.rejects((await createProjectModelHost({}, { root })).definition("sales/order.json"), { code: "MODEL_NOT_REGISTERED" });
+  await registerFixtureDefinition(root, "sales/order.json", source);
   const fresh = await createProjectModelHost({}, { root });
   assert.equal((await fresh.definition("sales/order.json")).source, source);
   assert.deepEqual((await fresh.definition("sales/order.json")).definition, schema);
