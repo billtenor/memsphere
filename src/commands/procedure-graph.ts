@@ -78,7 +78,20 @@ export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: st
   const run = snapshot.run;
   if (run.status !== "running") return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.status, command: `memsphere run show --run ${run.id}` });
   const ready = g.ready(snapshot);
-  if (ready.length === 1 && enter) { const entered = await g.enter(run.id, ready[0].id); await createCommandState(project, run.id, entered.step.id).catch(() => undefined); return stepPrompt(g, entered.snapshot, entered.step, project); }
+  if (ready.length === 1 && enter) {
+    let entered: Awaited<ReturnType<GraphRuntime["enter"]>>;
+    try { entered = await g.enter(run.id, ready[0].id); }
+    catch (error) {
+      if ((error as { code?: string }).code !== "STEP_FINISHED") throw error;
+      // The report is already durable. Another process can finish this target
+      // after our snapshot; ask for fresh status instead of failing the report.
+      return renderPrompt("run.graph-waiting", run.language, { runId: run.id,
+        message: run.language === "en" ? "The next Step completed concurrently; read the current Run status." : "下一 Step 已由其他进程完成，请读取当前 Run 状态。",
+        command: `memsphere --project ${quote(project)} run status --run ${run.id}` });
+    }
+    await createCommandState(project, run.id, entered.step.id).catch(() => undefined);
+    return stepPrompt(g, entered.snapshot, entered.step, project);
+  }
   if (ready.length > 0) return renderPrompt("run.graph-selection", run.language, { runId: run.id, steps: ready.map(s => { const a = g.action(run, s); return { id: s.id, description: a.description, actor: a.actor ?? "agent", artifact: a.artifact!.name }; }), command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step <step-id>` });
   const reviewing = snapshot.steps.filter(s => s.status === "awaiting_review");
   const partial = run.frames![0].graphFrame.joins.filter(j => Object.keys(j.arrivals).length);

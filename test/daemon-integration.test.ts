@@ -78,15 +78,19 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
     const { stopDaemon } = await import("../src/daemon/service.js");
     await stopDaemon(f.home);
     // A persisted result or removed daemon state can precede process exit.
-    // Windows retains each process cwd, so observe exit before removing it.
-    if (process.platform === "win32") {
-      const deadline = Date.now() + 20000;
-      for (const pid of pids) for (;;) {
-        try { process.kill(pid, 0); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") break; throw error; }
-        assert.ok(Date.now() < deadline, `fixture process ${pid} must exit before removing its cwd`);
-        await new Promise(resolve => setTimeout(resolve, 25));
+    // Processes can still write activity, and Windows retains each process cwd.
+    const deadline = Date.now() + 20000;
+    for (const pid of pids) for (;;) {
+      try { process.kill(pid, 0); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") break; throw error; }
+      if (process.platform === "linux") {
+        try {
+          const stat = await readFile(`/proc/${pid}/stat`, "utf8");
+          if (["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3))) break;
+        } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") break; throw error; }
       }
+      assert.ok(Date.now() < deadline, `fixture process ${pid} must exit before removing its cwd`);
+      await new Promise(resolve => setTimeout(resolve, 25));
     }
   });
   const { readArtifactReviewForRunner } = await import("../src/context_control/review-repository.js");
