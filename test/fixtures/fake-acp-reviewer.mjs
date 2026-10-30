@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { access } from "node:fs/promises";
-import { closeSync, realpathSync } from "node:fs";
+import { realpathSync } from "node:fs";
 
 const mode = process.argv[2] || "approve";
 const sessions = new Set();
@@ -35,15 +35,6 @@ const app = acp
     if (mode === "exit-zero") process.exit(0);
     if (mode === "exit-error") process.exit(7);
     if (mode === "exit-signal") process.kill(process.pid, "SIGTERM");
-    if (mode === "disconnect") {
-      // Close both references: Node's pipe handle can duplicate descriptor 1,
-      // especially on Windows. Either reference alone can keep stdout open.
-      // A broken fixture must fail rather than leave the test child alive forever.
-      setTimeout(() => process.exit(97), 6_000);
-      closeSync(1);
-      process.stdout._handle.close();
-      await new Promise(() => {});
-    }
     if (mode === "internal-error") {
       process.stderr.write("provider diagnostic: reconnecting\n");
       throw new Error("synthetic provider failure");

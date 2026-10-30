@@ -25,9 +25,9 @@ export async function runAgentReviewAcpSession(input: {
   onSession(metadata: Omit<AgentReviewAcpSession, "stopReason" | "stderr">): Promise<void>;
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
-}): Promise<AgentReviewAcpSession> {
+}, dependencies: { spawn?: typeof spawnAgent } = {}): Promise<AgentReviewAcpSession> {
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
-  const process = spawnAgent(input.launch);
+  const process = (dependencies.spawn ?? spawnAgent)(input.launch);
   const transport = new AbortController();
   const onExit = (code: number | null, signal: string | null) => {
     transport.abort(new Error(`agent_process_exit: ${signal ? `signal ${signal}` : `exited ${code}`}`));

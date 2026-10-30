@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1061,10 +1062,25 @@ test("ACP Client permits silent work with both timeouts disabled and detects tra
   });
   const result = await runAgentReviewAcpSession(input("idle"));
   assert.equal(result.stopReason, "end_turn");
-  for (const mode of ["exit-zero", "exit-error", "exit-signal", "disconnect"]) {
+  for (const mode of ["exit-zero", "exit-error", "exit-signal", "disconnect", "stream-error"]) {
     const before = Date.now();
-    await assert.rejects(runAgentReviewAcpSession({ ...input(mode), isSubmitted: async () => false }),
-      mode === "disconnect" ? /agent_connection_closed:/ : /agent_process_exit:|agent_connection_closed:/);
+    let provider: ChildProcessWithoutNullStreams | undefined;
+    const breakPipe = mode === "disconnect" || mode === "stream-error";
+    await assert.rejects(runAgentReviewAcpSession({
+      ...input(breakPipe ? "progress-hang" : mode),
+      isSubmitted: async () => false,
+      onSession: async () => {
+        if (breakPipe) {
+          assert.equal(provider!.exitCode, null, "the provider must still be alive when its ACP pipe breaks");
+          provider!.stdout.destroy(mode === "stream-error" ? new Error("Test disconnected the ACP pipe") : undefined);
+        }
+      }
+    }, {
+      spawn: launch => provider = crossSpawn(launch.command, launch.args, {
+        cwd: launch.cwd, env: launch.env, stdio: "pipe"
+      }) as ChildProcessWithoutNullStreams
+    }),
+      breakPipe ? /agent_connection_closed:/ : /agent_process_exit:|agent_connection_closed:/);
     assert.ok(Date.now() - before < 5_000, `${mode}: transport failure must not wait for a configured timeout`);
   }
 });
