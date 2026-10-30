@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { readFile, readdir } from "node:fs/promises";
 import { createServer } from "node:http";
 import test from "node:test";
+import { promisify } from "node:util";
 import { parse } from "yaml";
 import { createApi, REPOSITORY } from "../../scripts/ci/full-health.mjs";
 import {
@@ -48,8 +50,38 @@ async function fixture(t: any, options: any = {}) {
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
   const address: any = server.address();
-  return { api: createApi({ token: "fixture", apiUrl: `http://127.0.0.1:${address.port}` }), posts, requests };
+  const endpoint = `http://127.0.0.1:${address.port}`;
+  return { api: createApi({ token: "fixture", apiUrl: endpoint }), endpoint, posts, requests };
 }
+
+test("publisher CLI succeeds for published decisions and fails for query or publication errors", async t => {
+  const execute = promisify(execFile);
+  for (const protectedFile of [false, true]) {
+    await t.test(protectedFile ? "protected change keeps only the guard red" : "ordinary change passes", async t => {
+      const f = await fixture(t, { files: [changed(protectedFile ? "scripts/ci/future.mjs" : "src/cli.ts")] });
+      const result = await execute(process.execPath, ["scripts/ci/ci-change-guard.mjs", "--publish"], {
+        env: { ...process.env, GITHUB_TOKEN: "fixture", GITHUB_API_URL: f.endpoint }
+      });
+      assert.equal(f.posts.at(-1).state, protectedFile ? "failure" : "success");
+      assert(f.posts.every(p => p.context === CONTEXT && p.sha === head));
+      if (protectedFile) assert(result.stdout.includes(HUMAN_INSTRUCTIONS));
+    });
+  }
+  for (const failure of ["query", "publish"]) {
+    await t.test(`${failure} errors fail the publisher`, async t => {
+      const f = await fixture(t, {
+        reply: (path: string, _url: URL, req: any) =>
+          (failure === "query" ? path.endsWith("/files") : req.method === "POST")
+            ? { status: 503, value: {} } : undefined
+      });
+      await assert.rejects(execute(process.execPath, ["scripts/ci/ci-change-guard.mjs", "--publish"], {
+        env: { ...process.env, GITHUB_TOKEN: "fixture", GITHUB_API_URL: f.endpoint }
+      }), (error: any) => error.code === 1);
+      assert(!f.posts.some(p => p.state === "success"));
+      if (failure === "query") assert.equal(f.posts.at(-1).state, "error");
+    });
+  }
+});
 
 // Protect CI policy, while preserving normal product implementation and test changes.
 test("every protected CI file rejects changes while normal product files remain allowed", () => {

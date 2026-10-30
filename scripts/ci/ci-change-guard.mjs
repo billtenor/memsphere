@@ -125,11 +125,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     if (process.argv.slice(2).some(arg => arg !== "--publish")) throw new Error("Usage: node scripts/ci/ci-change-guard.mjs [--publish]");
     if (!process.env.GITHUB_TOKEN) throw new Error("GITHUB_TOKEN is required");
-    const reports = await refreshGuard(createApi({ token: process.env.GITHUB_TOKEN }), {
+    const reports = await refreshGuard(createApi({ token: process.env.GITHUB_TOKEN, apiUrl: process.env.GITHUB_API_URL }), {
       publish: process.argv.includes("--publish"),
       targetUrl: process.env.GITHUB_RUN_ID ? `https://github.com/${REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}` : undefined
     });
-    if (reports.some(report => report.state !== "success")) process.exitCode = 1;
+    // A published policy rejection is a successful refresh. Only operational
+    // failures should also fail the publisher job; the guard status still blocks.
+    if (reports.some(report => report.state === "error")) process.exitCode = 1;
   } catch (error) {
     console.error(`CI change guard: ${error.message}`);
     process.exitCode = 1;
