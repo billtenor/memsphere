@@ -1,8 +1,8 @@
 ---
 id: 20261028-runner-agent-identity-async-review
-status: doing
 type: feature
 created: 2026-10-28
+completed_at: 2026-10-30
 run_id: run-7c86229c-cf37-42de-8460-6bbec4c1d299
 ---
 
@@ -331,3 +331,14 @@ Agent 意见收齐后，Runner 可独立阅读、处置并提交本人的 approv
 模型结构不新增状态或字段：整体轮次在 Human 待验收时仍可为 pending，Agent 等待完成与整体结算分离；已有 Review/vote、commentDispositions 记录两条线各自进展。Graph 和旧 Flow 同步等待、daemon、CLI 即时返回统一使用 artifactReviewWaitReady，Runner 就绪使用同一 Agent 完成判定。旧 Flow 保留此前明确排除改造的真实 JSON 写锁。
 
 验证覆盖 Agent 执行时 Human 草稿更新不释放等待、全部 Agent 完成而 Human 未投时同步返回/异步发送、无 Agent 同步异步立即返回且无任务、重复 wait 无重复通知、Runner 在 Human 未提交时决定及修订、Human 最终验收不能绕过、旧轮投票冲突，以及既有发送失败/恢复/去重。
+
+
+## 最终验收结果（2026-10-30）
+
+实现验收第8轮 `round-67cd9018-f8a7-4036-ab93-2f0740971354`，冻结实现 commit `fa0dec4344e44579670a56ab869504f64f15232c`：研发、测试、架构 Agent 均正式通过；Runner 逐条处置6条非阻塞意见后通过；Human billtenor 以产品负责人/架构师身份明确回复“通过”，已受托提交，Review/Round 均为 passed。
+
+官方全量回归在该冻结树一次完成182/182文件、0失败；研发与测试分别独立完整复跑全绿。Linux短TMPDIR条件及Windows平台skip已披露；相同生产源码的build/typecheck通过。最终Memory变更级校验 `change-20261030-031536690z-1676929d`，valid=true、issues=[]；此后Memory字节未变，View：http://0.0.0.0:30000/projects/memsphere/changes/change-20261030-031536690z-1676929d。
+
+需求记录已归档，产品实现验收通过；本记录的completed_at不代表PR已创建、CI已完成或已合入master，原Run继续交付流程。Traex真实接收并继续和Windows实跑仍为合入前验证门禁，不因Human本轮通过而豁免。POSIX长socket路径及诊断、queue未知结果结构化错误码、失败Assignment内联指引等保留后续。完整交付范围、证据位置和边界见 delivery-report.md。
+
+长期需求、方案、开发计划、锁盘点与交付报告随代码保留；本目录其余原始验收附件仍留本地及Run Artifact，不因归档纳入Git。另按Human要求交付 `changes/active/20261029-graph-run-backtracking/change.md`，仅需求概述，不实现回溯。
