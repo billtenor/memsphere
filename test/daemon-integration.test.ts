@@ -152,13 +152,16 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
         await api.submitArtifactReviewAgentAssignment({ ...attempt, vote: "approve" });
       }
     }
-    for (let i = 0; i < 400; i++) {
+    // Poll count is not a time budget: faster state reads must not shorten the
+    // time available to the real ACP worker. The test's existing deadline bounds
+    // this wait, including cleanup after a timeout through its abort signal.
+    for (;;) {
+      t.signal.throwIfAborted();
       const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
       if (assignment.status === "submitted") return;
       if (assignment.status === "failed") assert.fail(JSON.stringify(assignment.attempts));
       await new Promise(resolve => setTimeout(resolve, 25));
     }
-    assert.fail("Agent did not submit");
   };
   const voteHuman = async (vote: "approve" | "request_changes", complete = true) => {
     if (complete) await completeAgent(true);
