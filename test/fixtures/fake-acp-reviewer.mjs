@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { access } from "node:fs/promises";
-import { realpathSync } from "node:fs";
+import { closeSync, realpathSync } from "node:fs";
 
 const mode = process.argv[2] || "approve";
 const sessions = new Set();
@@ -36,7 +36,10 @@ const app = acp
     if (mode === "exit-error") process.exit(7);
     if (mode === "exit-signal") process.kill(process.pid, "SIGTERM");
     if (mode === "disconnect") {
-      process.stdout.end();
+      // Close the OS descriptor, not just Node stdout's writable side, on Windows too.
+      // A broken fixture must fail rather than leave the test child alive forever.
+      setTimeout(() => process.exit(97), 6_000);
+      closeSync(1);
       await new Promise(() => {});
     }
     if (mode === "internal-error") {

@@ -1064,7 +1064,7 @@ test("ACP Client permits silent work with both timeouts disabled and detects tra
   for (const mode of ["exit-zero", "exit-error", "exit-signal", "disconnect"]) {
     const before = Date.now();
     await assert.rejects(runAgentReviewAcpSession({ ...input(mode), isSubmitted: async () => false }),
-      /agent_process_exit:|agent_connection_closed:/);
+      mode === "disconnect" ? /agent_connection_closed:/ : /agent_process_exit:|agent_connection_closed:/);
     assert.ok(Date.now() - before < 5_000, "transport failure must not wait for a configured timeout");
   }
 });
