@@ -72,8 +72,22 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
   f.beforeCleanup(async () => {
     await completeAgent(true).catch(() => undefined);
+    const pids = new Set((await reviewState()).round.assignments.flatMap(a => a.attempts?.map(attempt => attempt.workerPid).filter((pid): pid is number => !!pid && pid !== process.pid) ?? []));
+    try { pids.add(JSON.parse(await readFile(join(f.home, ".runtime", "daemon.json"), "utf8")).pid); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const { stopDaemon } = await import("../src/daemon/service.js");
     await stopDaemon(f.home);
+    // A persisted result or removed daemon state can precede process exit.
+    // Windows retains each process cwd, so observe exit before removing it.
+    if (process.platform === "win32") {
+      const deadline = Date.now() + 20000;
+      for (const pid of pids) for (;;) {
+        try { process.kill(pid, 0); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") break; throw error; }
+        assert.ok(Date.now() < deadline, `fixture process ${pid} must exit before removing its cwd`);
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    }
   });
   const { readArtifactReviewForRunner } = await import("../src/context_control/review-repository.js");
   // Run creation, candidate production and session binding are preconditions,
