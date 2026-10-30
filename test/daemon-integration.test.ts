@@ -366,7 +366,9 @@ for (const state of ["passed", "awaiting_revision"] as const) {
     const f = await reviewFixture(t);
     await f.voteHuman(state === "passed" ? "approve" : "request_changes");
     if ((await f.reviewState()).review.status === "awaiting_runner_vote") {
-      await f.call("continue", "review", "vote", "--vote", state === "passed" ? "approve" : "request_changes", "--comment", "Fixture decision");
+      const { submitArtifactReviewRunnerVote } = await import("../src/context_control/review-repository.js");
+      await submitArtifactReviewRunnerVote({ runsRoot: join(f.root, "runs"), reviewId: f.reviewId,
+        roundId: (await f.reviewState()).round.id, vote: state === "passed" ? "approve" : "request_changes", comment: "Fixture decision" });
     }
     assert.equal((await f.reviewState()).review.status, state);
     const sync = await f.call("run", "review", "wait", "--review", f.reviewId);
@@ -383,10 +385,10 @@ for (const state of ["passed", "awaiting_revision"] as const) {
 
 test("native report refuses another session binding until the caller explicitly enters its target", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t);
-  const a = JSON.parse((await f.call("run", "start", "--name", "First free Run", "--output", "json")).stdout);
-  await f.call("run", "start", "--name", "Second free Run", "--output", "json");
   const { openContextControl } = await import("../src/project/context-control.js");
   const service = (await openContextControl(f.root))!;
+  // The fixture session is already bound to a different (graph) Run.
+  const a = await service.start("Report target");
   const before = await service.snapshot(a.id);
   await assert.rejects(f.call("run", "report", "--run", a.id, "--name", "Candidate", "--artifact", "must not be written", "--output", "json"), /SESSION_CONTEXT_CONFLICT/);
   assert.deepEqual(await service.snapshot(a.id), before);
@@ -397,9 +399,11 @@ test("native report refuses another session binding until the caller explicitly 
 
 test("daemon control refuses unauthorized stop requests without changing its instance", { timeout: 30000 }, async t => {
   const f = await businessFixture(t, {});
-  const call = (...args: string[]) => exec(process.execPath, [cli, ...args], { env: { ...process.env, MEMSPHERE_HOME: f.home } });
-  f.beforeCleanup(async () => { await call("daemon", "stop"); });
-  const started = JSON.parse((await call("daemon", "start")).stdout);
+  const { stopDaemon, daemonStatus } = await import("../src/daemon/service.js");
+  f.beforeCleanup(async () => { await stopDaemon(f.home); });
+  // Launch through the real entrypoint: ensureDaemon captures its caller's CLI.
+  const started = JSON.parse((await exec(process.execPath, [cli, "daemon", "start"],
+    { env: { ...process.env, MEMSPHERE_HOME: f.home } })).stdout);
   const state = JSON.parse(await readFile(join(f.home, ".runtime", "daemon.json"), "utf8"));
   const { createConnection } = await import("node:net");
   for (const invalid of [{ protocol: 2, token: state.token }, { protocol: 1, token: "0".repeat(state.token.length) }]) {
@@ -418,7 +422,7 @@ test("daemon control refuses unauthorized stop requests without changing its ins
       });
     });
     assert.match(response.error!, /protocol\/authentication mismatch/);
-    const after = JSON.parse((await call("daemon", "status")).stdout);
+    const after = await daemonStatus(f.home);
     assert.equal(after.running, true); assert.equal(after.instanceId, started.instanceId);
   }
 });
@@ -505,12 +509,15 @@ test("terminal task write conflict suspends scheduling, exposes diagnostics and 
   const f = await reviewFixture(t, "cas-conflict");
   await f.call("continue", "review", "wait");
   await f.voteHuman("approve");
+  const { daemonStatus } = await import("../src/daemon/service.js");
   let status: any;
   for (let i = 0; i < 100; i++) {
-    status = JSON.parse((await f.call("daemon", "status")).stdout);
+    status = await daemonStatus(f.home);
     if (status.taskErrors.some((e: { error: string }) => e.error.includes("TASK_STATE_WRITE_FAILED"))) break;
     await new Promise(resolve => setTimeout(resolve, 50));
   }
+  // Assert the CLI diagnostic once; repeated observation uses the control API.
+  status = JSON.parse((await f.call("daemon", "status")).stdout);
   assert.match(status.taskErrors[0]?.error ?? "", /TASK_STATE_WRITE_FAILED/);
   assert.equal(status.tasks.running, 1);
   const { listTasks, registerTask } = await import("../src/daemon/tasks.js");
