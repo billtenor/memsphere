@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -64,6 +64,12 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
     assert.equal(assignment.actorKind, "agent");
     assert.equal(assignment.status, "queued");
 
+    let callerDirectory = dirname(configPath);
+    if (process.platform !== "win32") {
+      const alias = join(callerDirectory, "caller-alias");
+      await symlink(callerDirectory, alias, "dir");
+      callerDirectory = alias;
+    }
     let attemptDirectory: string | undefined;
     await runArtifactReviewAgentWorker({
       config: configPath,
@@ -72,7 +78,7 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
       assignment: artifactReviewAssignmentId(assignment),
       nodeExecutable: process.execPath,
       cliEntrypoint: fakeCli,
-      workspaceRoot: dirname(configPath),
+      workspaceRoot: callerDirectory,
       providerResolver: () => ({ id: "traex", buildLaunch(input) {
         attemptDirectory = input.workspaceRoot;
         return fakeAgentReviewProvider.buildLaunch(input);
@@ -1074,6 +1080,7 @@ test("Reviewer Attempts use fresh caller-local temporary directories, including 
       await mkdir(actualCaller);
       await symlink(actualCaller, nestedCaller, "dir");
     }
+    const expectedParent = await realpath(nestedCaller);
     const directories: string[] = [];
     try {
       for (let index = 0; index < 2; index++) {
@@ -1087,7 +1094,7 @@ test("Reviewer Attempts use fresh caller-local temporary directories, including 
           cliEntrypoint: fakeCli, workspaceRoot: nestedCaller,
           providerResolver: () => ({ id: "traex", buildLaunch(input) {
             directories.push(input.workspaceRoot);
-            assert.equal(dirname(input.workspaceRoot), join(nestedCaller, "tmp"));
+            assert.equal(dirname(input.workspaceRoot), join(expectedParent, "tmp"));
             for (const name of ["TMPDIR", "TMP", "TEMP"]) assert.equal(input.sessionEnv[name], input.workspaceRoot);
             return fakeAgentReviewProvider.buildLaunch(input);
           } })

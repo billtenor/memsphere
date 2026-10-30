@@ -1,5 +1,5 @@
 import { delimiter, join, resolve } from "node:path";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
 import {
@@ -72,7 +72,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     const temporaryRoot = join(callerDirectory, "tmp");
     await mkdir(temporaryRoot, { recursive: true });
     attemptDirectory = await mkdtemp(join(temporaryRoot, "memsphere-review-"));
-    workspaceRoot = attemptDirectory;
+    workspaceRoot = await realpath(attemptDirectory);
     activity.recordLifecycle("workspace", `Attempt working directory: ${workspaceRoot}`);
     await assertWindowsPrerequisites();
     const actor = claimed.run.controlPlane?.actors[actorId];
