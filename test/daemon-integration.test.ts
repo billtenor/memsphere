@@ -119,9 +119,12 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   const snapshot = await service.snapshot(started.runId);
   const step = snapshot.steps.find(s => s.reviewRounds?.length)!;
   const reviewId = `graph-review-${started.runId}__${step.id}`;
-  const reviewState = () => readArtifactReviewForRunner({ runsRoot: join(f.root, "runs"), reviewId });
+  // Reuse this fixture's opened model service. Each query still reads current
+  // records; reopening and revalidating all model bindings is not under test.
+  const reviewInput = { runsRoot: join(f.root, "runs"), reviewId, service };
+  const reviewState = () => readArtifactReviewForRunner(reviewInput);
   const api = await import("../src/context_control/review-repository.js");
-  const agentInput = { runsRoot: join(f.root, "runs"), reviewId, roundId: (await reviewState()).round.id, actorId: "agent" };
+  const agentInput = { ...reviewInput, roundId: (await reviewState()).round.id, actorId: "agent" };
   if (includeAgent && !realReviewer) {
     // Most cases test wait/queue behavior, not ACP dispatch. Keep a controlled
     // pending assignment instead of repeating an entire Reviewer/tool process.
@@ -141,7 +144,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
     const current = await reviewState();
     if (allowManual && current.round.assignments.find(a => a.actorId === "agent")!.status === "queued") {
       const api = await import("../src/context_control/review-repository.js");
-      const input = { runsRoot: join(f.root, "runs"), reviewId, roundId: current.round.id, actorId: "agent" };
+      const input = { ...reviewInput, roundId: current.round.id, actorId: "agent" };
       const claimed = await api.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid });
       if (claimed) {
         const attempt = { ...input, attemptId: claimed.attempt.id };
@@ -161,7 +164,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
     if (complete) await completeAgent(true);
     const { submitArtifactReviewHumanAssignmentForRunner } = await import("../src/context_control/review-repository.js");
     const current = await reviewState();
-    return submitArtifactReviewHumanAssignmentForRunner({ runsRoot: join(f.root, "runs"), runId: started.runId, reviewId,
+    return submitArtifactReviewHumanAssignmentForRunner({ ...reviewInput, runId: started.runId,
       roundId: current.round.id, assignmentId: "human", vote,
       comments: vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }],
       authorizationNote: "Isolated fixture vote" });
