@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import test from "node:test";
+import test, { beforeEach, describe, type TestContext } from "node:test";
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 import { withNativeFileLock } from "../src/file-lock.js";
@@ -10,10 +10,20 @@ import { withContextControlViewRead } from "../src/project/context-control-acces
 import { commitModelOperation, withModelMaintenance } from "../src/project/model-operation.js";
 import { textContent } from "../src/context_control/types.js";
 
+describe("View reads with initialized model Stores", () => {
+  type Fixture = Awaited<ReturnType<typeof businessFixture>> & { service: NonNullable<Awaited<ReturnType<typeof openContextControl>>> };
+  const fixtures = new Map<string, Fixture>();
+  beforeEach(async t => {
+    const f = await businessFixture(t, {});
+    fixtures.set(t.name, { ...f, service: (await openContextControl(f.root, true))! });
+    t.after(() => { fixtures.delete(t.name); });
+  });
+  function preparedFixture(t: TestContext) { return fixtures.get(t.name)!; }
+
 // Holding the former settings lock must not block reads. No elapsed-time
 // performance threshold: the read must finish while the lock is still owned.
 test("View identity and frozen content do not wait for unrelated settings access", async t => {
-  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const f = preparedFixture(t), service = f.service;
   const run = await service.start("View"), result = await service.report(run.id, { name: "A", content: textContent("Body") });
   await mkdir(join(f.root, ".runtime"), { recursive: true });
   await withNativeFileLock(join(f.root, ".runtime/settings.lock"), async () => {
@@ -32,7 +42,7 @@ test("View identity and frozen content do not wait for unrelated settings access
 });
 
 test("View and artifact reads bypass a held Run lock without repairing an incomplete draft", { timeout: 5000 }, async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  const { root, service } = preparedFixture(t);
   const run = await service.start("View Run lock");
   const result = await service.report(run.id, { name: "body", content: textContent("frozen") });
   const store = service.stores.step, create = store.create.bind(store);
@@ -59,6 +69,7 @@ test("View and artifact reads bypass a held Run lock without repairing an incomp
   await service.snapshot(run.id);
   assert.ok(await store.get({}, missingKey));
   await assert.rejects(service.readArtifact(run.id, unfinishedArtifact), { code: "INCOMPLETE_ARTIFACT" });
+});
 });
 
 test("View discards a result when a model publication overlaps its read", async t => {

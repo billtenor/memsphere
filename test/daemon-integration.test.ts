@@ -7,6 +7,10 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { businessFixture } from "./helpers/business-data.js";
+import { openContextControl } from "../src/project/context-control.js";
+import { readProjectConfig } from "../src/config.js";
+import { openCommandStates } from "../src/home/command-state-store.js";
+import type { GraphProcedureMemory } from "../src/memory/ast.js";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
 const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`;
@@ -66,16 +70,35 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents, acp_providers: providers }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
-  f.beforeCleanup(async () => { await completeAgent(true).catch(() => undefined); await call("daemon", "stop"); });
-  const procedure = join(f.directory, "graph.yaml");
-  await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [async-test]\ndefines: [Async test]\nmode: graph\nactions:\n  - !action\n    id: work\n    description: Produce\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Candidate\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n      review: [approval]\n`);
-  const bindings = join(f.directory, "bindings.json");
-  await writeFile(bindings, JSON.stringify({ reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } }, slots: { "async-test::approval": { actors: includeAgent ? ["human", "agent"] : ["human"] } } }));
-  const started = JSON.parse((await call("run", "start", "--file", procedure, "--name", "Async", "--review-config", bindings, "--output", "json")).stdout);
-  await call("continue", "report", "--artifact", "candidate");
-  const { openContextControl } = await import("../src/project/context-control.js");
+  f.beforeCleanup(async () => {
+    await completeAgent(true).catch(() => undefined);
+    const { stopDaemon } = await import("../src/daemon/service.js");
+    await stopDaemon(f.home);
+  });
   const { readArtifactReviewForRunner } = await import("../src/context_control/review-repository.js");
-  const snapshot = await (await openContextControl(f.root))!.snapshot(started.runId);
+  // Run creation, candidate production and session binding are preconditions,
+  // not the CLI boundary under test. Construct them through domain APIs/Stores.
+  const config = await readProjectConfig("test-project", f.home);
+  const service = (await openContextControl(f.root, true))!;
+  const procedure: GraphProcedureMemory = {
+    tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
+    actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
+      artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
+  };
+  const initial = await service.withGraph(g => g.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
+    reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
+      slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } }));
+  const started = { runId: initial.run.id };
+  const work = initial.steps[0];
+  await service.withGraph(async graph => {
+    await graph.enter(started.runId, work.id);
+    await graph.report(started.runId, work.id, { text: "candidate" });
+  });
+  await (await openCommandStates(true, f.home))!.create({}, "codex-origin-session", {
+    id: "codex-origin-session", agentType: "codex", sessionId: "origin-session", updatedAt: new Date().toISOString(),
+    commandGroup: "run", groupId: started.runId, status: "active", parameters: { project: "test-project", step: work.id }, state: { reads: {} }
+  });
+  const snapshot = await service.snapshot(started.runId);
   const step = snapshot.steps.find(s => s.reviewRounds?.length)!;
   const reviewId = `graph-review-${started.runId}__${step.id}`;
   const reviewState = () => readArtifactReviewForRunner({ runsRoot: join(f.root, "runs"), reviewId });
@@ -103,15 +126,18 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   };
   const voteHuman = async (vote: "approve" | "request_changes", complete = true) => {
     if (complete) await completeAgent(true);
-    const comments = join(f.directory, "human-comments.json");
-    await writeFile(comments, JSON.stringify(vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }]));
-    return call("continue", "review", "submit-for-human", "--assignment", "human", "--vote", vote, "--comments-file", comments, "--authorization-note", "Isolated fixture vote");
+    const { submitArtifactReviewHumanAssignmentForRunner } = await import("../src/context_control/review-repository.js");
+    const current = await reviewState();
+    return submitArtifactReviewHumanAssignmentForRunner({ runsRoot: join(f.root, "runs"), runId: started.runId, reviewId,
+      roundId: current.round.id, assignmentId: "human", vote,
+      comments: vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }],
+      authorizationNote: "Isolated fixture vote" });
   };
   const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } }, acp_providers: providers }));
   return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync, completeAgent };
 }
 
-test("asynchronous review wait returns immediately and sends only a continuation command to its original session", { timeout: 90000 }, async t => {
+test("repeated asynchronous review wait reuses one task and sends a continuation to its original session", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t);
   const { call, queue, started } = f;
   const wait = await call("continue", "review", "wait");
@@ -133,7 +159,7 @@ test("asynchronous review wait returns immediately and sends only a continuation
   assert.doesNotMatch(ready.stdout, /已登记/);
   assert.doesNotMatch(sent[4], /approve|投票|状态|Reviewer/);
   assert.ok(started.runId);
-  const { listTasks, updateTask } = await import("../src/daemon/tasks.js");
+  const { listTasks } = await import("../src/daemon/tasks.js");
   let rows = await listTasks(f.home);
   for (let i = 0; i < 100 && rows[0].value.status !== "completed"; i++) {
     await new Promise(resolve => setTimeout(resolve, 25)); rows = await listTasks(f.home);
@@ -141,6 +167,15 @@ test("asynchronous review wait returns immediately and sends only a continuation
   const task = rows[0];
   const status = JSON.parse((await call("run", "review", "wait", "status", "--review", task.value.input.reviewId)).stdout);
   assert.equal(status[0].status, "completed");
+});
+
+test("explicit retry delivers the same continuation to the original session", { timeout: 90000 }, async t => {
+  const f = await reviewFixture(t);
+  const { call, queue } = f;
+  await call("continue", "review", "wait");
+  await f.completeAgent();
+  const task = await waitForTaskStatus(f.home, "completed");
+  const { updateTask } = await import("../src/daemon/tasks.js");
   await updateTask(task, { status: "failed", error: { stage: "send", code: "fixture", message: "Explicit retry fixture" } }, f.home);
   await rm(queue);
   const retry = await call("run", "review", "wait", "retry", "--review", task.value.input.reviewId, "--round", task.value.input.roundId);
@@ -239,16 +274,17 @@ test("a Runner without artifact.read cannot reach asynchronous review registrati
   assert.equal((await daemonStatus(f.home)).running, false);
 });
 
-async function waitForTaskStatus(home: string, status: string) {
+async function waitForTaskStatus(home: string, status: string, id?: string) {
   const { listTasks } = await import("../src/daemon/tasks.js");
   const deadline = Date.now() + 20000;
   let rows = await listTasks(home);
   while (Date.now() < deadline) {
-    if (rows[0]?.value.status === status) return rows[0];
+    const row = id ? rows.find(row => row.id === id) : rows[0];
+    if (row?.value.status === status) return row;
     await new Promise(resolve => setTimeout(resolve, 25));
     rows = await listTasks(home);
   }
-  assert.fail(`Expected task ${status}; observed ${rows[0]?.value.status ?? "missing"}`);
+  assert.fail(`Expected task ${id ?? "first"} ${status}; observed ${JSON.stringify(rows.map(row => ({ id: row.id, status: row.value.status })))}`);
 }
 
 test("daemon notification for a requested revision contains only the continuation command", { timeout: 90000 }, async t => {
@@ -371,7 +407,11 @@ test("pending wait uses synchronous execution when the caller configuration disa
   const { daemonStatus } = await import("../src/daemon/service.js");
   let finished = false;
   const waiting = f.call("continue", "review", "wait").then(result => { finished = true; return result; });
-  await new Promise(resolve => setTimeout(resolve, 500));
+  const deadline = Date.now() + 20000;
+  while (!(await f.reviewState()).round.assignments.find(a => a.actorId === "agent")!.attempts?.at(-1)?.sessionId) {
+    assert.ok(Date.now() < deadline, "synchronous wait must start its gated Reviewer session");
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
   assert.equal(finished, false);
   assert.deepEqual(await listTasks(f.home), []);
   assert.equal((await daemonStatus(f.home)).running, false);
@@ -441,12 +481,17 @@ test("terminal task write conflict suspends scheduling, exposes diagnostics and 
   }
   assert.match(status.taskErrors[0]?.error ?? "", /TASK_STATE_WRITE_FAILED/);
   assert.equal(status.tasks.running, 1);
-  await new Promise(resolve => setTimeout(resolve, 2200));
+  const { listTasks, registerTask } = await import("../src/daemon/tasks.js");
+  const original = (await listTasks(f.home))[0];
+  // A disabled-recipient marker reaches cancelled only after another scheduling
+  // pass. Observe that progress rather than guessing how many ticks fit in 2.2s.
+  const marker = await registerTask({ input: original.value.input,
+    recipient: { agentType: "traex", sessionId: "tick-marker", agentCommand: "unused" } }, f.home);
+  await waitForTaskStatus(f.home, "cancelled", marker.id);
   const attempts = () => readFile(f.queueLog, "utf8").then(s => s.trim().split("\n"));
   assert.equal((await attempts()).length, 1, "subsequent ticks must not resend after a terminal write conflict");
   await f.call("daemon", "restart");
-  const { listTasks } = await import("../src/daemon/tasks.js");
-  const [row] = await listTasks(f.home);
+  const row = (await listTasks(f.home)).find(row => row.id === original.id)!;
   assert.equal(row.value.status, "failed");
   assert.equal(row.value.error?.code, "execution_interrupted");
   assert.equal(row.value.error?.stage, "recovery");

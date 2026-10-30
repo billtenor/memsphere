@@ -23,6 +23,14 @@ Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集
 
 Runner 交付后，系统升级和历史通用流程升级两个重测试改由已有的升级分组执行，不再落入 Run/Data/SDK 的默认兜底分类。Linux Projects & Memory、macOS完整Memory组和Windows完整升级组接收它们；默认原生保护集合保持原范围，在已有Reviewer平台文件中补充Windows queue包装脚本验证。所有文件仍完整执行，未增加job或并发，也未放宽5分钟预算。
 
+### daemon 测试职责审计
+
+按 `memsphere-repository-testing-rules`，非被测前置状态应优先用 Store/API 构造。daemon 通知测试原先逐例通过 CLI 创建 graph Run、上报候选、准备 Human 票，重复演练了非被测流程；现通过 Graph API、CommandState Store 和 Review API 准备这些状态。真实 CLI wait、身份拒绝、并发登记、显式重试与真实 daemon/queue 子进程继续执行，通知内容、目标会话、幂等和失败结果断言保持。Run start/report/Continue 绑定的真实 CLI 保护由 `procedure-graph-cli.test.ts` 保留，未以手写夹具取代该边界的专门测试。
+
+首次通知与显式重试拆为各自的契约测试。同步等待不再睡眠500毫秒后猜测进程是否已进入等待，而是等待受控 Reviewer 建立 session；不确定投递后的禁止重发测试不再睡眠2.2秒猜测 daemon 已再次扫描，而是登记禁用接收方标记任务并等待其取消，证明后续调度已发生。状态等待均有界，既有用例超时不放宽。浏览器滚动测试使用 locator trial click 重新定位重渲染后的按钮，保留页面与弹窗滚动隔离断言。
+
+Run 锁与 View 读取测试的模型、Store 和服务初始化移至 `beforeEach` 夹具阶段，各用例继续拥有独立目录与服务；业务操作仍在原5秒/10秒等超时内验证。初始化不是锁绕过契约，不应消耗其测试主体时限。真实文件锁占用、跨服务 CAS 竞争、失败注入和恢复断言保留，不改为共享可变 Store，也不放宽CI job预算。
+
 ## 合入 master / 发布前完整检查
 
 每次合入master（push master）自动运行full，不再配置每日schedule。GitHub Actions的CI工作流支持手动选择ref和profile（default/full，手动默认full）：
