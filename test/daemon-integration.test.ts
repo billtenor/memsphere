@@ -170,13 +170,11 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync, completeAgent };
 }
 
-test("repeated asynchronous review wait reuses one task and sends a continuation to its original session", { timeout: 90000 }, async t => {
+test("asynchronous review wait dispatches ACP and notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t, "success", true, true);
   const { call, queue, started } = f;
   const wait = await call("continue", "review", "wait");
   assert.match(wait.stdout, /已登记异步等待/);
-  const again = await call("continue", "review", "wait");
-  assert.equal(/task-[a-f0-9-]+/.exec(wait.stdout)![0], /task-[a-f0-9-]+/.exec(again.stdout)![0]);
   await f.completeAgent();
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
   assert.ok((await f.reviewState()).round.assignments.find(a => a.actorId === "agent")!.attempts?.at(-1)?.sessionId);
@@ -185,21 +183,14 @@ test("repeated asynchronous review wait reuses one task and sends a continuation
   assert.ok(sent, "daemon should deliver the review result");
   assert.equal(sent[0], "queue"); assert.equal(sent[2], "origin-session");
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
-  const sync = await call("continue", "review", "wait");
   assert.equal(sent[4], notification(f.reviewId));
-  assert.ok(sync.stdout.includes(f.reviewId));
-  const ready = await call("continue", "review", "wait");
-  assert.doesNotMatch(ready.stdout, /已登记/);
   assert.doesNotMatch(sent[4], /approve|投票|状态|Reviewer/);
   assert.ok(started.runId);
-  const { listTasks } = await import("../src/daemon/tasks.js");
-  let rows = await listTasks(f.home);
-  for (let i = 0; i < 100 && rows[0].value.status !== "completed"; i++) {
-    await new Promise(resolve => setTimeout(resolve, 25)); rows = await listTasks(f.home);
-  }
-  const task = rows[0];
-  const status = JSON.parse((await call("run", "review", "wait", "status", "--review", task.value.input.reviewId)).stdout);
-  assert.equal(status[0].status, "completed");
+  await waitForTaskStatus(f.home, "completed");
+  const ready = await call("continue", "review", "wait");
+  assert.ok(ready.stdout.includes(f.reviewId));
+  assert.doesNotMatch(ready.stdout, /已登记/);
+  assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
 });
 
 test("explicit retry delivers the same continuation to the original session", { timeout: 90000 }, async t => {
@@ -469,8 +460,11 @@ for (const async of [false, true]) test(`Human-only wait returns immediately wit
 test("a completed historical wait does not block a fresh pending wait in the same round", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t);
   const { listTasks, updateTask } = await import("../src/daemon/tasks.js");
-  await f.call("continue", "review", "wait");
-  await f.call("daemon", "stop");
+  const first = await f.call("continue", "review", "wait");
+  const repeated = await f.call("continue", "review", "wait");
+  assert.equal(/task-[a-f0-9-]+/.exec(first.stdout)![0], /task-[a-f0-9-]+/.exec(repeated.stdout)![0]);
+  const { stopDaemon } = await import("../src/daemon/service.js");
+  await stopDaemon(f.home);
   const previous = (await listTasks(f.home))[0];
   await updateTask(previous, { status: "completed", daemonInstanceId: undefined }, f.home);
   const outputs = await Promise.all([f.call("continue", "review", "wait"), f.call("continue", "review", "wait")]);
@@ -485,8 +479,13 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   while (Date.now() < deadline && (await listTasks(f.home)).some(r => r.value.status !== "completed")) await new Promise(resolve => setTimeout(resolve, 25));
   assert.ok((await listTasks(f.home)).every(r => r.value.status === "completed"));
   assert.equal((await readFile(f.queueLog, "utf8")).trim().split("\n").length, 1);
-  assert.doesNotMatch((await f.call("continue", "review", "wait")).stdout, /已登记/);
+  const ready = await f.call("continue", "review", "wait");
+  assert.doesNotMatch(ready.stdout, /已登记/);
+  assert.ok(ready.stdout.includes(f.reviewId));
   assert.equal((await listTasks(f.home)).length, 2);
+  const status = JSON.parse((await f.call("run", "review", "wait", "status", "--review", f.reviewId)).stdout);
+  assert.equal(status.length, 2);
+  assert.ok(status.every((task: { status: string }) => task.status === "completed"));
 });
 
 

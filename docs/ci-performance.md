@@ -27,7 +27,7 @@ Runner 交付后，系统升级和历史通用流程升级两个重测试改由�
 
 按 `memsphere-repository-testing-rules`，非被测前置状态应优先用 Store/API 构造。daemon 通知测试原先逐例通过 CLI 创建 graph Run、上报候选、准备 Human 票，重复演练了非被测流程；现通过 Graph API、CommandState Store 和 Review API 准备这些状态。真实 CLI wait、身份拒绝、并发登记、显式重试与真实 daemon/queue 子进程继续执行，通知内容、目标会话、幂等和失败结果断言保持。Run start/report/Continue 绑定的真实 CLI 保护由 `procedure-graph-cli.test.ts` 保留，未以手写夹具取代该边界的专门测试。
 
-通知内容、失败可查询、重试、历史任务及写冲突用例通过 Review API 准备受控待提交 Agent，不再为每份前置票重复运行 ACP Reviewer 及其工具进程。异步重复 wait 和同步 pending wait 两例仍执行真实 ACP 调度与受控 Reviewer 工具链；它们验证调度边界，其余用例继续验证真实 CLI、daemon 和 queue 边界。没有用模块测试替代这些真实边界。
+通知内容、失败可查询、重试、历史任务及写冲突用例通过 Review API 准备受控待提交 Agent，不再为每份前置票重复运行 ACP Reviewer 及其工具进程。异步通知和同步 pending wait 两例仍执行真实 ACP 调度与受控 Reviewer 工具链；它们验证调度边界，其余用例继续验证真实 CLI、daemon 和 queue 边界。没有用模块测试替代这些真实边界。异步真实 ACP 用例只保留调度、通知及 Human 待提交时可继续读取的链路；重复登记与任务状态查询归入已有的受控历史任务用例，避免单个90秒用例串行演练无关CLI契约。原断言保留，测试与CI超时不增加。
 
 各平台清理都必须观察夹具自身的 daemon/Reviewer PID 已退出：业务提交完成或 daemon 状态文件删除都可能早于进程完全退出，进程可能继续写活动记录，Windows 还会保留 cwd。清理通过有界的存活检查等待这些 PID 退出，再删除目录；Linux 已退出但待回收的僵尸进程不再持有文件资源。不使用固定睡眠或忽略 `EBUSY`/`ENOTEMPTY`。受控 Reviewer 使用测试进程 PID，清理不把测试自身列为待退出子进程。
 
