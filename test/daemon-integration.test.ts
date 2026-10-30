@@ -53,7 +53,7 @@ async function writeTestCommand(command: string, source: string) {
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" | "cas-conflict" = "success", includeAgent = true) {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" | "cas-conflict" = "success", includeAgent = true, realReviewer = false) {
   const f = await businessFixture(t, {});
   const bin = join(f.directory, "bin"); await mkdir(bin);
   const gate = join(f.directory, "review-gate");
@@ -102,8 +102,23 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   const step = snapshot.steps.find(s => s.reviewRounds?.length)!;
   const reviewId = `graph-review-${started.runId}__${step.id}`;
   const reviewState = () => readArtifactReviewForRunner({ runsRoot: join(f.root, "runs"), reviewId });
+  const api = await import("../src/context_control/review-repository.js");
+  const agentInput = { runsRoot: join(f.root, "runs"), reviewId, roundId: (await reviewState()).round.id, actorId: "agent" };
+  if (includeAgent && !realReviewer) {
+    // Most cases test wait/queue behavior, not ACP dispatch. Keep a controlled
+    // pending assignment instead of repeating an entire Reviewer/tool process.
+    const claimed = await api.claimArtifactReviewAgentAssignment({ ...agentInput, workerPid: process.pid });
+    assert.ok(claimed);
+    await api.markArtifactReviewAgentCliReady({ ...agentInput, attemptId: claimed.attempt.id });
+  }
   const completeAgent = async (allowManual = false) => {
     if (!includeAgent) return;
+    if (!realReviewer) {
+      const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
+      if (assignment.status !== "submitted") await api.submitArtifactReviewAgentAssignment({ ...agentInput,
+        attemptId: assignment.attempts!.at(-1)!.id, vote: "approve" });
+      return;
+    }
     await writeFile(gate, "ready");
     const current = await reviewState();
     if (allowManual && current.round.assignments.find(a => a.actorId === "agent")!.status === "queued") {
@@ -138,7 +153,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
 }
 
 test("repeated asynchronous review wait reuses one task and sends a continuation to its original session", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { call, queue, started } = f;
   const wait = await call("continue", "review", "wait");
   assert.match(wait.stdout, /已登记异步等待/);
@@ -401,7 +416,7 @@ test("daemon control refuses unauthorized stop requests without changing its ins
 
 
 test("pending wait uses synchronous execution when the caller configuration disables async", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   await f.setAsync(false);
   const { listTasks } = await import("../src/daemon/tasks.js");
   const { daemonStatus } = await import("../src/daemon/service.js");
