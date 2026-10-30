@@ -688,7 +688,9 @@ test("completed Artifact Review isolates dialog scrolling without mutating Host 
         button?.scrollIntoView({ block: "center" });
       });
       const reviewButton = page.locator(".task-result").getByRole("button", { name: "产物评审", exact: true });
-      await reviewButton.scrollIntoViewIfNeeded();
+      // Status polling may replace the button while scrolling; a trial click
+      // retries locator resolution without opening the dialog before measurement.
+      await reviewButton.click({ trial: true });
       await waitForAnimationFrames(page, 2);
       const beforeOpen = await reviewButton.evaluate((button) => ({
         scrollY: document.querySelector<HTMLElement>("#memsphere-view-root")?.scrollTop ?? 0,
