@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { access } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 
 const mode = process.argv[2] || "approve";
 const sessions = new Set();
@@ -21,7 +22,7 @@ const app = acp
   })
   .onRequest(acp.methods.agent.session.new, ({ params }) => {
     if (process.env.MEMSPHERE_WORKSPACE_ROOT) {
-      assert.equal(params.cwd, process.cwd());
+      assert.equal(realpathSync(params.cwd), realpathSync(process.cwd()));
       assert.equal(params.cwd, process.env.MEMSPHERE_WORKSPACE_ROOT);
       for (const name of ["TMPDIR", "TMP", "TEMP"]) assert.equal(process.env[name], params.cwd);
     }

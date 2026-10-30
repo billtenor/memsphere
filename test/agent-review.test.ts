@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1067,7 +1067,13 @@ test("Reviewer Attempts use fresh caller-local temporary directories, including 
   await withAgentReviewFixture("no-submit", async ({ configPath, runsRoot, runId }) => {
     const caller = await mkdtemp(join(tmpdir(), "memsphere-review-caller-"));
     const nestedCaller = join(caller, "nested");
-    await mkdir(nestedCaller);
+    if (process.platform === "win32") {
+      await mkdir(nestedCaller);
+    } else {
+      const actualCaller = join(caller, "actual");
+      await mkdir(actualCaller);
+      await symlink(actualCaller, nestedCaller, "dir");
+    }
     const directories: string[] = [];
     try {
       for (let index = 0; index < 2; index++) {
