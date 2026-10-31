@@ -50,6 +50,17 @@ test("README and System Memory retain product positioning while Skill points to 
   }
 });
 
+test("Concept authors can discover writing rules through its definition and Skill", async () => {
+  const [concept, skill] = await Promise.all([
+    readReserved("concepts/memsphere-concept.yaml"),
+    readFile(join(root, "src", "skills", "memsphere", "SKILL.md"), "utf8")
+  ]);
+  assert.match(concept, /memsphere-concept-writing-rules/);
+  assert.match(skill, /Concept 编写或评审.*memsphere-concept-writing-rules/);
+  const manifest = await readReservedMemoryManifest();
+  assert(manifest.system_memory.install.includes("statements/memsphere-concept-writing-rules.yaml"));
+});
+
 test("all installed System Memory sources match the current Project copies", async () => {
   const manifest = await readReservedMemoryManifest();
   assert(manifest.system_memory.install.includes("concepts/memsphere-personalized-software.yaml"));
@@ -64,9 +75,9 @@ test("all installed System Memory sources match the current Project copies", asy
 });
 
 test("Skill and project delivery memories enforce the Memory ChangeSet gate", async () => {
-  const [skill, framework, development, testing, delivery, agile] = await Promise.all([
+  const [skill, construction, development, testing, delivery, agile] = await Promise.all([
     readFile(join(root, "src", "skills", "memsphere", "SKILL.md"), "utf8"),
-    readReserved("concepts/memsphere-framework.yaml"),
+    readReserved("procedures/memsphere-procedure-construction.yaml"),
     readFile(join(projectMemoryRoot, "statements", "memsphere-repository-development-rules.yaml"), "utf8"),
     readFile(join(projectMemoryRoot, "statements", "memsphere-repository-testing-rules.yaml"), "utf8"),
     readFile(join(projectMemoryRoot, "statements", "memsphere-repository-delivery-rules.yaml"), "utf8"),
@@ -74,7 +85,7 @@ test("Skill and project delivery memories enforce the Memory ChangeSet gate", as
   ]);
 
   assert.match(skill, /评审、提交或交付前/);
-  for (const source of [skill, framework, development, testing, delivery, agile]) {
+  for (const source of [skill, construction, development, testing, delivery, agile]) {
     assert.match(source, /memsphere memory change validate \[change-id\]/);
     assert.match(source, /不能(?:代替|满足)/);
   }

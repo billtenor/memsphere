@@ -133,7 +133,7 @@ memsphere run report --run <id> --artifact-file <local-copy>
 
 ### 编写内容
 
-编写前读取 `memsphere-memory`、对应 `memsphere-concept/statement/procedure/schema` 与 `memsphere-yaml-syntax-rules`。Procedure 编写或评审还需完整读取 `memsphere-procedure-writing-rules`，明确字段职责、规则作用域与语义去重。
+编写前读取 `memsphere-memory`、对应 `memsphere-concept/statement/procedure/schema` 与 `memsphere-yaml-syntax-rules`。Concept 编写或评审还需读取 `memsphere-concept-writing-rules`，以消除理解歧义为内容取舍标准。Procedure 编写或评审还需完整读取 `memsphere-procedure-writing-rules`，明确字段职责、规则作用域与语义去重。
 
 ```yaml
 !concept
