@@ -30,6 +30,7 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     let runner: ReturnType<typeof spawn> | undefined;
     let verified = false;
+    let observed: Awaited<ReturnType<typeof processTable>> | undefined;
     t.after(async () => {
       if (!verified) {
         // A failing regression must reclaim its fixture even if the broken
@@ -37,7 +38,10 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
         const roots = ready.flatMap(fixture => [fixture.wrapper, fixture.worker, fixture.browser, fixture.stubborn])
           .filter((pid): pid is number => pid !== undefined).map(pid => ({ pid }));
         if (runner?.pid) roots.push({ pid: runner.pid });
-        await terminateTestProcesses(new Set(roots), "SIGTERM");
+        const live = new Map((await processTable()).map(row => [row.pid, row.started]));
+        const originals = new Map(observed?.map(row => [row.pid, row.started]));
+        await terminateTestProcesses(new Set(roots.filter(({ pid }) => !observed ||
+          (originals.has(pid) && live.get(pid) === originals.get(pid)))), "SIGTERM");
       }
       server.closeAllConnections(); await new Promise<void>(done => server.close(() => done()));
       await rm(directory, { recursive: true, force: true });
@@ -75,13 +79,18 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     };
     await Promise.race([allReady(), closed.then(() => { throw new Error(`Runner exited before fixture ready: ${output}`); })]);
     const before = await processTable();
+    observed = before;
     const parents = new Map(before.map(row => [row.pid, row.parent]));
     const expected = before.filter(row => {
       let pid = row.pid;
       while (pid && parents.has(pid) && pid !== runner!.pid) pid = parents.get(pid)!;
       return pid === runner!.pid;
-    }).map(row => row.pid);
-    for (const fixture of ready) assert.ok(expected.includes(fixture.browser), "snapshot includes the real detached browser");
+    });
+    for (const fixture of ready) {
+      for (const pid of [fixture.worker, fixture.wrapper, fixture.browser, fixture.stubborn].filter(Boolean)) {
+        assert.ok(expected.some(row => row.pid === pid), `snapshot includes fixture process ${pid}`);
+      }
+    }
     for (const response of barriers) response.end(signal ? "hold" : "finish");
     if (signal) {
       if (process.platform === "win32") runner.send!(signal);
@@ -92,12 +101,12 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     assert.equal(code, signal === "SIGTERM" ? 143 : signal === "SIGINT" ? 130 : 0, output);
     assert.ok(!events.includes("/unexpected"), "cancellation must stop scheduling queued tests");
     if (!signal) assert.equal(events.filter(event => event === "/cleanup").length, count);
-    const live = new Set((await processTable()).filter(row => !row.zombie).map(row => row.pid));
-    for (const pid of expected) assert.ok(!live.has(pid), `runner returned with descendant ${pid} still alive`);
+    const live = new Map((await processTable()).filter(row => !row.zombie).map(row => [row.pid, row]));
+    // Windows can reuse a terminated process's PID before this second snapshot.
+    // Check the recorded process's birth identity, as the runner itself does.
+    for (const original of expected) assert.notEqual(live.get(original.pid)?.started, original.started,
+      `runner returned with descendant ${original.pid} still alive (started ${original.started})`);
     for (const fixture of ready) {
-      for (const pid of [fixture.worker, fixture.wrapper, fixture.browser, fixture.stubborn].filter(Boolean)) {
-        assert.ok(!live.has(pid!), `runner returned with process ${pid} still alive`);
-      }
       await assert.rejects(stat(fixture.home), { code: "ENOENT" });
     }
     const results = JSON.parse(await readFile(join(directory, "results.json"), "utf8"));
