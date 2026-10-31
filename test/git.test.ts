@@ -49,14 +49,3 @@ test("missing Git guidance remains portable outside Windows", () => {
     "Git is required but was not found. Install Git and ensure it is available on PATH."
   );
 });
-
-test("README documents native Windows shells without requiring Git Bash", async () => {
-  const readmeZhCn = await readFile(new URL("../README.md", import.meta.url), "utf8");
-  const readmeEn = await readFile(new URL("../README.en.md", import.meta.url), "utf8");
-
-  assert.match(readmeEn, /Reopen PowerShell, CMD, Git Bash, or another supported shell/);
-  assert.match(readmeEn, /does not require Git Bash/);
-  assert.match(readmeZhCn, /重新打开 PowerShell、CMD 或 Git Bash 等受支持 shell/);
-  assert.match(readmeZhCn, /不要求先进入 Git Bash/);
-  assert.doesNotMatch(readmeZhCn, /在 Git Bash 中使用 Memsphere/);
-});

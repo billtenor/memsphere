@@ -33,3 +33,9 @@ Concept 的目的在于实现概念理解的一致性；原 Memsphere 定义被�
 ChangeSet：change-20261031-142958242z-23a545aa，passed。View 路径：/projects/memsphere/changes/change-20261031-142958242z-23a545aa。
 
 验收原始日志位于 /tmp/concept-target-tests.log、/tmp/concept-typecheck.log 和 /tmp/concept-full-tests.log，不纳入代码提交。实现与相关验证完成，PR 集成及 CI 状态另行检查；自由探索 Run 保持开放。
+
+## 自动化测试清理
+
+按现有测试规范删除以关键词、固定句子、章节数量或引用次数推断语义正确性的测试：产品定位、教程、Skill 路由、文档说明、README 引导，以及安装测试中夹带的正文断言。保留 Memory 解析与安装副本一致性、manifest 校验、Skill 安装与升级、Git 行为、发布元数据及文档中可执行示例的解析与运行验证。
+
+受影响的 product-positioning、reserved-store、skill-command、package-release、git 测试通过。此次不改运行代码，不追加全量回归。私有评测材料保存在 evolution，不纳入本仓库。

@@ -121,16 +121,15 @@ test("bundled memory contains a valid self-bootstrap chain and manifest", async 
 
   const memory = files.find((file) => file.entity.names.includes("memsphere-memory"));
   assert(memory);
-  for (const [conceptName, schemaReference] of [
-    ["memsphere-concept", "schemas/memsphere-concept-schema"],
-    ["memsphere-statement", "schemas/memsphere-statement-schema"],
-    ["memsphere-procedure", "schemas/memsphere-procedure-schema"],
-    ["memsphere-schema", "schemas/memsphere-schema-schema"]
+  for (const conceptName of [
+    "memsphere-concept",
+    "memsphere-statement",
+    "memsphere-procedure",
+    "memsphere-schema"
   ]) {
     const concept = files.find((file) => file.entity.names.includes(conceptName));
     assert(concept?.entity.tag === "!concept");
     assert(concept.entity.defines.every((definition) => typeof definition === "string"));
-    assert(concept.entity.defines.some((definition) => definition.includes(schemaReference.slice("schemas/".length))));
   }
   for (const [entitySchemaName, expectedFields, requiredFields] of [
     ["memsphere-concept-schema", ["syntax", "name", "names", "defines", "extends"], ["syntax", "defines"]],
@@ -183,85 +182,6 @@ test("bundled Market manifest exposes every complete source", async () => {
   for (const kind of ["concepts", "procedures", "schemas", "statements"]) {
     await assert.rejects(access(join(bundledReservedMemoryRoot(), kind)), /ENOENT/);
   }
-});
-
-test("bundled branch-review applies general development and testing rules", async () => {
-  const market = await readBundledMarketMemories();
-  const branchReview = market.find((memory) => (
-    memory.reference === "procedures/generic-code-branch-review-and-remediation"
-  ));
-  assert(branchReview);
-  const source = branchReview.source.toString("utf8");
-  assert.equal(
-    [...source.matchAll(/target: statements\/memsphere-general-development-rules/g)].length,
-    2,
-    "branch review must apply general development rules during review and disposition"
-  );
-  assert.equal(
-    [...source.matchAll(/target: statements\/memsphere-general-testing-rules/g)].length,
-    3,
-    "branch review must apply general testing rules during review, disposition, and remediation"
-  );
-});
-
-test("official agile memories enforce conditional Memory ChangeSet delivery evidence", async () => {
-  const market = await readBundledMarketMemories();
-  for (const reference of [
-    "procedures/generic-agile-requirement-development",
-    "statements/memsphere-general-development-rules",
-    "statements/memsphere-general-testing-rules",
-    "statements/memsphere-general-delivery-rules"
-  ]) {
-    const memory = market.find((item) => item.reference === reference);
-    assert(memory, `missing official Memory: ${reference}`);
-    const source = memory.source.toString("utf8");
-    assert.match(source, /项目使用 Memsphere.*Memory 差异/);
-    assert.match(source, /memsphere memory change validate \[change-id\]/);
-    assert.match(source, /普通 (?:Store 校验|memsphere validate).*不能代替/);
-  }
-
-  const agile = market.find((item) => item.reference === "procedures/generic-agile-requirement-development");
-  assert(agile);
-  const source = agile.source.toString("utf8");
-  for (const signal of ["功能实现摘要", "初始验证报告", "报告必须包含", "commit 前必须重新执行"]) {
-    assert.match(source, new RegExp(signal));
-  }
-});
-
-test("chapter one teaches one bounded first-use journey with Chinese user-facing terms", async () => {
-  const tutorial = await readFile(
-    join(bundledSystemMemoryRoot(), "procedures", "memsphere-tutorial-chapter-01.yaml"),
-    "utf8"
-  );
-  assert.match(tutorial, /提示词、技能、Memsphere/);
-  assert.match(tutorial, /人工参与者真实场景/);
-  assert.match(tutorial, /当前教学流程运行的可视化界面观察指引/);
-  assert.match(tutorial, /可视化界面顶部进入“流程运行”/);
-  assert.match(tutorial, /每一步上报的产物就是运行产物/);
-  assert.doesNotMatch(tutorial, /可视化界面实际展示的“任务”/);
-  assert.doesNotMatch(tutorial, /导入 Reserved Memory|Imported|not imported|了解并导入 Reserved Memory/);
-});
-
-test("View Memory and Skill describe language and maintenance entry points", async () => {
-  const [reservedView, projectView, skill] = await Promise.all([
-    readFile(join(bundledSystemMemoryRoot(), "concepts", "memsphere-view.yaml"), "utf8"),
-    readFile(join(process.cwd(), ".memsphere", "memory", "concepts", "memsphere-view.yaml"), "utf8"),
-    readFile(join(process.cwd(), "src", "skills", "memsphere", "SKILL.md"), "utf8")
-  ]);
-  for (const memory of [reservedView, projectView]) {
-    assert.match(memory, /固定界面文案通过独立语言资源展示/);
-    assert.match(memory, /Memory DSL 字段在中文标签与 YAML 原名之间的展示切换是另一项独立偏好/);
-    assert.match(memory, /修改 View host 或 port 仍需执行 memsphere view restart/);
-  }
-  assert.match(skill, /Home 与当前 Project/);
-  assert.match(skill, /Home 维护语言、View 服务、ACP Provider/);
-  assert.match(skill, /Project 维护 Store、Control Plane、Runner/);
-  assert.match(skill, /scope 审阅 diff 后保存/);
-  assert.match(skill, /project repair/);
-  assert.match(skill, /Embedded 只写当前 worktree 的可审阅差异/);
-  assert.match(skill, /历史路径、canonical identity 与已知原版摘要均匹配/);
-  assert.match(skill, /Mounted Project 只读/);
-  assert.doesNotMatch(skill, /project reinitialize/);
 });
 
 test("manifest rejects unsafe, duplicate, overlapping, and unknown values", () => {
