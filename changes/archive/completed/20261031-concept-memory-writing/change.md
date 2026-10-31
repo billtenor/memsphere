@@ -39,3 +39,7 @@ ChangeSet：change-20261031-142958242z-23a545aa，passed。View 路径：/projec
 按现有测试规范删除以关键词、固定句子、章节数量或引用次数推断语义正确性的测试：产品定位、教程、Skill 路由、文档说明、README 引导，以及安装测试中夹带的正文断言。保留 Memory 解析与安装副本一致性、manifest 校验、Skill 安装与升级、Git 行为、发布元数据及文档中可执行示例的解析与运行验证。
 
 受影响的 product-positioning、reserved-store、skill-command、package-release、git 测试通过。此次不改运行代码，不追加全量回归。私有评测材料保存在 evolution，不纳入本仓库。
+
+## Repair 集成测试 fixture 修复
+
+PR CI 在 Linux、macOS 和 Windows 的同一 repair 测试失败：旧版本 fixture 依赖固定正文替换，Concept 改写后没有准备出旧内容。现改为独立且合法的最小 Concept/Procedure 旧版本输入，保留恢复发行原文、校验发布及幂等行为的断言。本机对应 repair 集成测试通过，跨平台结果由更新后的 PR CI 确认。
