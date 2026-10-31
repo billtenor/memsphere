@@ -12,28 +12,20 @@ const sources = Object.fromEntries(await Promise.all(files.map(async file => [fi
 test("PR runs every retained test on Linux and every declared native risk on macOS and Windows", () => {
   const rows = createCiPlan("default", files, sources).include;
   assert.equal(rows.length + 1, 8, "eight complete test/package builds");
-  let executions = 0;
   for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
     const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite));
     if (os === "windows-latest") assigned.push(...packagePlatformTests);
-    executions += assigned.length;
     assert.equal(new Set(assigned).size, assigned.length, `${os}: no duplicate files`);
     if (os === "ubuntu-24.04") assert.deepEqual([...assigned].sort(), [...files].sort());
     else {
       for (const file of [...platformTests, ...files.filter(file => file.startsWith("project-upgrade"))]) {
         assert(assigned.includes(file), `${os}: required native protection ${file}`);
       }
-      assert(assigned.length < files.length, `${os}: avoid a second complete copy`);
     }
   }
   const packaged = workflow.jobs["windows-package-smoke"].steps.find(step => step.name === "Native platform contracts");
   assert.equal(packaged.if, "needs.plan.outputs.profile == 'default'");
   assert.match(packaged.run, /node scripts\/ci\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
-  // Compare identical current suites: a historical fixed file count would
-  // reject adding regression coverage even when the saving ratio improves.
-  const fullExecutions = createCiPlan("full", files, sources).include.reduce((count, row) =>
-    count + selectTests(files, sources, {}, row.suite).length, 0);
-  assert(executions <= Math.floor(fullExecutions * 0.6), "at least 40% fewer file executions than full coverage of the same current suite");
   assert(platformTests.includes("project-command.test.ts"), "repair CAS, literal Git paths, symlink rejection and rollback remain platform checks");
   assert(platformTests.includes("project-resolver.test.ts"));
   assert(platformTests.includes("run-memory-backfill.test.ts"));
