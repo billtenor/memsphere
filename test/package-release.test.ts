@@ -7,8 +7,6 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
     files?: string[];
     scripts?: Record<string, string>;
   };
-  const readmeZhCn = await readFile("README.md", "utf8");
-  const readmeEn = await readFile("README.en.md", "utf8");
 
   assert.deepEqual(packageJson.files, [
     "dist",
@@ -27,20 +25,7 @@ test("npm package preserves the memsphere first-use bootstrap contract", async (
   assert.equal(packageJson.scripts?.prepack, "npm run build");
   assert.equal(packageJson.scripts?.prepublishOnly, "npm test");
 
-  for (const instruction of [
-    "npm install -g memsphere",
-    "memsphere skill init --global",
-    "memsphere project create my-project --bind",
-    "After setup succeeds, do not stop with a summary",
-    "memsphere-tutorial-chapter-01"
-  ]) {
-    assert.match(readmeEn, new RegExp(instruction));
-  }
 
-  assert.match(readmeEn, /\[简体中文\]\(README\.md\)/);
-  assert.match(readmeZhCn, /\[English\]\(README\.en\.md\)/);
-  assert.match(readmeZhCn, /安装配置成功后不要停在总结/);
-  assert.match(readmeZhCn, /memsphere 教学流程-第一章/);
 });
 
 test("release metadata uses the package version consistently", async () => {

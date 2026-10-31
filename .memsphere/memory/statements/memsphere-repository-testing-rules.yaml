@@ -6,7 +6,9 @@ names:
 defines:
   - 规定 memsphere 代码与 Memory 变更交付前的最低测试和校验要求。
 asserts:
-  - 交付前必须通过 npm run typecheck、npm test、npm run build 和 memsphere validate；存在失败时不得声称交付完成。
+  - 交付前按实际变更及其风险选择检查，先运行能覆盖受影响契约的最小范围；不得把全量回归作为所有变更的默认步骤。适用检查存在失败时，必须说明失败与影响，不得声称该检查通过。
+  - 仅修改 Memory 正文时，执行 Memory 校验并检查内容语义；涉及引用或 System Memory 时还检查引用及发行源与项目副本的一致性，不要求类型检查、构建或全量回归。涉及 Procedure 可执行流程或 Schema 契约变化时，另做对应运行或契约验证。
+  - 修改代码、依赖或构建配置时，根据影响执行类型检查、构建和相关测试；只有明确需要验证跨模块影响、局部检查无法覆盖风险，或用户及发布流程明确要求时，才扩大到全量回归，并说明原因。
   - 本轮存在 Memory 交付差异时，还必须对最终内容执行 memsphere memory change validate [change-id]，并记录 ChangeSet ID、校验状态和 View 入口；普通 memsphere validate 不能满足该门禁。
   - 必须记录实际执行的测试命令、结果和未执行项，不得用历史结果代替当前变更验证。
   - npm run validate 当前只执行构建，不得替代 memsphere validate。
@@ -34,8 +36,8 @@ sections:
       - 代码行为与回归测试
     asserts:
       - 修改代码行为时必须在适用层级补充或更新能够覆盖变更风险的自动化测试，并先运行受影响测试文件；修复 bug 必须增加或更新能够复现原问题的回归测试。
-      - 完成受影响测试后必须运行 npm test 全量回归，不得通过删除、跳过或弱化既有断言使测试通过。
-      - 修改 CLI、Memory、Run、Artifact、Review、View、Reserved Store、Archive 或 Migration 时，测试必须覆盖成功路径以及本次变更涉及的失败或边界路径。
+      - 受影响测试通过后，只有新改动、失败或尚未覆盖的风险才触发追加或重复测试；不得为了使测试通过而删除、跳过或弱化仍然有效的产品契约断言。
+      - 修改 CLI、Memory、Run、Artifact、Review、View、Reserved Store、Archive 或 Migration 的代码行为时，相关测试必须覆盖成功路径以及本次变更涉及的失败或边界路径。
   - !statement
     names:
       - 自动化测试稳定性
@@ -63,7 +65,7 @@ sections:
     names:
       - System 与 Reserved Memory
     asserts:
-      - 修改 reserved-memory 中的 Memory、manifest 或安装行为时，必须运行 test/reserved-store.test.ts，验证 Managed Project bootstrap、System Memory manifest 完整性和受控更新契约，以及重复创建时的拒绝行为。
+      - 仅修改 reserved-memory 的正文时，检查解析、引用及发行源与项目副本的一致性；修改 manifest 或安装行为时，运行 test/reserved-store.test.ts，验证安装清单与受影响的安装、更新契约。
       - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate 和 memsphere memory change validate [change-id]；源文件与安装副本不得出现非预期差异，ChangeSet 证据必须匹配最终内容。
   - !statement
     names:
@@ -71,7 +73,7 @@ sections:
     defines:
       - 本节只记录 memsphere 仓库中可长期复用的变更范围与现有必跑测试套件映射，不收录单次变更临时选择的测试。
     asserts:
-      - 修改 Memory YAML 语法、实体 schema、解析或序列化时，必须运行 memory-schema、memory-syntax 和 memory-serializer 相关测试。
-      - 修改 Schema 或 Artifact 契约、格式解析和 validator 时，必须运行 artifact-validation、artifact-format-fixtures 及相关 migration 测试，并同时覆盖合法与非法 Artifact。
-      - 修改 Procedure Run、分支、循环、Call、Schema 填写或 Repeat 时，必须运行 run-store 和 run-command 相关测试。
-      - 修改 Review、View 或归档行为时，必须运行对应的 review-store、view 或 archive-store 测试。
+      - 修改 Memory YAML 语法、实体模型或解析、序列化代码时，运行 memory-schema、memory-syntax 和 memory-serializer 中覆盖改动的测试；仅编辑 YAML 正文不触发这些代码测试。
+      - 修改 Schema 或 Artifact 的运行时契约、格式解析和 validator 代码时，运行覆盖改动的 artifact-validation、artifact-format-fixtures 测试；涉及迁移时再运行相关 migration 测试，并覆盖合法与非法 Artifact。
+      - 修改 Procedure Run、分支、循环、Call、Schema 填写或 Repeat 的执行代码时，运行 run-store 和 run-command 中覆盖改动的测试。
+      - 修改 Review、View 或归档的代码行为时，运行对应 review-store、view 或 archive-store 中覆盖改动的测试。

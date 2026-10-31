@@ -21,6 +21,7 @@ import {
 import { gitOutput, runGit } from "../src/git.js";
 import { readProjectRegistry } from "../src/project/registry.js";
 import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
+import { currentMemorySyntax } from "../src/memory/syntax.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { readAllMemoryFiles } from "../src/memory/store.js";
 import {
@@ -181,21 +182,30 @@ test("Managed Project System Memory repair validates and publishes automatically
     const legacyTargets = [
       {
         relativePath: join("concepts", "memsphere-framework.yaml"),
-        currentText: "  - Memsphere 是 AI 时代个性化软件的运行环境：它为软件提供相对稳定的语言、运行时和资产管理方式，让软件能够从自然语言开始并在真实使用中持续演化。",
-        legacyText: "  - Memsphere 是维护、检索和遵循 Memory 的框架。"
+        source: `!concept
+syntax: ${currentMemorySyntax}
+names: [memsphere-framework, Memsphere]
+defines:
+  - Legacy framework definition.
+`
       },
       {
         relativePath: join("procedures", "memsphere-tutorial-chapter-01.yaml"),
-        currentText: "  - 面向首次使用 Memsphere 的人工参与者，从一个真实需求出发理解个性化软件、提示词、技能与 Memsphere 的适用边界、完整愿景和当前能力，并在可视化界面的当前教学流程运行中完成一次可观察的入门闭环。",
-        legacyText: "  - 面向首次使用 Memsphere 的人工参与者，介绍四类记忆。"
+        source: `!procedure
+syntax: ${currentMemorySyntax}
+names: [memsphere-tutorial-chapter-01]
+defines:
+  - Legacy tutorial definition.
+flow:
+  - !action
+    action: Explain the legacy tutorial.
+    artifact: !artifact
+      name: Legacy explanation
+`
       }
     ];
-    for (const { relativePath, currentText, legacyText } of legacyTargets) {
-      const path = join(memoryRoot, relativePath);
-      const source = await readFile(path, "utf8");
-      const legacySource = source.replace(currentText, legacyText);
-      assert.notEqual(legacySource, source, `test fixture did not stale ${relativePath}`);
-      await writeFile(path, legacySource);
+    for (const { relativePath, source } of legacyTargets) {
+      await writeFile(join(memoryRoot, relativePath), source);
     }
     await runGit(["add", "-A"], { cwd: memoryRoot });
     await runGit(["commit", "-m", "Simulate Project created before new System Memory"], { cwd: memoryRoot });
