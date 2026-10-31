@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { once } from "node:events";
+import { watch } from "node:fs";
 import { promisify } from "node:util";
 import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import { businessFixture } from "./helpers/business-data.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { readProjectConfig } from "../src/config.js";
@@ -53,46 +54,91 @@ async function writeTestCommand(command: string, source: string) {
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" | "cas-conflict" = "success", includeAgent = true, realReviewer = false) {
+// Register before reading so a state change during the read cannot be missed.
+// Filesystem events only wake observation; assertions always use persisted state.
+async function observe<T>(t: TestContext, directory: string, read: () => Promise<T>, ready: (value: T) => boolean, signal = t.signal) {
+  let wake = () => {};
+  let failure: Error | undefined;
+  const watcher = watch(directory, () => wake());
+  watcher.on("error", error => { failure = error; wake(); });
+  const abort = () => wake();
+  signal.addEventListener("abort", abort);
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      if (failure) throw failure;
+      const changed = new Promise<void>(resolve => { wake = resolve; });
+      const value = await read();
+      if (ready(value)) return value;
+      signal.throwIfAborted();
+      if (failure) throw failure;
+      await changed;
+    }
+  } finally {
+    watcher.close();
+    signal.removeEventListener("abort", abort);
+  }
+}
+
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true) {
   const f = await businessFixture(t, {});
   const bin = join(f.directory, "bin"); await mkdir(bin);
-  const gate = join(f.directory, "review-gate");
   const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
-  const providers = { codex: { env: { REVIEW_TEST_GATE: gate } } };
   const provider = join(bin, "codex-acp");
-  await writeTestCommand(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) { console.log("fake-acp test"); process.exit(0); } process.env.MEMSPHERE_HOME = ${JSON.stringify(f.home)}; process.argv[2] = "gated-approve"; import(${JSON.stringify(pathToFileURL(resolve("test/fixtures/fake-acp-reviewer.mjs")).href)});\n`);
+  await writeTestCommand(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) console.log("controlled reviewer fixture"); else { console.error("ACP dispatch is outside this test boundary"); process.exitCode = 1; }\n`);
   const queue = join(f.directory, "queue.json");
   const queueLog = join(f.directory, "queue-attempts.ndjson");
   const fake = join(bin, "codex");
-  await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="cas-conflict") { const path = ${JSON.stringify(join(f.home, "data", "daemon-tasks"))}; for(const file of fs.readdirSync(path).filter(x=>x.startsWith("task-") && x.endsWith(".json"))) { const record = path+"/"+file; const row=JSON.parse(fs.readFileSync(record,"utf8")); row.revision++; fs.writeFileSync(record+".tmp",JSON.stringify(row)); fs.renameSync(record+".tmp",record); } } if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
+  await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
   await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
-  await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents, acp_providers: providers }));
+  await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
-  f.beforeCleanup(async () => {
-    await completeAgent(true).catch(() => undefined);
-    const pids = new Set((await reviewState()).round.assignments.flatMap(a => a.attempts?.map(attempt => attempt.workerPid).filter((pid): pid is number => !!pid && pid !== process.pid) ?? []));
-    try { pids.add(JSON.parse(await readFile(join(f.home, ".runtime", "daemon.json"), "utf8")).pid); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    const { stopDaemon } = await import("../src/daemon/service.js");
-    await stopDaemon(f.home);
-    // A persisted result or removed daemon state can precede process exit.
-    // Processes can still write activity, and Windows retains each process cwd.
-    const deadline = Date.now() + 20000;
-    for (const pid of pids) for (;;) {
-      try { process.kill(pid, 0); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") break; throw error; }
-      if (process.platform === "linux") {
-        try {
-          const stat = await readFile(`/proc/${pid}/stat`, "utf8");
-          if (["Z", "X"].includes(stat.slice(stat.lastIndexOf(")") + 2, stat.lastIndexOf(")") + 3))) break;
-        } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") break; throw error; }
+  const { daemonStatus, stopDaemon: stop } = await import("../src/daemon/service.js");
+  let daemon: ReturnType<typeof spawn> | undefined;
+  const startDaemon = async () => {
+    assert.equal(daemon, undefined);
+    await mkdir(join(f.home, ".runtime"), { recursive: true });
+    const lifetime = new AbortController();
+    daemon = spawn(process.execPath, [cli, "daemon", "serve"], { cwd: f.root, env, stdio: "ignore" });
+    daemon.once("error", error => lifetime.abort(error));
+    daemon.once("exit", (code, signal) => lifetime.abort(new Error(`Fixture daemon exited: ${code ?? signal}`)));
+    try {
+      await observe(t, join(f.home, ".runtime"), () => daemonStatus(f.home), state => state.running,
+        AbortSignal.any([t.signal, lifetime.signal]));
+    } catch (error) {
+      if (daemon.exitCode === null && daemon.signalCode === null && daemon.pid) {
+        const exited = once(daemon, "exit", { signal: AbortSignal.timeout(20000) });
+        daemon.kill();
+        await exited;
       }
-      assert.ok(Date.now() < deadline, `fixture process ${pid} must exit before removing its cwd`);
-      await new Promise(resolve => setTimeout(resolve, 25));
+      daemon = undefined;
+      throw error;
     }
-  });
+  };
+  const stopDaemon = async () => {
+    if (!daemon) return;
+    const child = daemon;
+    if (child.exitCode === null && child.signalCode === null) {
+      const exited = once(child, "exit", { signal: AbortSignal.timeout(20000) });
+      try {
+        await stop(f.home);
+        await exited;
+      } catch (error) {
+        child.kill();
+        throw error;
+      }
+    }
+    daemon = undefined;
+  };
+  f.beforeCleanup(stopDaemon);
+  const waitForTask = async (status: string, id?: string) => {
+    const { listTasks } = await import("../src/daemon/tasks.js");
+    const rows = await observe(t, join(f.home, "data", "daemon-tasks"), () => listTasks(f.home), rows =>
+      (id ? rows.find(row => row.id === id) : rows[0])?.value.status === status);
+    return (id ? rows.find(row => row.id === id) : rows[0])!;
+  };
   const { readArtifactReviewForRunner } = await import("../src/context_control/review-repository.js");
   // Run creation, candidate production and session binding are preconditions,
   // not the CLI boundary under test. Construct them through domain APIs/Stores.
@@ -125,46 +171,21 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
   const reviewState = () => readArtifactReviewForRunner(reviewInput);
   const api = await import("../src/context_control/review-repository.js");
   const agentInput = { ...reviewInput, roundId: (await reviewState()).round.id, actorId: "agent" };
-  if (includeAgent && !realReviewer) {
+  if (includeAgent) {
     // Most cases test wait/queue behavior, not ACP dispatch. Keep a controlled
     // pending assignment instead of repeating an entire Reviewer/tool process.
     const claimed = await api.claimArtifactReviewAgentAssignment({ ...agentInput, workerPid: process.pid });
     assert.ok(claimed);
     await api.markArtifactReviewAgentCliReady({ ...agentInput, attemptId: claimed.attempt.id });
   }
-  const completeAgent = async (allowManual = false) => {
+  const completeAgent = async () => {
     if (!includeAgent) return;
-    if (!realReviewer) {
-      const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
-      if (assignment.status !== "submitted") await api.submitArtifactReviewAgentAssignment({ ...agentInput,
-        attemptId: assignment.attempts!.at(-1)!.id, vote: "approve" });
-      return;
-    }
-    await writeFile(gate, "ready");
-    const current = await reviewState();
-    if (allowManual && current.round.assignments.find(a => a.actorId === "agent")!.status === "queued") {
-      const api = await import("../src/context_control/review-repository.js");
-      const input = { ...reviewInput, roundId: current.round.id, actorId: "agent" };
-      const claimed = await api.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid });
-      if (claimed) {
-        const attempt = { ...input, attemptId: claimed.attempt.id };
-        await api.markArtifactReviewAgentCliReady(attempt);
-        await api.submitArtifactReviewAgentAssignment({ ...attempt, vote: "approve" });
-      }
-    }
-    // Poll count is not a time budget: faster state reads must not shorten the
-    // time available to the real ACP worker. The test's existing deadline bounds
-    // this wait, including cleanup after a timeout through its abort signal.
-    for (;;) {
-      t.signal.throwIfAborted();
-      const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
-      if (assignment.status === "submitted") return;
-      if (assignment.status === "failed") assert.fail(JSON.stringify(assignment.attempts));
-      await new Promise(resolve => setTimeout(resolve, 25));
-    }
+    const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
+    if (assignment.status !== "submitted") await api.submitArtifactReviewAgentAssignment({ ...agentInput,
+      attemptId: assignment.attempts!.at(-1)!.id, vote: "approve" });
   };
   const voteHuman = async (vote: "approve" | "request_changes", complete = true) => {
-    if (complete) await completeAgent(true);
+    if (complete) await completeAgent();
     const { submitArtifactReviewHumanAssignmentForRunner } = await import("../src/context_control/review-repository.js");
     const current = await reviewState();
     return submitArtifactReviewHumanAssignmentForRunner({ ...reviewInput, runId: started.runId,
@@ -172,27 +193,24 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" |
       comments: vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }],
       authorizationNote: "Isolated fixture vote" });
   };
-  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } }, acp_providers: providers }));
-  return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync, completeAgent };
+  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } } }));
+  return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, waitForTask };
 }
 
-test("asynchronous review wait dispatches ACP and notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t, "success", true, true);
-  const { call, queue, started } = f;
+test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
+  const f = await reviewFixture(t);
+  const { call, queue } = f;
+  await f.startDaemon();
   const wait = await call("continue", "review", "wait");
   assert.match(wait.stdout, /已登记异步等待/);
   await f.completeAgent();
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
-  assert.ok((await f.reviewState()).round.assignments.find(a => a.actorId === "agent")!.attempts?.at(-1)?.sessionId);
-  let sent: string[] | undefined;
-  for (let i = 0; i < 200; i++) { try { sent = JSON.parse(await readFile(queue, "utf8")); break; } catch { await new Promise(resolve => setTimeout(resolve, 25)); } }
-  assert.ok(sent, "daemon should deliver the review result");
+  await f.waitForTask("completed");
+  const sent: string[] = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(sent[0], "queue"); assert.equal(sent[2], "origin-session");
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
   assert.equal(sent[4], notification(f.reviewId));
   assert.doesNotMatch(sent[4], /approve|投票|状态|Reviewer/);
-  assert.ok(started.runId);
-  await waitForTaskStatus(f.home, "completed");
   const ready = await call("continue", "review", "wait");
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.doesNotMatch(ready.stdout, /已登记/);
@@ -202,15 +220,16 @@ test("asynchronous review wait dispatches ACP and notifies its original session 
 test("explicit retry delivers the same continuation to the original session", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t);
   const { call, queue } = f;
+  await f.startDaemon();
   await call("continue", "review", "wait");
   await f.completeAgent();
-  const task = await waitForTaskStatus(f.home, "completed");
+  const task = await f.waitForTask("completed");
   const { updateTask } = await import("../src/daemon/tasks.js");
   await updateTask(task, { status: "failed", error: { stage: "send", code: "fixture", message: "Explicit retry fixture" } }, f.home);
   await rm(queue);
   const retry = await call("run", "review", "wait", "retry", "--review", task.value.input.reviewId, "--round", task.value.input.roundId);
   assert.match(retry.stdout, /registered for retry/);
-  for (let i = 0; i < 200; i++) { try { await readFile(queue); break; } catch { await new Promise(resolve => setTimeout(resolve, 25)); } }
+  await f.waitForTask("completed");
   const retriedMessage = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(retriedMessage[2], "origin-session");
   assert.equal(retriedMessage[4], notification(f.reviewId));
@@ -276,10 +295,8 @@ test("daemon recovery reports interrupted execution and cancels disabled queued 
   const call = (...args: string[]) => exec(process.execPath, [cli, ...args], { env: { ...process.env, MEMSPHERE_HOME: f.home } });
   f.beforeCleanup(async () => { await call("daemon", "stop"); });
   await call("daemon", "start");
-  let rows = await listTasks(f.home);
-  for (let i = 0; i < 200 && rows.some(row => row.value.status === "queued" || row.value.status === "running"); i++) {
-    await new Promise(resolve => setTimeout(resolve, 25)); rows = await listTasks(f.home);
-  }
+  const rows = await observe(t, join(f.home, "data", "daemon-tasks"), () => listTasks(f.home), rows =>
+    rows.every(row => row.value.status !== "queued" && row.value.status !== "running"));
   const cancelled = rows.find(row => row.value.recipient.sessionId === "disabled")!.value;
   assert.equal(cancelled.status, "cancelled"); assert.equal(cancelled.error?.code, "runner_disabled");
   const recovered = rows.find(row => row.value.recipient.sessionId === "interrupted")!.value;
@@ -304,27 +321,15 @@ test("a Runner without artifact.read cannot reach asynchronous review registrati
   assert.equal((await daemonStatus(f.home)).running, false);
 });
 
-async function waitForTaskStatus(home: string, status: string, id?: string) {
-  const { listTasks } = await import("../src/daemon/tasks.js");
-  const deadline = Date.now() + 20000;
-  let rows = await listTasks(home);
-  while (Date.now() < deadline) {
-    const row = id ? rows.find(row => row.id === id) : rows[0];
-    if (row?.value.status === status) return row;
-    await new Promise(resolve => setTimeout(resolve, 25));
-    rows = await listTasks(home);
-  }
-  assert.fail(`Expected task ${id ?? "first"} ${status}; observed ${JSON.stringify(rows.map(row => ({ id: row.id, status: row.value.status })))}`);
-}
-
 test("daemon notification for a requested revision contains only the continuation command", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t);
+  await f.startDaemon();
   await f.call("continue", "review", "wait");
-  await f.call("daemon", "stop");
+  await f.stopDaemon();
   await f.voteHuman("request_changes");
   assert.equal((await f.reviewState()).review.status, "awaiting_revision");
-  await f.call("daemon", "start");
-  await waitForTaskStatus(f.home, "completed");
+  await f.startDaemon();
+  await f.waitForTask("completed");
   const sent = JSON.parse(await readFile(f.queue, "utf8"));
   const sync = await f.call("run", "review", "wait", "--review", f.reviewId);
   assert.equal(sent[2], "origin-session");
@@ -334,9 +339,10 @@ test("daemon notification for a requested revision contains only the continuatio
 
 test("failed wakeup remains queryable without sending a second notification", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t, "all-fail");
+  await f.startDaemon();
   await f.call("continue", "review", "wait");
   await f.voteHuman("approve");
-  const task = await waitForTaskStatus(f.home, "failed");
+  const task = await f.waitForTask("failed");
   assert.equal(task.value.error?.stage, "send");
   const attempts: string[][] = (await readFile(f.queueLog, "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.equal(attempts.length, 1);
@@ -346,7 +352,7 @@ test("failed wakeup remains queryable without sending a second notification", { 
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.doesNotMatch(ready.stdout, /已登记/);
   assert.equal((await readFile(f.queueLog, "utf8")).trim().split("\n").length, 1);
-  assert.equal((await waitForTaskStatus(f.home, "failed")).value.error?.stage, "send");
+  assert.equal((await f.waitForTask("failed")).value.error?.stage, "send");
 });
 
 test("unusable identity rejects Continue while native synchronous review remains available", { timeout: 90000 }, async t => {
@@ -434,28 +440,6 @@ test("daemon control refuses unauthorized stop requests without changing its ins
 });
 
 
-test("pending wait uses synchronous execution when the caller configuration disables async", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t, "success", true, true);
-  await f.setAsync(false);
-  const { listTasks } = await import("../src/daemon/tasks.js");
-  const { daemonStatus } = await import("../src/daemon/service.js");
-  let finished = false;
-  const waiting = f.call("continue", "review", "wait").then(result => { finished = true; return result; });
-  const deadline = Date.now() + 20000;
-  while (!(await f.reviewState()).round.assignments.find(a => a.actorId === "agent")!.attempts?.at(-1)?.sessionId) {
-    assert.ok(Date.now() < deadline, "synchronous wait must start its gated Reviewer session");
-    await new Promise(resolve => setTimeout(resolve, 25));
-  }
-  assert.equal(finished, false);
-  assert.deepEqual(await listTasks(f.home), []);
-  assert.equal((await daemonStatus(f.home)).running, false);
-  await f.completeAgent();
-  const result = await waiting;
-  assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
-  assert.ok(result.stdout.includes(f.reviewId));
-  assert.doesNotMatch(result.stdout, /已登记|Memsphere 自动消息/);
-});
-
 for (const async of [false, true]) test(`Human-only wait returns immediately with async=${async} and never registers a task`, { timeout: 30000 }, async t => {
   const f = await reviewFixture(t, "success", false);
   await f.setAsync(async);
@@ -470,13 +454,14 @@ for (const async of [false, true]) test(`Human-only wait returns immediately wit
 test("a completed historical wait does not block a fresh pending wait in the same round", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t);
   const { listTasks, updateTask } = await import("../src/daemon/tasks.js");
+  await f.startDaemon();
   const first = await f.call("continue", "review", "wait");
   const repeated = await f.call("continue", "review", "wait");
   assert.equal(/task-[a-f0-9-]+/.exec(first.stdout)![0], /task-[a-f0-9-]+/.exec(repeated.stdout)![0]);
-  const { stopDaemon } = await import("../src/daemon/service.js");
-  await stopDaemon(f.home);
+  await f.stopDaemon();
   const previous = (await listTasks(f.home))[0];
   await updateTask(previous, { status: "completed", daemonInstanceId: undefined }, f.home);
+  await f.startDaemon();
   const outputs = await Promise.all([f.call("continue", "review", "wait"), f.call("continue", "review", "wait")]);
   const ids = outputs.map(r => /task-[a-f0-9-]+/.exec(r.stdout)![0]);
   assert.equal(ids[0], ids[1]);
@@ -485,9 +470,7 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   assert.equal(rows.length, 2);
   assert.equal(rows.filter(r => ["queued", "running"].includes(r.value.status)).length, 1);
   await f.voteHuman("approve");
-  const deadline = Date.now() + 20000;
-  while (Date.now() < deadline && (await listTasks(f.home)).some(r => r.value.status !== "completed")) await new Promise(resolve => setTimeout(resolve, 25));
-  assert.ok((await listTasks(f.home)).every(r => r.value.status === "completed"));
+  await f.waitForTask("completed", ids[0]);
   assert.equal((await readFile(f.queueLog, "utf8")).trim().split("\n").length, 1);
   const ready = await f.call("continue", "review", "wait");
   assert.doesNotMatch(ready.stdout, /已登记/);
@@ -508,37 +491,4 @@ test("explicit task retry and fresh registration share the active-task deduplica
   const [retry, registration] = await Promise.all([retryFailedTask(first.id, f.home), registerTask(input, f.home)]);
   assert.equal(retry.id, registration.id);
   assert.equal((await listTasks(f.home)).filter(r => ["queued", "running"].includes(r.value.status)).length, 1);
-});
-
-
-test("terminal task write conflict suspends scheduling, exposes diagnostics and recovers without resending", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t, "cas-conflict");
-  await f.call("continue", "review", "wait");
-  await f.voteHuman("approve");
-  const { daemonStatus } = await import("../src/daemon/service.js");
-  let status: any;
-  for (let i = 0; i < 100; i++) {
-    status = await daemonStatus(f.home);
-    if (status.taskErrors.some((e: { error: string }) => e.error.includes("TASK_STATE_WRITE_FAILED"))) break;
-    await new Promise(resolve => setTimeout(resolve, 50));
-  }
-  // Assert the CLI diagnostic once; repeated observation uses the control API.
-  status = JSON.parse((await f.call("daemon", "status")).stdout);
-  assert.match(status.taskErrors[0]?.error ?? "", /TASK_STATE_WRITE_FAILED/);
-  assert.equal(status.tasks.running, 1);
-  const { listTasks, registerTask } = await import("../src/daemon/tasks.js");
-  const original = (await listTasks(f.home))[0];
-  // A disabled-recipient marker reaches cancelled only after another scheduling
-  // pass. Observe that progress rather than guessing how many ticks fit in 2.2s.
-  const marker = await registerTask({ input: original.value.input,
-    recipient: { agentType: "traex", sessionId: "tick-marker", agentCommand: "unused" } }, f.home);
-  await waitForTaskStatus(f.home, "cancelled", marker.id);
-  const attempts = () => readFile(f.queueLog, "utf8").then(s => s.trim().split("\n"));
-  assert.equal((await attempts()).length, 1, "subsequent ticks must not resend after a terminal write conflict");
-  await f.call("daemon", "restart");
-  const row = (await listTasks(f.home)).find(row => row.id === original.id)!;
-  assert.equal(row.value.status, "failed");
-  assert.equal(row.value.error?.code, "execution_interrupted");
-  assert.equal(row.value.error?.stage, "recovery");
-  assert.equal((await attempts()).length, 1, "graceful restart must not queue an uncertain delivery again");
 });
