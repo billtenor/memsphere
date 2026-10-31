@@ -72,7 +72,7 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     const parents = new Map(before.map(row => [row.pid, row.parent]));
     const expected = before.filter(row => {
       let pid = row.pid;
-      while (parents.has(pid) && pid !== runner!.pid) pid = parents.get(pid)!;
+      while (pid && parents.has(pid) && pid !== runner!.pid) pid = parents.get(pid)!;
       return pid === runner!.pid;
     }).map(row => row.pid);
     for (const fixture of ready) assert.ok(expected.includes(fixture.browser), "snapshot includes the real detached browser");
