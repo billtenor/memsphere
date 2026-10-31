@@ -29,9 +29,15 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     });
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     let runner: ReturnType<typeof spawn> | undefined;
+    let verified = false;
     t.after(async () => {
-      if (runner?.exitCode === null && runner.signalCode === null) {
-        await terminateTestProcesses(new Set([runner]), "SIGTERM");
+      if (!verified) {
+        // A failing regression must reclaim its fixture even if the broken
+        // runner has already exited and orphaned the recorded browser/workers.
+        const roots = ready.flatMap(fixture => [fixture.wrapper, fixture.worker, fixture.browser, fixture.stubborn])
+          .filter((pid): pid is number => pid !== undefined).map(pid => ({ pid }));
+        if (runner?.pid) roots.push({ pid: runner.pid });
+        await terminateTestProcesses(new Set(roots), "SIGTERM");
       }
       server.closeAllConnections(); await new Promise<void>(done => server.close(() => done()));
       await rm(directory, { recursive: true, force: true });
@@ -97,5 +103,6 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     const results = JSON.parse(await readFile(join(directory, "results.json"), "utf8"));
     assert.equal(results.results.length, count);
     assert.ok(results.results.every((result: { exitCode: number }) => signal ? result.exitCode !== 0 : result.exitCode === 0));
+    verified = true;
   });
 }

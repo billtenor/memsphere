@@ -23,7 +23,7 @@ export async function processTable() {
 function ownedTree(table, roots) {
   const owned = new Set(roots);
   for (;;) {
-    const children = table.filter(row => owned.has(row.parent) && !owned.has(row.pid));
+    const children = table.filter(row => (owned.has(row.parent) || owned.has(row.group)) && !owned.has(row.pid));
     if (!children.length) return table.filter(row => owned.has(row.pid) && !row.zombie);
     for (const child of children) owned.add(child.pid);
   }
@@ -33,8 +33,9 @@ export async function terminateTestProcesses(children, signal) {
   const roots = [...children].map(child => child.pid).filter(Boolean);
   if (!roots.length) return;
   const tree = ownedTree(await processTable(), roots);
-  const owned = new Set(tree.map(row => row.pid));
-  // Only groups whose leaders belong to this runner are eligible.
+  const owned = new Set([...roots, ...tree.map(row => row.pid)]);
+  // A recorded group leader can already have exited while its children live.
+  // Only groups led by recorded roots or their descendants are eligible.
   const groups = new Set(tree.filter(row => owned.has(row.group)).map(row => row.group));
   const send = (requested, targets = groups) => {
     for (const group of targets) {
