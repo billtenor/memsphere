@@ -23,15 +23,29 @@ Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集
 
 Runner 交付后，系统升级和历史通用流程升级两个重测试改由已有的升级分组执行，不再落入 Run/Data/SDK 的默认兜底分类。Linux Projects & Memory、macOS完整Memory组和Windows完整升级组接收它们；默认原生保护集合保持原范围，在已有Reviewer平台文件中补充Windows queue包装脚本验证。所有文件仍完整执行，未增加job或并发，也未放宽5分钟预算。
 
+### 测试取消与进程回收
+
+`run-tests.mjs` 收到 SIGINT、SIGTERM 或 SIGHUP 后停止调度，回收它已启动的测试进程树，再删除临时 Home 并保存已有结果；取消分别以 130、143、129 返回，不会误报成功。正常执行不扫描进程表，也不增加 worker 数、job 或测试执行期限。
+
+POSIX 上每份测试拥有独立进程组；取消时通过进程树快照识别 Playwright 等另建的进程组，只向本次 runner 的组发送信号。保留最多2秒的退出清理窗口，仍存活的进程组强制回收，并确认已退出。Windows 使用进程树快照和原生 taskkill 回收；退出确认同时核对启动时间，避免把已复用的 PID 当作原进程仍未退出。清理窗口只用于取消回收，不是工具或测试执行超时。
+
+文件执行次数和相对 full 的执行降幅仅作观察数据，不作为通过门禁；新增测试不应因文件数量增长而被拒绝。default 每个 job 上限保持5分钟，full 的测试和 Windows 打包 job 上限保持20分钟；其他辅助 job 保留现有不超过5分钟的上限。执行时限由 GitHub 原生 job 超时控制，仓库测试保留对应配置断言。完整覆盖、原生风险覆盖和同一平台不重复执行的校验继续保留。
+
+`test/ci/test-runner.test.ts` 使用原样 runner 副本与真实 Chromium 验证正常完成、SIGINT 取消及并发 SIGTERM 取消。受控 HTTP/IPC 握手确认浏览器和拒绝正常退出的子进程已经启动，取消后通过 OS 进程表检查所有已观测后代均退出、后续测试未调度、临时 Home 已删除。测试不依赖固定 sleep。Windows 用受控预加载 IPC 触发同一信号处理器，实际树回收仍执行原生 Windows 路径；不把它描述为 Windows 控制台按键测试。
+
 ### daemon 测试职责审计
 
 按 `memsphere-repository-testing-rules`，非被测前置状态应优先用 Store/API 构造。daemon 通知测试原先逐例通过 CLI 创建 graph Run、上报候选、准备 Human 票，重复演练了非被测流程；现通过 Graph API、CommandState Store 和 Review API 准备这些状态。真实 CLI wait、身份拒绝、并发登记、显式重试与真实 daemon/queue 子进程继续执行，通知内容、目标会话、幂等和失败结果断言保持。Run start/report/Continue 绑定的真实 CLI 保护由 `procedure-graph-cli.test.ts` 保留，未以手写夹具取代该边界的专门测试。
 
-通知内容、失败可查询、重试、历史任务及写冲突用例通过 Review API 准备受控待提交 Agent，不再为每份前置票重复运行 ACP Reviewer 及其工具进程。异步重复 wait 和同步 pending wait 两例仍执行真实 ACP 调度与受控 Reviewer 工具链；它们验证调度边界，其余用例继续验证真实 CLI、daemon 和 queue 边界。没有用模块测试替代这些真实边界。
+通知测试通过 Review API 创建并完成受控 Agent assignment，不再启动 ACP Reviewer 或其工具链。这里保护的是 Memsphere 的等待登记、通知格式、目标会话、失败可查询、显式重试和任务历史；外部 Agent 的正确性不属于本仓库职责。Memsphere 的 ACP 适配行为由 `agent-review.test.ts` 等专门测试使用受控协议端点验证，不在通知测试中重复覆盖。
 
-各平台清理都必须观察夹具自身的 daemon/Reviewer PID 已退出：业务提交完成或 daemon 状态文件删除都可能早于进程完全退出，进程可能继续写活动记录，Windows 还会保留 cwd。清理通过有界的存活检查等待这些 PID 退出，再删除目录；Linux 已退出但待回收的僵尸进程不再持有文件资源。不使用固定睡眠或忽略 `EBUSY`/`ENOTEMPTY`。受控 Reviewer 使用测试进程 PID，清理不把测试自身列为待退出子进程。
+首次通知与显式重试各自保护一个契约。已可返回结果的 Runner 决策、会话绑定冲突的目标 Run 通过域 API 准备。夹具复用自己打开的模型服务读取当前 Store，不缓存 Review 结果，也不跨用例共享可变服务。通知测试的 daemon 以真实 CLI `daemon serve` 作为可直接持有的子进程启动，清理等待其 exit 事件后才删除目录，不再轮询 PID 或读取 `/proc`。CLI 自启动和 restart 仍由专门的 daemon/View 生命周期用例覆盖。
 
-首次通知与显式重试拆为各自的契约测试。同步等待不再睡眠500毫秒后猜测进程是否已进入等待，而是等待受控 Reviewer 建立 session；不确定投递后的禁止重发测试不再睡眠2.2秒猜测 daemon 已再次扫描，而是登记禁用接收方标记任务并等待其取消，证明后续调度已发生。状态等待均有界，既有用例超时不放宽。浏览器滚动测试使用 locator trial click 重新定位重渲染后的按钮，保留页面与弹窗滚动隔离断言。
+持久化任务状态通过文件变更事件唤醒后重新读取；监听先于首次读取注册，避免遗漏读取期间发生的变更。事件本身不代表任务成功，不依赖固定 sleep、轮询次数或扫描周期；等待仍受原用例期限约束，不增加测试或 CI 超时。
+
+删除 pending 同步等待用例中通过 ACP session 建立和 `finished === false` 猜测阻塞的时序断言。同步/异步配置下 Human-only 的即时返回、结果已就绪时不登记任务仍保留；不声称这些用例证明了 pending 同步阻塞的时序。删除通过轮询内存诊断和额外标记任务推断后续 tick 的终态写冲突整链路用例，不把其他 CAS 测试等同于对该不确定投递场景的完整覆盖。这些是按职责和可观察性主动缩减测试范围，不以增加等待时间保留不可靠断言。
+
+daemon 控制鉴权测试继续通过真实 socket 验证越权请求被拒绝且实例不变。浏览器滚动测试使用 locator trial click 重新定位重渲染后的按钮，保留页面与弹窗滚动隔离断言。
 
 Run 锁与 View 读取测试的模型、Store 和服务初始化移至 `beforeEach` 夹具阶段，各用例继续拥有独立目录与服务；业务操作仍在原5秒/10秒等超时内验证。初始化不是锁绕过契约，不应消耗其测试主体时限。真实文件锁占用、跨服务 CAS 竞争、失败注入和恢复断言保留，不改为共享可变 Store，也不放宽CI job预算。
 
