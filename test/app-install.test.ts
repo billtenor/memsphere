@@ -142,6 +142,31 @@ test("CLI discovery never launches a program; explicit check uses only its decla
   assert.equal((await checkCli(context.primary, "example.missing")).status, "unavailable");
 }));
 
+test("Non-loopback App operations reject missing or invalid tokens and accept the operator token", async () => fixture(async (root, context) => {
+  const directory = join(root, "expense"); await cp(expenseExample, directory, { recursive: true });
+  await installApp(context, directory, { ledgerDirectory: join(root, "ledger") });
+  const binding = join(root, "expense-binding.json");
+  await writeFile(binding, JSON.stringify({ schemaVersion: 1, executable: join(directory, "cli/expense.cjs") }));
+  await bindCli(context, "org.memsphere.expense-cli", binding, "org.memsphere.expense");
+  await setAppEnabled(context, "org.memsphere.expense", true);
+  const config = await readConfig(); config.view = { host: "0.0.0.0", port: 0 };
+  const server = createViewServer(config, { settingsToken: "fixture-token" });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    for (const token of [undefined, "wrong-token", "fixture-token"]) {
+      const response = await fetch(`${origin}/api/projects/test/apps/org.memsphere.expense/operations/list`, {
+        method: "POST", headers: { "content-type": "application/json", origin,
+          ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify({ input: {} })
+      });
+      const payload = await response.json();
+      assert.equal(response.status, token === "fixture-token" ? 200 : 401);
+      if (token === "fixture-token") assert.deepEqual(payload.result.records, []);
+      else assert.equal(payload.error, "Settings operator token is required");
+    }
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+}));
+
 test("Real View API and independently launched CLI share records, revisions and business validation", async () => fixture(async (root, context) => {
   const directory = join(root, "expense"); await cp(expenseExample, directory, { recursive: true });
   const ledger = join(root, "ledger"), executable = join(directory, "cli/expense.cjs");

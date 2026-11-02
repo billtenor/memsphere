@@ -354,8 +354,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         ...(plugin.inject.includes("api") && instanceOptions.appApiBase ? { api: Object.freeze({
           async invoke(operation: string, input?: unknown) {
             if (!/^[a-z0-9][a-z0-9._-]*$/.test(operation)) throw new Error("Invalid App operation");
+            const headers: Record<string, string> = { "content-type": "application/json" };
+            const token = sessionStorage.getItem("memsphere.settingsToken.v1");
+            if (token) headers.authorization = `Bearer ${token}`;
             const response = await fetch(`${instanceOptions.appApiBase}/${encodeURIComponent(operation)}`, {
-              method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ input })
+              method: "POST", headers, body: JSON.stringify({ input })
             });
             const result = await response.json();
             if (!response.ok) throw new Error(result.error ?? "App operation failed");
