@@ -20,6 +20,93 @@ const systemIconSource = await browserModule("../src/view/system-icon.ts");
 const runtimeSource = await browserRuntimeBundle();
 const referenceSource = await browserEntryBundle("../modules/org.memsphere.reference/adapter/view/index.ts");
 
+const appApiBase = "/api/projects/memsphere/apps/example.app/operations";
+const appApiPlugin = `
+  import { slots } from "@memsphere/view-sdk";
+  export default { apiVersion: 1, inject: ["api", "slots", "router"], apply(context) {
+    const route = context.router.register({ id: "index", path: "/app" });
+    context.slots.register(slots.mainView, { id: "app", key: route.key, value: {
+      mount({ element }) {
+        const button = document.createElement("button"); button.textContent = "Load App data";
+        const result = document.createElement("p"); result.id = "app-result";
+        button.addEventListener("click", async () => {
+          result.textContent = "Loading";
+          try { result.textContent = (await context.api.invoke("list", {})).message; }
+          catch (error) { result.textContent = error.message; }
+        });
+        element.append(button, result);
+      }
+    }});
+  }};
+`;
+const appApiInstance: ViewHostBootInstance = {
+  ...bootInstance("org.example.app", "app", "/app.js", "/"),
+  appApiBase,
+  allowedServices: ["api", "slots", "router"],
+  routeGrants: [{ id: "index", path: "/app" }]
+};
+
+for (const [label, token, expected] of [
+  ["verified", "fixture-token", "App data loaded"],
+  ["missing", "", "Settings operator token is required"],
+  ["invalid", "wrong-token", "Settings operator token is required"]
+]) {
+  test(`App API ${label} operator token preserves the remote authorization result`, async () => {
+    await withPage(renderViewHostHtml("en", [appApiInstance]), new Map([["/app.js", appApiPlugin]]), async page => {
+      if (token) await page.addInitScript(value => sessionStorage.setItem("memsphere.settingsToken.v1", value), token);
+      await page.route(`**${appApiBase}/list`, async route => {
+        const authorized = route.request().headers().authorization === "Bearer fixture-token";
+        await route.fulfill({ status: authorized ? 200 : 401, contentType: "application/json",
+          body: JSON.stringify(authorized ? { result: { message: "App data loaded" } } : { error: "Settings operator token is required" }) });
+      });
+    }, async page => {
+      await page.getByRole("button", { name: "Load App data", exact: true }).click();
+      await page.waitForFunction(value => document.querySelector("#app-result")?.textContent === value, expected);
+      assert.equal(await page.locator("#app-result").textContent(), expected);
+    }, "/app");
+  });
+}
+
+test("App API uses a newly verified operator token without remounting the plugin", async () => {
+  let expectedToken = "initial-token";
+  await withPage(renderViewHostHtml("en", [appApiInstance]), new Map([["/app.js", appApiPlugin]]), async page => {
+    await page.addInitScript(() => sessionStorage.setItem("memsphere.settingsToken.v1", "initial-token"));
+    await page.route(`**${appApiBase}/list`, async route => {
+      const authorized = route.request().headers().authorization === `Bearer ${expectedToken}`;
+      await route.fulfill({ status: authorized ? 200 : 401, contentType: "application/json",
+        body: JSON.stringify(authorized ? { result: { message: `Loaded with ${expectedToken}` } } : { error: "Settings operator token is required" }) });
+    });
+  }, async page => {
+    await page.getByRole("button", { name: "Load App data", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#app-result")?.textContent === "Loaded with initial-token");
+    expectedToken = "updated-token";
+    await page.evaluate(() => sessionStorage.setItem("memsphere.settingsToken.v1", "updated-token"));
+    await page.getByRole("button", { name: "Load App data", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#app-result")?.textContent === "Loaded with updated-token");
+    assert.equal(await page.locator("#app-result").textContent(), "Loaded with updated-token");
+  }, "/app");
+});
+
+test("App API stops sending a cleared operator token without remounting the plugin", async () => {
+  let lastAuthorization: string | undefined;
+  await withPage(renderViewHostHtml("en", [appApiInstance]), new Map([["/app.js", appApiPlugin]]), async page => {
+    await page.addInitScript(() => sessionStorage.setItem("memsphere.settingsToken.v1", "fixture-token"));
+    await page.route(`**${appApiBase}/list`, async route => {
+      lastAuthorization = route.request().headers().authorization;
+      const authorized = lastAuthorization === "Bearer fixture-token";
+      await route.fulfill({ status: authorized ? 200 : 401, contentType: "application/json",
+        body: JSON.stringify(authorized ? { result: { message: "App data loaded" } } : { error: "Settings operator token is required" }) });
+    });
+  }, async page => {
+    await page.getByRole("button", { name: "Load App data", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#app-result")?.textContent === "App data loaded");
+    await page.evaluate(() => sessionStorage.removeItem("memsphere.settingsToken.v1"));
+    await page.getByRole("button", { name: "Load App data", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("#app-result")?.textContent === "Settings operator token is required");
+    assert.equal(lastAuthorization, undefined);
+  }, "/app");
+});
+
 test("ViewHost applies instances in catalog order and isolates one failed instance", async () => {
   const instances: ViewHostBootInstance[] = [
     bootInstance("org.memsphere.memory", "memory", "/memory.js", "/"),
