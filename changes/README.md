@@ -1,27 +1,9 @@
-# Changes
+# 参考资料
 
-每个需求使用一个目录和一份 `change.md`。新需求放在 `active/<YYYYMMDD-slug>/change.md`。
+本目录保存需求、设计和验收的参考文档，以及文档和测试使用的附件。
 
-Active 状态只有三种：
+仓库维护任务通过适用的 Procedure Run 或自由探索 Run 留存需求、设计、验收和交付结果。同一任务的讨论与修订继续使用同一个 Run，需要评审、引用或交付的成果保存为 Run Artifact。
 
-- `todo`：尚未开发。
-- `doing`：正在开发。
-- `accepting`：开发完成，正在测试或等待验收。
+维护任务的记录、进度和完成情况以对应 Run 为准。本目录的文档用于提供参考材料，引用时应注明来源。
 
-验收标准全部通过、项目回归测试完成并由提需方确认后，将整个目录移动到 `archive/completed/`。取消的需求移动到 `archive/cancelled/<YYYY>/`，并在文档中记录原因。
-
-Project 根目录下的 `runs/` 保存详细流程产物；`change.md` 保存需要长期追踪的需求、方案、任务和验收摘要，并可通过 `run_id` 关联对应 Run。
-
-最小文档头：
-
-```yaml
----
-id: 20260720-example
-status: todo
-type: feature
-created: 2026-07-20
-run_id:
----
-```
-
-正文至少包括需求、验收标准、技术与测试方案、开发任务和验收结果。完成归档后可移除 `status`，增加 `completed_at`。
+具体交付要求见项目 Memory `memsphere-repository-delivery-rules` 与 `memsphere-exploration-artifact-rules`。文档与测试引用的文件路径必须保持有效。

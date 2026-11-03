@@ -25,6 +25,15 @@ sections:
       - 非被测前置状态必须优先通过 Store、API 或 helper 以最短路径构造；测试必须验证用户可观察结果，不得把非被测的实现步骤重新演练为测试主体。
   - !statement
     names:
+      - 验证方法与证明范围
+    defines:
+      - 用于本仓库测试与校验的编写和审查，区分结构校验、内容语义判断与执行行为验证各自的证明范围。
+    asserts:
+      - 结构校验只能证明其显式检查的结构条件，不证明正文规则成立、产物语义正确或执行效果符合预期。
+      - 判断内容的语义是否成立，必须阅读实际内容，并依据适用对象、事实和规则核对。
+      - 判断执行行为是否符合预期，必须使用覆盖相关行为契约的自动化测试或实际运行验证。
+  - !statement
+    names:
       - 测试分层
     asserts:
       - 测试层级必须按实际跨越的运行边界判断，不得根据文件名、测试框架或是否使用 mock 笼统命名。
@@ -60,7 +69,7 @@ sections:
     asserts:
       - 新建、修改、移动、重命名或删除 .memsphere/memory 中的任意 Concept、Statement、Procedure 或 Schema 后，必须同时运行 memsphere validate 和 memsphere memory change validate [change-id]；前者检查当前 Store 健康，后者捕获并验证交付差异，两者不得互相替代。
       - memsphere validate 必须确认 config 与各 root 可用、四类当前 Memory 均可解析、syntax 与字段结构合法，并检查规范名称和别名等 catalog 冲突。
-      - memsphere validate 不验证自然语言 asserts 是否成立、Procedure 是否能按预期运行、Artifact 内容是否符合业务语义，也不直接校验 reserved-memory 源目录；这些必须由覆盖对应语义的自动化测试或实际运行验证。
+      - memsphere validate 不直接校验 reserved-memory 源目录。
   - !statement
     names:
       - System 与 Reserved Memory

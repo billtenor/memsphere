@@ -70,9 +70,11 @@ test("trusted local Package replaces Memory and Run through formal composition a
       return Boolean(scoped && global && (scoped.compareDocumentPosition(global) & Node.DOCUMENT_POSITION_FOLLOWING));
     }), true, "global Package styles stay after Module styles in document order");
     if (process.env.MEMSPHERE_CAPTURE_VIEW_PACKAGE === "1") {
-      await page.screenshot({ path: resolve("changes/active/20260905-view-package-customization/memory-custom-desktop.png"), fullPage: true });
+      const captureRoot = resolve(".tmp/view-package-captures");
+      await mkdir(captureRoot, { recursive: true });
+      await page.screenshot({ path: join(captureRoot, "memory-custom-desktop.png"), fullPage: true });
       await page.setViewportSize({ width: 390, height: 844 });
-      await page.screenshot({ path: resolve("changes/active/20260905-view-package-customization/memory-custom-mobile.png"), fullPage: true });
+      await page.screenshot({ path: join(captureRoot, "memory-custom-mobile.png"), fullPage: true });
       await page.setViewportSize({ width: 1280, height: 800 });
     }
 
