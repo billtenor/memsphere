@@ -7,8 +7,12 @@ defines:
   - 约束 memsphere 代码仓库中已完成需求的交付收尾。
 asserts:
   - 交付前必须检查本轮是否存在 Memory 差异；存在时，交付记录必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口，普通 memsphere validate 不能代替 memsphere memory change validate [change-id]。
-  - 需求完成实现、测试和验收后，必须在 change.md 中记录验收结果，移除 active status，并写入 completed_at。
-  - 必须将需求目录从 changes/active/<change-id>/ 移动到 changes/archive/completed/<change-id>/；归档目标已存在时不得覆盖。
-  - 状态更新与目录归档完成前，不得将该需求视为已经完整交付。
-  - 需求目录归档用于记录需求、设计和交付结论，不代表目录内全部文件都应进入 Git；单次运行的原始验收附件与代码提交分开管理，报告应明确证据实际留存位置及其是否随代码交付。
+  - 仓库维护任务通过适用 Procedure Run 或自由探索 Run 留存需求、设计、验收和交付结果；同一任务的讨论、修订和后续处理继续使用同一个 Run。
+  - 需要供评审、后续引用或交付使用的结果应作为 Run Artifact 保存，按实际用途组织粒度；自由探索遵循 memsphere-exploration-artifact-rules，普通进度与零碎讨论不机械上报。
+  - 交付记录必须说明实际改动、对应 commit 或文件版本、验证结果、验收结论、兼容性影响、残留问题和后续事项，并提供 Run ID 与相关 Artifact ID。
+  - 交付文档必须直接描述当前用途、行为与规则，只保留读者理解和使用最终成果所需的信息，不混入修改经过、中间状态或失效方案。
+  - changes 目录用于阅读参考文档及使用测试附件；维护任务的记录、进度和完成情况以对应 Run 为准。
+  - 使用参考文档时，应在产物中注明来源，并核对其背景、决策和验收要求是否适用于当前任务。
+  - 交付报告与代码集成状态必须如实说明；自由探索成果交付不等于 Run 结束，只有 Human 明确确认当前成果并同意结束后才执行 run finish。
+  - 单次运行的原始验收附件与代码提交分开管理，报告应明确证据实际留存位置及其是否随代码交付。
   - 证据已提交评审、被报告引用或需要留存，均不等于必须提交到代码仓库；Git 交付范围与提交前检查遵循 memsphere-repository-git-rules。
