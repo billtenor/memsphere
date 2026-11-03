@@ -1,27 +1,15 @@
-# Changes
+# 历史需求档案
 
-每个需求使用一个目录和一份 `change.md`。新需求放在 `active/<YYYYMMDD-slug>/change.md`。
+自 2026-11-03 起，仓库维护任务通过适用的 Procedure Run 或自由探索 Run 留存需求、设计、验收和交付结果。需要评审、引用或交付的结果保存为 Run Artifact，普通进度和零碎讨论留在对话或工作文件中。具体要求见项目 Memory `memsphere-repository-delivery-rules` 与 `memsphere-exploration-artifact-rules`。
 
-Active 状态只有三种：
+本目录保留旧机制下形成的需求、方案和附件，新任务不再创建 `change.md`，交付也不再要求更新文档状态或移动需求目录。历史路径仍被文档和测试引用，应保持可读取。
 
-- `todo`：尚未开发。
-- `doing`：正在开发。
-- `accepting`：开发完成，正在测试或等待验收。
+继续处理历史需求时，先核对原记录和已有 Run。能继续的 Run 直接沿用；没有可继续的 Run 时，按当前任务入口启动 Run，并在产物中注明历史记录路径、保留有效背景与决策。原记录中的 `status`、目录位置和日期只是历史信息，不代表需求目前仍在进行、已经完成或已经取消。
 
-验收标准全部通过、项目回归测试完成并由提需方确认后，将整个目录移动到 `archive/completed/`。取消的需求移动到 `archive/cancelled/<YYYY>/`，并在文档中记录原因。
+历史目录的含义：
 
-Project 根目录下的 `runs/` 保存详细流程产物；`change.md` 保存需要长期追踪的需求、方案、任务和验收摘要，并可通过 `run_id` 关联对应 Run。
+- `active/`：旧机制下尚未归档的记录，需按具体需求核对现状。
+- `archive/completed/`：旧机制下已归档为完成的记录。
+- `archive/cancelled/`：旧机制下已归档为取消的记录。
 
-最小文档头：
-
-```yaml
----
-id: 20260720-example
-status: todo
-type: feature
-created: 2026-07-20
-run_id:
----
-```
-
-正文至少包括需求、验收标准、技术与测试方案、开发任务和验收结果。完成归档后可移除 `status`，增加 `completed_at`。
+本次退役保留这些记录，不批量改写历史状态或迁移 Run。若以后清理整个目录，必须先迁移仍被测试读取的模型附件并更新文档链接与 `.gitattributes` 中的路径约定。
