@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { businessFixture } from "./helpers/business-data.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { parseMemoryEntity } from "../src/memory/store.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
@@ -17,7 +17,7 @@ function action(id: string, from: string | string[] = "START", when?: string): G
 }
 function procedure(actions: GraphAction[]): GraphProcedureMemory { return parseMemoryEntity("procedures", { tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["runtime-graph"], defines: ["A graph"], actions }) as GraphProcedureMemory; }
 async function fixture(t: TestContext) {
-  const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
+  const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!;
   return { root, service, use: <T>(fn: (g: GraphRuntime) => Promise<T>) => service.withGraph(fn) };
 }
 async function produce(g: GraphRuntime, runId: string, stepId: string, value: string, revisionSummary?: string) {

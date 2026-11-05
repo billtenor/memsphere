@@ -8,7 +8,7 @@ import {writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as delay} from 'node:timers/promises';
-import {businessFixture} from './helpers/business-data.js';
+import {initializedContextFixture} from './helpers/initialized-context.js';
 import {openContextControl} from '../src/project/context-control.js';
 import {captureProcessIdentity,stopRewindWorker} from '../src/context_control/review-process.js';
 import * as reviews from '../src/context_control/review-repository.js';
@@ -32,9 +32,9 @@ test('a mismatched OS start identity never signals a live detached process', {sk
 
 for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:true},{resistant:false,late:false,failOnce:false,orphan:true}])test(`rewind stops the real ACP worker/provider group${resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' with orphaned Windows descendants':''} and preserves an unrelated reviewer`,{timeout:240000,skip:(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
  const gates=await processGates(t.signal);
- const f=await businessFixture(t,{});
+ const f=await initializedContextFixture(t);
  t.after(()=>gates.close());
- const service=(await openContextControl(f.root,true))!;
+ const service=(await openContextControl(f.root))!;
  const spec={name:'body',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}};
  const actor={kind:'agent' as const,name:'reviewer',permissions:['artifact.read' as const,'decision.assess' as const],agent:{provider:'test',providerType:'traex' as const,command:process.execPath,args:[fileURLToPath(new URL('./fixtures/fake-acp-reviewer.mjs',import.meta.url)),'rewind-gated'],env:{},startupTimeoutMs:10000,idleTimeoutMs:null}};
  const p:GraphProcedureMemory={tag:'!procedure',syntax:'memsphere-20261027-stable',mode:'graph',names:['process-rewind'],defines:['process test'],actions:[{tag:'!action',id:'A',description:'product',dependencies:[{tag:'!dependency',from:'START'}],artifact:spec},{tag:'!action',id:'T',description:'technical',dependencies:[{tag:'!dependency',from:'A'}],artifact:{...spec,review:['check']}},{tag:'!action',id:'independent',description:'independent',dependencies:[{tag:'!dependency',from:'START'}],artifact:{...spec,review:['check']}}]};

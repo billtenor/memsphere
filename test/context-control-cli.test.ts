@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -5,22 +6,27 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { businessFixture } from "./helpers/business-data.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { findCommandStates } from "../src/home/command-state-store.js";
 import { textContent } from "../src/context_control/types.js";
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
-async function fixture(t: test.TestContext) {
-  const f = await businessFixture(t, {});
+async function fixture(t: test.TestContext, processBoundary = false) {
+  const f = await initializedContextFixture(t);
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
-  const invoke = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "cli-test-session", TRAECLI_THREAD_ID: "" } });
+  const invoke = (...args: string[]) => {
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "cli-test-session", TRAECLI_THREAD_ID: "" };
+    return processBoundary
+      ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.cwd, env })
+      : invokeCliModule(["--project", "test-project", ...args], f.cwd, env, cli);
+  };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   return { ...f, invoke, call };
 }
 
 test("native CLI finishes current outputs and lists/restores archived exploration records", { timeout: 60000 }, async t => {
-  const f = await fixture(t), run = await f.call("run", "start", "--name", "结束归档");
+  const f = await fixture(t, true), run = await f.call("run", "start", "--name", "结束归档");
   await assert.rejects(f.invoke("archive", "run", run.id), /Finish or abandon/);
   const a = await f.call("run", "report", "--run", run.id, "--name", "A", "--artifact", "A");
   await f.call("run", "finish", "--run", run.id, "--authorization", "用户检查 A 后明确确认结束");
@@ -36,7 +42,7 @@ test("native CLI finishes current outputs and lists/restores archived exploratio
 });
 
 test("direct production, Continue, independent reads, repeated comments and immutable revision", { timeout: 60000 }, async t => {
-  const f = await fixture(t); const run = await f.call("run", "start", "--name", "CLI探索");
+  const f = await fixture(t, true); const run = await f.call("run", "start", "--name", "CLI探索");
   assert.equal(run.sessionId, "cli-test-session");
   assert.equal(run.contextId, undefined);
   const help = await f.invoke("continue", "--help"); assert.match(help.stdout, /report.*review create/);
@@ -64,7 +70,7 @@ test("direct production, Continue, independent reads, repeated comments and immu
 });
 
 for (const entry of ["native", "continue"] as const) {
-  test(`${entry} finish requires authorization and preserves feedback/revision until confirmed`, { timeout: 60000 }, async t => {
+  test(`CLI module ${entry} finish requires authorization and preserves feedback/revision until confirmed`, { timeout: 60000 }, async t => {
     const f = await fixture(t), run = await f.call("run", "start", "--name", "等待确认");
     const service = (await openContextControl(f.root))!;
     const original = (await service.report(run.id, { name: "初版", content: textContent("初版结论") })).artifact;
@@ -103,8 +109,8 @@ for (const entry of ["native", "continue"] as const) {
 }
 
 for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201]) {
-  test(`${kind} previews ${length} Unicode chars and exports original bytes`, { timeout: 30000 }, async t => {
-    const f = await fixture(t); const run = await f.call("run", "start", "--name", "preview");
+  test(`${length === 201 ? "CLI" : "CLI module"} ${kind} previews ${length} Unicode chars and exports original bytes`, { timeout: 30000 }, async t => {
+    const f = await fixture(t, length === 201); const run = await f.call("run", "start", "--name", "preview");
     const content = "中a😀".repeat(67).slice(0); const value = Array.from(content).slice(0, length).join("");
     const saved = kind === "artifact" ? await f.call("run", "report", "--run", run.id, "--name", "正文", "--artifact", value) : await f.call("run", "external", "add", "--run", run.id, "--source", "来源", "--content", value);
     const id = saved.artifactId ?? saved.externalId;
@@ -122,7 +128,7 @@ for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201
   });
 }
 
-test("derived outputs retain manual removals and removed production-boundary flags are rejected", { timeout: 30000 }, async t => {
+test("CLI module derived outputs retain manual removals and removed production-boundary flags are rejected", { timeout: 30000 }, async t => {
   const f = await fixture(t); const r = await f.call("run", "start", "--name", "outputs");
   const a = await f.call("continue", "report", "--name", "A", "--artifact", "A");
   await f.call("continue", "outputs", "update", "--remove", a.artifactId);

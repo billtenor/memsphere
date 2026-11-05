@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -5,6 +6,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { businessFixture } from "./helpers/business-data.js";
 import { serializeMemoryYaml } from "../src/memory/serializer.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
@@ -32,20 +34,26 @@ test("graph continuation preserves an unrelated auto-enter failure", async () =>
   await assert.rejects(graphNext(runtime, snapshot, "test-project"), error => error === failure);
 });
 
-async function fixture(t: test.TestContext, multiple = false) {
-  const f = await businessFixture(t, {});
+async function fixture(t: test.TestContext, multiple = false, prepared = true, processBoundary = false) {
+  const f = prepared ? await initializedContextFixture(t) : await businessFixture(t, {});
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" } }));
+  await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), store: { type: "embedded", repository_path: f.root, memory_path: "memory" } }));
   const procedure = join(f.directory, "graph.yaml");
   const action = (id: string) => `  - !action\n    id: ${id}\n    description: Produce ${id}\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: ${id} output\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n`;
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
-  const invoke = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" } }).catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+  const invoke = (...args: string[]) => {
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" };
+    const result = processBoundary
+      ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
+      : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
+    return result.catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+  };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   return { ...f, procedure, invoke, call };
 }
 
-for (const language of ["zh-CN", "en"] as const) test(`graph ${language} Step prompts provide executable fixed-material reads for direct and collected inputs`, { timeout: 90000 }, async t => {
+for (const language of ["zh-CN", "en"] as const) test(`graph CLI module ${language} Step prompts provide executable fixed-material reads for direct and collected inputs`, { timeout: 90000 }, async t => {
   const f = await fixture(t);
   await writeFile(join(f.home, "config.json"), JSON.stringify({ language, runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   const artifact = { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } };
@@ -75,7 +83,7 @@ for (const language of ["zh-CN", "en"] as const) test(`graph ${language} Step pr
 });
 
 test("graph CLI auto-enters one Step, binds Continue and leaves show read-only", { timeout: 60000 }, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, false, false, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "CLI graph");
   assert.doesNotMatch(start.prompt, /context-/);
   const snapshot = await f.call("run", "show", "--run", start.runId);
@@ -91,7 +99,7 @@ test("graph CLI auto-enters one Step, binds Continue and leaves show read-only",
   await f.call("run", "finish", "--run", start.runId);
 });
 
-test("multiple pending Steps require explicit enter; repeated enter returns the same Continue binding", { timeout: 60000 }, async t => {
+test("CLI module multiple pending Steps require explicit enter; repeated enter returns the same Continue binding", { timeout: 60000 }, async t => {
   const f = await fixture(t, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "Choose");
   assert.match(start.prompt, /step enter/); assert.doesNotMatch(start.prompt, /Action/);
@@ -106,7 +114,7 @@ test("multiple pending Steps require explicit enter; repeated enter returns the 
 });
 
 test("independent CLI processes enter idempotently and complete different Steps with unique completion sequence", { timeout: 60000 }, async t => {
-  const f = await fixture(t, true);
+  const f = await fixture(t, true, true, true);
   await writeFile(join(f.home, "config.json"), JSON.stringify({}));
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "concurrent");
   const steps = (await f.call("run", "show", "--run", start.runId)).steps;
@@ -130,7 +138,7 @@ test("independent CLI processes enter idempotently and complete different Steps 
   assert.equal(result.run.frames[0].graphFrame.processedStepIds.length, 2);
 });
 
-test("Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
+test("CLI module Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
   const f = await fixture(t);
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
   config.control_plane = { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { reviewer: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] }, advisor: { kind: "human", name: "Advisor", permissions: ["artifact.read", "decision.assess"] } } };
@@ -179,7 +187,7 @@ test("Continue binds Human authorization and advisory resolution to its Step and
 });
 
 
-test("a failed auxiliary Continue store preserves the running Step and offers a native report command", { timeout: 60000 }, async t => {
+test("CLI module failed auxiliary Continue store preserves the running Step and offers a native report command", { timeout: 60000 }, async t => {
   const f = await fixture(t);
   await mkdir(join(f.home, "data"), { recursive: true });
   const invalid = join(f.home, "data", "runner-sessions"); await writeFile(invalid, "not a directory");
@@ -192,7 +200,7 @@ test("a failed auxiliary Continue store preserves the running Step and offers a 
 });
 
 test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
- const f=await fixture(t);
+ const f=await fixture(t, false, true, true);
  const start=await f.call('run','start','--file',f.procedure,'--name','rewind CLI');
  const completed=await f.call('continue','report','--artifact','old body');
  const show=await f.call('run','show','--run',start.runId);
@@ -216,7 +224,7 @@ test('CLI rewind preview is read only, preserves Continue, and requires explicit
  assert.equal(final.artifacts.find((a:any)=>a.id===fresh.artifactId).revisedFrom,completed.artifactId);
 });
 
-for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI ${path} preserves explicit enter for a pending rewind replacement`, { timeout: 120000 }, async t => {
+for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI module ${path} preserves explicit enter for a pending rewind replacement`, { timeout: 120000 }, async t => {
   const f = await fixture(t, path !== 'status');
   const binding = join(f.directory, 'replacement-review.json');
   if (path === 'branch-review') {
@@ -271,7 +279,7 @@ for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI ${pat
 });
 
 test('rewind JSON argument and superseded errors use the structured stderr contract', { timeout: 60000 }, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, false, true, true);
   const start = await f.call('run', 'start', '--file', f.procedure, '--name', 'structured rewind errors');
   const old = (await f.call('run', 'show', '--run', start.runId)).steps[0].id;
   const rewind = await f.call('run', 'step', 'rewind', '--run', start.runId, '--step', old, '--reason', 'new A');

@@ -4,14 +4,14 @@ import test from "node:test";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runArtifactReviewAgentWorker } from "../src/acp/review-worker.js";
-import { businessFixture } from "./helpers/business-data.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
 import * as reviews from "../src/context_control/review-repository.js";
 
 async function fixture(t: test.TestContext, agent = false, advisory = false, mixed = false) {
-  const f = await businessFixture(t, {}); const service = (await openContextControl(f.root, true))!;
+  const f = await initializedContextFixture(t); const service = (await openContextControl(f.root))!;
   const actor = agent ? { kind: "agent" as const, name: "Agent", permissions: ["artifact.read" as const, "decision.assess" as const], agent: { provider: "test", providerType: "traex" as const, command: process.execPath, args: [fileURLToPath(new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url)), "approve"], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: 10000 } } : { kind: "human" as const, name: "Human", permissions: ["artifact.read" as const, ...(advisory ? ["decision.assess" as const] : ["decision.decide" as const])] };
   const procedure: GraphProcedureMemory = { tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["review-graph"], defines: ["Review"], actions: [{ tag: "!action", id: "A", description: "Deliver", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/markdown" }, review: ["approval"] } }] };
   const result = await service.withGraph(async g => {

@@ -1,6 +1,7 @@
 import type test from "node:test";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { initializedContextFixture } from "./initialized-context.js";
 import { businessFixture } from "./business-data.js";
 import { withCurrentMemorySyntax } from "./memory.js";
 import { reviewConfiguration } from "./review.js";
@@ -9,12 +10,12 @@ import { graphMemorySyntax } from "../../src/memory/syntax.js";
 import * as flow from "../../src/run/store.js";
 import * as reviews from "../../src/context_control/review-repository.js";
 export async function reviewNodeFixture(t: test.TestContext, graph: boolean, secondAgent = false, options: { reuseService?: boolean } = {}) {
-  const f = await businessFixture(t, {});
+  const f = graph ? await initializedContextFixture(t) : await businessFixture(t, {});
   const controlPlane = { runner: { permissions: ["artifact.read" as const, "artifact.submit" as const, "decision.decide" as const] }, actors: { human: { kind: "human" as const, name: "Human", permissions: ["artifact.read" as const, "decision.decide" as const] }, agent: { kind: "agent" as const, name: "Agent", permissions: ["artifact.read" as const, "decision.assess" as const], agent: { provider: "test", providerType: "traex" as const, command: process.execPath, args: [], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: 10000 } } } };
   if (secondAgent) Object.assign(controlPlane.actors, { agent2: structuredClone(controlPlane.actors.agent) });
   let input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; service?: NonNullable<Awaited<ReturnType<typeof openContextControl>>> }, runId: string;
   if (graph) {
-    const service = (await openContextControl(f.root, true))!;
+    const service = (await openContextControl(f.root))!;
     const result = await service.withGraph(async g => {
       const start = await g.start({ name: "test", procedure: { tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["p"], defines: ["Fixture procedure"], actions: [{ tag: "!action", id: "a", description: "Make result", asserts: ["Check evidence", "Check scope"], dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/markdown" }, review: ["reviewer"] } }] }, controlPlane, reviewConfiguration: { reviews: { "p#actions[a]": { policy: "artifact_acceptance.unanimous" } }, slots: { "p::reviewer": { actorIds: ["agent", "human", ...(secondAgent ? ["agent2"] : [])] } } } });
       await g.enter(start.run.id, start.steps[0].id);
