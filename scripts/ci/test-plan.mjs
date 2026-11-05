@@ -1,5 +1,6 @@
-import { readdir } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // Relative POSIX paths keep discovery identical on every CI platform.
 export async function discoverTestFiles(directory) {
@@ -13,8 +14,24 @@ export async function discoverTestFiles(directory) {
   return groups.flat().sort();
 }
 
-// Suites partition discovered tests; no per-file inclusion list is required.
+// Fixed exclusions preserve the previous native PR coverage. New test paths
+// are included automatically; adding an exclusion is a protected CI change.
+const defaultExclusions = new Set(JSON.parse(await readFile(new URL("./default-test-exclusions.json", import.meta.url), "utf8")));
+const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
+const testKey = file => (isAbsolute(file) ? relative(testDirectory, file) : file).split(sep).join("/");
+// Routing changes only the owning job, never whether a discovered test runs.
+function nativeGroup(file, source) {
+  const key = testKey(file);
+  if (key === "project-command.test.ts") return "package-platform";
+  if (["system-upgrade-changeset.test.ts", "run-model-artifact.test.ts", "memory-changeset.test.ts"].includes(key) || testCategory(file, source) === "project-upgrade") return "platform-upgrades";
+  return "platform-core";
+}
 export const testSuites = {
+  "package-platform": { title: "Packaged Job Platform Contracts", categories: [] },
+  "platform-core": { title: "Platform Core Contracts", categories: [] },
+  "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
+  platform: { title: "Platform Contracts", categories: [] },
+  "platform-and-upgrades": { title: "Platform & Upgrade Contracts", categories: [] },
   "model-ui": { title: "Models & Settings UI", categories: ["model-ui"] },
   "review-ui": { title: "Review & Shell UI", categories: ["review-ui"] },
   "memory-cli": { title: "Memory & Project CLI", categories: ["memory-cli"] },
@@ -50,6 +67,10 @@ export function selectTests(files, sources, durations, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
+    if (["platform", "platform-and-upgrades", "platform-core", "platform-upgrades", "package-platform"].includes(suite)) {
+      if (defaultExclusions.has(testKey(file))) return false;
+      return suite === "platform" || suite === "platform-and-upgrades" || nativeGroup(file, sources[file]) === suite;
+    }
     return testSuites[suite].categories.includes(testCategory(file, sources[file]));
   })
     .sort((a, b) => (durations[basename(b)] ?? 2) - (durations[basename(a)] ?? 2) || a.localeCompare(b, "en"));

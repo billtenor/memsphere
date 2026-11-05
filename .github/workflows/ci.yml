@@ -138,6 +138,19 @@ jobs:
           cd ".ci windows project"
           ../.ci-install/node_modules/.bin/memsphere view status
 
+      - name: Native platform contracts
+        if: needs.plan.outputs.profile == 'default'
+        env:
+          CI_TEST_RESULTS: ci-results/windows-latest-package-platform.json
+        run: node scripts/ci/run-tests.mjs --suite=package-platform --test-concurrency=2
+      - name: Preserve native contract timings
+        if: always() && needs.plan.outputs.profile == 'default'
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-windows-latest-package-platform
+          path: ci-results
+          if-no-files-found: error
+
   full-result:
     name: Full cross-platform regression
     runs-on: ubuntu-24.04

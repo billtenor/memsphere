@@ -8,18 +8,20 @@
 
 ## 默认 PR
 
-统一 Node 22，Linux 固定 Ubuntu 24.04。default 和 full 均由 `scripts/ci/ci-plan.mjs` 生成相同的完整测试矩阵：
+统一 Node 22，Linux 固定 Ubuntu 24.04。默认矩阵保留 7 个测试 job，另有 Windows 打包 job：
 
 | 平台 | 套件 | 文件并发 |
 |---|---|---|
 | Linux | Browser UI / CLI & Packaging / Projects & Memory / Run, Data & SDK | 3 / 3 / 2 / 2 |
-| macOS | Models & Settings UI / Review & Shell UI / CLI & Packaging / Projects & Memory / Run, Data & SDK | 3 / 3 / 4 / 3 / 3 |
-| Windows | Models & Settings UI / Review & Shell UI / Memory & Project CLI / App, Model & Data CLI / Project Lifecycle / Project Upgrades / Memory Stores & Changes / Run, Data & SDK | 2 / 3 / 2 / 2 / 3 / 3 / 2 / 3 |
-| Windows | 真实 npm 安装包、Run/View 及四种 Shell 冒烟 | 独立 job |
+| macOS | Platform & Upgrade Contracts | 4 |
+| Windows | Platform Core Contracts / Platform Publication & Upgrades | 4 / 4 |
+| Windows | 真实 npm 安装包、Run/View、四种 Shell 冒烟及 project-command 契约 | 独立 job，契约并发 2 |
 
-每个平台递归发现 `test/` 下全部 `.test.ts`，按分类分配到对应套件，每个文件恰好执行一次。新增文件无需登记白名单；未匹配专用分类的文件归入 runtime-core。当前没有文件排除项。平台专属用例由测试代码声明适用条件，其他平台记录 skip。Chromium 安装依据实际选集自动计算。
+测试文件递归发现。Linux 默认与所有平台 full 均执行全部 `.test.ts`；macOS 和 Windows 默认仅排除 `scripts/ci/default-test-exclusions.json` 中的固定相对路径。该清单由原默认白名单对应的未选文件生成，现有测试的覆盖和执行分组保持一致。排除项只匹配精确路径，不使用目录或名称模式；新增测试路径自动纳入默认 CI，同名的其他目录文件也不会被排除。
 
-测试发现、分类、矩阵和覆盖完整性回归均受 CI change guard 保护；如需增加文件排除规则，该规则也必须位于受保护的 CI 代码中。普通测试文件新增不需要修改 CI 文件。分类只决定执行分组，不允许使测试退出某个平台的覆盖范围。
+Windows 选中测试按职责分配到 core、upgrades 或打包 job，每个文件只运行一次。分组决定由哪个 job 执行，不用于拒绝新增测试。Chromium 安装依据实际选集自动计算。平台专属用例仍由测试代码声明适用条件，其他平台记录 skip。
+
+测试发现、排除清单、分类、矩阵与覆盖回归均受 CI change guard 保护。增加排除项需要审查，新增普通测试不需要编辑 CI 文件。full 不应用默认排除清单，保持三平台全量验证。
 
 两个 profile 保留不同的触发、取消、门禁和时间标准：default 测试及打包 job 上限为 5 分钟，full 为 20 分钟；其他辅助 job 保持现有超时。整体排队时间不作为测试失败条件，测试失败或 job 超时均不得视为通过。
 
@@ -29,7 +31,7 @@
 
 POSIX 上每份测试拥有独立进程组；取消时通过进程树快照识别 Playwright 等另建的进程组，只向本次 runner 的组发送信号。保留最多2秒的退出清理窗口，仍存活的进程组强制回收，并确认已退出。Windows 使用进程树快照和原生 taskkill 回收；退出确认同时核对启动时间，避免把已复用的 PID 当作原进程仍未退出。清理窗口只用于取消回收，不是工具或测试执行超时。
 
-文件执行次数和相对 full 的执行降幅仅作观察数据，不作为通过门禁；新增测试不应因文件数量增长而被拒绝。default 每个 job 上限保持5分钟，full 的测试和 Windows 打包 job 上限保持20分钟；其他辅助 job 保留现有不超过5分钟的上限。执行时限由 GitHub 原生 job 超时控制，仓库测试保留对应配置断言。完整覆盖和同一平台不重复执行的校验继续保留。
+文件执行次数和相对 full 的执行降幅仅作观察数据，不作为通过门禁；新增测试不应因文件数量增长而被拒绝。default 每个 job 上限保持5分钟，full 的测试和 Windows 打包 job 上限保持20分钟；其他辅助 job 保留现有不超过5分钟的上限。执行时限由 GitHub 原生 job 超时控制，仓库测试保留对应配置断言。full 完整覆盖、default 固定排除及同一平台不重复执行的校验继续保留。
 
 `test/ci/test-runner.test.ts` 使用原样 runner 副本与真实 Chromium 验证正常完成、SIGINT 取消及并发 SIGTERM 取消。受控 HTTP/IPC 握手确认浏览器和拒绝正常退出的子进程已经启动，取消后通过 OS 进程表检查所有已观测后代均退出、后续测试未调度、临时 Home 已删除。测试不依赖固定 sleep。Windows 用受控预加载 IPC 触发同一信号处理器，实际树回收仍执行原生 Windows 路径；不把它描述为 Windows 控制台按键测试。
 

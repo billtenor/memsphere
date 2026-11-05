@@ -14,7 +14,11 @@ const linux = [
   ["ubuntu-24.04", "browser", 3], ["ubuntu-24.04", "cli", 3],
   ["ubuntu-24.04", "memory-and-projects", 2], ["ubuntu-24.04", "runtime-core", 2]
 ];
-const testRows = [...linux,
+const defaultRows = [...linux,
+  ["macos-latest", "platform-and-upgrades", 4],
+  ["windows-latest", "platform-core", 4], ["windows-latest", "platform-upgrades", 4]
+];
+const fullRows = [...linux,
   ["macos-latest", "model-ui", 3], ["macos-latest", "review-ui", 3],
   ["macos-latest", "cli", 4], ["macos-latest", "memory-and-projects", 3], ["macos-latest", "runtime-core", 3],
   ["windows-latest", "model-ui", 2], ["windows-latest", "review-ui", 3],
@@ -25,7 +29,7 @@ const testRows = [...linux,
 
 export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
-  return { include: testRows.map(([os, suite, workers]) => {
+  return { include: (profile === "full" ? fullRows : defaultRows).map(([os, suite, workers]) => {
     const selected = selectTests(files, sources, {}, suite);
     if (!selected.length) throw new Error(`Empty CI suite: ${suite}`);
     const browser = selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));

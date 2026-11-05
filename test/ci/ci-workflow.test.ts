@@ -9,21 +9,36 @@ const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = await discoverTestFiles("test");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(`test/${file}`, "utf8")])));
 
-test("default and full CI automatically cover every discovered and future file once on each platform", () => {
+test("exclusion-based selection preserves every prior default suite", async () => {
+  const baseline = JSON.parse(await readFile("test/ci/fixtures/selection-before-exclusions.json", "utf8"));
+  const existing = baseline.files.filter((file: string) => files.includes(file));
+  for (const [suite, selected] of Object.entries(baseline.suites)) {
+    assert.deepEqual(selectTests(existing, sources, {}, suite).sort(), (selected as string[]).filter(file => files.includes(file)), suite);
+  }
+});
+
+test("default excludes only fixed paths; all future files run once and full remains exhaustive", async () => {
   const future = {
     "nested/unmeasured-new-feature.test.ts": "",
+    "nested/daemon-integration.test.ts": "",
     "project-upgrade-future.test.ts": "",
     "model-future-browser.test.ts": "helpers/browser",
     "future-cli.test.ts": ""
   };
+  const exclusions = JSON.parse(await readFile("scripts/ci/default-test-exclusions.json", "utf8"));
+  assert.equal(new Set(exclusions).size, exclusions.length);
+  assert(exclusions.every((path: string) => typeof path === "string" && !/[?*]/.test(path) && !path.includes("..") && !path.startsWith("/")));
   const allFiles = [...files, ...Object.keys(future)];
   const allSources = { ...sources, ...future };
   for (const profile of ["default", "full"]) {
     const rows = createCiPlan(profile, allFiles, allSources).include;
-    assert.equal(rows.length, 17);
+    assert.equal(rows.length, profile === "full" ? 17 : 7);
     for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
       const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
-      assert.deepEqual([...assigned].sort(), [...allFiles].sort(), `${profile}/${os}: no missing or duplicate files`);
+      if (profile === "default" && os === "windows-latest") assigned.push(...selectTests(allFiles, allSources, {}, "package-platform"));
+      const expected = profile === "default" && os !== "ubuntu-24.04" ? allFiles.filter(file => !exclusions.includes(file)) : allFiles;
+      assert.deepEqual([...assigned].sort(), [...expected].sort(), `${profile}/${os}: no missing or duplicate files`);
+      for (const file of Object.keys(future)) assert(assigned.includes(file), file);
     }
     for (const row of rows) {
       assert.equal(row.title, testSuites[row.suite].title);
