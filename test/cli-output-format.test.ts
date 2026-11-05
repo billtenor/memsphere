@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -23,9 +24,21 @@ function cli(fixture: Fixture, args: string[], format?: Format, input?: string) 
   return result;
 }
 
-/** Compare actual CLI representations of an unchanged result, including the default. */
-function representations(fixture: Fixture, args: string[], input?: string): any {
-  const results = (["json", "text", undefined] as const).map(format => cli(fixture, args, format, input));
+/** Compare the real handlers' format variants. Native JSON transport and the
+ * model's native YAML/default output retain process/encoding coverage. */
+async function representations(fixture: Fixture, args: string[], input?: string): Promise<any> {
+  const results: Array<{ status: number | null; stdout: string; stderr: string }> = [];
+  for (const format of ["json", "text", undefined] as const) {
+    if (format === "json" || args[0] === "model" && args[1] === "read") results.push(cli(fixture, args, format, input));
+    else {
+      assert.equal(input, undefined, "stdin contracts must use the native CLI");
+      const env = { ...process.env };
+      for (const name of Object.keys(env)) if (name.toUpperCase().startsWith("MEMSPHERE_")) delete env[name];
+      const result = await invokeCliModule(["--project", "test-project", ...args, ...(format ? ["--output", format] : [])],
+        fixture.cwd, { ...env, MEMSPHERE_HOME: fixture.home }, entry);
+      results.push({ ...result, status: 0 });
+    }
+  }
   for (const result of results) {
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, "");
@@ -67,15 +80,15 @@ async function fixture(t: TestContext) {
 test("actual model/data/Store reads use YAML text by default and preserve special strings and nested JSON values", { timeout: 60_000 }, async t => {
   const f = await fixture(t);
   const before = await snapshotTree(f.root);
-  const model = representations(f, ["model", "read", "record.json", "--part", "all"]);
+  const model = await representations(f, ["model", "read", "record.json", "--part", "all"]);
   assert.deepEqual(model.definition, schema);
-  const data = representations(f, ["data", "read", "a", "--store", "records"]);
+  const data = await representations(f, ["data", "read", "a", "--store", "records"]);
   assert.deepEqual(data.value, value);
   assert.equal(data.revision, 1);
   const query = cli(f, ["data", "read", "a", "--store", "records", "--path", "$.nested.nil"], "json");
   assert.equal(query.status, 0, query.stderr);
   assert.deepEqual(JSON.parse(query.stdout).value, [null]);
-  const store = representations(f, ["data", "store", "read", "records"]);
+  const store = await representations(f, ["data", "store", "read", "records"]);
   assert.equal(store.storeId, "records");
   assert.equal(store.model, "record.json");
   assert.equal(store.capabilities.value, true);
@@ -86,7 +99,7 @@ test("all three list commands expose the same paged receipt in JSON, text and de
   const f = await fixture(t);
   const before = await snapshotTree(f.root);
   for (const args of [["model", "list"], ["data", "list", "--store", "records"], ["data", "store", "list"]]) {
-    const first = representations(f, [...args, "--limit", "1"]);
+    const first = await representations(f, [...args, "--limit", "1"]);
     assert.equal(first.items.length, 1);
     assert.equal(typeof first.nextCursor, "string");
     assert.ok(first.nextCursor.length);

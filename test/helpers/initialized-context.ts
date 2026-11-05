@@ -27,3 +27,12 @@ export async function initializedContextFixture(t: TestContext, schemas: Record<
   }
   return f;
 }
+
+/** Legacy model-backed Artifact tests need installed models, without bindings
+ * to unrelated Context Control Stores that change Run source discovery. */
+export async function initializedModelFixture(t: TestContext, schemas: Record<string, unknown>) {
+  const f = await businessFixture(t, schemas);
+  const source = await installedBaseline();
+  await cp(join(source, "models"), join(f.root, "models"), { recursive: true });
+  return f;
+}
