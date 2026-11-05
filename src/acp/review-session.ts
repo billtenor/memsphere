@@ -1,3 +1,4 @@
+import { currentReviewNode, reviewNodeView, reviewNodeProgress, nodeSubmitSchema, type NodeMutation, type ReviewNodeState } from "../review-nodes.js";
 import { requireRunContent } from "../project/run-data.js";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
@@ -9,6 +10,7 @@ import {
 import { readConfig } from "../config.js";
 import {
   appendArtifactReviewAgentComment,
+  mutateArtifactReviewNodes,
   markArtifactReviewAgentCliReady,
   readArtifactReviewForActor,
   readRun,
@@ -36,6 +38,7 @@ export async function agentReviewArtifactPayload(): Promise<unknown> {
     artifact: await expandArtifact(binding.runsRoot, submission.artifact),
     contextArtifacts: await Promise.all(submission.contextArtifacts.map(async (item) => ({
       stepId: item.stepId,
+      ...(item.artifactId ? { artifactId: item.artifactId } : {}),
       artifact: await expandArtifact(binding.runsRoot, item.artifact)
     }))),
     revisionSummary: submission.revisionSummary
@@ -52,6 +55,7 @@ export async function agentReviewAssignmentDetailPayload(): Promise<unknown> {
   const context = await readBoundContext(binding);
   return {
     status: context.assignment.status,
+    reviewProgress: reviewNodeProgress(context.assignment, context.assignment.status),
     binding: context.assignment.binding,
     slots: [...context.assignment.slotIds],
     permissions: context.assignment.permissions,
@@ -66,7 +70,8 @@ export async function addBoundAgentReviewComment(input: {
   severity: ArtifactReviewSeverity;
   anchor?: ArtifactReviewAgentAnchorInput;
 }): Promise<unknown> {
-  const binding = await boundAgentReviewSession();
+  const binding = await boundAgentReviewSession(true);
+  if ((await readBoundContext(binding)).assignment.nodeTree) throw new Error("review_node_artifact_protocol_required");
   const context = await appendArtifactReviewAgentComment({ ...binding, ...input });
   return agentAssignmentReceipt(context, "comment");
 }
@@ -75,12 +80,12 @@ export async function submitBoundAgentReview(input: {
   vote: ArtifactReviewVoteValue;
   summary?: string;
 }): Promise<unknown> {
-  const binding = await boundAgentReviewSession();
+  const binding = await boundAgentReviewSession(true);
   const context = await submitArtifactReviewAgentAssignment({ ...binding, ...input });
   return agentAssignmentReceipt(context, "submit");
 }
 
-async function boundAgentReviewSession(): Promise<BoundAgentReviewSession> {
+async function boundAgentReviewSession(write = false): Promise<BoundAgentReviewSession> {
   const configPath = requiredEnv("MEMSPHERE_CONFIG_PATH");
   const workspaceRoot = resolve(requiredEnv("MEMSPHERE_WORKSPACE_ROOT"));
   const runId = requiredEnv("MEMSPHERE_REVIEW_RUN_ID");
@@ -96,9 +101,12 @@ async function boundAgentReviewSession(): Promise<BoundAgentReviewSession> {
     const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
     const assignment = round?.assignments.find((candidate) => artifactReviewAssignmentId(candidate) === assignmentId);
     if (!round || !assignment) continue;
-    const attempt = assignment.attempts?.at(-1);
+    const attemptId = process.env.MEMSPHERE_REVIEW_ATTEMPT_ID;
+    if (assignment.nodeTree && !attemptId) throw new Error("review_attempt_binding_required");
+    const attempt = attemptId ? assignment.attempts?.find(a => a.id === attemptId) : assignment.attempts?.at(-1);
     if (!attempt) throw new Error(`Agent Review attempt not found: ${assignmentId}`);
-    await markArtifactReviewAgentCliReady({
+    if (write && (assignment.attempts?.at(-1)?.id !== attempt?.id || assignment.status !== "running")) throw new Error("review_attempt_not_current");
+    if (write) await markArtifactReviewAgentCliReady({
       runsRoot: config.runsRoot,
       reviewId: review.id,
       roundId: round.id,
@@ -151,6 +159,7 @@ function agentAssignmentReceipt(context: ArtifactReviewAgentContext, operation: 
     reviewRoundId: context.round.id,
     assignmentId: context.assignment.id,
     status: context.assignment.status,
+    reviewProgress: reviewNodeProgress(context.assignment, context.assignment.status),
     vote: context.assignment.submitted?.vote,
     commentCount: context.assignment.draft.comments.length,
     completed: operation === "submit",
@@ -164,4 +173,33 @@ function requiredEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`Agent Review Session environment is missing ${name}`);
   return value;
+}
+
+export async function boundReviewNodeContext() {
+  const binding = await boundAgentReviewSession();
+  return readBoundContext(binding);
+}
+export async function boundReviewNodeView(options: { nodeId?: string; all?: boolean; list?: boolean } = {}) {
+  const context = await boundReviewNodeContext();
+  return { ...reviewNodeView(context.assignment, context.assignment.submitted?.comments ?? context.assignment.draft.comments, { ...options, status: context.assignment.status }), vote: context.assignment.submitted?.vote, summary: context.assignment.submitted?.summary };
+}
+export async function mutateBoundReviewNode(mutation: Omit<Extract<NodeMutation, { operation: "report" }>, "expectedNodeId"> | Exclude<NodeMutation, { operation: "report" }>) {
+  const binding = await boundAgentReviewSession(true);
+  const context = await readBoundContext(binding);
+  const currentNodeId = currentReviewNode(context.assignment)?.nodeId ?? "";
+  const fixed: NodeMutation = mutation.operation === "report"
+    ? { ...mutation, expectedNodeId: currentNodeId }
+    : mutation.operation === "comment-add"
+      ? { ...mutation, nodeId: mutation.nodeId ?? currentNodeId }
+      : mutation;
+  const commentIds = (state: ReviewNodeState) => [...state.ruleResults.flatMap(r => r.commentIds), ...(state.reasonCommentId ? [state.reasonCommentId] : []), ...(state.commentIds ?? [])];
+  const targetNodeId = fixed.operation === "report" ? fixed.expectedNodeId : fixed.operation === "update" ? fixed.nodeId : fixed.operation === "comment-add" ? fixed.nodeId : context.assignment.nodeStates?.find(s => commentIds(s).includes(fixed.commentId))?.nodeId;
+  const saved = await mutateArtifactReviewNodes({ ...binding, mutation: fixed });
+  const state = saved.assignment.nodeStates?.find(s => s.nodeId === targetNodeId);
+  return { operation: mutation.operation, savedNodeId: targetNodeId, savedCommentIds: state ? commentIds(state) : [], ...("commentId" in fixed ? { commentId: fixed.commentId } : {}), ...reviewNodeView(saved.assignment, saved.assignment.draft.comments, { status: saved.assignment.status }) };
+}
+export async function submitBoundReviewNodes(artifact: unknown) {
+  const input = nodeSubmitSchema.parse(artifact);
+  await submitBoundAgentReview(input);
+  return { operation: "submit", ...await boundReviewNodeView() };
 }

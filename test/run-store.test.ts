@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { allReviewNodes, currentReviewNode } from "../src/review-nodes.js";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { createHash } from "node:crypto";
@@ -29,6 +30,7 @@ import {
   ensureCurrentSchemaDraft,
   finalArtifacts,
   markArtifactReviewAgentCliReady,
+  mutateArtifactReviewNodes,
   readRun,
   repeatRun,
   reportRun,
@@ -2102,6 +2104,12 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       protocolVersion: 1,
       sessionId: "agent-round-1"
     });
+    let nodeContext = await readRun(runsRoot, started.id);
+    const firstOpenId = allReviewNodes(claimed.assignment.nodeTree!).find(n => n.kind === "open_review")!.nodeId;
+    while (currentReviewNode(currentArtifactReview(nodeContext)!.rounds[0].assignments.find(a => a.actorId === agentAssignment.actorId)!)) {
+      const node = currentReviewNode(currentArtifactReview(nodeContext)!.rounds[0].assignments.find(a => a.actorId === agentAssignment.actorId)!)!;
+      nodeContext = (await mutateArtifactReviewNodes({ runsRoot, reviewId: review.id, roundId: round.id, actorId: agentAssignment.actorId, attemptId: claimed.attempt.id, mutation: { operation: "report", expectedNodeId: node.nodeId, artifact: { applicable: true, comments: [] } } })).run;
+    }
     await assert.rejects(
       submitArtifactReviewAgentAssignment({
         runsRoot,
@@ -2128,18 +2136,9 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       }),
       /does not match the current Submission/
     );
-    const agentCommented = await appendArtifactReviewAgentComment({
-      runsRoot,
-      reviewId: review.id,
-      roundId: round.id,
-      actorId: agentAssignment.actorId,
-      attemptId: claimed.attempt.id,
-      body: "The candidate is traceable.",
-      anchor: {
-        sourceHash: review.submissions[0].digest,
-        target: " artifact:root ",
-        context: " Reviewed delivery "
-      }
+    const agentCommented = await mutateArtifactReviewNodes({
+      runsRoot, reviewId: review.id, roundId: round.id, actorId: agentAssignment.actorId, attemptId: claimed.attempt.id,
+      mutation: { operation: "comment-add", nodeId: firstOpenId, artifact: { body: "The candidate is traceable.", severity: "suggestion", anchor: { sourceHash: review.submissions[0].digest, target: " artifact:root ", context: " Reviewed delivery " } } }
     });
     assert.deepEqual(agentCommented.assignment.draft.comments[0]?.anchor, {
       submissionId: review.submissions[0].id,
@@ -2219,6 +2218,10 @@ test("reviewed Schema Artifacts enter Review only after explicit whole-draft sub
       protocolVersion: 1,
       sessionId: "agent-round-2"
     });
+    let secondContext = secondClaim;
+    while (currentReviewNode(secondContext.assignment)) {
+      secondContext = await mutateArtifactReviewNodes({ runsRoot, reviewId: revisedReview.id, roundId: secondRound.id, actorId: secondAgent.actorId, attemptId: secondClaim.attempt.id, mutation: { operation: "report", expectedNodeId: currentReviewNode(secondContext.assignment)!.nodeId, artifact: { applicable: true, comments: [] } } });
+    }
     const secondAgentSubmitted = await submitArtifactReviewAgentAssignment({
       runsRoot,
       reviewId: revisedReview.id,

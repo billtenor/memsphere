@@ -54,6 +54,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
       MEMSPHERE_REVIEW_RUN_ID: input.run.id,
       ...((input.run.memorySnapshot || input.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: input.run.id } : {}),
       MEMSPHERE_REVIEW_ASSIGNMENT_ID: assignmentId,
+      MEMSPHERE_REVIEW_ATTEMPT_ID: attempt.id,
       MEMSPHERE_CONFIG_PATH: input.config.configPath,
       MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,
       MEMSPHERE_CLI: "<runtime-generated-session-cli>",
@@ -70,7 +71,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
     };
     const prompt = await buildArtifactReviewerPrompt({
       context,
-      promptVersion: attempt.promptVersion ?? launch.promptVersion,
+      promptVersion: assignment.nodeTree ? "artifact-review-v3" : attempt.promptVersion ?? launch.promptVersion,
       locale: resolvePromptLocale(input.run.language)
     });
     const directory = join(
@@ -102,7 +103,7 @@ export async function writeAgentReviewDebugArtifacts(input: {
       startupTimeoutMs: launch.startupTimeoutMs,
       idleTimeoutMs: launch.idleTimeoutMs,
       maxRuntimeMs: launch.maxRuntimeMs,
-      promptVersion: attempt.promptVersion ?? launch.promptVersion,
+      promptVersion: assignment.nodeTree ? "artifact-review-v3" : attempt.promptVersion ?? launch.promptVersion,
       model: launch.model,
       cliSource,
       promptFile: "prompt.md"

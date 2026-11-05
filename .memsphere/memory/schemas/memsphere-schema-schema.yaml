@@ -25,6 +25,7 @@ asserts:
   - 模型数据 Artifact 使用 store 与可选 model，不与 Schema 同时声明；Schema 及其字段不声明 store/model，不进入模型产物逐字段填写。
   - 模型 Artifact 可通过 run report --write-options 内联 JSON 对象（可选 data_id 字段） 选择稳定业务 ID，仅适用于绑定业务 Store 的普通模型产物（空对象也受此限制）；仅接受 JSON 对象与当前支持的 data_id 字段，不支持文件引用，未知字段或非字符串值拒绝；ID 必须非空白并符合 filesystem JSON ValueStore 可移植文件名规则（含 .json 后缀长度），不修剪或编码。省略时按 Run ID 与 stepExecutionId 生成。首个通过格式及模型校验的候选在评审或业务写入前持久化目标，重试/评审修订省略时继承、同 ID 可重交、不同 ID 拒绝；校验失败尚未冻结目标。不同步骤、循环或 Run 可显式选择同一 ID，执行身份和历史快照仍独立。候选 modelTarget、评审材料和接受 modelData 回执记录业务 ID，接受只写已评审目标；旧记录未含目标字段时按原生成规则处理。写入为无条件整条原子 upsert，最后成功写入覆盖，不合并字段，无 expected-revision 或 CAS，写入后 Run 保存失败以同 ID redo。
   - 自由探索完整成果直接 report，不预建空 draft；Schema 渐进撰写的局部内容仍走原流程；不向 !schema 添加 model、payload、Step 或持久化字段。
+  - Schema 的有效审查规则保留其定义来源和原始字段位置；被引用 Schema 的规则属于目标 Memory 的路径，不改写成承载节点的内嵌路径。节点审查状态与开放审查属于宿主 Review，不向 !schema 添加 reviewSource、nodeId 或判断字段。
 fields:
   - !schema
     name: syntax

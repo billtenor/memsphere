@@ -123,8 +123,8 @@ test("ACP Agent Reviewer completes its bound Assignment through the Session CLI"
       .split("\n")
       .map((line) => JSON.parse(line) as { prompt?: { kind: string; text: string } });
     assert.deepEqual(rawRecords.filter((record) => record.prompt).map((record) => record.prompt?.kind), ["initial"]);
-    assert.match(rawRecords.find((record) => record.prompt)?.prompt?.text ?? "", /# Memsphere Artifact Reviewer/);
-    assert.doesNotMatch(JSON.stringify(activity), /# Memsphere Artifact Reviewer/);
+    assert.match(rawRecords.find((record) => record.prompt)?.prompt?.text ?? "", /# Memsphere progressive Artifact review/);
+    assert.doesNotMatch(JSON.stringify(activity), /# Memsphere progressive Artifact review/);
 
     const config = await readConfig(configPath);
     const server = createViewServer(config);
@@ -472,42 +472,17 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.equal(launch.actorId, "reviewer-agent");
     assert.equal(launch.provider, "traex");
     assert.deepEqual((launch.args as string[]).slice(0, 4), ["--sandbox", "workspace-write", "--ask-for-approval", "never"]);
-    assert.match(prompt, /# Memsphere Artifact Reviewer/);
-    assert.match(prompt, /## Role\nCheck the candidate independently\./);
-    assert.match(prompt, /## Goal/);
-    assert.match(prompt, /The Role is a lens, not a limit on scope/);
-    assert.match(prompt, /Do not treat the candidate summary, prior validation report, or another reviewer's conclusion as proof/);
-    assert.match(prompt, /## Review contract/);
-    assert.match(prompt, /### Action\nProduce a reviewed Artifact\./);
-    assert.match(prompt, /### Procedure assertions\n- Keep the review evidence traceable\./);
-    assert.match(prompt, /### Action assertions\n- The candidate must be concrete\./);
-    assert.match(prompt, /### Suggestions\n- Prefer a concise candidate\./);
-    assert.match(prompt, /- Name: reviewed result/);
-    assert.match(prompt, /- Schema: Inline; type object; format json; 1 top-level field/);
-    assert.doesNotMatch(prompt, /## Artifact\n```json/);
-    assert.match(prompt, /memsphere-review run artifact show --output json/);
-    assert.match(prompt, /memsphere-review run artifact show --step "<step-ref>"/);
-    assert.match(prompt, /memsphere-review run artifact contract show --output json/);
-    assert.match(prompt, /memsphere-review run review assignment show --output json/);
-    assert.match(prompt, /Comment bodies use Markdown/);
-    assert.match(prompt, /memsphere-review run review comment --severity <blocking\|risk\|suggestion> --body-file <path>/);
-    assert.doesNotMatch(prompt, /MEMSPHERE_CLI|MEMSPHERE_REVIEW_|MEMSPHERE_COMMENT/);
-    assert.match(prompt, /Do not encode line breaks as literal `\\n` sequences/);
-    assert.match(prompt, /## Earlier Artifacts\n- flow\[1\]: prior context/);
-    assert.match(prompt, /Inspect prior Run Artifacts when relevant/);
-    assert.match(prompt, /Cover every contract assertion/);
-    assert.match(prompt, /Record every substantiated, actionable finding as a comment/);
-    assert.match(prompt, /## Review method/);
-    assert.match(prompt, /Explain the evidence and residual risks/);
-    assert.match(prompt, /do not stop after the first issue/);
-    assert.match(prompt, /Cover every contract assertion and check related defect patterns and adjacent boundaries/);
-    assert.match(prompt, /After completing the coverage pass, submit one vote and summary/);
-    assert.match(prompt, /Do not invent findings/);
+    assert.match(prompt, /# Memsphere progressive Artifact review/);
+    assert.match(prompt, /Check the candidate independently/);
+    assert.match(prompt, /within your role/);
+    assert.match(prompt, /do not replace evidence/);
+    assert.match(prompt, /"rulePath": "asserts\[0\]"/);
+    assert.match(prompt, /"text": "Keep the review evidence traceable\."/);
+    assert.doesNotMatch(prompt, /"text": "The candidate must be concrete\."/);
+    assert.match(prompt, /memsphere run artifact show/);
+    assert.match(prompt, /memsphere continue report --artifact/);
+    assert.doesNotMatch(prompt, /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
-    assert.match(prompt, /memsphere-review run step show --step "<step-ref>"/);
-    assert.match(prompt, /ChangeSet Run sessions automatically bind their frozen Memory snapshot/);
-    assert.doesNotMatch(prompt, /Identity:|Binding:|Decision policy:|Candidate Artifact and contract|Required workflow/);
-    assert.doesNotMatch(prompt, /reviewer-agent|round-|assignment-/);
     await assert.rejects(
       tryRunArtifactReviewAgents({
         config: { ...config, debug: { agentReview: false, root: debugRoot } },
@@ -799,11 +774,11 @@ test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, 
   });
   try {
     const reviewCommands = [
-      "memsphere-review run artifact show --output json",
-      "memsphere-review run artifact contract show --output json",
-      "memsphere-review run review assignment show --output json",
-      "memsphere-review run review comment --severity suggestion --body shell-smoke --output json",
-      "memsphere-review run review submit --vote approve --summary shell-smoke --output json"
+      "memsphere run artifact show --output json",
+      "memsphere run artifact contract show --output json",
+      "memsphere run review assignment show --output json",
+      "memsphere run review comment --severity suggestion --body shell-smoke --output json",
+      "memsphere run review submit --vote approve --summary shell-smoke --output json"
     ];
     for (const [command, prefix] of [
       ["powershell.exe", ["-NoProfile", "-Command"]],
@@ -835,7 +810,7 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     launch = provider.buildLaunch({
       actor: agentIdentity("traex", ["acp", "serve"], { model: "review-model" }),
       workspaceRoot: "/workspace",
-      sessionEnv: { MEMSPHERE_CLI: "/tmp/memsphere-review" }
+      sessionEnv: { MEMSPHERE_CLI: "/tmp/memsphere" }
     });
   } finally {
     if (originalNoProxy === undefined) delete process.env.NO_PROXY;
@@ -851,7 +826,7 @@ test("Traex Provider fixes the ACP process to workspace-write non-interactive ex
     "-c", "model=\"review-model\"",
     "acp", "serve"
   ]);
-  assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere-review");
+  assert.equal(launch.env.MEMSPHERE_CLI, "/tmp/memsphere");
   if (process.platform === "win32") {
     assert.equal(
       launch.env.NO_PROXY ?? launch.env.no_proxy,
@@ -1087,7 +1062,7 @@ test("ACP Client permits silent work with both timeouts disabled and detects tra
 
 test("Reviewer Attempts use fresh caller-local temporary directories, including retries", async () => {
   await withAgentReviewFixture("no-submit", async ({ configPath, runsRoot, runId }) => {
-    const caller = await mkdtemp(join(tmpdir(), "memsphere-review-caller-"));
+    const caller = await mkdtemp(join(tmpdir(), "memsphere-caller-"));
     const nestedCaller = join(caller, "nested");
     if (process.platform === "win32") {
       await mkdir(nestedCaller);

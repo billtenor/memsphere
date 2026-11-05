@@ -333,6 +333,8 @@ memsphere run start <procedure-name> --name "<run-name>"
 
 Procedure Run 的每一步会明确给出产物要求。Agent 通过 `run report` 上报结果，Memsphere 负责校验、记录状态，并在需要时进入正式 Review。没有适用 Procedure 时，可用 `memsphere run start --name "<run-name>"` 启动自由探索 Run；在形成可供引用、评审、交接或交付的完整结果时上报 Artifact。
 
+新 Agent Reviewer 会自动按冻结规则树渐进审查。`memsphere run review report --assignment A --artifact '{"applicable":true,"comments":[]}'` 完成当前节点并展示下一节点；只需上报不满足或无法判定的规则意见，省略 comments 时保留逐条已存意见。`comment add/update/delete` 与 `update --node N` 编辑但不推进，`list` 查树，`show --all` 查全部判断。命令也可使用绑定个人审查的 `memsphere continue`；内容统一支持 --artifact JSON 字符串或 --artifact-file 文件。全部规则后必须进行开放审查，结合角色经验检查额外问题；最终复核后 `submit --artifact '{"vote":"approve","summary":"结论"}'` 一次提交现有意见和独立投票。Human 直接提交结论，历史无树审查保持原交互。
+
 Review 已开始后，可以用 `memsphere run binding show/update` 或 View 调整后续评审人。当前轮和历史轮保持不变；同一 Review 的下一轮使用最后一次成功保存的 Binding。View 中保存 Binding 不要求输入设置密钥。
 
 也可以直接在一个新的 Agent 会话中输入：

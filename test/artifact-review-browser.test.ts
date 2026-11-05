@@ -25,10 +25,36 @@ import type { AgentReviewProvider } from "../src/acp/provider.js";
 import { agentActivityPath, readAgentActivitySnapshot } from "../src/acp/activity.js";
 import { reviewConfiguration } from "./helpers/review.js";
 import { runGit } from "../src/git.js";
+import { reviewMaterialFixture, completeReview } from "./helpers/review-node-materials.js";
+import * as graphReviews from "../src/context_control/review-repository.js";
+import { currentReviewNode } from "../src/review-nodes.js";
 
 const browserTestDirectory = dirname(fileURLToPath(import.meta.url));
 const browserFakeReviewer = join(browserTestDirectory, "fixtures", "fake-acp-reviewer.mjs");
 const browserFakeCli = join(browserTestDirectory, "fixtures", "fake-review-cli.mjs");
+
+for (const input of ["inputA", "inputB"] as const) test(`graph Review locates ${input} rather than the candidate at the same Markdown location`, async t => {
+  const f = await reviewMaterialFixture(t), n = currentReviewNode(f.claimed.assignment)!;
+  await graphReviews.mutateArtifactReviewNodes({ ...f.bound, mutation: { operation: "comment-add", artifact: { rulePath: n.asserts[0].rulePath, result: "undetermined", body: `Locate ${input}`, severity: "risk", anchor: { targetRef: { kind: "artifact", id: f.result.materials[input] }, location: "markdown:h1:0" } } } });
+  await completeReview(f.bound); await graphReviews.submitArtifactReviewAgentAssignment({ ...f.bound, vote: "approve" });
+  const config: MemsphereConfig = { configPath: join(f.root, "config.json"), scopeRoot: f.root, memoryRoot: join(f.root, "memory"), reviewsRoot: join(f.root, "reviews"), runsRoot: f.input.runsRoot, archiveRoot: join(f.root, "archives"), view: { host: "127.0.0.1", port: 0 }, controlPlane: f.controlPlane };
+  await withReviewBrowser(config, { width: 1440, height: 900 }, async (page, origin) => {
+    await page.goto(`${origin}/tasks/${f.runId}/artifact-reviews/${f.input.reviewId}`);
+    const modal = page.locator("#artifact-review-modal"); await modal.waitFor();
+    await modal.getByRole("button", { name: "评审详情", exact: true }).first().click();
+    const comment = modal.locator(".comment-card").filter({ hasText: `Locate ${input}` }); await comment.waitFor();
+    const opinion = await page.request.get(`${origin}/api/runs/${f.runId}/artifact-reviews/${f.input.reviewId}/rounds/${f.input.roundId}?view=compact&opinion_actor=agent`);
+    assert.equal(opinion.status(), 200);
+    const dto = await opinion.json();
+    const anchor = dto.rounds.find((r: any) => r.id === f.input.roundId).assignments.find((a: any) => a.actorId === "agent").submitted.comments[0].anchor;
+    assert.equal(anchor.targetRef.id, f.result.materials[input]); assert.equal(anchor.submissionId, f.result.materials[input]);
+    await comment.getByRole("button", { name: "定位", exact: true }).click();
+    const located = modal.locator('[data-anchor="markdown:h1:0"].artifact-review-target-located'); await located.waitFor();
+    assert.match(await located.innerText(), new RegExp(input)); assert.doesNotMatch(await located.innerText(), /Candidate/);
+    assert.equal(await located.locator(".inline-plus").count(), 0);
+    assert.match(new URL(page.url()).searchParams.get("material")!, /^context:/);
+  });
+});
 
 test("Human Artifact Review keeps each participant's draft private", async () => {
   const fixture = await createTwoActorReviewFixture();
@@ -1061,6 +1087,9 @@ flow:
     await materialChooser.selectOption({ label: "待评审产物 · activity candidate" });
     await modal.getByText("Review this implementation.", { exact: true }).waitFor();
     const agentRow = modal.locator(".artifact-review-row").filter({ hasText: "Advisor" }).first();
+    const totalNodes = completedAgent.nodeTree ? completedAgent.nodeStates?.filter(s => s.reported).length : 0;
+    assert.ok(totalNodes && totalNodes > 0);
+    await agentRow.getByText(`${totalNodes}/${totalNodes}`, { exact: true }).waitFor();
     const detailToggle = agentRow.getByRole("button", { name: "运行记录", exact: true });
     assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-participant-head')]").count(), 1);
     assert.equal(await detailToggle.locator("xpath=ancestor::*[contains(@class, 'artifact-review-row-main')]").count(), 0);

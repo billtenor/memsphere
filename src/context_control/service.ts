@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "../data/api/context.js";
 import type { ValueStore, StoredValue } from "../data/api/value-store.js";
 import type { Entity } from "./model-assets.js";
-import type { Artifact, Body, External, Ref, ReportInput, Review, Run, Snapshot, Step } from "./types.js";
+import type { Artifact, Body, External, NewReviewComment, Ref, ReportInput, Review, Run, Snapshot, Step } from "./types.js";
 import { failure } from "./errors.js";
 import { effectiveStep } from "./graph-rewind.js";
 import { GraphRuntime, isGraphRun } from "./graph-runtime.js";
@@ -330,7 +330,7 @@ export class ContextControl {
   async review(runId: string, artifactId: string, source: "human" | "agent", comments: string[]) {
     if (!comments.length || !["human", "agent"].includes(source)) throw failure("INVALID_ARGUMENT", "Review requires source and comments");
     comments.forEach(c => nonblank(c, "comment"));
-    return this.writeRecord(runId, async () => { await this.complete(runId, artifactId); const time = now(); const r: Review = { id: id("review"), artifactId, reviewer: { role: "reviewer", source }, status: "submitted", comments: comments.map(body => ({ id: id("comment"), body, createdAt: time })), createdAt: time, endedAt: time }; await this.create("review", runId, r); return r; });
+    return this.writeRecord(runId, async () => { await this.complete(runId, artifactId); const time = now(); const r: Review = { id: id("review"), artifactId, reviewer: { role: "reviewer", source }, status: "submitted", comments: comments.map((body): NewReviewComment => ({ commentId: id("comment"), body, createdAt: time })), createdAt: time, endedAt: time }; await this.create("review", runId, r); return r; });
   }
   async finish(runId: string, artifactIds?: string[]) {
     const row = await this.require<Run>("run", runId, runId);

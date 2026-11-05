@@ -1,6 +1,18 @@
 import type { PromptLocale } from "./locale.js";
 
+export type ReviewNodePromptModel = { data: string; open: boolean; hasNode: boolean; rolePrompts: string[]; materials: string; permissions: Array<{ id: string; description: string }> };
+export type ReviewNodePromptId = "acp.review-v3.initial" | "acp.review-v3.node" | "acp.review-v3.summary" | "acp.review-v3.edit-receipt" | "acp.review-v3.submit-receipt" | "acp.review-v3.list" | "acp.review-v3.results" | "acp.review-v3.reminder";
+
 export type PromptInputMap = {
+  "acp.review-v3.initial": ReviewNodePromptModel;
+  "acp.review-v3.node": ReviewNodePromptModel;
+  "acp.review-v3.summary": ReviewNodePromptModel;
+  "acp.review-v3.edit-receipt": ReviewNodePromptModel;
+  "acp.review-v3.submit-receipt": ReviewNodePromptModel;
+  "acp.review-v3.list": ReviewNodePromptModel;
+  "acp.review-v3.results": ReviewNodePromptModel;
+  "acp.review-v3.reminder": ReviewNodePromptModel;
+
   "run.async-wait": { taskId: string };
   "run.graph-selection": { runId: string; steps: Array<{ id: string; description: string; actor: string; artifact: string }>; command: string };
   "run.graph-waiting": { runId: string; message: string; command: string };

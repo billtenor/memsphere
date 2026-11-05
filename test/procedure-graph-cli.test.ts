@@ -156,7 +156,9 @@ test("Continue binds Human authorization and advisory resolution to its Step and
   const reviewed = await f.call("run", "show", "--run", start.runId);
   const personal = reviewed.reviews.find((r: any) => r.reviewer.actorId === "advisor");
   assert.equal(personal.roundId, round.id); assert.match(personal.vote.delegationNote, /fixture advisor authorization/);
-  const commentId = personal.comments[0].id;
+  const commentId = personal.comments[0].commentId;
+  assert.equal(typeof commentId, "string"); assert.ok(commentId.length > 0);
+  assert.equal(personal.comments[0].id, undefined);
   const resolve = ["review", "resolve", "--comment", commentId, "--disposition", "accepted-fixed", "--note", "Clarified in candidate"];
   await assert.rejects(f.call("continue", ...resolve), /validation/);
   const runPath = join(f.root, "data/context_control/runs", `${start.runId}.json`);

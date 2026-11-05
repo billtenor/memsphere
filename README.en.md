@@ -331,6 +331,8 @@ memsphere run start <procedure-name> --name "<run-name>"
 
 Each Procedure Run step states its Artifact requirements. The Agent reports results through `run report`; Memsphere validates them, records state, and enters formal Review when required. If no Procedure applies, `memsphere run start --name "<run-name>"` starts free exploration. Report an Artifact when a complete result is needed for reference, review, handoff, or delivery.
 
+New Agent Reviewers automatically traverse a frozen rule tree. `memsphere run review report --assignment A --artifact '{"applicable":true,"comments":[]}'` confirms the current node and displays the next one; report only unsatisfied or undetermined rules, and omit comments to retain saved findings. `comment add/update/delete` and `update --node N` edit without advancing; `list` reads the tree and `show --all` reads saved judgments. The bound `memsphere continue` routes are also available. Content commands accept either an inline JSON --artifact or --artifact-file. After every tree, including an empty tree, open review asks for additional issues based on role and experience. Following final recheck, `submit --artifact '{"vote":"approve","summary":"Conclusion"}'` submits the existing comments and an independent vote once. Humans submit a conclusion directly; historical reviews without trees keep their interaction protocol.
+
 After a Review starts, use `memsphere run binding show/update` or the View to change later reviewers. The current and historical rounds stay unchanged; the next round of the same Review uses the last successfully saved Binding. Saving a Binding in the View does not require the Settings operation token.
 
 You can also enter the following in a new Agent session:

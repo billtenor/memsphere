@@ -67,7 +67,7 @@
     "comments": {
       "type": "array",
       "title": "评论",
-      "description": "本参与者对固定材料提出的评论，id 在本 Review 内唯一；正式提交前可编辑，提交后正文和锚点固定。",
+      "description": "本参与者对固定材料提出的评论，commentId 在本 Review 内唯一；正式提交前可编辑，提交后正文和锚点固定。",
       "items": {
         "$ref": "#/definitions/Comment",
         "title": "评论",
@@ -103,6 +103,19 @@
       "$ref": "#/definitions/Timestamp",
       "title": "结束时间",
       "description": "本份 Review 正式提交或取消的时间；submitted、cancelled 时填写，pending、running 时省略。"
+    },
+    "nodeTree": {
+      "$ref": "#/definitions/ReviewNodeTree",
+      "title": "冻结审查规则树",
+      "description": "新协议个人 Agent Review 的固定规则树；与 nodeStates 同时存在。"
+    },
+    "nodeStates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/definitions/ReviewNodeState"
+      },
+      "title": "节点审查状态",
+      "description": "适用性、异常判断、Comment 关联和报告完成标记；与 nodeTree 同时存在。"
     }
   },
   "required": [
@@ -162,10 +175,16 @@
       "title": "评审评论",
       "description": "意见作者提出的一条具体评论；正式提交后正文和锚点固定。",
       "properties": {
+        "commentId": {
+          "$ref": "#/definitions/Id",
+          "title": "意见标识",
+          "description": "新建意见的唯一标识；由 ruleResults.commentIds、reasonCommentId 及 resolutions.commentId 引用。"
+        },
         "id": {
           "$ref": "#/definitions/Id",
-          "title": "评论标识",
-          "description": "本 Review 内唯一的评论标识，由所属 Step.reviewRounds 中本轮的 resolutions 通过 reviewId + commentId 关联。"
+          "title": "历史意见标识（兼容）",
+          "description": "仅旧协议记录保留。新建意见使用 commentId；业务 invariant 要求 id/commentId 恰有一个，新协议记录必须使用 commentId。",
+          "readOnly": true
         },
         "body": {
           "type": "string",
@@ -219,7 +238,6 @@
         }
       },
       "required": [
-        "id",
         "body",
         "createdAt"
       ],
@@ -461,6 +479,207 @@
         "stage",
         "code",
         "message"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewNodeTree": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "$ref": "#/definitions/ReviewNode"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewSource": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "procedure",
+            "step",
+            "schema",
+            "statement"
+          ],
+          "title": "来源类型",
+          "description": "流程总体、当前步骤、Schema 或 Statement；当前步骤的 Action/产物契约规则统一标为 step。"
+        },
+        "memoryRef": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "title": "来源路径",
+          "description": "相对于 memoryRef 所指冻结 Memory 根的定义路径；无独立 Memory 时相对于本次冻结契约根；来源根用 \".\"。"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewRule": {
+      "type": "object",
+      "title": "要求或建议条目",
+      "description": "所属 asserts/suggests 数组表示强制程度，来源共享所在节点，只存完整路径和正文。",
+      "properties": {
+        "rulePath": {
+          "type": "string",
+          "minLength": 1,
+          "title": "完整规则路径",
+          "description": "相对于节点 source.memoryRef 所指冻结 Memory 根的完整 AST 路径，如 sections[0].asserts[0]；不截短或重新编号。"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "title": "正文"
+        }
+      },
+      "required": [
+        "rulePath",
+        "text"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewNode": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/definitions/Id",
+          "title": "节点标识",
+          "description": "本人 Review 内按冻结完整树 DFS 前序分配的字符串编号；从 \"1\" 开始，根和空节点也编号，后续操作保持。"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source": {
+          "$ref": "#/definitions/ReviewSource",
+          "title": "节点来源",
+          "description": "有实际来源的节点填写；系统空根和无来源的空中间节点省略整个字段。有自身规则的节点必须填写，由业务 invariant 校验。"
+        },
+        "defines": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "asserts": {
+          "type": "array",
+          "title": "强制要求",
+          "items": {
+            "$ref": "#/definitions/ReviewRule"
+          }
+        },
+        "suggests": {
+          "type": "array",
+          "title": "建议",
+          "items": {
+            "$ref": "#/definitions/ReviewRule"
+          }
+        },
+        "children": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewNode"
+          },
+          "title": "子节点",
+          "description": "与当前节点使用完全相同的递归结构；自己的 source/defines/asserts/suggests/children。"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "open_review"
+          ],
+          "description": "系统追加的必审开放节点；无此字段为普通规则/组织节点。"
+        }
+      },
+      "required": [
+        "nodeId",
+        "name",
+        "defines",
+        "asserts",
+        "suggests",
+        "children"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewNodeState": {
+      "type": "object",
+      "properties": {
+        "nodeId": {
+          "$ref": "#/definitions/Id",
+          "title": "节点标识",
+          "description": "指向本 Review 内对应 ReviewNode.nodeId，编号在审查期间不变。"
+        },
+        "reported": {
+          "type": "boolean"
+        },
+        "applicable": {
+          "type": "boolean"
+        },
+        "ruleResults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReviewRuleResult"
+          }
+        },
+        "reasonCommentId": {
+          "$ref": "#/definitions/Id",
+          "title": "节点不适用原因意见标识",
+          "description": "指向同一 Review.comments 中的一条节点原因；删除后省略，完整性在 report/submit 时校验。"
+        },
+        "commentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Id"
+          },
+          "description": "仅开放审查节点使用，引用未绑定 Statement 的额外问题。"
+        }
+      },
+      "required": [
+        "nodeId",
+        "reported",
+        "ruleResults"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewRuleResult": {
+      "type": "object",
+      "properties": {
+        "rulePath": {
+          "type": "string",
+          "minLength": 1,
+          "title": "完整规则路径",
+          "description": "精确匹配当前 nodeId 内的某个 asserts/suggests 条目的完整 rulePath。"
+        },
+        "result": {
+          "type": "string",
+          "enum": [
+            "not_satisfied",
+            "undetermined"
+          ]
+        },
+        "commentIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/Id"
+          },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "rulePath",
+        "result",
+        "commentIds"
       ],
       "additionalProperties": false
     }

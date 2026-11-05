@@ -180,7 +180,8 @@ for (const entity of ["run", "review"] as const) test(`rewind upgrade preserves 
  const f = await businessFixture(t, {}), s = (await openContextControl(f.root,true))!;
  const run = await s.start("prior rewind model");
  const artifact=(await s.report(run.id,{name:"old",content:textContent("before rewind")})).artifact;
- const review=await s.review(run.id,artifact.id,"human",["preserve this comment"]);
+ const review={id:"historical-review",artifactId:artifact.id,reviewer:{role:"reviewer",source:"human"},status:"submitted",createdAt:new Date().toISOString(),comments:[{id:"historical-comment",body:"preserve this comment",createdAt:new Date().toISOString()}]};
+ await s.stores.review.create({},`${run.id}/${review.id}`,review);
  const before = await s.stores.run.get({},run.id), beforeReview=await s.stores.review.get({},`${run.id}/${review.id}`);
  await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`, await readFile(new URL(`./fixtures/context-control-${entity}-before-rewind.json`,import.meta.url),"utf8"));
  await assert.rejects(openContextControl(f.root),{code:"MODEL_INCOMPATIBLE"});
@@ -188,4 +189,19 @@ for (const entity of ["run", "review"] as const) test(`rewind upgrade preserves 
  const reopened=(await openContextControl(f.root))!;
  assert.deepEqual(await reopened.stores.run.get({},run.id),before);
  assert.deepEqual(await reopened.stores.review.get({},`${run.id}/${review.id}`),beforeReview);
+});
+
+for (const fixtureName of ["context-control-review-before-nodes.json", "context-control-review-master-release.json", "context-control-review-rewind-release.json"]) test(`known Review upgrade from ${fixtureName} preserves historical Comment IDs and revisions`, async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const run = await service.start("historical review"), artifact = (await service.report(run.id, { name: "A", content: textContent("A") })).artifact;
+  const id = "review-history", key = `${run.id}/${id}`;
+  await service.stores.review.create({}, key, { id, roundId: "historical-round", artifactId: artifact.id, reviewer: { role: "runner" }, status: "submitted", createdAt: new Date().toISOString(), endedAt: new Date().toISOString(), comments: [{ id: "comment-original", body: "Keep history", createdAt: new Date().toISOString(), severity: "suggestion" }], vote: { value: "approve" } });
+  const before = await service.stores.review.get({}, key), path = join(f.root, "data/context_control/reviews", run.id, `${id}.json`), bytes = await readFile(path, "utf8");
+  await publishFixtureDefinition(f.root, "memsphere/context_control/review.json", await readFile(new URL(`./fixtures/${fixtureName}`, import.meta.url), "utf8"));
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.review.get({}, key), before);
+  assert.equal(await readFile(path, "utf8"), bytes);
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
 });

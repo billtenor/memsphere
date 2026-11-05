@@ -1,0 +1,8 @@
+{{#if open}}## Open review
+The statement checks are complete. Use your role, professional experience, and the current Artifact to find issues the rules did not cover, including omissions, incorrect assumptions, or other relevant defects.
+Record any additional issues, or explicitly confirm none. Do not manufacture issues to complete this step. This node is required and cannot be skipped as inapplicable. Open-review Comments have no rulePath/result.
+{{else}}## Current rule node
+Inspect this node's full asserts/suggests. Assess applicability for your role and Artifact. Reference exact rulePath for not_satisfied/undetermined exceptions; explain missing evidence. Omit satisfied rules. An inapplicable node needs one reason and does not skip children.
+{{/if}}
+{{data}}
+{{> acp-review-v3/commands}}

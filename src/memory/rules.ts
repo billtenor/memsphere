@@ -7,12 +7,15 @@ export type EffectiveRule = {
   kind: "rule";
   text: string;
   /** Stable within one resolved Memory snapshot. Not intended as display copy. */
-  ruleId: string;
+  rulePath: string;
+  source?: string;
 };
 
 export type EffectiveRuleReference = {
   kind: "reference";
   target: string;
+  names?: string[];
+  defines?: string[];
   entries: EffectiveRuleEntry[];
   sections: EffectiveRuleSection[];
 };
@@ -20,6 +23,7 @@ export type EffectiveRuleReference = {
 export type EffectiveRuleEntry = EffectiveRule | EffectiveRuleReference;
 
 export type EffectiveRuleSection = {
+  source?: string;
   name: string;
   defines: string[];
   entries: EffectiveRuleEntry[];
@@ -98,7 +102,7 @@ export async function resolveRuleParts(
   const declaredEntries: EffectiveRuleEntry[] = [];
   for (const [index, part] of (parts ?? []).entries()) {
     if (typeof part === "string") {
-      declaredEntries.push({ kind: "rule", text: part, ruleId: `local:${channel}[${index}]` });
+      declaredEntries.push({ kind: "rule", text: part, rulePath: `${channel}[${index}]` });
     } else {
       declaredEntries.push(await projectReference(part.target, []));
     }
@@ -131,7 +135,7 @@ async function projectStatement(
     const projected = await projectSection(target, section, channel, `sections[${index}]`, projectReference, stack);
     if (containsRule(projected.entries, projected.sections)) sections.push(projected);
   }
-  return { kind: "reference", target, entries, sections };
+  return { kind: "reference", target, names: [...statement.names], defines: [...statement.defines], entries, sections };
 }
 
 async function projectSection(
@@ -149,6 +153,7 @@ async function projectSection(
     if (containsRule(projected.entries, projected.sections)) sections.push(projected);
   }
   return {
+    source: `${target}#${path}`,
     name: section.names[0],
     defines: [...section.defines],
     entries,
@@ -170,7 +175,8 @@ async function projectEntries(
       entries.push({
         kind: "rule",
         text: part,
-        ruleId: `${target}#${pathPrefix}${channel}[${index}]`
+        rulePath: `${pathPrefix}${channel}[${index}]`,
+        source: target
       });
     } else {
       entries.push(await projectReference(part.target, stack));
@@ -188,14 +194,16 @@ function deduplicateEntries(entries: readonly EffectiveRuleEntry[], seen: Set<st
   const result: EffectiveRuleEntry[] = [];
   for (const entry of entries) {
     if (entry.kind === "rule") {
-      if (seen.has(entry.ruleId)) continue;
-      seen.add(entry.ruleId);
+      if (seen.has(`${entry.source ?? "local"}#${entry.rulePath}`)) continue;
+      seen.add(`${entry.source ?? "local"}#${entry.rulePath}`);
       result.push({ ...entry });
       continue;
     }
     const reference: EffectiveRuleReference = {
       kind: "reference",
       target: entry.target,
+      names: entry.names,
+      defines: entry.defines,
       entries: deduplicateEntries(entry.entries, seen),
       sections: deduplicateSections(entry.sections, seen)
     };
@@ -206,6 +214,7 @@ function deduplicateEntries(entries: readonly EffectiveRuleEntry[], seen: Set<st
 
 function deduplicateSections(sections: readonly EffectiveRuleSection[], seen: Set<string>): EffectiveRuleSection[] {
   return sections.map((section) => ({
+    source: section.source,
     name: section.name,
     defines: [...section.defines],
     entries: deduplicateEntries(section.entries, seen),
@@ -229,6 +238,8 @@ function cloneReference(reference: EffectiveRuleReference): EffectiveRuleReferen
   return {
     kind: "reference",
     target: reference.target,
+    names: reference.names ? [...reference.names] : undefined,
+    defines: reference.defines ? [...reference.defines] : undefined,
     entries: reference.entries.map(cloneEntry),
     sections: reference.sections.map(cloneSection)
   };
@@ -240,6 +251,7 @@ function cloneEntry(entry: EffectiveRuleEntry): EffectiveRuleEntry {
 
 function cloneSection(section: EffectiveRuleSection): EffectiveRuleSection {
   return {
+    source: section.source,
     name: section.name,
     defines: [...section.defines],
     entries: section.entries.map(cloneEntry),

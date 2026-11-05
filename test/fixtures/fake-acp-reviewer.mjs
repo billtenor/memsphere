@@ -57,6 +57,7 @@ const app = acp
     if (mode === "rewind-gated") {
       if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
       invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
+      invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
       const child = spawn(process.execPath,["-e",process.env.REVIEW_TEST_RESISTANT ? 'process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));process.send("ready");setInterval(()=>{},1000)' : 'process.send("ready");setInterval(()=>{if(process.env.REVIEW_TEST_RELEASE&&require("node:fs").existsSync(process.env.REVIEW_TEST_RELEASE))process.exit(0)},25)'],{stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
       await writeFile(process.env.REVIEW_TEST_READY,JSON.stringify({providerPid:process.pid,childPid:child.pid}));
@@ -105,7 +106,16 @@ async function completeReview(vote, client, sessionId) {
   await invokeReviewCli([
     "run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"
   ]);
-  await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]);
+  const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
+  if (detail.reviewProgress) {
+    let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
+    while (view.node) {
+      if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
+      view = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
+    }
+    await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
+    return;
+  }
   if (vote === "request_changes") {
     await invokeReviewCli(["run", "review", "comment", "--assignment", assignment, "--severity", "blocking", "--body", "Fake blocking finding", "--output", "json"]);
   }

@@ -1,3 +1,4 @@
+import type { ReviewNodes } from "../review-nodes.js";
 import type { GraphArtifactSpec, GraphProcedureMemory } from "../memory/ast.js";
 import type { ControlPlaneActor, DecisionPolicyDefinitionSnapshot, PermissionId, RunReviewConfiguration } from "../control-plane/index.js";
 import type { EffectiveRuleTree } from "../memory/rules.js";
@@ -35,8 +36,12 @@ export type Step = {
 };
 export type Artifact = Body & { id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
 export type External = Body & { id: string; runId: string; source: string; capturedAt: string };
-export type ReviewComment = { id: string; body: string; createdAt: string; severity?: "blocking" | "risk" | "suggestion"; anchor?: { targetRef?: Ref; location: string; context?: string } };
+export type ReviewComment = { commentId?: string; id?: string; body: string; createdAt: string; severity?: "blocking" | "risk" | "suggestion"; anchor?: { targetRef?: Ref; location: string; context?: string } };
+/** New writes have one canonical identity; ReviewComment also reads historical id records. */
+export type NewReviewComment = Omit<ReviewComment, "id" | "commentId"> & { commentId: string; id?: never };
 export type Review = {
+  nodeTree?: ReviewNodes["nodeTree"];
+  nodeStates?: ReviewNodes["nodeStates"];
   id: string; roundId?: string; artifactId: string;
   reviewer: { role: "reviewer" | "runner"; source?: "human" | "agent"; actorId?: string };
   status: "pending" | "running" | "submitted" | "cancelled";
