@@ -16,7 +16,13 @@ import type {GraphProcedureMemory} from '../src/memory/ast.js';
 // OS liveness has no portable exit event for non-child descendants. Bound each
 // observation loop; success always requires the actual identity probe.
 async function until<T>(read:()=>Promise<T|undefined>){const end=Date.now()+60000;while(Date.now()<end){const value=await read();if(value)return value;await delay(25);}throw Error('Timed out waiting for process readiness');}
-const alive=async(pid:number)=>Boolean(await captureProcessIdentity(pid));
+// These assertions ask whether an owned fixture PID is alive, not for its
+// creation identity. Windows signal 0 queries that directly without spawning
+// PowerShell for every PID; identity safety remains covered by native CIM tests.
+const alive=async(pid:number)=>{
+ if(process.platform!=='win32')return Boolean(await captureProcessIdentity(pid));
+ try{process.kill(pid,0);return true;}catch(error){if((error as NodeJS.ErrnoException).code==='ESRCH')return false;throw error;}
+};
 
 test('a mismatched OS start identity never signals a live detached process', {skip:process.platform==='win32'}, async t=>{
  const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
