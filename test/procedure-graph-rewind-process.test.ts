@@ -56,6 +56,7 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
    g.stopReviewer=async worker=>{
     process.kill(worker.pid,'SIGKILL');
     await until(async()=>await alive(worker.pid)?undefined:true);
+    assert.equal(await alive(processes[0].childPid),true,'fixture child survives worker exit until explicitly released');
     await stopRewindWorker(worker);
    };
    return g.rewind(start.run.id,product.step.id,'bad product');

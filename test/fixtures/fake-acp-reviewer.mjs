@@ -58,7 +58,7 @@ const app = acp
       if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
       invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
       invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
-      const child = spawn(process.execPath,["-e",process.env.REVIEW_TEST_RESISTANT ? 'process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));process.send("ready");setInterval(()=>{},1000)' : 'process.send("ready");setInterval(()=>{if(process.env.REVIEW_TEST_RELEASE&&require("node:fs").existsSync(process.env.REVIEW_TEST_RELEASE))process.exit(0)},25)'],{stdio:["ignore","ignore","ignore","ipc"]});
+      const child = spawn(process.execPath,["-e",process.env.REVIEW_TEST_RESISTANT ? 'process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));process.send("ready");setInterval(()=>{},1000)' : 'process.on("disconnect",()=>{});process.send("ready");setInterval(()=>{if(process.env.REVIEW_TEST_RELEASE&&require("node:fs").existsSync(process.env.REVIEW_TEST_RELEASE))process.exit(0)},25)'],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
       await writeFile(process.env.REVIEW_TEST_READY,JSON.stringify({providerPid:process.pid,childPid:child.pid}));
       while (!signal.aborted) {
