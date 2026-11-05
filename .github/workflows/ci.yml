@@ -48,7 +48,7 @@ jobs:
     needs: plan
     name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
+    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || ((matrix.suite == 'runtime-core' || matrix.suite == 'cli' || matrix.suite == 'platform-core') && 8 || 5) }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
