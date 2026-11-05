@@ -1,0 +1,623 @@
+{
+  "type": "object",
+  "title": "Review",
+  "description": "一位参与者在某轮中的独立评审实例，保存个人进度、评论、投票和执行记录；按 roundId 汇聚得到整轮评审视图。",
+  "properties": {
+    "id": {
+      "$ref": "#/definitions/Id",
+      "title": "评审标识",
+      "description": "一位参与者在一轮中的独立评审标识；执行重试保留此标识。"
+    },
+    "roundId": {
+      "$ref": "#/definitions/Id",
+      "title": "所属轮次",
+      "description": "正式评审所属轮次；轻量评论省略，不创建轮次或投票。"
+    },
+    "artifactId": {
+      "$ref": "#/definitions/Id",
+      "title": "被评审产物",
+      "description": "本次评审的已提交 Artifact；须与 roundId 对应轮次的 artifactId 一致，创建后固定。所属 Step 和 Run 沿此引用取得，材料包含该产物及沿 dependencies 递归可达的全部 Artifact 与 External，按类型与标识去重。"
+    },
+    "reviewer": {
+      "type": "object",
+      "title": "评审参与者",
+      "description": "本份Review的参与者；正式评审按轮次绑定；轻量评论使用role=reviewer与source，actorId可省略。",
+      "properties": {
+        "role": {
+          "type": "string",
+          "title": "参与角色",
+          "description": "reviewer 为被分配的评审者，runner 为本 Run 的 Runner；身份和权限来自所属 Step 的对应轮次配置。",
+          "enum": [
+            "reviewer",
+            "runner"
+          ]
+        },
+        "actorId": {
+          "$ref": "#/definitions/Id",
+          "title": "参与者",
+          "description": "role=reviewer 时必须填写，引用本轮 reviewConfig.reviewers 的键；role=runner 时省略。"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "human",
+            "agent"
+          ],
+          "title": "意见来源",
+          "description": "轻量评论必填，表示Runner声明的来源类别，不是认证或审批身份。"
+        }
+      },
+      "required": [
+        "role"
+      ],
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "string",
+      "title": "个人评审状态",
+      "description": "pending：待开始；running：评审中；submitted：已正式提交；cancelled：已取消。提交不等待他人，提交后评论与投票不可修改，取消不计为提交。Agent 执行失败记录在 attempts，重试仍使用本 Review；此状态不表示产物通过或要求修改。",
+      "minLength": 1,
+      "enum": [
+        "pending",
+        "running",
+        "submitted",
+        "cancelled"
+      ]
+    },
+    "comments": {
+      "type": "array",
+      "title": "评论",
+      "description": "本参与者对固定材料提出的评论，id 在本 Review 内唯一；正式提交前可编辑，提交后正文和锚点固定。",
+      "items": {
+        "$ref": "#/definitions/Comment",
+        "title": "评论",
+        "description": "一条具体意见。"
+      }
+    },
+    "vote": {
+      "$ref": "#/definitions/Vote",
+      "title": "投票",
+      "description": "本参与者的选择和说明；仅 status=submitted 时计入正式汇聚。有正式投票要求的参与者提交时必须填写 value；只有评论权限时可以不投票。"
+    },
+    "attempts": {
+      "type": "array",
+      "title": "Agent 评审执行记录",
+      "description": "本参与者的 Agent 执行尝试，按请求顺序追加；Human 评审省略。进程结束与正式意见提交相互独立，执行失败和重试不自动生成投票。",
+      "items": {
+        "$ref": "#/definitions/ReviewAttempt",
+        "title": "执行尝试",
+        "description": "本参与者一次评审执行的启动、会话和结束信息。"
+      }
+    },
+    "createdAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "创建时间",
+      "description": "本份个人 Review 创建的时间。"
+    },
+    "startedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "开始时间",
+      "description": "本参与者首次开始评审的时间；未开始时省略，执行重试不改变。"
+    },
+    "endedAt": {
+      "$ref": "#/definitions/Timestamp",
+      "title": "结束时间",
+      "description": "本份 Review 正式提交或取消的时间；submitted、cancelled 时填写，pending、running 时省略。"
+    }
+  },
+  "required": [
+    "id",
+    "artifactId",
+    "reviewer",
+    "status",
+    "comments",
+    "createdAt"
+  ],
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Id": {
+      "type": "string",
+      "title": "标识",
+      "description": "对象或定义的稳定标识。",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "Timestamp": {
+      "type": "string",
+      "title": "时间",
+      "description": "带时区的 RFC 3339 时间。",
+      "minLength": 1,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "DependencyRef": {
+      "type": "object",
+      "title": "材料引用",
+      "description": "定位被评审产物或其直接、间接依赖的材料，均须同属此 Run。",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "title": "材料类型",
+          "description": "被引用的材料类型。",
+          "minLength": 1,
+          "enum": [
+            "artifact",
+            "external"
+          ]
+        },
+        "id": {
+          "$ref": "#/definitions/Id",
+          "title": "材料标识",
+          "description": "Artifact 或 External 的标识。"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "additionalProperties": false
+    },
+    "Comment": {
+      "type": "object",
+      "title": "评审评论",
+      "description": "意见作者提出的一条具体评论；正式提交后正文和锚点固定。",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Id",
+          "title": "评论标识",
+          "description": "本 Review 内唯一的评论标识，由所属 Step.reviewRounds 中本轮的 resolutions 通过 reviewId + commentId 关联。"
+        },
+        "body": {
+          "type": "string",
+          "title": "正文",
+          "description": "具体问题、依据或建议。",
+          "minLength": 1
+        },
+        "severity": {
+          "type": "string",
+          "title": "严重性",
+          "description": "阻断问题、风险或建议。",
+          "minLength": 1,
+          "enum": [
+            "blocking",
+            "risk",
+            "suggestion"
+          ]
+        },
+        "anchor": {
+          "type": "object",
+          "title": "意见位置",
+          "description": "定位本次固定材料中的局部内容。",
+          "properties": {
+            "targetRef": {
+              "$ref": "#/definitions/DependencyRef",
+              "title": "目标材料",
+              "description": "省略时指向被评审 Artifact；填写时须指向该产物或沿其 dependencies 递归可达的 Artifact、External。"
+            },
+            "location": {
+              "type": "string",
+              "title": "位置",
+              "description": "字段路径、章节或文件行号。",
+              "minLength": 1
+            },
+            "context": {
+              "type": "string",
+              "title": "上下文",
+              "description": "帮助定位的短引文。",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "location"
+          ],
+          "additionalProperties": false
+        },
+        "createdAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "创建时间",
+          "description": "该意见首次创建的时间。"
+        }
+      },
+      "required": [
+        "id",
+        "body",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "Vote": {
+      "type": "object",
+      "title": "投票",
+      "description": "本参与者的评审选择和说明；是否正式提交由 Review.status 确定，提交时间使用 Review.endedAt。",
+      "properties": {
+        "value": {
+          "type": "string",
+          "title": "选择",
+          "description": "通过、要求修改或弃权；正式要求修改或弃权时须通过评论或投票说明给出理由。",
+          "minLength": 1,
+          "enum": [
+            "approve",
+            "request_changes",
+            "abstain"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "title": "说明",
+          "description": "本次选择的简短说明。",
+          "minLength": 1
+        },
+        "delegationNote": {
+          "type": "string",
+          "title": "代提交授权说明",
+          "description": "Human 评审者明确授权 Runner 代提交的依据和范围；仅授权代提交时填写，Review.reviewer 仍是该 Human 评审者。",
+          "minLength": 1
+        }
+      },
+      "required": [],
+      "additionalProperties": false
+    },
+    "ReviewAttempt": {
+      "type": "object",
+      "title": "Agent 评审执行",
+      "description": "本份个人 Review 的一次 Agent 执行尝试；参与者从 Review.reviewer 取得。重试追加记录，活动日志通过所属 Run、Review.id 和尝试 id 定位。",
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/Id",
+          "title": "尝试标识",
+          "description": "本次实际执行的标识。"
+        },
+        "createdAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "排队时间",
+          "description": "请求本次执行的时间。"
+        },
+        "startedAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "启动时间",
+          "description": "实际启动的时间。"
+        },
+        "workerPid": {
+          "type": "integer",
+          "title": "进程 ID",
+          "description": "实际 Worker 进程 ID，用于停止和归档前检查。",
+          "minimum": 1
+        },
+        "cliReadyAt": {
+          "$ref": "#/definitions/Timestamp",
+          "title": "就绪时间",
+          "description": "观测到评审 CLI 就绪的时间。"
+        },
+        "promptVersion": {
+          "type": "string",
+          "title": "提示协议版本",
+          "description": "本次使用的评审提示协议版本。",
+          "minLength": 1
+        },
+        "session": {
+          "type": "object",
+          "title": "实际会话",
+          "description": "执行过程中观察到的会话信息。",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "title": "Provider",
+              "description": "实际执行服务。",
+              "minLength": 1
+            },
+            "id": {
+              "type": "string",
+              "title": "会话 ID",
+              "description": "执行服务返回的会话标识。",
+              "minLength": 1
+            },
+            "protocolVersion": {
+              "type": "integer",
+              "title": "协议版本",
+              "description": "本次协商的协议版本。",
+              "minimum": 0
+            },
+            "agentName": {
+              "type": "string",
+              "title": "Agent 名称",
+              "description": "运行端报告的名称。",
+              "minLength": 1
+            },
+            "agentVersion": {
+              "type": "string",
+              "title": "Agent 版本",
+              "description": "运行端报告的版本。",
+              "minLength": 1
+            },
+            "model": {
+              "type": "string",
+              "title": "模型",
+              "description": "运行端报告的实际模型。",
+              "minLength": 1
+            }
+          },
+          "required": [],
+          "additionalProperties": false
+        },
+        "completion": {
+          "type": "object",
+          "title": "执行结束",
+          "description": "执行结束时填写；失败须填写 failure。进程结束不代表正式提交，正式意见以 Review.status、comments 和 vote 为准。",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "title": "结束方式",
+              "description": "正常结束、失败或取消。",
+              "minLength": 1,
+              "enum": [
+                "completed",
+                "failed",
+                "cancelled"
+              ]
+            },
+            "at": {
+              "$ref": "#/definitions/Timestamp",
+              "title": "结束时间",
+              "description": "实际结束的时间。"
+            },
+            "stopReason": {
+              "type": "string",
+              "title": "停止原因",
+              "description": "运行端返回的停止原因。",
+              "minLength": 1
+            },
+            "failure": {
+              "$ref": "#/definitions/ReviewFailure",
+              "title": "失败信息",
+              "description": "执行失败的阶段和原因。"
+            }
+          },
+          "required": [
+            "kind",
+            "at"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "id",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "ReviewFailure": {
+      "type": "object",
+      "title": "失败信息",
+      "description": "实际发生的执行故障。",
+      "properties": {
+        "stage": {
+          "type": "string",
+          "title": "阶段",
+          "description": "发生故障的阶段。",
+          "minLength": 1,
+          "enum": [
+            "spawn",
+            "initialize",
+            "auth",
+            "session",
+            "mode",
+            "cli",
+            "prompt",
+            "permission",
+            "timeout",
+            "protocol",
+            "process"
+          ]
+        },
+        "code": {
+          "type": "string",
+          "title": "代码",
+          "description": "故障代码。",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "title": "说明",
+          "description": "具体故障信息。",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "title": "类别",
+          "description": "故障归类。",
+          "minLength": 1,
+          "enum": [
+            "environment",
+            "provider",
+            "reviewer",
+            "unknown"
+          ]
+        }
+      },
+      "required": [
+        "stage",
+        "code",
+        "message"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "examples": [
+    {
+      "id": "review-owner-1",
+      "roundId": "round-design-1",
+      "artifactId": "artifact-design-1",
+      "reviewer": {
+        "role": "reviewer",
+        "actorId": "owner"
+      },
+      "status": "submitted",
+      "comments": [
+        {
+          "id": "comment-1",
+          "body": "请补充失败后的恢复方式。",
+          "severity": "risk",
+          "createdAt": "2026-10-22T08:01:00Z"
+        }
+      ],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:01:00Z",
+      "vote": {
+        "value": "request_changes"
+      }
+    },
+    {
+      "id": "review-runner-1",
+      "roundId": "round-design-1",
+      "artifactId": "artifact-design-1",
+      "reviewer": {
+        "role": "runner"
+      },
+      "status": "submitted",
+      "comments": [],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:01:00Z",
+      "endedAt": "2026-10-22T08:02:00Z",
+      "vote": {
+        "value": "request_changes",
+        "summary": "按意见补充恢复方案后重新提交。"
+      }
+    },
+    {
+      "id": "review-owner-2",
+      "roundId": "round-design-2",
+      "artifactId": "artifact-design-2",
+      "reviewer": {
+        "role": "reviewer",
+        "actorId": "owner"
+      },
+      "status": "submitted",
+      "comments": [],
+      "createdAt": "2026-10-22T08:03:00Z",
+      "startedAt": "2026-10-22T08:03:00Z",
+      "endedAt": "2026-10-22T08:04:00Z",
+      "vote": {
+        "value": "approve"
+      }
+    },
+    {
+      "id": "review-agent-2",
+      "roundId": "round-design-2",
+      "artifactId": "artifact-design-2",
+      "reviewer": {
+        "role": "reviewer",
+        "actorId": "code-reviewer"
+      },
+      "status": "running",
+      "comments": [
+        {
+          "id": "comment-draft",
+          "body": "正在核对恢复步骤。",
+          "createdAt": "2026-10-22T08:04:00Z"
+        }
+      ],
+      "createdAt": "2026-10-22T08:03:00Z",
+      "startedAt": "2026-10-22T08:03:00Z",
+      "attempts": [
+        {
+          "id": "attempt-1",
+          "createdAt": "2026-10-22T08:03:00Z",
+          "startedAt": "2026-10-22T08:03:00Z",
+          "workerPid": 1234,
+          "completion": {
+            "kind": "failed",
+            "at": "2026-10-22T08:04:00Z",
+            "failure": {
+              "stage": "session",
+              "code": "SESSION_CLOSED",
+              "message": "会话已关闭。"
+            }
+          }
+        },
+        {
+          "id": "attempt-2",
+          "createdAt": "2026-10-22T08:05:00Z"
+        }
+      ]
+    },
+    {
+      "id": "review-runner-2",
+      "roundId": "round-design-2",
+      "artifactId": "artifact-design-2",
+      "reviewer": {
+        "role": "runner"
+      },
+      "status": "pending",
+      "comments": [],
+      "createdAt": "2026-10-22T08:03:00Z"
+    },
+    {
+      "id": "review-cancelled",
+      "roundId": "round-cancelled",
+      "artifactId": "artifact-cancelled",
+      "reviewer": {
+        "role": "reviewer",
+        "actorId": "owner"
+      },
+      "status": "cancelled",
+      "comments": [],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:01:00Z"
+    },
+    {
+      "id": "review-advisory",
+      "roundId": "round-advisory",
+      "artifactId": "artifact-advisory",
+      "reviewer": {
+        "role": "reviewer",
+        "actorId": "owner"
+      },
+      "status": "submitted",
+      "comments": [
+        {
+          "id": "comment-1",
+          "body": "建议补充恢复演练案例。",
+          "severity": "suggestion",
+          "createdAt": "2026-10-22T08:00:00Z"
+        }
+      ],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:01:00Z",
+      "vote": {
+        "value": "approve"
+      }
+    },
+    {
+      "id": "review-advisory-runner",
+      "roundId": "round-advisory",
+      "artifactId": "artifact-advisory",
+      "reviewer": {
+        "role": "runner"
+      },
+      "status": "submitted",
+      "comments": [],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "startedAt": "2026-10-22T08:01:00Z",
+      "endedAt": "2026-10-22T08:02:00Z",
+      "vote": {
+        "value": "approve",
+        "summary": "演练案例纳入后续补充。"
+      }
+    },
+    {
+      "id": "review-cancelled-runner",
+      "roundId": "round-cancelled",
+      "artifactId": "artifact-cancelled",
+      "reviewer": {
+        "role": "runner"
+      },
+      "status": "cancelled",
+      "comments": [],
+      "createdAt": "2026-10-22T08:00:00Z",
+      "endedAt": "2026-10-22T08:01:00Z"
+    }
+  ]
+}

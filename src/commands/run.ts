@@ -851,6 +851,7 @@ export async function resolveReviewCommentBody(
 
 export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions): Promise<void> {
   requireBoundAssignment(options.assignment);
+  if ((await agentReviewAssignmentDetailPayload() as { reviewProgress?: unknown }).reviewProgress) throw new Error("review_node_artifact_protocol_required");
   if (!options.vote || !["approve", "request_changes", "abstain"].includes(options.vote)) {
     throw new Error("--vote must be approve, request_changes, or abstain");
   }

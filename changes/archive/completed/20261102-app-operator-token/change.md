@@ -1,6 +1,6 @@
 ---
 id: 20261102-app-operator-token
-status: accepting
+completed_at: 2026-11-02
 type: bug
 created: 2026-11-02
 run_id: run-20261102-041506z-0c2b123c
@@ -28,12 +28,16 @@ run_id: run-20261102-041506z-0c2b123c
 - [x] 通过 bug 理解与修复方案评审。
 - [x] 补充失败回归并修复统一 App 调用。
 - [x] 验证浏览器、后端、构建及实际页面。
-- [ ] 创建 PR，跟进全部适用 CI。
+- [x] 创建 PR，跟进全部适用 CI。
 
 ## 验收结果
 
 `node --import tsx --test test/view-host-composition.test.ts test/app-install.test.ts`：41/41 通过。新增回归覆盖有效、缺失、错误、重新验证及清除会话令牌；真实非 loopback 配置的后端测试确认鉴权仍有效。旧实现的有效令牌及令牌更新用例失败，证明回归能够复现原问题。`npm run typecheck` 与 `npm run build` 均通过。
 
-通过 playwright-cli 在实际设置页验证操作令牌后，修复前 Evolver list 仍返回 401；仅替换本机运行时构建文件、保留回滚副本后，同一标签页刷新返回 200，错误消失。服务无需重启。此为本机运行时热修复，主仓库源码仍待 PR 合入；合入前重新构建主仓库会覆盖热修复。
+通过 playwright-cli 在实际设置页验证操作令牌后，修复前 Evolver list 仍返回 401；仅替换本机运行时构建文件、保留回滚副本后，同一标签页刷新返回 200，错误消失。服务无需重启。修复已通过 PR #129 合入 master（e1739e5ed3bc36212ab78897e4d8d70e7caffaec）。合入后主仓库重新构建通过，运行时资产与已验证修复一致，已不再依赖临时热修复。
 
 无 Memory 交付差异；已核对 App 远程操作令牌既有契约，本次恢复预期行为。未运行全量本地回归，改动由受影响 ViewHost/App 测试及构建覆盖，后续跟进适用 CI。原始线上检查、回归输出与流程评审证据保留在 Run 及临时工作文件，单次原始证据不随代码提交。
+
+## 合入与收尾
+
+[PR #129](https://github.com/billtenor/memsphere/pull/129) 已合入。默认 CI、全量跨平台 CI 和合入门禁全部通过。用户明确确认“已确认正常，可以收尾”。合入后主仓库构建通过，变更说明归档，按同一 Run 清理本轮本地开发分支并结束流程。

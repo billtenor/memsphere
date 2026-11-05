@@ -1,3 +1,4 @@
+import { createReviewNodes, assertReviewNodes, reviewCommentId } from "../review-nodes.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import jsonata from "jsonata";
@@ -129,7 +130,7 @@ export class GraphRuntime {
     const row = await this.step(run, stepId); const step = structuredClone(row.value);
     const round = step.reviewRounds?.find(r => r.id === roundId);
     if (!round) throw failure("NOT_FOUND", "Review Round not found");
-    const review = (await this.records.list<Review>("review", runId)).find(r => r.roundId === roundId && r.status === "submitted" && r.comments.some(c => c.id === resolution.commentId));
+    const review = (await this.records.list<Review>("review", runId)).find(r => r.roundId === roundId && r.status === "submitted" && r.comments.some(c => reviewCommentId(c) === resolution.commentId));
     if (!review || !review.reviewer.actorId || round.reviewConfig.reviewers[review.reviewer.actorId]?.permissions.includes("decision.decide")) throw failure("NOT_FOUND", "Submitted advisory comment not found");
     if (!resolution.note.trim() || resolution.value === "accepted-fixed" && !resolution.validationSummary?.trim()) throw failure("INVALID_ARGUMENT", "Resolution requires a note and accepted-fixed requires validation evidence");
     round.resolutions = [...(round.resolutions ?? []).filter(r => r.reviewId !== review.id || r.commentId !== resolution.commentId), { ...resolution, reviewId: review.id, updatedAt: now() }];
@@ -316,7 +317,20 @@ export class GraphRuntime {
     await this.ensureArtifact(runId, stage.artifact);
     if (stage.round) for (const review of pendingGraphReviews(stage.round)) {
       const old = await this.records.get<Review>("review", runId, review.id);
-      if (!old) await this.records.create("review", runId, review);
+      if (!old) {
+        if (stage.round.reviewConfig.reviewers[review.reviewer.actorId!]?.kind === "agent") {
+          const procedure = this.procedure(run);
+          const actionIndex = procedure.actions.findIndex(action => action.id === step.source?.actionId);
+          if (actionIndex < 0) throw failure("INVALID_STATE", "Frozen Review Action is missing");
+          const action = procedure.actions[actionIndex], rules = await this.rules(run, action);
+          Object.assign(review, createReviewNodes([
+            { source: { kind: "procedure", memoryRef: run.memoryRef, path: "." }, name: procedure.names[0], defines: procedure.defines, asserts: rules.procedure },
+            { source: { kind: "step", memoryRef: run.memoryRef, path: `actions[${actionIndex}]` }, name: action.description, asserts: rules.asserts, suggests: rules.suggests },
+            { source: { kind: "step", memoryRef: run.memoryRef, path: `actions[${actionIndex}].artifact` }, name: action.artifact!.name, asserts: rules.artifactAsserts, suggests: rules.artifactSuggests }
+          ], run.language === "en" ? "Open review" : "开放审查"));
+        }
+        await this.records.create("review", runId, review);
+      }
       else if (old.value.roundId !== review.roundId || old.value.artifactId !== review.artifactId || !isDeepStrictEqual(old.value.reviewer, review.reviewer)) throw failure("RECOVERY_CONFLICT", `Review identity differs: ${review.id}`);
     }
     if (stage.nextStatus === "done" && stage.completionSequence === undefined) {
@@ -459,11 +473,6 @@ export class GraphRuntime {
     if (delegationNote !== undefined) {
       if (!delegationNote.trim() || actor?.kind !== "human" || !run.permissionConfig?.runner.permissions.includes("decision.decide")) throw failure("PERMISSION_DENIED", "Human delegation requires the Human actor, Runner decision authority, and an authorization note");
     }
-    if (actor?.kind === "human") {
-      if (!actor.permissions.includes("decision.decide") && comments.some(c => !c.severity || !["blocking", "risk", "suggestion"].includes(c.severity))) throw failure("INVALID_ARGUMENT", "Advisory Human Comment severity is required and must be valid");
-      if ((vote === "request_changes" || vote === "abstain") && !comments.length) throw failure("INVALID_ARGUMENT", `${vote} requires at least one Comment`);
-    }
-    if ((vote === "request_changes" || vote === "abstain") && !comments.length && !summary?.trim()) throw failure("INVALID_ARGUMENT", "Changes/abstention require an explanation");
     const id = graphReviewId(round.id, actorId); const old = await this.records.get<Review>("review", runId, id);
     if (guard?.attemptId) {
       const attempt = old?.value.attempts?.at(-1);
@@ -471,9 +480,19 @@ export class GraphRuntime {
     }
     if (old?.value.status === "submitted") throw failure("REVIEW_CONFLICT", "Review was already submitted");
     if (delegationNote && old && (old.value.comments.length || old.value.vote)) throw failure("REVIEW_CONFLICT", "Human Draft contains an opinion; do not overwrite it");
+    if (old?.value.nodeTree) {
+      assertReviewNodes(old.value, old.value.comments, true);
+    }
     const material = (await this.records.require<Artifact>("artifact", runId, round.artifactId)).value;
     const digest = (await validateGraphBody(material, this.action(run, step).artifact!, this.reader)).sha256;
-    const storedComments = storeGraphComments(comments, round.artifactId, digest);
+    const storedComments = old?.value.nodeTree ? structuredClone(old.value.comments) : storeGraphComments(comments, round.artifactId, digest);
+    // Validate the exact personal snapshot that will be saved under old's CAS
+    // revision, never the earlier application DTO's comments.
+    if (actor?.kind === "human") {
+      if (!actor.permissions.includes("decision.decide") && storedComments.some(c => !c.severity || !["blocking", "risk", "suggestion"].includes(c.severity))) throw failure("INVALID_ARGUMENT", "Advisory Human Comment severity is required and must be valid");
+      if ((vote === "request_changes" || vote === "abstain") && !storedComments.length) throw failure("INVALID_ARGUMENT", `${vote} requires at least one Comment`);
+    }
+    if ((vote === "request_changes" || vote === "abstain") && !storedComments.length && !summary?.trim()) throw failure("INVALID_ARGUMENT", "Changes/abstention require an explanation");
     const value: Review = { ...(old?.value ?? { id, roundId, artifactId: round.artifactId, reviewer: runner ? { role: "runner" as const } : { role: "reviewer" as const, actorId }, createdAt: now(), comments: [] }),
       status: "submitted", endedAt: now(), comments: storedComments, vote: { value: vote, ...(summary?.trim() ? { summary } : {}), ...(delegationNote ? { delegationNote } : {}) } };
     const attempt = value.attempts?.at(-1);

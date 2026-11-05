@@ -90,6 +90,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
         ...((claimed.run.memorySnapshot || claimed.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: claimed.run.id } : {}),
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: artifactReviewAssignmentId(claimed.assignment),
+        MEMSPHERE_REVIEW_ATTEMPT_ID: claimed.attempt.id,
         MEMSPHERE_CONFIG_PATH: config.configPath,
         MEMSPHERE_WORKSPACE_ROOT: workspaceRoot,
         PATH: [cliRuntime.directory, process.env.PATH].filter(Boolean).join(delimiter)
@@ -97,7 +98,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     });
     const prompt = await buildArtifactReviewerPrompt({
       context: claimed,
-      promptVersion: claimed.attempt.promptVersion ?? launch.promptVersion,
+      promptVersion: claimed.assignment.nodeTree ? "artifact-review-v3" : claimed.attempt.promptVersion ?? launch.promptVersion,
       locale: resolvePromptLocale(claimed.run.language)
     });
     const result = await runAgentReviewAcpSession({
@@ -107,7 +108,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         : "当前目录是本次 Attempt 的独立工作目录。按需读取或下载 Artifact，本地材料和临时文件自行在当前目录组织。此目录未复制代码。"}`,
       reminder: buildArtifactReviewerReminder(
         resolvePromptLocale(claimed.run.language),
-        claimed.attempt.promptVersion ?? launch.promptVersion
+        claimed.assignment.nodeTree ? "artifact-review-v3" : claimed.attempt.promptVersion ?? launch.promptVersion
       ),
       workspaceRoot,
       isSubmitted: async () => {

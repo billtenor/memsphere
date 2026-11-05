@@ -175,3 +175,19 @@ test("making idle timeout optional upgrades the known definition without rewriti
   const reopened = (await openContextControl(f.root))!;
   assert.deepEqual(await reopened.stores.run.get({}, run.id), before);
 });
+
+
+test("known pre-node Review upgrades additively without rewriting historical Comment IDs or revisions", async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const run = await service.start("historical review"), artifact = (await service.report(run.id, { name: "A", content: textContent("A") })).artifact;
+  const id = "review-history", key = `${run.id}/${id}`;
+  await service.stores.review.create({}, key, { id, roundId: "historical-round", artifactId: artifact.id, reviewer: { role: "runner" }, status: "submitted", createdAt: new Date().toISOString(), endedAt: new Date().toISOString(), comments: [{ id: "comment-original", body: "Keep history", createdAt: new Date().toISOString(), severity: "suggestion" }], vote: { value: "approve" } });
+  const before = await service.stores.review.get({}, key), path = join(f.root, "data/context_control/reviews", run.id, `${id}.json`), bytes = await readFile(path, "utf8");
+  await publishFixtureDefinition(f.root, "memsphere/context_control/review.json", await readFile(new URL("./fixtures/context-control-review-before-nodes.json", import.meta.url), "utf8"));
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.review.get({}, key), before);
+  assert.equal(await readFile(path, "utf8"), bytes);
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
+});

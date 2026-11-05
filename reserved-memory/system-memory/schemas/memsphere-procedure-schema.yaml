@@ -30,6 +30,7 @@ asserts:
   - 自由探索 CLI 不创建 Procedure Memory；continue、outputs 与上下文控制模型字段不是本 Schema 的 YAML 字段，不改变既有 Action/Artifact 的 type、format、schema 定义。
   - graph Action 使用 id、description、dependencies 和 artifact 或 collect；字段互斥、JSONata、model/payload、START 与来源规则由 memsphere-yaml-syntax-rules 的 graph 流程专节定义。
   - mode 缺省为 flow；graph actions 必须非空，defines 仍是非空字符串数组，不提供启动业务 input。
+  - Agent 审查自动组织冻结 Procedure 与当前 Step 的有效规则；节点树、判断、意见、Attempt 和开放审查是运行时状态，不允许作为 !procedure、!action 或 artifact 的新增 YAML 字段。
 fields:
   - !schema
     name: syntax

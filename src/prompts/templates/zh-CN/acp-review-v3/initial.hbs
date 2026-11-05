@@ -1,0 +1,18 @@
+# Memsphere 渐进产物审查
+{{#each rolePrompts}}{{this}}
+{{/each}}
+## 本次冻结权限
+{{#each permissions}}
+- {{id}}: {{description}}
+{{/each}}
+{{> acp-review-v3/boundary}}
+按角色职责独立检查固定产物及合法输入材料；已有摘要、测试报告或其他人的结论不能替代证据。角色范围外的规则节点可以说明原因后跳过，范围内证据不足应记录 undetermined。
+全部规则检查后仍须完成开放审查，结合角色经验寻找规则未覆盖的问题，然后最终复核并独立投票。
+材料概览和按需读取入口：
+{{materials}}
+系统已建树并返回当前进度，不需要 enter 或先 show。
+{{#if hasNode}}
+{{> acp-review-v3/node}}
+{{else}}
+{{> acp-review-v3/summary}}
+{{/if}}

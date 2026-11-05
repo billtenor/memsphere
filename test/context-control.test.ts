@@ -2,11 +2,28 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { withNativeFileLock } from "../src/file-lock.js";
 import test from "node:test";
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openContextControl } from "../src/project/context-control.js";
 import { businessFixture } from "./helpers/business-data.js";
 import { textContent } from "../src/context_control/types.js";
+import { reviewCommentId } from "../src/review-nodes.js";
+
+test("lightweight Review historical comment IDs remain readable without rewriting persisted bytes or revision", async t => {
+  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  const run = await service.start("Historical Review");
+  const artifact = await service.report(run.id, { name: "Candidate", content: textContent("Candidate") });
+  const review = await service.review(run.id, artifact.artifact.id, "agent", ["Existing opinion"]);
+  const path = join(root, "data/context_control/reviews", run.id, `${review.id}.json`);
+  const record = JSON.parse(await readFile(path, "utf8"));
+  record.value.comments[0].id = record.value.comments[0].commentId;
+  delete record.value.comments[0].commentId;
+  await writeFile(path, JSON.stringify(record)); const bytes = await readFile(path, "utf8");
+  const reopened = (await openContextControl(root))!;
+  const read = (await reopened.snapshot(run.id)).reviews.find(r => r.id === review.id)!;
+  assert.equal(reviewCommentId(read.comments[0]), review.comments[0].commentId);
+  assert.equal(await readFile(path, "utf8"), bytes);
+});
 
 test("Context Control ignores former Project and Run gates for recovery and independent writes", async t => {
   const { root } = await businessFixture(t, {});
@@ -40,12 +57,14 @@ test("free exploration persists model-backed create/read/report and immutable re
   assert.deepEqual(result.artifact.dependencies, [{ kind: "artifact", id: first.artifact.id }]);
   assert.ok(result.step.reads?.[`artifact:${first.artifact.id}`]);
   const review = await service.review(run.id, target.id, "human", ["补充恢复", "补充测试"]);
-  assert.equal(review.comments.length, 2); assert.notEqual(review.comments[0].id, review.comments[1].id);
+  assert.equal(review.comments.length, 2); assert.notEqual(review.comments[0].commentId, review.comments[1].commentId);
+  for (const comment of review.comments) { assert.ok(comment.commentId); assert.equal(comment.id, undefined); }
   const revised = await service.report(run.id, { revisedFrom: target.id, content: textContent("完整方案") });
   assert.deepEqual(revised.artifact.dependencies, result.artifact.dependencies);
   assert.notEqual(revised.artifact.id, target.id);
   const reopened = (await openContextControl(root))!;
   assert.equal((await reopened.snapshot(run.id)).artifacts.length, 3);
+  assert.deepEqual((await reopened.snapshot(run.id)).reviews.find(r => r.id === review.id)?.comments, review.comments);
   const path = join(root, "data/context_control/artifacts", run.id, `${target.id}.json`);
   assert.equal(JSON.parse(await readFile(path, "utf8")).value.id, target.id);
   await reopened.finish(run.id, [revised.artifact.id]);
