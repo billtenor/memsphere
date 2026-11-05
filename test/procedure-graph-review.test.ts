@@ -128,7 +128,9 @@ for (const vote of ["approve", "request_changes"] as const) test(`Agent processi
     if (property !== "withGraph") return Reflect.get(target, property, receiver);
     return async (action: Parameters<typeof target.withGraph>[0]) => {
       const result = await target.withGraph(action);
-      if (humanDraftSaved && result && typeof result === "object" && "artifactReviews" in result) observed();
+      if (humanDraftSaved && result && typeof result === "object" && "artifactReviews" in result &&
+        (result as typeof context.run).artifactReviews?.some(review => review.rounds.at(-1)?.assignments.some(
+          assignment => assignment.actorId === "human" && assignment.draft.vote === "approve"))) observed();
       return result;
     };
   } });
