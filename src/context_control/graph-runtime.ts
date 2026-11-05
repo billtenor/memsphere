@@ -20,7 +20,7 @@ import { deriveOutputs } from "./outputs.js";
 import { terminateProcessTree } from "../platform-process.js";
 import { assertContextControlRecord } from "./invariants.js";
 import { collectMemberTriggerIds, collectReplayReady, effectiveStep, mergeArrivals, planRewind, requireEffectiveStep, triggerArrivals } from "./graph-rewind.js";
-import { captureProcessIdentity, captureProcessGroup, stopRewindWorker } from "./review-process.js";
+import { captureProcessGroup, stopRewindWorker } from "./review-process.js";
 
 const now = () => new Date().toISOString();
 const newId = (kind: string) => `${kind}-${randomUUID()}`;
@@ -145,7 +145,7 @@ export class GraphRuntime {
     if (!step.reviewRounds?.some(round => round.id === roundId)) throw failure("NOT_FOUND", "Review Round not found");
     const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actorId));
     const value = structuredClone(row.value), attempt = value.attempts?.find(attempt => attempt.id === attemptId);
-    if (!attempt?.workerIdentity || attempt.workerPid !== workerPid || workerPid !== process.pid || !isDeepStrictEqual(await captureProcessIdentity(workerPid), attempt.workerIdentity))
+    if (!attempt?.workerIdentity || attempt.workerPid !== workerPid || workerPid !== process.pid)
       throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Worker lifecycle evidence does not match its OS identity");
     const members = await captureProcessGroup(attempt.workerIdentity.group);
     if (!members.some(member => isDeepStrictEqual(member, attempt.workerIdentity))) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Worker missing from its lifecycle snapshot");
@@ -466,8 +466,9 @@ export class GraphRuntime {
       for (const attempt of review.attempts ?? []) {
         if (!artifact || !plan.affectedStepIds.includes(artifact.stepId) || !attempt.workerPid) continue;
         const identity = attempt.workerIdentity;
-        const current = await captureProcessIdentity(attempt.workerPid);
-        const members = identity && current && isDeepStrictEqual(identity, current) ? [...(attempt.workerMembers ?? []), ...await captureProcessGroup(identity.group)] : attempt.workerMembers;
+        const observed = await captureProcessGroup(identity?.group ?? attempt.workerPid);
+        const current = observed.find(member => member.pid === attempt.workerPid);
+        const members = identity && current && isDeepStrictEqual(identity, current) ? [...(attempt.workerMembers ?? []), ...observed] : attempt.workerMembers;
         workers.push({ reviewId: review.id, attemptId: attempt.id, pid: attempt.workerPid, ...(identity ? { identity } : {}), ...(members ? { members } : {}) });
       }
     }
@@ -510,9 +511,10 @@ export class GraphRuntime {
       if (!artifact || !affected.has(artifact.stepId)) continue;
       for (const attempt of review.attempts ?? []) {
         if (!attempt.workerPid || intent.workers.some(w => w.reviewId === review.id && w.attemptId === attempt.id)) continue;
-        const current = await captureProcessIdentity(attempt.workerPid), identity = attempt.workerIdentity;
-        if (process.platform !== "win32" && !current && !(await captureProcessGroup(identity?.group ?? attempt.workerPid)).length) continue;
-        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:await captureProcessGroup(identity.group)}:attempt.workerMembers?{members:attempt.workerMembers}:{})});
+        const identity = attempt.workerIdentity, observed = await captureProcessGroup(identity?.group ?? attempt.workerPid);
+        const current = observed.find(member => member.pid === attempt.workerPid);
+        if (process.platform !== "win32" && !current && !observed.length) continue;
+        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:observed}:attempt.workerMembers?{members:attempt.workerMembers}:{})});
       }
     }
     if (missing.length) {

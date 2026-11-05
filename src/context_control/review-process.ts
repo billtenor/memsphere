@@ -59,11 +59,14 @@ async function windowsMembers(members: ProcessIdentity[]): Promise<ProcessIdenti
   const ids = new Set(members.map(p => p.pid));
   return (await windowsProcesses()).filter(p => ids.has(p.pid)).map(windowsIdentity);
 }
+function windowsGroup(rows: WindowsProcess[], group: number): ProcessIdentity[] {
+  const ids = new Set([group]); let more = true;
+  while (more) { more = false; for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) { ids.add(row.pid); more = true; } }
+  return rows.filter(row => ids.has(row.pid)).map(windowsIdentity);
+}
 export async function captureProcessGroup(group: number): Promise<ProcessIdentity[]> {
   if (process.platform === "win32") {
-    const rows = await windowsProcesses(), ids = new Set([group]); let more = true;
-    while (more) { more = false; for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) { ids.add(row.pid); more = true; } }
-    return rows.filter(p => ids.has(p.pid)).map(windowsIdentity);
+    return windowsGroup(await windowsProcesses(), group);
   }
   if (process.platform !== "linux") {
     const { stdout } = await exec("ps", ["-axo", "pid=,pgid=,stat=,lstart="]);
@@ -79,7 +82,9 @@ export async function captureProcessGroup(group: number): Promise<ProcessIdentit
 }
 function same(a: ProcessIdentity, b: ProcessIdentity) { return a.pid === b.pid && a.started === b.started && a.group === b.group; }
 export async function stopRewindWorker(worker: RewindWorker) {
-  const leader = await captureProcessIdentity(worker.pid);
+  const rows = process.platform === "win32" ? await windowsProcesses() : undefined;
+  const leaderRow = rows?.find(row => row.pid === worker.pid);
+  const leader = rows ? leaderRow ? windowsIdentity(leaderRow) : undefined : await captureProcessIdentity(worker.pid);
   if (!worker.identity) {
     if (!leader && process.platform === "win32") throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer identity and descendant evidence are unavailable; rewind remains pending");
     if (!leader && !(await captureProcessGroup(worker.pid)).length) return;
@@ -87,8 +92,9 @@ export async function stopRewindWorker(worker: RewindWorker) {
   }
   if (process.platform === "win32" && !leader && !worker.members)
     throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer leader exited before descendants were recorded; cleanup cannot be proven, rewind remains pending");
-  const members = process.platform === "win32" && !leader
-    ? await windowsMembers(worker.members ?? [])
+  const memberIds = new Set(worker.members?.map(member => member.pid));
+  const members = rows
+    ? leader ? windowsGroup(rows, worker.identity.group) : rows.filter(row => memberIds.has(row.pid)).map(windowsIdentity)
     : await captureProcessGroup(worker.identity.group);
   if (!members.length) return;
   if (leader && !same(worker.identity, leader) || !leader && members.some(p => !worker.members?.some(old => same(old, p))))
