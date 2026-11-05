@@ -9,8 +9,11 @@ import { currentReviewNode, reviewCommentId, reviewNodeProgress } from "../src/r
 
 for (const command of ["report", "update", "comment add", "comment update", "submit"]) test(`restricted CLI: ${command} has equivalent route and artifact combinations`, { timeout: 120000 }, async t => {
   const results = [];
+  // Cases mutate separate Runs/Reviews; model installation is shared setup.
+  let project: Parameters<typeof reviewCliFixture>[1];
   for (const route of [["run", "review"], ["continue"]]) for (const source of ["string", "file"]) {
-    const f = await reviewCliFixture(t), n = currentReviewNode(f.claimed.assignment)!;
+    const f = await reviewCliFixture(t, project), n = currentReviewNode(f.claimed.assignment)!;
+    project ??= { fixture: f, service: f.input.service! };
     const finding = { rulePath: n.asserts[0].rulePath, result: "undetermined", body: "Need evidence", severity: "risk" };
     const args = command.split(" "), params: string[] = [];
     let body: unknown;
