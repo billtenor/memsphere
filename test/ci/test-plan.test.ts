@@ -56,15 +56,12 @@ test("New project upgrade tests enter their CI suite and remain in aggregate pro
   }
 });
 
-test("system and historical upgrades run in upgrade groups without duplicating native PR protection", () => {
+test("system and historical upgrades run in upgrade groups instead of runtime groups", () => {
   const upgrades = ["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"];
   const files = [...upgrades, "daemon-integration.test.ts"];
   const sources = Object.fromEntries(files.map(file => [file, ""]));
   assert.deepEqual(selectTests(files, sources, {}, "runtime-core"), ["daemon-integration.test.ts"]);
   for (const suite of ["project-upgrade", "memory-and-projects"]) {
     assert.deepEqual(selectTests(files, sources, {}, suite).sort(), upgrades);
-  }
-  for (const suite of ["platform-upgrades", "platform-and-upgrades"]) {
-    assert.deepEqual(selectTests(files, sources, {}, suite), ["system-upgrade-changeset.test.ts"]);
   }
 });

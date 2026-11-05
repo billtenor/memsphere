@@ -3,52 +3,33 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
 import { ciProfile, createCiPlan } from "../../scripts/ci/ci-plan.mjs";
-import { discoverTestFiles, packagePlatformTests, platformTests, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = await discoverTestFiles("test");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(`test/${file}`, "utf8")])));
 
-test("PR runs every retained test on Linux and every declared native risk on macOS and Windows", () => {
-  const rows = createCiPlan("default", files, sources).include;
-  assert.equal(rows.length + 1, 8, "eight complete test/package builds");
-  for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
-    const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite));
-    if (os === "windows-latest") assigned.push(...packagePlatformTests);
-    assert.equal(new Set(assigned).size, assigned.length, `${os}: no duplicate files`);
-    if (os === "ubuntu-24.04") assert.deepEqual([...assigned].sort(), [...files].sort());
-    else {
-      for (const file of [...platformTests, ...files.filter(file => file.startsWith("project-upgrade"))]) {
-        assert(assigned.includes(file), `${os}: required native protection ${file}`);
-      }
-    }
-  }
-  const packaged = workflow.jobs["windows-package-smoke"].steps.find(step => step.name === "Native platform contracts");
-  assert.equal(packaged.if, "needs.plan.outputs.profile == 'default'");
-  assert.match(packaged.run, /node scripts\/ci\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
-  assert(platformTests.includes("project-command.test.ts"), "repair CAS, literal Git paths, symlink rejection and rollback remain platform checks");
-  assert(platformTests.includes("project-resolver.test.ts"));
-  assert(selectTests(files, sources, {}, "platform-core").includes("procedure-graph-rewind-windows.test.ts"));
-  assert(platformTests.includes("run-memory-backfill.test.ts"));
-  assert.throws(() => createCiPlan("default", files.filter(file => file !== "project-resolver.test.ts"), sources), /protection is missing/);
-});
-
-test("Full CI retains complete exactly-once coverage on all platforms, including future files", () => {
-  const future = "unmeasured-new-feature.test.ts";
-  const allFiles = [...files, future];
-  const allSources = { ...sources, [future]: "" };
-  const rows = createCiPlan("full", allFiles, allSources).include;
-  assert.equal(rows.length, 17);
-  for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
-    const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
-    assert.deepEqual([...assigned].sort(), [...allFiles].sort(), `${os}: no missing or duplicate files`);
-  }
+test("default and full CI automatically cover every discovered and future file once on each platform", () => {
+  const future = {
+    "nested/unmeasured-new-feature.test.ts": "",
+    "project-upgrade-future.test.ts": "",
+    "model-future-browser.test.ts": "helpers/browser",
+    "future-cli.test.ts": ""
+  };
+  const allFiles = [...files, ...Object.keys(future)];
+  const allSources = { ...sources, ...future };
   for (const profile of ["default", "full"]) {
-    for (const row of createCiPlan(profile, files, sources).include) {
+    const rows = createCiPlan(profile, allFiles, allSources).include;
+    assert.equal(rows.length, 17);
+    for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
+      const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
+      assert.deepEqual([...assigned].sort(), [...allFiles].sort(), `${profile}/${os}: no missing or duplicate files`);
+    }
+    for (const row of rows) {
       assert.equal(row.title, testSuites[row.suite].title);
       assert(row.workers > 0);
-      const selected = selectTests(files, sources, {}, row.suite);
-      assert.equal(row.browser, selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])));
+      const selected = selectTests(allFiles, allSources, {}, row.suite);
+      assert.equal(row.browser, selected.some(file => allSources[file].includes("helpers/browser") || /from ["']playwright["']/.test(allSources[file])));
     }
   }
 });

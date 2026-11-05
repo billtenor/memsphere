@@ -1,4 +1,4 @@
-# CI 分层与测试精简
+# CI 测试执行与门禁
 
 ## 必须守住的边界
 
@@ -8,20 +8,20 @@
 
 ## 默认 PR
 
-统一Node22，Linux固定Ubuntu24.04（当前Playwright不支持Ubuntu26.04）。默认矩阵由 `scripts/ci/ci-plan.mjs` 生成：
+统一 Node 22，Linux 固定 Ubuntu 24.04。default 和 full 均由 `scripts/ci/ci-plan.mjs` 生成相同的完整测试矩阵：
 
 | 平台 | 套件 | 文件并发 |
 |---|---|---|
 | Linux | Browser UI / CLI & Packaging / Projects & Memory / Run, Data & SDK | 3 / 3 / 2 / 2 |
-| macOS | Platform & Upgrade Contracts | 4 |
-| Windows | Platform Core Contracts / Platform Publication & Upgrades | 4 / 4 |
-| Windows | 真实npm安装包、Run/View及四种Shell冒烟，default另运行project-command | 独立job |
+| macOS | Models & Settings UI / Review & Shell UI / CLI & Packaging / Projects & Memory / Run, Data & SDK | 3 / 3 / 4 / 3 / 3 |
+| Windows | Models & Settings UI / Review & Shell UI / Memory & Project CLI / App, Model & Data CLI / Project Lifecycle / Project Upgrades / Memory Stores & Changes / Run, Data & SDK | 2 / 3 / 2 / 2 / 3 / 3 / 2 / 3 |
+| Windows | 真实 npm 安装包、Run/View 及四种 Shell 冒烟 | 独立 job |
 
-Linux对每个保留文件恰好执行一次，macOS和Windows对平台风险集增加执行，macOS同job包含全部升级测试，Windows将发布、Run产物和Memory变更用例放入升级组，其余35项平台保护由core组执行；project-command重型集成用例复用原有安装包job的空闲时间（runner并发上限2，实际一个文件），直接调用测试runner，不再触发pretest重建。full仍由原有矩阵覆盖这份用例，安装包job仅在default追加该文件。不是增加job或删除保护。新增测试默认进入Linux和完整检查，不要求人工登记才会执行。39项平台清单位于 `scripts/ci/test-plan.mjs` 的platformTests，缺失清单文件会使计划生成失败；平台差异新增时同时更新风险审计和清单。Chromium安装依据实际选集自动计算，不按文件名或job标题猜测。
+每个平台递归发现 `test/` 下全部 `.test.ts`，按分类分配到对应套件，每个文件恰好执行一次。新增文件无需登记白名单；未匹配专用分类的文件归入 runtime-core。当前没有文件排除项。平台专属用例由测试代码声明适用条件，其他平台记录 skip。Chromium 安装依据实际选集自动计算。
 
-不再设置整条workflow的五分钟硬预算，平台排队与调度不构成检查失败。default测试/打包及Security仅保留GitHub原生job 5分钟超时；整体耗时作为观察指标。精简目的包括降低总消耗，不能只用更多runner换取墙钟时间。
+测试发现、分类、矩阵和覆盖完整性回归均受 CI change guard 保护；如需增加文件排除规则，该规则也必须位于受保护的 CI 代码中。普通测试文件新增不需要修改 CI 文件。分类只决定执行分组，不允许使测试退出某个平台的覆盖范围。
 
-Runner 交付后，系统升级和历史通用流程升级两个重测试改由已有的升级分组执行，不再落入 Run/Data/SDK 的默认兜底分类。Linux Projects & Memory、macOS完整Memory组和Windows完整升级组接收它们；默认原生保护集合保持原范围，在已有Reviewer平台文件中补充Windows queue包装脚本验证。所有文件仍完整执行，未增加job或并发，也未放宽5分钟预算。
+两个 profile 保留不同的触发、取消、门禁和时间标准：default 测试及打包 job 上限为 5 分钟，full 为 20 分钟；其他辅助 job 保持现有超时。整体排队时间不作为测试失败条件，测试失败或 job 超时均不得视为通过。
 
 ### 测试取消与进程回收
 
@@ -29,7 +29,7 @@ Runner 交付后，系统升级和历史通用流程升级两个重测试改由�
 
 POSIX 上每份测试拥有独立进程组；取消时通过进程树快照识别 Playwright 等另建的进程组，只向本次 runner 的组发送信号。保留最多2秒的退出清理窗口，仍存活的进程组强制回收，并确认已退出。Windows 使用进程树快照和原生 taskkill 回收；退出确认同时核对启动时间，避免把已复用的 PID 当作原进程仍未退出。清理窗口只用于取消回收，不是工具或测试执行超时。
 
-文件执行次数和相对 full 的执行降幅仅作观察数据，不作为通过门禁；新增测试不应因文件数量增长而被拒绝。default 每个 job 上限保持5分钟，full 的测试和 Windows 打包 job 上限保持20分钟；其他辅助 job 保留现有不超过5分钟的上限。执行时限由 GitHub 原生 job 超时控制，仓库测试保留对应配置断言。完整覆盖、原生风险覆盖和同一平台不重复执行的校验继续保留。
+文件执行次数和相对 full 的执行降幅仅作观察数据，不作为通过门禁；新增测试不应因文件数量增长而被拒绝。default 每个 job 上限保持5分钟，full 的测试和 Windows 打包 job 上限保持20分钟；其他辅助 job 保留现有不超过5分钟的上限。执行时限由 GitHub 原生 job 超时控制，仓库测试保留对应配置断言。完整覆盖和同一平台不重复执行的校验继续保留。
 
 `test/ci/test-runner.test.ts` 使用原样 runner 副本与真实 Chromium 验证正常完成、SIGINT 取消及并发 SIGTERM 取消。受控 HTTP/IPC 握手确认浏览器和拒绝正常退出的子进程已经启动，取消后通过 OS 进程表检查所有已观测后代均退出、后续测试未调度、临时 Home 已删除。测试不依赖固定 sleep。Windows 用受控预加载 IPC 触发同一信号处理器，实际树回收仍执行原生 Windows 路径；不把它描述为 Windows 控制台按键测试。
 
@@ -65,25 +65,7 @@ gh run watch <run-id> --exit-status
 
 full复用既有17个suite行：Linux4、macOS5、Windows8，再加Windows打包。每个OS对所有保留文件恰好执行一次；各行原有2–4文件进程数不变，full测试/打包job采用20分钟有界超时，full汇总job采用5分钟。它验证跨平台质量，没有整条workflow五分钟预算。正常执行远低于20分钟；额外余量容纳已观察到的runner收尾长尾，不改变测试失败结果。`Full cross-platform regression`必须等全部测试/打包成功才成功。
 
-default按PR号或ref分组，继续取消同目标旧default运行。full按run ID独立分组且不取消，保证连续master push不会挤掉旧pending full，与default互不取消。bootstrap独立，不能提供full证明。合入后full会暴露未进入PR平台集的OS组合故障，失败阻拦后续PR，修复PR可手动验证其自身full再解锁。无合入时不主动检测依赖或runner变化，仍可手动触发full。full触发自身失败也必须处理。
-
-## 平台风险与降频边界
-
-审计src中process.platform、realpath、symlink和终止信号的81处匹配，并与测试交叉检查。平台清单不是对所有原生操作自动证明覆盖；后续变更需要更新相关映射。
-
-| 代码边界 | 逐PR平台保护（均为.test.ts文件） |
-|---|---|
-| project/resolver、workspace、registry，home、Git路径 | project-resolver、project-registry、home、git、model-storage-paths |
-| Embedded repair的chmod CAS、literal pathspec、链接kind目录拒绝和写后回滚 | project-command（整个文件保留，非仅参数矩阵） |
-| Report与快照补齐 | run-store、report-execution、run-memory-backfill（含Windows junction） |
-| 原生锁、原子写入与跨进程记录 | file-lock、persistence、data-filesystem-process/open/revisions/json-valuestore/datastore/helpers、business-data-service |
-| 模型事务、注册目录与备份还原 | model-service、model-operation、model-registration、example-relocation |
-| Memory链接、Git隔离、受控更新 | memory-changeset、embedded-changeset、memory-sync、reserved-store、system-upgrade-changeset、reserved-models；另含3个project-upgrade文件 |
-| App/Module包路径、外部CLI与资源 | app-install、view-package-registry |
-| ACP进程、Shell、命令提示 | agent-review、run-output、run-rule-integration、run-model-artifact、windows-prerequisites、cli-errors |
-| 服务、归档、配置 | view-service、archive-store、config-management |
-
-其余Schema/语法组合、CLI消息与选项组合、View大部分浏览器场景逐PR在Linux运行，macOS/Windows全组合合入master后或发布前运行。保留文件内部有部分纯逻辑断言，本轮不为进一步减少毫秒级开销继续拆分。
+default按PR号或ref分组，继续取消同目标旧default运行。full按run ID独立分组且不取消，保证连续master push不会挤掉旧pending full，与default互不取消。bootstrap独立，不能提供full证明。合入后 full 验证实际 master 提交，失败阻拦后续 PR，修复PR可手动验证其自身full再解锁。无合入时不主动检测依赖或runner变化，仍可手动触发full。full触发自身失败也必须处理。
 
 ## 本轮删减审计
 
@@ -106,13 +88,6 @@ default按PR号或ref分组，继续取消同目标旧default运行。full按run
 - zh-CN/dark：Procedure和Run分别1280px（2点）。
 
 原对称留白、主题Token、无溢出、宽屏利用和意见堆叠断言保留。接受不再每类Memory×主题×宽度全组合；测试验证18个tuple无重复。用例数量、文件数和几何组合分开计量，不能互相充数。
-
-## 基线与测量
-
-历史run39218044291：148文件×3OS=444次文件执行；17测试行+1打包job=18次完整构建；这18个job的completedAt-startedAt合计2849秒（47.48分钟），非CPU或账单时间，未含作业排队。预算计时244.1秒含排队，仅作历史对照。
-
-集成最新master新增用例后，当前150个保留文件，默认执行234次（150+42+35+6+1），相对原444次基线减少47.3%；完整构建8次，减少55.6%。另有不构建的profile计划和结果汇总job，不能把它们漏记成“整个workflow只有8个job”。full成本单列，不能混算成PR节省。最终耗时以当前head实际CI为准，记录事件/profile、SHA和环境波动。
-
 
 ## PR full 健康门禁
 
@@ -150,7 +125,7 @@ gh run list --workflow ci.yml --branch <repair-branch>
 gh workflow run full-health.yml --ref master
 ```
 
-API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通PR仍由精简default保护。
+API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通 PR 由覆盖三平台全部文件的 default 检查保护。
 
 ### 首次安装与回滚
 
