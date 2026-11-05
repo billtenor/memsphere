@@ -96,7 +96,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const fake = join(bin, "codex");
   await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
+  await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
   // These commands still communicate with the real daemon process. Keep
@@ -152,7 +152,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   // Run creation, candidate production and session binding are preconditions,
   // not the CLI boundary under test. Construct them through domain APIs/Stores.
   const config = await readProjectConfig("test-project", f.home);
-  const service = (await openContextControl(f.root, true))!;
+  const service = (await openContextControl(f.root))!;
   const procedure: GraphProcedureMemory = {
     tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
     actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
