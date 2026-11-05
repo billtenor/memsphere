@@ -63,6 +63,7 @@ const app = acp
       invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
       const child = spawn(process.execPath,[fileURLToPath(new URL('./rewind-provider-child.mjs', import.meta.url))],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
+      if (process.env.REVIEW_TEST_SUBMITTED) await completeReview("approve", client, params.sessionId);
       await processGate(process.env.REVIEW_TEST_GATES,'publish',process.env.REVIEW_TEST_READY,{providerPid:process.pid,childPid:child.pid});
       if (process.env.REVIEW_TEST_RELEASE) {
         await processGate(process.env.REVIEW_TEST_GATES,'wait',process.env.REVIEW_TEST_RELEASE,undefined,signal);

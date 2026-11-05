@@ -4,7 +4,7 @@ import { fork } from "node:child_process";
 import { once } from "node:events";
 import { release as osRelease } from "node:os";
 import test from "node:test";
-import { captureProcessGroup, captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
+import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { terminateProcessTree } from "../src/platform-process.js";
 
 for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan"] as const) test(`Windows native rewind process safety: ${scenario}`, {
@@ -60,4 +60,30 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan"] as co
     assert.deepEqual(await captureProcessIdentity(unrelated.worker.pid!), unrelated.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(unrelated.child.pid), unrelated.child);
   }
+});
+
+// Exercise the query adapter separately from tree termination: failed probes must
+// never become empty membership/exit evidence.
+test("Windows process query requires explicit successful identity evidence", async () => {
+  assert.deepEqual(await queryWindowsProcesses(undefined, async () => ({stdout:'{"ok":true,"processes":[]}'})), []);
+  // Unrelated protected/system rows may lack creation times. Preserve the row
+  // rather than treating it as absent; selected identities must still be proven.
+  assert.deepEqual(await queryWindowsProcesses(undefined, async () => ({stdout:'{"ok":true,"processes":[{"ProcessId":0,"ParentProcessId":0,"Started":null}]}'})), [{pid:0,group:0,parent:0,started:null}]);
+  for (const stdout of ["", "[]", '{"ok":false,"processes":[]}', '{"ok":true,"processes":[{"ProcessId":1,"ParentProcessId":0,"Started":"invalid"}]}'])
+    await assert.rejects(queryWindowsProcesses(undefined, async () => ({stdout})));
+  for (const code of [1, 2, "ENOENT", "ETIMEDOUT"])
+    await assert.rejects(queryWindowsProcesses(undefined, async () => {throw Object.assign(new Error("probe failed"), {code});}), {code});
+});
+
+test("Windows native CIM errors propagate from the identity query", {skip:process.platform !== "win32", timeout:30000}, async () => {
+  const {execFile} = await import("node:child_process");
+  const {promisify} = await import("node:util");
+  const exec = promisify(execFile);
+  await assert.rejects(queryWindowsProcesses(undefined, script => exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "function Get-CimInstance { throw 'injected CIM query failure' }; " + script
+  ], {timeout:10000})), error => {
+    assert.equal((error as {code?:unknown}).code, 2);
+    assert.match((error as {stderr:string}).stderr, /injected CIM query failure/);
+    return true;
+  });
 });

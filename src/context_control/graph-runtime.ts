@@ -448,8 +448,9 @@ export class GraphRuntime {
     const workers = [] as NonNullable<GraphFrame["pendingRewind"]>["workers"];
     for (const review of snapshot.reviews) {
       const artifact = snapshot.artifacts.find(a => a.id === review.artifactId);
-      const attempt = review.attempts?.at(-1);
-      if (artifact && plan.affectedStepIds.includes(artifact.stepId) && review.status !== "submitted" && attempt?.workerPid && !attempt.completion) {
+      // A saved vote/completion is not proof that the OS process has exited.
+      for (const attempt of review.attempts ?? []) {
+        if (!artifact || !plan.affectedStepIds.includes(artifact.stepId) || !attempt.workerPid) continue;
         const identity = attempt.workerIdentity;
         const current = await captureProcessIdentity(attempt.workerPid);
         const members = identity && current && isDeepStrictEqual(identity, current) ? await captureProcessGroup(identity.group) : undefined;
@@ -489,12 +490,16 @@ export class GraphRuntime {
     // worker again before cancellation, and save its identity before signalling.
     const snapshot = await this.snapshotValue(runId);
     const missing = [] as typeof intent.workers;
+    const affected = new Set(this.frame(snapshot.run).rewinds?.find(event => event.id === intent.id)?.affectedStepIds);
     for (const review of snapshot.reviews) {
-      const artifact = snapshot.artifacts.find(a => a.id === review.artifactId), attempt = review.attempts?.at(-1);
-      if (!artifact || effectiveStep(snapshot.run, artifact.stepId) || review.status === "submitted" || !attempt?.workerPid || intent.workers.some(w => w.reviewId === review.id && w.attemptId === attempt.id)) continue;
-      const current = await captureProcessIdentity(attempt.workerPid), identity = attempt.workerIdentity;
-      if (!current && !(await captureProcessGroup(identity?.group ?? attempt.workerPid)).length) continue;
-      missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:await captureProcessGroup(identity.group)}:{})});
+      const artifact = snapshot.artifacts.find(a => a.id === review.artifactId);
+      if (!artifact || !affected.has(artifact.stepId)) continue;
+      for (const attempt of review.attempts ?? []) {
+        if (!attempt.workerPid || intent.workers.some(w => w.reviewId === review.id && w.attemptId === attempt.id)) continue;
+        const current = await captureProcessIdentity(attempt.workerPid), identity = attempt.workerIdentity;
+        if (process.platform !== "win32" && !current && !(await captureProcessGroup(identity?.group ?? attempt.workerPid)).length) continue;
+        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:await captureProcessGroup(identity.group)}:{})});
+      }
     }
     if (missing.length) {
       const latest = await this.run(runId), updated = structuredClone(latest.value);
@@ -505,7 +510,7 @@ export class GraphRuntime {
     await this.cancelSupersededReviews(runId);
     for (const worker of intent.workers) {
       const review = (await this.records.require<Review>("review", runId, worker.reviewId)).value;
-      if (review.attempts?.at(-1)?.id !== worker.attemptId) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
+      if (!review.attempts?.some(attempt => attempt.id === worker.attemptId)) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
       await this.stopReviewer(worker);
     }
     // Only this recovery, after every saved worker was verified stopped, may

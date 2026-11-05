@@ -19,33 +19,51 @@ export async function captureProcessIdentity(pid: number): Promise<ProcessIdenti
       return { pid, group: Number(fields[2]), started: `${boot}:${fields[19]}` };
     }
     if (process.platform === "win32") {
-      const script = `$p=Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}'; if($p){$p.CreationDate.ToUniversalTime().Ticks}`;
-      const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-      return stdout.trim() ? { pid, group: pid, started: stdout.trim() } : undefined;
+      const [identity] = await queryWindowsProcesses(pid);
+      if (!identity) return undefined;
+      return windowsIdentity(identity);
     }
     const { stdout } = await exec("ps", ["-p", String(pid), "-o", "pgid=", "-o", "lstart="]);
     const match = stdout.trim().match(/^(\d+)\s+(.+)$/);
     return match ? { pid, group: Number(match[1]), started: match[2] } : undefined;
   } catch (error) {
+    if (process.platform === "win32") throw error;
     if (["ENOENT", "ESRCH"].includes((error as NodeJS.ErrnoException).code ?? "") || (error as { code?: unknown }).code === 1) return undefined;
     throw error;
   }
 }
-async function windowsProcesses(): Promise<Array<ProcessIdentity & { parent: number }>> {
-  const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,@{Name='Started';Expression={$_.CreationDate.ToUniversalTime().Ticks.ToString()}} | ConvertTo-Json -Compress";
-  const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
-  const parsed = JSON.parse(stdout || "[]"), rows = Array.isArray(parsed) ? parsed : [parsed];
-  return rows.map(row => ({ pid: Number(row.ProcessId), group: Number(row.ProcessId), parent: Number(row.ParentProcessId), started: String(row.Started) }));
+type WindowsProcess = { pid: number; group: number; parent: number; started: string | null };
+function windowsIdentity(row: WindowsProcess): ProcessIdentity {
+  if (!row.started) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows process exists but its creation identity is unavailable");
+  return { pid: row.pid, group: row.group, started: row.started };
 }
+type ProcessQuery = (script: string) => Promise<{ stdout: string }>;
+/** A successful empty query proves absence; command/transport/shape failures do not. */
+export async function queryWindowsProcesses(pid?: number, query: ProcessQuery = script =>
+  exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 })
+): Promise<WindowsProcess[]> {
+  if (pid !== undefined && (!Number.isSafeInteger(pid) || pid < 1)) throw failure("INVALID_ARGUMENT", "Invalid worker PID");
+  const filter = pid === undefined ? "" : ` -Filter 'ProcessId=${pid}'`;
+  const script = `$ErrorActionPreference='Stop'; try { $rows=@(Get-CimInstance Win32_Process${filter} -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,@{Name='Started';Expression={if($_.CreationDate){$_.CreationDate.ToUniversalTime().Ticks.ToString()}else{$null}}}); ConvertTo-Json -InputObject @{ok=$true;processes=$rows} -Depth 3 -Compress } catch { [Console]::Error.WriteLine($_.ToString()); exit 2 }`;
+  const { stdout } = await query(script);
+  const result = JSON.parse(stdout);
+  if (result?.ok !== true || !Array.isArray(result.processes)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows process query returned no success evidence");
+  return result.processes.map((row: { ProcessId: unknown; ParentProcessId: unknown; Started: unknown }) => {
+    if (!Number.isSafeInteger(row.ProcessId) || Number(row.ProcessId) < 0 || !Number.isSafeInteger(row.ParentProcessId) || Number(row.ParentProcessId) < 0 || (row.Started !== null && (typeof row.Started !== "string" || !/^\d+$/.test(row.Started))))
+      throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows process query returned invalid identity evidence");
+    return { pid: Number(row.ProcessId), group: Number(row.ProcessId), parent: Number(row.ParentProcessId), started: row.Started as string | null };
+  });
+}
+const windowsProcesses = () => queryWindowsProcesses();
 async function windowsMembers(members: ProcessIdentity[]): Promise<ProcessIdentity[]> {
   const ids = new Set(members.map(p => p.pid));
-  return (await windowsProcesses()).filter(p => ids.has(p.pid)).map(({ parent: _parent, ...identity }) => identity);
+  return (await windowsProcesses()).filter(p => ids.has(p.pid)).map(windowsIdentity);
 }
 export async function captureProcessGroup(group: number): Promise<ProcessIdentity[]> {
   if (process.platform === "win32") {
     const rows = await windowsProcesses(), ids = new Set([group]); let more = true;
     while (more) { more = false; for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) { ids.add(row.pid); more = true; } }
-    return rows.filter(p => ids.has(p.pid)).map(({ parent: _parent, ...identity }) => identity);
+    return rows.filter(p => ids.has(p.pid)).map(windowsIdentity);
   }
   if (process.platform !== "linux") {
     const { stdout } = await exec("ps", ["-axo", "pid=,pgid=,stat=,lstart="]);

@@ -26,8 +26,9 @@ export async function dispatchArtifactReviewAgents(input: {
     roundId: string;
     assignmentId: string;
   }) => Promise<void>;
-}): Promise<number> {
-  const run = await readRun(input.config.runsRoot, input.run.id);
+}, dependencies: { readRun?: typeof readRun } = {}): Promise<number> {
+  const loadRun = dependencies.readRun ?? readRun;
+  const run = await loadRun(input.config.runsRoot, input.run.id);
   if (run.status !== "running") return 0;
   const reviews = (run.artifactReviews ?? []).filter((review) => review.status === "pending");
   const queued = reviews.flatMap((review) => {
@@ -51,7 +52,7 @@ export async function dispatchArtifactReviewAgents(input: {
     const directory = join(input.config.scopeRoot, ".runtime", "review-dispatch");
     await mkdir(directory, { recursive: true });
     await withNativeFileLock(join(directory, `${key}.lock`), async () => {
-      const current = await readRun(input.config.runsRoot, input.run.id);
+      const current = await loadRun(input.config.runsRoot, input.run.id);
       const currentAssignment = current.artifactReviews?.find(r => r.id === review.id)?.rounds.find(r => r.id === round.id)?.assignments.find(a => artifactReviewAssignmentId(a) === assignmentId);
       if (currentAssignment?.status !== "queued") return;
       try {
@@ -82,7 +83,7 @@ export async function dispatchArtifactReviewAgents(input: {
       });
       const identity = worker.pid ? await captureProcessIdentity(worker.pid) : undefined;
       if (worker.exitCode !== null || worker.signalCode !== null) return;
-      const latest = await readRun(input.config.runsRoot, input.run.id);
+      const latest = await loadRun(input.config.runsRoot, input.run.id);
       const latestReview = latest.artifactReviews?.find(r => r.id === review.id);
       const latestRound = latestReview?.rounds.find(r => r.id === round.id);
       if (latest.status !== "running" || latestReview?.status === "cancelled" ||
