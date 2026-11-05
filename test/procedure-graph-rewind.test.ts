@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
-import { openContextControl } from "../src/project/context-control.js";
-import { businessFixture } from "./helpers/business-data.js";
+import test from "node:test";
+import { graphDomainFixture as fixture } from "./helpers/graph-domain.js";
 import type { GraphAction, GraphProcedureMemory } from "../src/memory/ast.js";
 import type { GraphRuntime } from "../src/context_control/graph-runtime.js";
 import type { Step } from "../src/context_control/types.js";
@@ -10,12 +9,11 @@ import { effectiveStep } from "../src/context_control/graph-rewind.js";
 const artifact = { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } };
 const action = (id: string, from: string | string[] = "START", when?: string): GraphAction => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from, ...(when ? { when } : {}) }], artifact });
 const procedure = (actions: GraphAction[]): GraphProcedureMemory => ({ tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["rewind-test"], defines: ["Rewind"], mode: "graph", actions });
-async function fixture(t: TestContext) { const f = await businessFixture(t, {}); return { ...f, service: (await openContextControl(f.root, true))! }; }
 async function produce(g: GraphRuntime, run: string, step: string, text = "body") { await g.enter(run, step); return g.report(run, step, { text }); }
 const latest = (steps: Step[], id: string) => steps.filter(s => s.source?.actionId === id).sort((a,b) => a.createdAt.localeCompare(b.createdAt)).at(-1)!;
 
 test("rewind creates a pending product version and retains exact old dependencies while replacing downstream", async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, true);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: "versions", procedure: procedure([action("product"), action("technical", "product")]) });
     const old = await produce(g, start.run.id, start.steps[0].id, "P1");
@@ -103,7 +101,7 @@ test("rewind blocks an old formal review and preserves its candidate and comment
 });
 
 test("a saved rewind recovers the same target after materialization interruption", async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, true);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: "recovery", procedure: procedure([action("A")]) });
     const old = await produce(g, start.run.id, start.steps[0].id);
@@ -1023,5 +1021,44 @@ for (const mode of ['eliminated-inner', 'initially-empty', 'reviewed', 'two-leve
     assert.deepEqual(current(state, 'summary')[0].inputs, { [finalMember]: [{ kind: 'artifact', id }] });
     assert.equal(current(state, 'unrelated').length, 1);
     assert.equal(current(state, 'stop1')[0].id, stop1.step.id);
+  });
+});
+
+
+test("a reused graph runtime resolves each Run against its own frozen Procedure", async t => {
+  const { service } = await fixture(t);
+  await service.withGraph(async g => {
+    const first = await g.start({ name: "first", procedure: procedure([action("A")]) });
+    const second = await g.start({ name: "second", procedure: procedure([action("B")]) });
+    await produce(g, first.run.id, first.steps[0].id, "first body");
+    await produce(g, second.run.id, second.steps[0].id, "second body");
+    assert.equal((await g.snapshot(first.run.id)).steps[0].source!.actionId, "A");
+    assert.equal((await g.snapshot(second.run.id)).steps[0].source!.actionId, "B");
+  });
+});
+
+test("a changed frozen Procedure is revalidated after a prior successful graph read", async t => {
+  const { service } = await fixture(t);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "snapshot integrity", procedure: procedure([action("A")]) });
+    await g.snapshot(start.run.id);
+    const row = (await service.stores.run.get({}, start.run.id))!;
+    const value = structuredClone(row.value) as typeof start.run;
+    value.memorySnapshot!.memories[value.memoryRef!].payload.content = "!concept\nnames: [rewind-test]\ndefines: [Wrong memory kind]\n";
+    await service.stores.run.update({}, start.run.id, value, { expectedRevision: row.revision });
+    await assert.rejects(g.advance(start.run.id));
+    assert.equal(((await service.stores.step.get({}, `${start.run.id}/${start.steps[0].id}`))!.value as Step).status, "pending");
+  });
+});
+
+
+test("editing a returned Action cannot alter a Run's frozen execution", async t => {
+  const { service } = await fixture(t);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "frozen action", procedure: procedure([action("A")]) });
+    g.action(start.run, start.steps[0]).id = "caller-edit";
+    const result = await produce(g, start.run.id, start.steps[0].id);
+    assert.equal(result.step.source!.actionId, "A");
+    assert.equal(result.step.status, "done");
   });
 });

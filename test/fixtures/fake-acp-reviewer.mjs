@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { fileURLToPath } from "node:url";
+import { processGate } from './process-gates.mjs';
 import crossSpawn from "cross-spawn";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -55,17 +57,17 @@ const app = acp
       }
     }
     if (mode === "rewind-gated") {
+      await processGate(process.env.REVIEW_TEST_GATES,'publish',`provider-launched:${process.env.REVIEW_TEST_READY}`);
       if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
       invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
       invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
-      const child = spawn(process.execPath,["-e",process.env.REVIEW_TEST_RESISTANT ? 'process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));process.send("ready");setInterval(()=>{},1000)' : 'process.on("disconnect",()=>{});process.send("ready");setInterval(()=>{if(process.env.REVIEW_TEST_RELEASE&&require("node:fs").existsSync(process.env.REVIEW_TEST_RELEASE))process.exit(0)},25)'],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
+      const child = spawn(process.execPath,[fileURLToPath(new URL('./rewind-provider-child.mjs', import.meta.url))],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
-      await writeFile(process.env.REVIEW_TEST_READY,JSON.stringify({providerPid:process.pid,childPid:child.pid}));
-      while (!signal.aborted) {
-        if (process.env.REVIEW_TEST_RELEASE) {
-          try { await access(process.env.REVIEW_TEST_RELEASE); break; } catch {}
-        }
-        await delay(25);
+      await processGate(process.env.REVIEW_TEST_GATES,'publish',process.env.REVIEW_TEST_READY,{providerPid:process.pid,childPid:child.pid});
+      if (process.env.REVIEW_TEST_RELEASE) {
+        await processGate(process.env.REVIEW_TEST_GATES,'wait',process.env.REVIEW_TEST_RELEASE,undefined,signal);
+      } else if (!signal.aborted) {
+        await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
       }
     }
     if (mode === "gated-approve") {

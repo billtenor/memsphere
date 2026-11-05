@@ -36,6 +36,7 @@ export type GraphReport = { text?: string; content?: Body["content"]; contentRef
 /** Graph persistence uses the same model Stores as exploration, with its own completion/recovery rules. */
 export class GraphRuntime {
   readonly records: Records;
+  private parsedProcedure?: { reference: string; content: string; value: GraphProcedureMemory };
   constructor(stores: Stores, private readonly reader: ContentReader) { this.records = new Records(stores); }
   async stopReviewer(worker: Parameters<typeof stopRewindWorker>[0]): Promise<void> {
     await stopRewindWorker(worker);
@@ -50,9 +51,15 @@ export class GraphRuntime {
   private procedure(run: Run): GraphProcedureMemory {
     const raw = run.memorySnapshot?.memories[run.memoryRef!];
     if (!raw) throw failure("INVALID_STATE", "Graph Run has no frozen Procedure");
+    // Store reads return fresh objects. Reuse only the exact frozen source,
+    // checking both reference and bytes so a different Run or changed snapshot
+    // cannot inherit another Procedure's parsed actions.
+    const cached = this.parsedProcedure;
+    if (cached && cached.reference === run.memoryRef && cached.content === raw.payload.content) return structuredClone(cached.value);
     const p = parseMemoryEntity("procedures", parseMemoryYaml(raw.payload.content));
     if (p.tag !== "!procedure" || p.mode !== "graph" || `procedures/${p.names[0]}` !== run.memoryRef) throw failure("INVALID_STATE", "Frozen Procedure identity/mode mismatch");
-    return p;
+    this.parsedProcedure = { reference: run.memoryRef!, content: raw.payload.content, value: p };
+    return structuredClone(p);
   }
   action(run: Run, step: Step): GraphAction {
     if (step.runId !== run.id || step.source?.memoryRef !== run.memoryRef) throw failure("INVALID_STATE", "Step belongs to another Run/Procedure");

@@ -1,9 +1,8 @@
+import { processGates } from './fixtures/process-gates.mjs';
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir, release as osRelease } from "node:os";
-import { join } from "node:path";
+import { release as osRelease } from "node:os";
 import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
 import { terminateProcessTree } from "../src/platform-process.js";
@@ -12,13 +11,21 @@ for (const scenario of ["tree", "identity", "orphan"] as const) test(`Windows na
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
   t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM and taskkill /T`);
-  const directory = await mkdtemp(join(tmpdir(), "rewind-tree-"));
-  const release = join(directory, "release");
+  const gates = await processGates(t.signal);
+  const workers: Array<ReturnType<typeof fork>> = [];
+  t.after(async () => {
+    gates.publish("release");
+    for (const worker of workers) {
+      await terminateProcessTree(worker.pid!).catch(() => undefined);
+      if (worker.connected) worker.disconnect();
+    }
+    await gates.close();
+  });
   const start = async () => {
-    const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [release], {
+    const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint)], {
       detached: true, stdio: ["ignore", "ignore", "inherit", "ipc"]
     });
-    t.after(async () => { await terminateProcessTree(worker.pid!).catch(() => undefined); if (worker.connected) worker.disconnect(); });
+    workers.push(worker);
     const [ready] = await once(worker, "message");
     const identity = await captureProcessIdentity(worker.pid!);
     assert.ok(identity);
@@ -27,7 +34,6 @@ for (const scenario of ["tree", "identity", "orphan"] as const) test(`Windows na
     assert.ok(child, "CIM observes the real child creation identity");
     return { worker, child, rewind: { pid: worker.pid!, identity, members, reviewId: "review", attemptId: "attempt" } };
   };
-  t.after(async () => { await writeFile(release, "exit"); await rm(directory, { recursive: true, force: true }); });
   const related = await start(), unrelated = await start();
   if (scenario === "identity") {
     await assert.rejects(stopRewindWorker({ ...related.rewind, identity: { ...related.rewind.identity, started: "recycled PID" } }), { code: "PROCESS_IDENTITY_CHANGED" });
@@ -40,8 +46,8 @@ for (const scenario of ["tree", "identity", "orphan"] as const) test(`Windows na
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child, "fixture child survives leader exit");
     await assert.rejects(stopRewindWorker(related.rewind), { code: "PROCESS_TERMINATION_PENDING" });
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
-    await writeFile(release, "exit");
-    // Retry the actual OS probe until descendants have consumed their release file.
+    gates.publish("release");
+    // Retry the actual OS probe until descendants have received their release message.
     const deadline = Date.now() + 20000;
     while (await captureProcessIdentity(related.child.pid)) {
       assert.ok(Date.now() < deadline, "orphan child exits");
