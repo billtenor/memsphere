@@ -17,7 +17,7 @@
 | Windows | Platform Core Contracts / Platform Publication & Upgrades | 4 / 4 |
 | Windows | 真实 npm 安装包、Run/View、四种 Shell 冒烟及 project-command 契约 | 独立 job，契约并发 2 |
 
-测试文件递归发现。Linux 默认与所有平台 full 均执行全部 `.test.ts`；macOS 和 Windows 默认仅排除 `scripts/ci/default-test-exclusions.json` 中的固定相对路径。该清单由原默认白名单对应的未选文件生成，现有测试的覆盖和执行分组保持一致。排除项只匹配精确路径，不使用目录或名称模式；新增测试路径自动纳入默认 CI，同名的其他目录文件也不会被排除。
+测试文件递归发现。Linux 默认与所有平台 full 均执行全部 `.test.ts`；macOS 和 Windows 默认仅排除 `scripts/ci/test-plan.mjs` 的 `defaultTestExclusions` 中的固定相对路径。该清单由原默认白名单对应的未选文件生成，现有测试的覆盖和执行分组保持一致。排除项只匹配精确路径，不使用目录或名称模式；新增测试路径自动纳入默认 CI，同名的其他目录文件也不会被排除。
 
 Windows 选中测试按职责分配到 core、upgrades 或打包 job，每个文件只运行一次。分组决定由哪个 job 执行，不用于拒绝新增测试。Chromium 安装依据实际选集自动计算。平台专属用例仍由测试代码声明适用条件，其他平台记录 skip。
 

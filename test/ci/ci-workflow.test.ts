@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
 import { ciProfile, createCiPlan } from "../../scripts/ci/ci-plan.mjs";
-import { discoverTestFiles, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
+import { defaultTestExclusions, discoverTestFiles, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = await discoverTestFiles("test");
@@ -25,7 +25,7 @@ test("default excludes only fixed paths; all future files run once and full rema
     "model-future-browser.test.ts": "helpers/browser",
     "future-cli.test.ts": ""
   };
-  const exclusions = JSON.parse(await readFile("scripts/ci/default-test-exclusions.json", "utf8"));
+  const exclusions = defaultTestExclusions;
   assert.equal(new Set(exclusions).size, exclusions.length);
   assert(exclusions.every((path: string) => typeof path === "string" && !/[?*]/.test(path) && !path.includes("..") && !path.startsWith("/")));
   const allFiles = [...files, ...Object.keys(future)];
