@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { after } from "node:test";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,6 +9,18 @@ import { readBundledSystemModels } from "../../src/reserved/models.js";
 import { withCurrentMemorySyntax } from "./memory.js";
 
 const cli = resolve("dist/cli.js");
+// Upgrade tests need an installed baseline, not repeated coverage of project create.
+// Capture one real CLI-created baseline; each scenario owns a full byte copy and
+// its own registry, Git object directory, model records and subsequent changes.
+let managedTemplate: string | undefined;
+after(async () => { if (managedTemplate) await rm(managedTemplate, { recursive: true, force: true }); });
+function copyManagedBaseline(source: string, destination: string) {
+  mkdirSync(destination, { recursive: true });
+  for (const entry of ["config.json", "project.json", "memory", "models"]) {
+    cpSync(join(source, entry), join(destination, entry), { recursive: true });
+  }
+  for (const entry of ["changes", "runs", "archive", "evals", ".runtime"]) mkdirSync(join(destination, entry));
+}
 export const memoryPath = "concepts/memsphere-framework.yaml";
 export const systemModel = readBundledSystemModels().find(model => model.registration.modelRef === "memsphere/model-registration.json")!;
 export const definitionPath = "models/registrations/system/definitions/json-schema/draft-07/memsphere/model-registration.json";
@@ -28,9 +42,26 @@ export async function fixture() {
     return result.stdout.trim();
   };
   const create = (name: string, options: string[] = []) => {
-    const result = run(["project", "create", name, ...options]);
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    return join(home, "projects", name);
+    const project = join(home, "projects", name);
+    if (options.length === 0 && managedTemplate) {
+      assert.equal(existsSync(project), false, "fixture Project must be new");
+      copyManagedBaseline(managedTemplate, project);
+      const metadataPath = join(project, "project.json");
+      writeFileSync(metadataPath, JSON.stringify({ ...JSON.parse(readFileSync(metadataPath, "utf8")), name }));
+      const registryPath = join(home, "registry.json");
+      const registry = existsSync(registryPath) ? JSON.parse(readFileSync(registryPath, "utf8")) : { format_version: 1, projects: {}, workspaces: {} };
+      assert.equal(registry.projects[name], undefined);
+      registry.projects[name] = { root: project };
+      writeFileSync(registryPath, JSON.stringify(registry));
+    } else {
+      const result = run(["project", "create", name, ...options]);
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      if (options.length === 0) {
+        managedTemplate = mkdtempSync(join(tmpdir(), "memsphere-upgrade-baseline-"));
+        copyManagedBaseline(project, managedTemplate);
+      }
+    }
+    return project;
   };
   const upgrade = (name: string, args: string[] = [], cwd = workspace) => {
     const result = run(["project", "upgrade", name, "--output", "json", ...args], cwd);

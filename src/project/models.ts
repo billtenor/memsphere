@@ -234,6 +234,12 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
       await assertSnapshot();
       return { source: saved.source, metaModel: saved.data.model };
     },
+    /** Inventory lookup without compiling unrelated definitions. */
+    async has(id: string): Promise<boolean> {
+      assertModelRef(id);
+      await assertSnapshot();
+      return known.has(id);
+    },
     async list(): Promise<ProjectModelSummary[]> {
       const result: ProjectModelSummary[] = [];
       for (const id of [...allStoredIds].sort()) {

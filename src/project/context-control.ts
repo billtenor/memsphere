@@ -1,5 +1,5 @@
 import { withContextControlAccess } from "./context-control-access.js";
-import { readModelOperationStamp } from "./model-operation.js";
+import { assertModelOperationStamp, readModelOperationStamp, withConsistentModelRead } from "./model-operation.js";
 import { isDeepStrictEqual } from "node:util";
 import type { Context } from "../data/api/context.js";
 import { JsonPayloadSerializer } from "../data/extensions/json-serializer/index.js";
@@ -34,20 +34,27 @@ export async function openContextControl(root: string, initialize = false, legac
 }
 
 async function openContextControlUnlocked(root: string, legacyUpgrade: boolean): Promise<ContextControl | undefined> {
+  return withConsistentModelRead(() => openContextControlSnapshot(root, legacyUpgrade));
+}
+
+async function openContextControlSnapshot(root: string, legacyUpgrade: boolean): Promise<ContextControl | undefined> {
+  const stamp = await readModelOperationStamp(root);
   const config = await readBusinessProject(root);
   const bindings = ENTITIES.map(e => config.dataStores?.[storeId(e)]);
   if (bindings.every(b => !b)) return undefined;
   if (bindings.some(b => !b)) throw failure("INITIALIZATION_INCOMPLETE", "Context control Store bindings are incomplete; start a free exploration to initialize");
+  // One operation-local host reads the same model catalog for all five Stores.
+  // It is discarded after opening, and the operation stamp fences the snapshot.
+  const host = await createProjectModelHost({}, { root, ...config });
   if (!legacyUpgrade) {
-    const host = await createProjectModelHost({}, { root, ...config });
     for (const asset of readContextControlModels()) {
       if (!isDeepStrictEqual((await host.definition(asset.id)).definition, asset.definition)) throw failure("MODEL_INCOMPATIBLE", `Context control models need an explicit upgrade: memsphere project models initialize (${asset.id})`);
     }
   }
   const stores = {} as Stores;
   for (const entity of ENTITIES) {
-    const oldSource = legacyUpgrade ? (await (await createProjectModelHost({}, { root, ...config })).source(modelId(entity))).source : undefined;
-    const runtime = oldSource === undefined ? undefined : (await checkModelDefinition({}, { modelRef: modelId(entity), source: oldSource, definition: JSON.parse(oldSource.replace(/^\uFEFF/, "")) })).runtime;
+    const oldSource = legacyUpgrade ? (await host.source(modelId(entity))).source : undefined;
+    const runtime = oldSource === undefined ? await host.runtime(modelId(entity)) : (await checkModelDefinition({}, { modelRef: modelId(entity), source: oldSource, definition: JSON.parse(oldSource.replace(/^\uFEFF/, "")) })).runtime;
     const opened = await openBusinessStore({}, root, storeId(entity), { runtime });
     if (opened.store.kind !== "ValueStore" || opened.binding.model !== modelId(entity)) throw failure("STORE_INCOMPATIBLE", `Wrong context control Store: ${storeId(entity)}`);
     stores[entity] = opened.store;
@@ -60,6 +67,7 @@ async function openContextControlUnlocked(root: string, legacyUpgrade: boolean):
     const content = await new JsonPayloadSerializer().serialize(context, opened.runtime.descriptor, row.value);
     return { bytes: await readAll(context, content), contentType: "application/json" };
   };
+  await assertModelOperationStamp(root, stamp);
   return new ContextControl(stores, contentReader);
 }
 
@@ -68,7 +76,7 @@ export async function initializeContextControl(root: string) {
   for (const asset of assets) {
     const config = await readBusinessProject(root);
     const host = await createProjectModelHost({}, { root, ...config });
-    const existing = (await host.list()).find(m => m.id === asset.id);
+    const existing = await host.has(asset.id);
     if (!existing) {
       try { await mutateModel({}, root, "create", asset.id, { source: asset.source, fields: { name: asset.name, package: asset.package, package_name: asset.packageName } }); }
       catch (error) { if ((error as { code?: string }).code !== "ALREADY_EXISTS") throw error; }
