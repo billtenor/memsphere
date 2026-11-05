@@ -118,3 +118,15 @@ for (const conflict of ["different", "duplicate", "schema"] as const) test(`subm
   assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
   assert.deepEqual(await (await openContextControl(f.root))!.stores.step.get({}, key), before);
 });
+
+test('collect membership evidence refers only to other triggers in its own Run', async () => {
+  const asset = readContextControlModels().find(a => a.entity === 'run')!;
+  const { runtime } = await checkModelDefinition({}, { modelRef: asset.id, definition: asset.definition });
+  const source = { id: 'source', actionId: 'B', dependencyIndex: 0, inputs: {}, arrivals: { START: { kind: 'start' } } };
+  const collect = { id: 'collect', actionId: 'gather', dependencyIndex: 0, stepId: 's', arrivals: { START: { kind: 'start' } }, collection: { items: { B: [] }, triggerIds: ['source'] } };
+  const record = (trigger: unknown) => ({ ...run(), frames: [{ id: 'f', type: 'graph', graphFrame: { ...graph(), triggers: [source, trigger] } }] });
+  assert.doesNotThrow(() => runtime!.reflect(record(collect)));
+  for (const id of ['collect', 'foreign-trigger']) assert.throws(() => runtime!.reflect(record({ ...collect, collection: { ...collect.collection, triggerIds: [id] } })), /discriminated.*collection/);
+  const { stepId: _id, ...withoutStep } = collect;
+  assert.throws(() => runtime!.reflect(record({ ...withoutStep, inputs: {} })), /discriminated.*collection/);
+});

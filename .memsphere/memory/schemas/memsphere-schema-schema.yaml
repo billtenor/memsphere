@@ -8,6 +8,7 @@ defines:
   - 定义 memsphere !schema Memory 的合法内容结构、值契约和组合约束。
   - Schema 的 name/names 标识值契约或字段，不是 Procedure 的单次 Run 名称。
 asserts:
+  - graph 的 CLI 回溯属于运行记录语义，不在本 Schema 增加回溯字段；Procedure mode 省略仍为 flow。
   - 根节点必须使用 !schema 标签，只允许 syntax、name/names、defines、asserts、suggests、optional、type、format、fields、item 和 items 字段。
   - "syntax 必须填写 memsphere-20260721-stable。"
   - 顶层 Schema 必须使用非空 name 或 names；fields 中的详细 Schema 字段也必须具有名称，item/items 中的匿名 Schema 可以省略名称。

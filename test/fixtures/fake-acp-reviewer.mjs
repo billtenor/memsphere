@@ -4,7 +4,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 
 const mode = process.argv[2] || "approve";
@@ -51,6 +52,19 @@ const app = acp
       while (!signal.aborted) {
         await delay(15);
         await sendProgress(client, params.sessionId, index++);
+      }
+    }
+    if (mode === "rewind-gated") {
+      if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
+      invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
+      const child = spawn(process.execPath,["-e",process.env.REVIEW_TEST_RESISTANT ? 'process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));process.send("ready");setInterval(()=>{},1000)' : 'process.send("ready");setInterval(()=>{if(process.env.REVIEW_TEST_RELEASE&&require("node:fs").existsSync(process.env.REVIEW_TEST_RELEASE))process.exit(0)},25)'],{stdio:["ignore","ignore","ignore","ipc"]});
+      await new Promise(resolve=>child.once("message",resolve));
+      await writeFile(process.env.REVIEW_TEST_READY,JSON.stringify({providerPid:process.pid,childPid:child.pid}));
+      while (!signal.aborted) {
+        if (process.env.REVIEW_TEST_RELEASE) {
+          try { await access(process.env.REVIEW_TEST_RELEASE); break; } catch {}
+        }
+        await delay(25);
       }
     }
     if (mode === "gated-approve") {

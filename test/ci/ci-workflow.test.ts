@@ -28,6 +28,7 @@ test("PR runs every retained test on Linux and every declared native risk on mac
   assert.match(packaged.run, /node scripts\/ci\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
   assert(platformTests.includes("project-command.test.ts"), "repair CAS, literal Git paths, symlink rejection and rollback remain platform checks");
   assert(platformTests.includes("project-resolver.test.ts"));
+  assert(selectTests(files, sources, {}, "platform-core").includes("procedure-graph-rewind-windows.test.ts"));
   assert(platformTests.includes("run-memory-backfill.test.ts"));
   assert.throws(() => createCiPlan("default", files.filter(file => file !== "project-resolver.test.ts"), sources), /protection is missing/);
 });

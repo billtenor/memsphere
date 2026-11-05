@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -12,6 +13,7 @@ import {
   type RunState
 } from "../context_control/review-repository.js";
 import { currentCliRuntimeDescriptor, type CliRuntimeDescriptor } from "./cli-runtime.js";
+import { captureProcessIdentity, captureProcessGroup, stopRewindWorker } from "../context_control/review-process.js";
 import { spawnCommand } from "../platform-process.js";
 
 export async function dispatchArtifactReviewAgents(input: {
@@ -54,7 +56,7 @@ export async function dispatchArtifactReviewAgents(input: {
       if (currentAssignment?.status !== "queued") return;
       try {
         const marker = JSON.parse(await readFile(join(directory, `${key}.json`), "utf8"));
-        try { process.kill(marker.pid, 0); return; } catch { /* previous worker exited */ }
+        if (marker.identity && isDeepStrictEqual(await captureProcessIdentity(marker.pid), marker.identity)) return;
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const args = [
       runtime.cliEntrypoint,
@@ -78,7 +80,21 @@ export async function dispatchArtifactReviewAgents(input: {
         worker.once("spawn", resolveSpawn);
         worker.once("error", rejectSpawn);
       });
-      await atomicWriteJson(join(directory, `${key}.json`), { pid: worker.pid });
+      const identity = worker.pid ? await captureProcessIdentity(worker.pid) : undefined;
+      if (worker.exitCode !== null || worker.signalCode !== null) return;
+      const latest = await readRun(input.config.runsRoot, input.run.id);
+      const latestReview = latest.artifactReviews?.find(r => r.id === review.id);
+      const latestRound = latestReview?.rounds.find(r => r.id === round.id);
+      if (latest.status !== "running" || latestReview?.status === "cancelled" ||
+          latestReview?.currentRoundId !== round.id || latestRound?.status === "cancelled") {
+        if (worker.pid && identity) await stopRewindWorker({
+          pid: worker.pid, identity, members: await captureProcessGroup(identity.group),
+          reviewId: review.id, attemptId: assignment.attempts?.at(-1)?.id ?? assignmentId
+        });
+        worker.unref();
+        return;
+      }
+      await atomicWriteJson(join(directory, `${key}.json`), { pid: worker.pid, identity });
       worker.unref();
     } catch (error) {
       const claimed = await claimArtifactReviewAgentAssignment({
@@ -86,7 +102,7 @@ export async function dispatchArtifactReviewAgents(input: {
         reviewId: review.id,
         roundId: round.id,
         actorId: assignmentId,
-        workerPid: process.pid
+        workerPid: worker.pid ?? process.pid
       });
       if (!claimed) return;
       const message = error instanceof Error ? error.message : String(error);

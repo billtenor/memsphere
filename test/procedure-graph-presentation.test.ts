@@ -87,10 +87,10 @@ test('stable route IDs survive unknown sources and parallel edges', async () => 
 test('the delivered agile graph routes every dependency outside unrelated cards', async () => {
     const { readFile } = await import('node:fs/promises');
     const { parseMemoryYaml } = await import('../src/memory/yaml.js');
-    const p = parseMemoryYaml(await readFile(new URL('../.memsphere/memory/procedures/memsphere-agile-requirement-development-graph.yaml', import.meta.url), 'utf8')) as ProcedureDefinition;
+    const p = parseMemoryYaml(await readFile(new URL('../.memsphere/memory/procedures/memsphere-agile-requirement-development.yaml', import.meta.url), 'utf8')) as ProcedureDefinition;
     const edges = procedureEdges(p), nodes = [{ id: 'START', width: 44, height: 44, dependencies: [] as string[], dependencyIds: [] as string[] }, ...p.actions.map(action => ({ id: action.id, width: 178, height: 160, dependencies: edges.filter(e => e.to === action.id).map(e => e.from), dependencyIds: edges.filter(e => e.to === action.id).map(e => e.id) }))];
     const layout = await layoutGraph(nodes);
-    assert.equal(p.actions.length, 14);
+    assert.equal(layout.positions.size, nodes.length);
     assert.equal(layout.edges.length, edges.length);
     assert.equal(new Set(layout.edges.map(e => e.id)).size, edges.length);
     for (const edge of layout.edges)

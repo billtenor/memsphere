@@ -31,7 +31,27 @@ export function assertContextControlRecord(modelRef: string, value: RecordValue)
     variant(frame, "type", { procedure: ["procedureFrame"], graph: ["graphFrame"] }, `Run.frames[${i}]`);
     if (frame.type !== "graph") continue;
     const graph = frame.graphFrame;
-    for (const trigger of graph.triggers) if (has(trigger, "stepId") === has(trigger, "inputs")) invalid("Run.graphFrame.trigger.stepId/inputs");
+    for (const trigger of graph.triggers) {
+      if (has(trigger, "stepId") === has(trigger, "inputs")) invalid("Run.graphFrame.trigger.stepId/inputs");
+      if (trigger.collection && (!trigger.stepId || trigger.collection.triggerIds.some((id: string) => id === trigger.id || !graph.triggers.some((t: RecordValue) => t.id === id)))) invalid("Run.graphFrame.trigger.collection");
+      for (const arrival of Object.values(trigger.arrivals ?? {}) as RecordValue[]) variant(arrival, "kind", { start: [], artifact: ["id"], collect: ["items"] }, "Run.graphFrame.trigger.arrival");
+    }
+    const rewinds = graph.rewinds ?? [], ids = new Set();
+    for (const rewind of rewinds) {
+      if (ids.has(rewind.id) || rewind.targetStepId === rewind.replacementStepId || !rewind.affectedStepIds.includes(rewind.targetStepId) || rewind.affectedStepIds.includes(rewind.replacementStepId)) invalid("Run.graphFrame.rewinds");
+      ids.add(rewind.id);
+      const target = graph.triggers.find((t: RecordValue) => t.stepId === rewind.targetStepId);
+      const replacement = graph.triggers.find((t: RecordValue) => t.stepId === rewind.replacementStepId);
+      if (!target || !replacement || target.actionId !== replacement.actionId || target.dependencyIndex !== replacement.dependencyIndex || rewind.affectedStepIds.some((id: string) => !graph.triggers.some((t: RecordValue) => t.stepId === id))) invalid("Run.graphFrame.rewinds.steps");
+      if (!graph.triggers.some((t: RecordValue) => t.stepId === rewind.targetStepId) || !graph.triggers.some((t: RecordValue) => t.stepId === rewind.replacementStepId) || rewind.affectedTriggerIds.some((id: string) => !graph.triggers.some((t: RecordValue) => t.id === id))) invalid("Run.graphFrame.rewinds.references");
+    }
+    if (graph.pendingRewind && !ids.has(graph.pendingRewind.id)) invalid("Run.graphFrame.pendingRewind");
+    const slots = new Set();
+    for (const gate of graph.deferredCollects ?? []) {
+      const slot = `${gate.actionId}:${gate.dependencyIndex}`;
+      if (slots.has(slot) || !ids.has(gate.rewindId) || !graph.triggers.some((t: RecordValue) => t.id === gate.triggerId) || [...gate.memberStepIds, ...(gate.memberSourceStepIds ?? []), ...gate.waits.map((w: RecordValue) => w.rootStepId)].some(id => !graph.triggers.some((t: RecordValue) => t.stepId === id))) invalid("Run.graphFrame.deferredCollects");
+      slots.add(slot);
+    }
     for (const join of graph.joins) for (const arrival of Object.values(join.arrivals) as RecordValue[]) {
       variant(arrival, "kind", { start: [], artifact: ["id"], collect: ["items"] }, "Run.graphFrame.arrival");
     }

@@ -434,6 +434,16 @@ runStep.command("enter")
   .requiredOption("--step <id>", "Step instance id")
   .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("enter", options)) throw new Error("enter requires a graph Run"); });
 
+runStep.command("rewind")
+  .description("Rewind a current graph Step, retaining history and rebuilding affected dependencies.")
+  .requiredOption("--run <id>", "Run id")
+  .requiredOption("--step <id>", "current production Step id")
+  .option("--dry-run", "preview affected Steps without writes")
+  .option("--reason <text>", "reason for rewind")
+  .option("--reason-file <path>", "read rewind reason from a file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("rewind", options)) throw new Error("rewind requires a graph Run"); });
+
 runStep
   .command("show")
   .description("Show the detailed contract and instructions for one Run step.")

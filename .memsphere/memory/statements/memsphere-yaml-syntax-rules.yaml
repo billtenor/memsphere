@@ -1140,3 +1140,10 @@ sections:
       - collect 是非空无重复的普通生产 Action ID 数组，不得指向 START 或另一个 collect；由 Memsphere 自动收集已完成且正式接纳的产物引用，按对应 Step 的持久创建顺序排列，不制造聚合 Artifact、不评审、不要求 Agent 执行。
       - graph 不提供 !if、!while、!call、动态 foreach、子图或启动业务参数；入口 Action 自行收集材料并产出 Artifact，循环由普通依赖表达。
       - 旧版本到新版本的显式 syntax 迁移只更新版本标识，不把旧 flow 改为 graph，也不强制迁移现有 Memory。
+  - !statement
+    names: [graph 运行回溯]
+    asserts:
+      - CLI 的 run step rewind 作用于具体的当前普通生产 Step，不新增 Procedure YAML 关键字，也不改变 mode 缺省为 flow。
+      - 回溯新建 pending 目标并按真实依赖重建受影响后继；已消费独立输入按实际派发记录恢复，历史产物、依赖和评审保留，旧步骤不得推动当前流程。
+      - collect 的独立控制信号在受影响成员替代路径完成或被 when 消除前延迟释放；历史控制来源无法精确重建时拒绝回溯，不猜测来源。
+      - 连续回溯必须合并同一 collect 依赖的所有成员替代等待与具体控制来源，正常 dispatch 的新控制信号不得绕过等待；多个历史同槽控制信号按实际派发顺序合并，恢复只触发一次。

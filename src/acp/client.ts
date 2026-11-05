@@ -21,12 +21,14 @@ export async function runAgentReviewAcpSession(input: {
   reminder: string;
   workspaceRoot: string;
   isSubmitted(): Promise<boolean>;
+  assertLaunchValid?(): Promise<void>;
   waitForSubmission?(): Promise<void>;
   onSession(metadata: Omit<AgentReviewAcpSession, "stopReason" | "stderr">): Promise<void>;
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }, dependencies: { spawn?: typeof spawnAgent } = {}): Promise<AgentReviewAcpSession> {
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
+  await input.assertLaunchValid?.();
   const process = (dependencies.spawn ?? spawnAgent)(input.launch);
   const transport = new AbortController();
   const onExit = (code: number | null, signal: string | null) => {
@@ -82,6 +84,7 @@ export async function runAgentReviewAcpSession(input: {
   });
   try {
     await waitForSpawn(process, startupSignal);
+    await input.assertLaunchValid?.();
     const stream = acp.ndJsonStream(
       Writable.toWeb(process.stdin) as WritableStream<Uint8Array>,
       Readable.toWeb(process.stdout) as ReadableStream<Uint8Array>

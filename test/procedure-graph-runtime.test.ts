@@ -175,7 +175,7 @@ for (const afterSave of [false, true]) test(`backlogged same-source completions 
     await reopened.withGraph(async recovered => {
       const snap = await recovered.advance(start.run.id);
       assert.deepEqual(snap.run.frames![0].graphFrame.processedStepIds, [first.step.id, second.step.id]);
-      assert.deepEqual(snap.run.frames![0].graphFrame.joins.find(j => j.actionId === "C")!.arrivals.A, { kind: "artifact", id: second.artifact.id });
+      assert.deepEqual(snap.run.frames![0].graphFrame.joins.find(j => j.actionId === "C")!.arrivals.A, { kind: "artifact", id: second.artifact.id, stepId: second.step.id });
       await produce(recovered, start.run.id, byAction(start.steps, "B")[0].id, "b");
       const child = byAction((await recovered.snapshot(start.run.id)).steps, "C");
       assert.equal(child.length, 1); assert.deepEqual(child[0].inputs!.A, [{ kind: "artifact", id: second.artifact.id }]);

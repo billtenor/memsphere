@@ -9,6 +9,7 @@ defines:
   - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
   - Procedure 的 name/names 标识可复用的流程定义；单次执行的 Run 名称不属于 Memory YAML，通过 run start --name 提供。
 asserts:
+  - graph 的 CLI 回溯属于运行记录语义，不在本 Schema 增加回溯字段；Procedure mode 省略仍为 flow。
   - 根节点必须使用 !procedure 标签，flow 模式只允许 syntax、name/names、defines、asserts、goals、mode 和 flow；graph 模式以 actions 代替 flow，禁止两者混用。
   - "新 graph 必须填写 memsphere-20261027-stable；旧稳定版本按其原 flow 语义保留。"
   - name 与 names 必须且只能使用一个；顶层规范名称必须是 1–120 字符的小写 ASCII kebab-case。names 的后续成员是别名，可以使用 Unicode 和内部空格，但不得包含首尾空白、控制字符或 `/`，且全部名称不得重复。

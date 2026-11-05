@@ -17,6 +17,9 @@ export async function discoverTestFiles(directory) {
 // See docs/ci-performance.md for the source-boundary audit and full-run policy.
 export const platformTests = [
   "agent-review.test.ts",
+  "acp-launch-fence.test.ts",
+  "procedure-graph-rewind-process.test.ts",
+  "procedure-graph-rewind-windows.test.ts",
   "app-install.test.ts",
   "archive-store.test.ts",
   "business-data-service.test.ts",

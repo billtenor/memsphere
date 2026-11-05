@@ -164,7 +164,7 @@ test("making idle timeout optional upgrades the known definition without rewriti
   const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!;
   const run = await s.start("idle timeout migration");
   const path = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
-  const old = JSON.parse(await readFile(path, "utf8"));
+  const old = JSON.parse(await readFile(new URL("./fixtures/context-control-run-before-rewind.json", import.meta.url), "utf8"));
   const agent = old.definitions.PermissionConfig.properties.actors.additionalProperties.properties.agent;
   agent.required.push("idleTimeoutMs");
   agent.properties.idleTimeoutMs.description = "空闲超时的毫秒数。";
@@ -174,4 +174,18 @@ test("making idle timeout optional upgrades the known definition without rewriti
   assert.equal(result?.records, 0);
   const reopened = (await openContextControl(f.root))!;
   assert.deepEqual(await reopened.stores.run.get({}, run.id), before);
+});
+
+for (const entity of ["run", "review"] as const) test(`rewind upgrade preserves ${entity} records and revisions`, async t => {
+ const f = await businessFixture(t, {}), s = (await openContextControl(f.root,true))!;
+ const run = await s.start("prior rewind model");
+ const artifact=(await s.report(run.id,{name:"old",content:textContent("before rewind")})).artifact;
+ const review=await s.review(run.id,artifact.id,"human",["preserve this comment"]);
+ const before = await s.stores.run.get({},run.id), beforeReview=await s.stores.review.get({},`${run.id}/${review.id}`);
+ await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`, await readFile(new URL(`./fixtures/context-control-${entity}-before-rewind.json`,import.meta.url),"utf8"));
+ await assert.rejects(openContextControl(f.root),{code:"MODEL_INCOMPATIBLE"});
+ assert.equal((await withModelMaintenance(f.root,()=>upgradeContextControlOutputs(f.root)))?.records,0);
+ const reopened=(await openContextControl(f.root))!;
+ assert.deepEqual(await reopened.stores.run.get({},run.id),before);
+ assert.deepEqual(await reopened.stores.review.get({},`${run.id}/${review.id}`),beforeReview);
 });

@@ -18,6 +18,8 @@ import { createGraphRound, graphPermissionConfig, graphReviewId, graphScope, pen
 import { deriveOutputs } from "./outputs.js";
 import { terminateProcessTree } from "../platform-process.js";
 import { assertContextControlRecord } from "./invariants.js";
+import { collectMemberTriggerIds, collectReplayReady, effectiveStep, mergeArrivals, planRewind, requireEffectiveStep, triggerArrivals } from "./graph-rewind.js";
+import { captureProcessIdentity, captureProcessGroup, stopRewindWorker } from "./review-process.js";
 
 const now = () => new Date().toISOString();
 const newId = (kind: string) => `${kind}-${randomUUID()}`;
@@ -34,6 +36,9 @@ export type GraphReport = { text?: string; content?: Body["content"]; contentRef
 export class GraphRuntime {
   readonly records: Records;
   constructor(stores: Stores, private readonly reader: ContentReader) { this.records = new Records(stores); }
+  async stopReviewer(worker: Parameters<typeof stopRewindWorker>[0]): Promise<void> {
+    await stopRewindWorker(worker);
+  }
   private async run(id: string) {
     const row = await this.records.require<Run>("run", id, id);
     if (!isGraphRun(row.value) || row.value.frames?.length !== 1 || !row.value.frames[0].graphFrame || row.value.frames[0].graphFrame.memoryRef !== row.value.memoryRef) throw failure("INVALID_STATE", `Not a valid graph Run: ${id}`);
@@ -105,13 +110,15 @@ export class GraphRuntime {
   /** Personal Review writes use their own record revision; graph recovery is separate. */
   async mutateReview<T>(runId: string, stepId: string, roundId: string, actor: string, action: (value: Review, run: Run, step: Step) => Promise<T>): Promise<T> {
     const run = (await this.run(runId)).value; this.active(run);
-    const step = (await this.step(run, stepId)).value;
+    const step = (await this.step(run, stepId)).value; requireEffectiveStep(run, stepId);
     if (step.status !== "awaiting_review" || step.reviewRounds?.at(-1)?.id !== roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer active");
     const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actor));
     if (row.value.roundId !== roundId || row.value.artifactId !== step.reviewRounds.at(-1)!.artifactId || row.value.reviewer.actorId !== actor) throw failure("INVALID_STATE", "Personal Review identity mismatch");
     const value = structuredClone(row.value);
     const result = await action(value, run, step);
+    requireEffectiveStep((await this.run(runId)).value, stepId);
     await this.records.update("review", runId, row, value);
+    requireEffectiveStep((await this.run(runId)).value, stepId);
     return result;
   }
   async recordReviewStop(runId: string, stepId: string, roundId: string, actorId: string, attemptId: string, stopReason: string) {
@@ -125,15 +132,17 @@ export class GraphRuntime {
     await this.records.update("review", runId, row, value);
   }
   async resolveComment(runId: string, stepId: string, roundId: string, resolution: { commentId: string; value: import("../artifact-review.js").ArtifactReviewDispositionValue; note: string; validationSummary?: string }) {
-    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "decision.decide");
+    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "decision.decide"); requireEffectiveStep(run, stepId);
     const row = await this.step(run, stepId); const step = structuredClone(row.value);
     const round = step.reviewRounds?.find(r => r.id === roundId);
     if (!round) throw failure("NOT_FOUND", "Review Round not found");
     const review = (await this.records.list<Review>("review", runId)).find(r => r.roundId === roundId && r.status === "submitted" && r.comments.some(c => c.id === resolution.commentId));
     if (!review || !review.reviewer.actorId || round.reviewConfig.reviewers[review.reviewer.actorId]?.permissions.includes("decision.decide")) throw failure("NOT_FOUND", "Submitted advisory comment not found");
     if (!resolution.note.trim() || resolution.value === "accepted-fixed" && !resolution.validationSummary?.trim()) throw failure("INVALID_ARGUMENT", "Resolution requires a note and accepted-fixed requires validation evidence");
+    requireEffectiveStep((await this.run(runId)).value, stepId);
     round.resolutions = [...(round.resolutions ?? []).filter(r => r.reviewId !== review.id || r.commentId !== resolution.commentId), { ...resolution, reviewId: review.id, updatedAt: now() }];
     await this.records.update("step", runId, row, step);
+    requireEffectiveStep((await this.run(runId)).value, stepId);
   }
   async bindingSnapshot(runId: string) {
     const snapshot = await this.snapshot(runId);
@@ -150,11 +159,13 @@ export class GraphRuntime {
   }
   private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.run(runId)).value;
+    assertContextControlRecord("memsphere/context_control/run.json", run);
     const [steps, artifacts, externals, reviews] = await Promise.all([
       this.records.list<Step>("step", runId), this.records.list<Artifact>("artifact", runId), this.records.list<External>("external", runId), this.records.list<Review>("review", runId)
     ]);
-    const completeIds = steps.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id);
-    for (const id of completeIds) if (!artifacts.some(a => a.id === id && a.status === "submitted")) throw failure("INVALID_STATE", `Completed Step has no submitted Artifact: ${id}`);
+    const historicalCompleteIds = steps.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id);
+    for (const id of historicalCompleteIds) if (!artifacts.some(a => a.id === id && a.status === "submitted")) throw failure("INVALID_STATE", `Completed Step has no submitted Artifact: ${id}`);
+    const completeIds = historicalCompleteIds.filter(id => effectiveStep(run, artifacts.find(a => a.id === id)!.stepId));
     const outputArtifactIds = deriveOutputs(run, artifacts, completeIds);
     if (outputArtifactIds.some(id => !completeIds.includes(id))) throw failure("INCOMPLETE_ARTIFACT", "Output override references an incomplete Artifact");
     this.creationOrder(run, steps);
@@ -172,16 +183,20 @@ export class GraphRuntime {
       if (step.status === "awaiting_review" && (!step.reviewRounds?.length || step.artifact?.mode !== "produce" || step.artifact.id !== step.reviewRounds.at(-1)!.artifactId)) throw failure("INVALID_STATE", "Review Step has no matching frozen Round/Artifact");
       for (const [source, refs] of Object.entries(step.inputs ?? {})) for (const ref of refs) {
         const artifact = artifacts.find(a => a.id === ref.id);
-        if (ref.kind !== "artifact" || !artifact || !completeIds.includes(ref.id) || steps.find(s => s.id === artifact.stepId)?.source?.actionId !== source) throw failure("INVALID_STATE", "Step input is not an accepted Artifact of its source Action");
+        if (ref.kind !== "artifact" || !artifact || !historicalCompleteIds.includes(ref.id) || steps.find(s => s.id === artifact.stepId)?.source?.actionId !== source) throw failure("INVALID_STATE", "Step input is not an accepted Artifact of its source Action");
       }
     }
-    return { run, steps, artifacts, externals, reviews, completeIds, outputArtifactIds };
+    return { run, steps, artifacts, externals, reviews, completeIds, historicalCompleteIds, outputArtifactIds };
   }
   private creationOrder(run: Run, steps: Step[]) {
     const order = new Map<string, number>();
     this.frame(run).triggers.forEach((t, index) => {
       const action = this.procedure(run).actions.find(a => a.id === t.actionId);
       if (!action?.dependencies[t.dependencyIndex] || !Number.isInteger(t.dependencyIndex)) throw failure("INVALID_STATE", "Trigger references an invalid dependency");
+      if (t.collection) {
+        const step = steps.find(s => s.id === t.stepId);
+        if (!action.collect || !step || Object.keys(t.collection.items).length !== action.collect.length || action.collect.some(id => !Object.hasOwn(t.collection!.items, id)) || (step.status === "done" && !isDeepStrictEqual(step.artifact, { mode: "collect", items: t.collection.items }))) throw failure("INVALID_STATE", "Invalid frozen collect membership");
+      }
       if (!t.stepId) return;
       if (order.has(t.stepId)) throw failure("INVALID_STATE", `Duplicate Step trigger: ${t.stepId}`);
       order.set(t.stepId, index);
@@ -191,6 +206,19 @@ export class GraphRuntime {
       this.action(run, step);
       const index = order.get(step.id);
       if (index === undefined || this.frame(run).triggers[index].actionId !== step.source?.actionId) throw failure("INVALID_STATE", `Step has no matching creation trigger: ${step.id}`);
+    }
+    for (const arrivals of [...this.frame(run).triggers.map(t => t.arrivals ?? {}), ...this.frame(run).joins.map(j => j.arrivals), ...(this.frame(run).deferredCollects ?? []).map(g => g.arrivals)]) {
+      for (const [actionId, arrival] of Object.entries(arrivals)) {
+        if (arrival.kind === "start") { if (actionId !== "START") throw failure("INVALID_STATE", "START arrival has another source"); continue; }
+        if (!arrival.stepId) continue; // Legacy arrivals are reconstructed only when needed.
+        const source = steps.find(s => s.id === arrival.stepId);
+        if (!source || source.source?.actionId !== actionId || source.status !== "done" || !this.frame(run).processedStepIds.includes(source.id) || !isDeepStrictEqual(source.artifact, arrival.kind === "artifact" ? {mode:"produce",id:arrival.id} : {mode:"collect",items:arrival.items})) throw failure("INVALID_STATE", "Arrival has no matching committed source Step");
+      }
+    }
+    for (const gate of this.frame(run).deferredCollects ?? []) {
+      const action = this.procedure(run).actions.find(a => a.id === gate.actionId);
+      const trigger = this.frame(run).triggers.find(t => t.id === gate.triggerId);
+      if (!action?.collect || !action.dependencies[gate.dependencyIndex] || trigger?.actionId !== gate.actionId || trigger.dependencyIndex !== gate.dependencyIndex || gate.memberStepIds.some(id => !action.collect!.includes(steps.find(s => s.id === id)?.source?.actionId ?? "")) || gate.waits.some(w => !effectiveStep(run, w.rootStepId) || w.waitActionIds.some(id => !this.procedure(run).actions.some(a => a.id === id)))) throw failure("INVALID_STATE", "Invalid collect recovery slot or member path");
     }
     const processed = this.frame(run).processedStepIds;
     if (new Set(processed).size !== processed.length || processed.some(id => !steps.some(s => s.id === id && s.status === "done"))) throw failure("INVALID_STATE", "Invalid processed Step identities");
@@ -214,6 +242,7 @@ export class GraphRuntime {
   private async completeArtifact(run: Run, id: string): Promise<Artifact> {
     const a = (await this.records.require<Artifact>("artifact", run.id, id)).value;
     const s = (await this.step(run, a.stepId)).value;
+    requireEffectiveStep(run, s.id);
     if (a.status !== "submitted" || s.status !== "done" || s.artifact?.mode !== "produce" || s.artifact.id !== id) throw failure("INCOMPLETE_ARTIFACT", `Not an accepted graph Artifact: ${id}`);
     return a;
   }
@@ -246,10 +275,25 @@ export class GraphRuntime {
     for (const action of this.procedure(run).actions) for (const [dependencyIndex, dep] of action.dependencies.entries()) {
       const sources = typeof dep.from === "string" ? [dep.from] : dep.from;
       if (!sources.includes(source)) continue;
+      const gate = frame.deferredCollects?.find(g => g.actionId === action.id && g.dependencyIndex === dependencyIndex);
+      if (gate) {
+        // Dispatch is authoritative: this signal is later than every committed
+        // signal already in the recovery slot. It must still respect member waits.
+        Object.defineProperty(gate.arrivals, source, {value: structuredClone(arrival), enumerable: true, writable: true, configurable: true});
+        continue;
+      }
       let join = frame.joins.find(j => j.actionId === action.id && j.dependencyIndex === dependencyIndex);
       if (!join) { join = { actionId: action.id, dependencyIndex, arrivals: {} }; frame.joins.push(join); }
       Object.defineProperty(join.arrivals, source, { value: structuredClone(arrival), enumerable: true, writable: true, configurable: true });
       if (!sources.every(id => own(join!.arrivals, id))) continue;
+      await this.fireJoin(run, action, dependencyIndex, join);
+    }
+  }
+  private async fireJoin(run: Run, action: GraphAction, dependencyIndex: number, join: GraphJoin) {
+    const dep = action.dependencies[dependencyIndex];
+    const sources = typeof dep.from === "string" ? [dep.from] : dep.from;
+    if (!sources.every(id => own(join.arrivals, id))) return;
+    const frame = this.frame(run);
       const inputs = this.bindings(join.arrivals);
       let accepted = true;
       if (dep.when !== undefined) {
@@ -266,13 +310,12 @@ export class GraphRuntime {
           throw Object.assign(failure("GRAPH_CONDITION_FAILED", `Action ${action.id} dependency ${dependencyIndex}: ${error && typeof error === "object" && "message" in error ? error.message : String(error)}`), { details: { actionId: action.id, dependencyIndex, inputs } });
         }
       }
-      const trigger = { id: newId("trigger"), actionId: action.id, dependencyIndex };
+      const trigger = { id: newId("trigger"), actionId: action.id, dependencyIndex, arrivals: structuredClone(join.arrivals) };
       if (accepted) {
         const step: Step = { id: newId("step"), runId: run.id, status: "pending", createdAt: now(), source: { memoryRef: run.memoryRef!, actionId: action.id }, inputs };
         frame.pendingSteps.push(step); frame.triggers.push({ ...trigger, stepId: step.id });
       } else frame.triggers.push({ ...trigger, inputs });
       join.arrivals = {};
-    }
   }
   private async materialize(runId: string) {
     let row = await this.run(runId);
@@ -337,7 +380,7 @@ export class GraphRuntime {
     await this.records.update("step", runId, row, step);
   }
   private async settle(runId: string, stepId: string) {
-    const run = (await this.run(runId)).value; const row = await this.step(run, stepId); const step = structuredClone(row.value);
+    const run = (await this.run(runId)).value; if (!effectiveStep(run, stepId)) return; const row = await this.step(run, stepId); const step = structuredClone(row.value);
     const round = step.reviewRounds?.at(-1);
     if (step.status !== "awaiting_review" || !round) return;
     if (step.frames?.length) return this.recoverSubmission(runId, stepId);
@@ -349,17 +392,131 @@ export class GraphRuntime {
     step.frames = [{ id: newId("frame"), type: "submission", submissionFrame: { artifact, nextStatus: "done" } }];
     await this.records.update("step", runId, row, step); await this.recoverSubmission(runId, stepId);
   }
+  async rewindPreview(runId: string, stepId: string) {
+    const row = await this.run(runId); this.active(row.value); this.authorize(row.value, "artifact.read");
+    const snapshot = await this.snapshotValue(runId);
+    const plan = planRewind(snapshot, this.procedure(row.value), stepId);
+    if ((await this.run(runId)).revision !== row.revision) throw failure("REVISION_CONFLICT", "Run changed while planning rewind");
+    return plan;
+  }
+  async rewind(runId: string, stepId: string, reason: string) {
+    if (!reason?.trim()) throw failure("INVALID_ARGUMENT", "Rewind reason must be nonblank");
+    const before = (await this.run(runId)).value; this.active(before);
+    for (const p of ["artifact.read", "artifact.submit", "decision.decide"] as const) this.authorize(before, p);
+    requireEffectiveStep(before, stepId);
+    await this.advance(runId);
+    const row = await this.run(runId), snapshot = await this.snapshotValue(runId);
+    if (!isDeepStrictEqual(row.value, snapshot.run)) throw failure("REVISION_CONFLICT", "Run changed while planning rewind");
+    const plan = planRewind(snapshot, this.procedure(row.value), stepId);
+    const guards = await Promise.all(plan.affectedStepIds.map(id => this.step(row.value, id)));
+    if (guards.some(guard => !isDeepStrictEqual(guard.value, snapshot.steps.find(s => s.id === guard.value.id)))) throw failure("REVISION_CONFLICT", "Step changed since the rewind snapshot");
+    const run = structuredClone(row.value), frame = this.frame(run), id = newId("rewind");
+    const target: Step = { id: newId("step"), runId, status: "pending", createdAt: now(), source: { memoryRef: run.memoryRef!, actionId: plan.actionId }, inputs: plan.inputs };
+    const event = { id, createdAt: now(), reason, targetStepId: stepId, replacementStepId: target.id, affectedStepIds: plan.affectedStepIds, affectedTriggerIds: plan.affectedTriggerIds };
+    const workers = [] as NonNullable<GraphFrame["pendingRewind"]>["workers"];
+    for (const review of snapshot.reviews) {
+      const artifact = snapshot.artifacts.find(a => a.id === review.artifactId);
+      const attempt = review.attempts?.at(-1);
+      if (artifact && plan.affectedStepIds.includes(artifact.stepId) && review.status !== "submitted" && attempt?.workerPid && !attempt.completion) {
+        const identity = attempt.workerIdentity;
+        const current = await captureProcessIdentity(attempt.workerPid);
+        const members = identity && current && isDeepStrictEqual(identity, current) ? await captureProcessGroup(identity.group) : undefined;
+        workers.push({ reviewId: review.id, attemptId: attempt.id, pid: attempt.workerPid, ...(identity ? { identity } : {}), ...(members ? { members } : {}) });
+      }
+    }
+    frame.rewinds = [...(frame.rewinds ?? []), event]; frame.joins = plan.joins;
+    frame.pendingSteps = [...frame.pendingSteps.filter(s => !plan.affectedStepIds.includes(s.id)), target];
+    frame.triggers.push({ id: newId("trigger"), actionId: plan.actionId, dependencyIndex: plan.dependencyIndex, stepId: target.id, arrivals: triggerArrivals(frame.triggers.find(t => t.stepId === stepId)!, snapshot, this.procedure(run)) });
+    frame.pendingRewind = { id, workers };
+    frame.deferredCollects = plan.deferred.map(g => ({ ...g, rewindId: id, waits: g.waits.map(w => ({ ...w, rootStepId: w.rootStepId === "replacement" ? target.id : w.rootStepId })) }));
+    if (run.outputOverrides) run.outputOverrides.addedArtifactIds = run.outputOverrides.addedArtifactIds.filter(id => !plan.affectedArtifactIds.includes(id));
+    for (const guard of guards) if ((await this.step(run, guard.value.id)).revision !== guard.revision) throw failure("REVISION_CONFLICT", "Step changed while planning rewind");
+    await this.saveRun(row, run);
+    try { await this.recoverRewind(runId); await this.materialize(runId); return { ...plan, rewindId: id, replacementStepId: target.id, snapshot: await this.snapshotValue(runId) }; }
+    catch (error) { throw Object.assign(error as object, { details: { runId, rewindId: id, replacementStepId: target.id, recoveryCommand: `memsphere run status --run ${runId}`, message: "Rewind saved; recover status instead of repeating rewind" } }); }
+  }
+  private async cancelSupersededReviews(runId: string) {
+    const run = (await this.run(runId)).value;
+    const reviews = await this.records.list<Review>("review", runId);
+    for (const artifact of await this.records.list<Artifact>("artifact", runId)) {
+      if (effectiveStep(run, artifact.stepId)) continue;
+      for (const review of reviews.filter(r => r.artifactId === artifact.id && r.status !== "submitted" && r.status !== "cancelled")) {
+        const row = await this.records.require<Review>("review", runId, review.id), value = structuredClone(row.value);
+        if (value.status === "submitted") continue;
+        value.status = "cancelled"; value.endedAt = now();
+        const attempt = value.attempts?.at(-1);
+        if (attempt && !attempt.completion) attempt.completion = { kind: "cancelled", at: now(), stopReason: "step_superseded" };
+        await this.records.update("review", runId, row, value);
+      }
+    }
+  }
+  private async recoverRewind(runId: string) {
+    const row = await this.run(runId), intent = this.frame(row.value).pendingRewind;
+    if (!intent) return;
+    // A claim can finish after the initial multi-store snapshot. Discover its live
+    // worker again before cancellation, and save its identity before signalling.
+    const snapshot = await this.snapshotValue(runId);
+    const missing = [] as typeof intent.workers;
+    for (const review of snapshot.reviews) {
+      const artifact = snapshot.artifacts.find(a => a.id === review.artifactId), attempt = review.attempts?.at(-1);
+      if (!artifact || effectiveStep(snapshot.run, artifact.stepId) || review.status === "submitted" || !attempt?.workerPid || intent.workers.some(w => w.reviewId === review.id && w.attemptId === attempt.id)) continue;
+      const current = await captureProcessIdentity(attempt.workerPid), identity = attempt.workerIdentity;
+      if (!current && !(await captureProcessGroup(identity?.group ?? attempt.workerPid)).length) continue;
+      missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:await captureProcessGroup(identity.group)}:{})});
+    }
+    if (missing.length) {
+      const latest = await this.run(runId), updated = structuredClone(latest.value);
+      if (this.frame(updated).pendingRewind?.id !== intent.id) throw failure("REVISION_CONFLICT", "Rewind cleanup intent changed");
+      this.frame(updated).pendingRewind!.workers.push(...missing); await this.saveRun(latest,updated);
+      intent.workers.push(...missing);
+    }
+    await this.cancelSupersededReviews(runId);
+    for (const worker of intent.workers) {
+      const review = (await this.records.require<Review>("review", runId, worker.reviewId)).value;
+      if (review.attempts?.at(-1)?.id !== worker.attemptId) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
+      await this.stopReviewer(worker);
+    }
+    await this.materialize(runId);
+    const latest = await this.run(runId), run = structuredClone(latest.value);
+    if (this.frame(run).pendingRewind?.id === intent.id) { delete this.frame(run).pendingRewind; await this.saveRun(latest, run); }
+  }
+  private async releaseCollects(runId: string) {
+    const snapshot = await this.snapshotValue(runId);
+    const gates = this.frame(snapshot.run).deferredCollects ?? [];
+    const gate = gates.find(g => {
+      const from = this.procedure(snapshot.run).actions.find(a => a.id === g.actionId)!.dependencies[g.dependencyIndex].from;
+      const sources = typeof from === "string" ? [from] : from;
+      return collectReplayReady(snapshot, g) && (sources.every(id => own(g.arrivals, id)) || g.waits.length > 0);
+    });
+    if (!gate) return false;
+    const row = await this.run(runId);
+    if (!isDeepStrictEqual(row.value, snapshot.run)) throw failure("REVISION_CONFLICT", "Run changed while releasing collect");
+    const run = structuredClone(row.value), frame = this.frame(run);
+    let join = frame.joins.find(j => j.actionId === gate.actionId && j.dependencyIndex === gate.dependencyIndex);
+    if (!join) { join = { actionId: gate.actionId, dependencyIndex: gate.dependencyIndex, arrivals: {} }; frame.joins.push(join); }
+    mergeArrivals(run, join.arrivals, gate.arrivals, snapshot.artifacts);
+    const action = this.procedure(run).actions.find(a => a.id === gate.actionId)!;
+    const from = action.dependencies[gate.dependencyIndex].from;
+    const sources = typeof from === "string" ? [from] : from;
+    // A settled replacement frontier with no control signal means that path
+    // was eliminated. Retire its recovery slot without manufacturing a trigger.
+    if (sources.every(id => own(gate.arrivals, id))) await this.fireJoin(run, action, gate.dependencyIndex, join);
+    else join.arrivals = {};
+    frame.deferredCollects = frame.deferredCollects!.filter(g => g.actionId !== gate.actionId || g.dependencyIndex !== gate.dependencyIndex);
+    await this.saveRun(row, run); await this.materialize(runId); return true;
+  }
   async advance(runId: string): Promise<Snapshot> {
     let run = (await this.run(runId)).value;
     if (run.status !== "running") return this.snapshotValue(runId);
-    this.active(run); await this.materialize(runId);
+    this.active(run); await this.recoverRewind(runId); await this.materialize(runId);
     for (const step of await this.records.list<Step>("step", runId)) if (step.frames?.length) await this.recoverSubmission(runId, step.id);
-    for (const step of await this.records.list<Step>("step", runId)) if (step.status === "awaiting_review") await this.settle(runId, step.id);
+    await this.cancelSupersededReviews(runId);
+    for (const step of await this.records.list<Step>("step", runId)) if (effectiveStep((await this.run(runId)).value, step.id) && step.status === "awaiting_review") await this.settle(runId, step.id);
     for (let automatic = 0; automatic < 1000; automatic++) {
       run = (await this.run(runId)).value;
       if (run.status !== "running") return this.snapshotValue(runId);
       const steps = await this.records.list<Step>("step", runId); const order = this.creationOrder(run, steps);
-      const done = steps.filter(s => s.status === "done"); const sequences = new Set<number>();
+      const done = steps.filter(s => s.status === "done" && effectiveStep(run, s.id)); const sequences = new Set<number>();
       for (const s of done) {
         if (!Number.isSafeInteger(s.completionSequence) || s.completionSequence! < 1 || sequences.has(s.completionSequence!)) throw failure("INVALID_STATE", "Missing or duplicate graph completion sequence");
         sequences.add(s.completionSequence!);
@@ -370,18 +527,28 @@ export class GraphRuntime {
         if (!result) throw failure("INVALID_STATE", "Completed Step has no result");
         const row = await this.run(runId); const next = structuredClone(row.value);
         if (next.status !== "running") return this.snapshotValue(runId);
-        if (this.frame(next).processedStepIds.includes(source.id)) continue;
-        await this.dispatch(next, source.source!.actionId, result.mode === "produce" ? { kind: "artifact", id: result.id } : { kind: "collect", items: result.items });
+        if (!effectiveStep(next, source.id) || this.frame(next).processedStepIds.includes(source.id)) continue;
+        await this.dispatch(next, source.source!.actionId, result.mode === "produce" ? { kind: "artifact", id: result.id, stepId: source.id } : { kind: "collect", items: result.items, stepId: source.id });
         this.frame(next).processedStepIds.push(source.id); await this.saveRun(row, next); await this.materialize(runId); continue;
       }
-      const collect = steps.filter(s => (s.status === "pending" || s.status === "running") && this.action(run, s).collect).sort((a, b) => order.get(a.id)! - order.get(b.id)!)[0];
-      if (!collect) return this.snapshotValue(runId);
+      const collect = steps.filter(s => effectiveStep(run, s.id) && (s.status === "pending" || s.status === "running") && this.action(run, s).collect).sort((a, b) => order.get(a.id)! - order.get(b.id)!)[0];
+      if (!collect) { if (await this.releaseCollects(runId)) continue; return this.snapshotValue(runId); }
       const row = await this.step(run, collect.id); const updated = structuredClone(row.value);
       if (updated.status !== "pending" && updated.status !== "running") continue;
-      const items: Record<string, string[]> = Object.create(null);
-      for (const sourceId of this.action(run, collect).collect!) {
-        items[sourceId] = [...new Set(done.filter(s => s.source!.actionId === sourceId && s.artifact?.mode === "produce").sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(s => (s.artifact as { id: string }).id))];
+      let collection = this.frame(run).triggers.find(t => t.stepId === collect.id)!.collection;
+      if (!collection) {
+        const snapshot = await this.snapshotValue(runId), current = await this.run(runId);
+        if (!isDeepStrictEqual(snapshot.run, current.value) || !isDeepStrictEqual(snapshot.run, run)) throw failure("REVISION_CONFLICT", "Run changed while freezing collect membership");
+        const items: Record<string, string[]> = Object.create(null);
+        for (const sourceId of this.action(run, collect).collect!) {
+          items[sourceId] = [...new Set(done.filter(s => s.source!.actionId === sourceId && s.artifact?.mode === "produce").sort((a, b) => order.get(a.id)! - order.get(b.id)!).map(s => (s.artifact as { id: string }).id))];
+        }
+        collection = { items, triggerIds: collectMemberTriggerIds(snapshot, this.procedure(run), collect.source!.actionId) };
+        const next = structuredClone(current.value);
+        this.frame(next).triggers.find(t => t.stepId === collect.id)!.collection = collection;
+        await this.saveRun(current, next);
       }
+      const items = collection.items;
       const sequence = await this.reserveCompletion(runId);
       updated.status = "done"; updated.startedAt ??= now(); updated.endedAt = now(); updated.completionSequence = sequence; updated.artifact = { mode: "collect", items };
       await this.records.update("step", runId, row, updated);
@@ -389,7 +556,7 @@ export class GraphRuntime {
     throw failure("GRAPH_AUTOMATIC_LIMIT", "Automatic graph work exceeded 1000 operations; inspect the graph for a collect cycle");
   }
   async enter(runId: string, stepId: string) {
-    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.read");
+    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.read"); requireEffectiveStep(run, stepId);
     const row = await this.step(run, stepId); const step = structuredClone(row.value);
     if (!this.action(run, step).artifact) throw failure("INVALID_ARGUMENT", "collect is executed by Memsphere, not enter");
     if (step.status === "done") throw failure("STEP_FINISHED", `Step is done: ${stepId}`);
@@ -401,13 +568,15 @@ export class GraphRuntime {
         const current = (await this.step(run, stepId)).value;
         if (current.status !== "running") throw error;
         // Concurrent entry reuses the winner's identity and start time.
-        return { snapshot: await this.snapshotValue(runId), step: current };
+        const snapshot = await this.snapshotValue(runId); requireEffectiveStep(snapshot.run, stepId);
+        return { snapshot, step: current };
       }
     }
-    return { snapshot: await this.snapshotValue(runId), step };
+    const snapshot = await this.snapshotValue(runId); requireEffectiveStep(snapshot.run, stepId);
+    return { snapshot, step };
   }
   async report(runId: string, stepId: string, input: GraphReport) {
-    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.submit");
+    const run = (await this.run(runId)).value; this.active(run); this.authorize(run, "artifact.submit"); requireEffectiveStep(run, stepId);
     const row = await this.step(run, stepId); const step = structuredClone(row.value); const action = this.action(run, step);
     if (!action.artifact || step.status !== "running") throw failure("STEP_NOT_RUNNING", `Step ${stepId} is ${step.status}; enter it before reporting`);
     if (step.frames?.length) throw Object.assign(failure("RECOVERY_REQUIRED", "A saved submission must be recovered before reporting again"), { details: { runId, stepId, artifactId: step.frames[0].submissionFrame.artifact.id, recoveryCommand: `memsphere run status --run ${runId}` } });
@@ -425,21 +594,27 @@ export class GraphRuntime {
       }
       throw error;
     }
+    requireEffectiveStep((await this.run(runId)).value, stepId);
+    const rewind = this.frame(run).rewinds?.find(r => r.replacementStepId === stepId);
+    const previousStep = rewind && (await this.step(run, rewind.targetStepId)).value;
+    const previousArtifact = previousStep?.artifact?.mode === "produce" ? previousStep.artifact.id : undefined;
     const dependencies = [...new Map(Object.values(step.inputs ?? {}).flat().map(r => [`${r.kind}:${r.id}`, r])).values()];
     for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
     const artifact: Artifact = { id: newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
-      ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : {}) };
+      ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : previousArtifact ? { revisedFrom: previousArtifact, revisedSummary: rewind!.reason } : {}) };
     const round = createGraphRound(run, this.procedure(run), action, artifact.id);
     const submissionFrame: SubmissionFrame = { artifact, nextStatus: round ? "awaiting_review" : "done", ...(round ? { round } : {}) };
     step.validation = { sha256: checked.sha256, artifactId: artifact.id, checkedAt: now(), status: "passed", issues: [] };
     step.frames = [{ id: newId("frame"), type: "submission", submissionFrame }];
+    requireEffectiveStep((await this.run(runId)).value, stepId);
     await this.records.update("step", runId, row, step);
-    try { await this.recoverSubmission(runId, stepId); const snapshot = await this.advance(runId); return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact }; }
+    try { await this.recoverSubmission(runId, stepId); const snapshot = await this.advance(runId); requireEffectiveStep(snapshot.run, stepId); return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact }; }
     catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}`, message: "Submission identity saved; recover status before repeating report" } }); }
   }
   async submitReview(runId: string, stepId: string, roundId: string, actorId: string | "runner", vote: ArtifactReviewVoteValue, comments: ArtifactReviewComment[] = [], summary?: string, delegationNote?: string, guard?: { expectedRevision?: number; attemptId?: string; human?: boolean }) {
     requireGraphVote(vote);
     const run = (await this.run(runId)).value; this.active(run);
+    requireEffectiveStep(run, stepId);
     const step = (await this.step(run, stepId)).value; const round = step.reviewRounds?.at(-1);
     if (step.status !== "awaiting_review" || !round || round.id !== roundId) throw failure("REVIEW_CONFLICT", "Review round is no longer current");
     const config = round.reviewConfig; const runner = actorId === "runner";
@@ -478,17 +653,18 @@ export class GraphRuntime {
       status: "submitted", endedAt: now(), comments: storedComments, vote: { value: vote, ...(summary?.trim() ? { summary } : {}), ...(delegationNote ? { delegationNote } : {}) } };
     const attempt = value.attempts?.at(-1);
     if (attempt && !attempt.completion) attempt.completion = { kind: "completed", at: value.endedAt! };
+    requireEffectiveStep((await this.run(runId)).value, stepId);
     if (old) await this.records.update("review", runId, old, value); else await this.records.create("review", runId, value);
-    try { await this.settle(runId, stepId); return await this.advance(runId); }
+    try { requireEffectiveStep((await this.run(runId)).value, stepId); await this.settle(runId, stepId); return await this.advance(runId); }
     catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, reviewId: id, roundId, recoveryCommand: `memsphere run status --run ${runId}`, message: "Review saved; recover status before repeating the vote" } }); }
   }
-  ready(snapshot: Snapshot) { const order = this.creationOrder(snapshot.run, snapshot.steps); return snapshot.steps.filter(s => (s.status === "pending" || s.status === "running") && this.action(snapshot.run, s).artifact).sort((a, b) => order.get(a.id)! - order.get(b.id)!); }
+  ready(snapshot: Snapshot) { const order = this.creationOrder(snapshot.run, snapshot.steps); return snapshot.steps.filter(s => effectiveStep(snapshot.run, s.id) && (s.status === "pending" || s.status === "running") && this.action(snapshot.run, s).artifact).sort((a, b) => order.get(a.id)! - order.get(b.id)!); }
   async finish(runId: string) {
     await this.advance(runId);
     const row = await this.run(runId), snapshot = await this.snapshotValue(runId);
     if (!isDeepStrictEqual(snapshot.run, row.value)) throw failure("REVISION_CONFLICT", "Run changed while checking graph completion");
     if (snapshot.run.status === "done") return snapshot.run; this.active(snapshot.run);
-    if (snapshot.steps.some(s => s.status !== "done" || !this.frame(snapshot.run).processedStepIds.includes(s.id)) || this.frame(snapshot.run).pendingSteps.length || this.frame(snapshot.run).joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
+    if (this.frame(snapshot.run).deferredCollects?.length || snapshot.steps.some(s => effectiveStep(snapshot.run, s.id) && (s.status !== "done" || !this.frame(snapshot.run).processedStepIds.includes(s.id))) || this.frame(snapshot.run).pendingSteps.length || this.frame(snapshot.run).joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
     const value = { ...row.value, status: "done" as const, endedAt: now() };
     await this.records.update("run", runId, row, value); return value;
   }

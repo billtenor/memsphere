@@ -88,7 +88,7 @@ flow 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-f
 
 #### graph：固定 Step 执行
 
-新 Procedure 可声明 `syntax: memsphere-20261027-stable`、`mode: graph` 和 `actions`；省略 mode 仍为 flow。先按正常 Procedure 入口读取并启动，不向启动命令传结构化业务 input；由入口 Action 准备业务材料。
+新 Procedure 默认建议显式使用 mode: graph。新 Procedure 可声明 `syntax: memsphere-20261027-stable`、`mode: graph` 和 `actions`；省略 mode 仍为 flow。先按正常 Procedure 入口读取并启动，不向启动命令传结构化业务 input；由入口 Action 准备业务材料。
 
 依赖满足时 Memsphere 立即创建 pending Step。只有一个可执行 Step 时自动 enter；多个时先读返回的概述列表，再执行 `memsphere run step enter --run R --step S`。enter 首次将该实例转为 running，重复 enter 复用同一实例、开始时间和 Continue 上下文；`run step show --run R --step S` 只读。
 
@@ -100,6 +100,18 @@ collect Action 由命令自动完成，Agent 不执行 enter/report；结果是�
 
 `run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store，但自由探索仍在 report 完整成果时才创建 Step。
 
+
+#### graph：CLI 回溯
+
+发现上游方案有问题时，先查询具体 Step ID，再只读预览影响范围：
+
+```bash
+memsphere run step rewind --run R --step S --dry-run --output json
+memsphere run step rewind --run R --step S --reason "修正产品方案" --output json
+memsphere run step enter --run R --step <回执中的 replacementStepId>
+```
+
+执行理由也可用 `--reason-file <path>`，与 `--reason` 互斥且内容不得为空。目标须为当前已经开始的普通生产 Step；pending、collect、已被替代的步骤不能回溯。新目标为 pending，执行不会改绑 Continue，须按回执显式 enter；status、独立分支上报及评审完成也不会代替这次进入。旧产物、依赖与评审持续保留，受影响后继退出当前链路，独立分支保持进度；旧上下文不能再上报或投票。当前产物依赖采用新版本，collect 合并同一依赖全部被替代成员路径的等待，新控制到达也须等待，并按实际派发顺序保留最新信号，等待包含同一 collect 声明中新激活成员及前置路径和上游 collect，正式完成或条件消除后仅恢复一次；控制路径被条件消除且等待收敛时撤销该恢复槽；回溯不撤销代码、commit 或外部副作用。执行保存后出错，按回执用原 Run 的 status 恢复同一目标和取消进程，不再次 rewind。只读 show/preview 不执行恢复；影响计算与等待均追踪空中间聚合的具体来源及其后继生产；空集合也保留成员路径和条件来源，恢复槽清除后回溯仍能重建；历史缺少足够成员或条件来源证据时拒绝相关回溯。`--output json` 的参数及运行时错误以 stderr JSON 返回 error.code/message，退出码非零。操作入口仅 CLI。
 
 #### flow：填写 Schema 并完成收尾
 

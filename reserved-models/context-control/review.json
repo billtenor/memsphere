@@ -377,6 +377,29 @@
             "at"
           ],
           "additionalProperties": false
+        },
+        "workerIdentity": {
+          "type": "object",
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "started": {
+              "type": "string",
+              "minLength": 1
+            },
+            "group": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "pid",
+            "started",
+            "group"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [

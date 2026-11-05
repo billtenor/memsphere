@@ -5,6 +5,7 @@ import { openContextControl } from "../project/context-control.js";
 import { failure } from "../context_control/service.js";
 import { contextOnlyCommand, type Options } from "./context-control.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
+import { requireEffectiveStep } from "../context_control/graph-rewind.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
 
 const operations: Array<[string[], string, string[]]> = [
@@ -47,6 +48,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     if (isGraphRun(run) !== Boolean(stepId)) throw failure("INVALID_STATE", "Graph CommandState requires a fixed Step binding");
     const step = stepId ? (await service!.snapshot(run.id)).steps.find(s => s.id === stepId) : undefined;
     if (stepId && !step) throw failure("NOT_FOUND", "CommandState Step not found");
+    if (stepId) requireEffectiveStep(run, stepId);
     return { ...row.value, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: step?.status ?? run.status, available: row.value.status === "active" && run.status === "running" && step?.status !== "done" };
   };
   continuation.action(async () => {
