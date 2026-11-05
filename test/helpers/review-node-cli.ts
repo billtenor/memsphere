@@ -6,7 +6,9 @@ import crossSpawn from "cross-spawn";
 import { createAgentReviewCliRuntime } from "../../src/acp/cli-runtime.js";
 import { reviewNodeFixture } from "./review-nodes.js";
 export async function reviewCliFixture(t: test.TestContext) {
-  const f = await reviewNodeFixture(t, true);
+  // Assertions read current persisted records through one validated service.
+  // Each CLI invocation still opens its own service in a separate process.
+  const f = await reviewNodeFixture(t, true, false, { reuseService: true });
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fileURLToPath(new URL("../../dist/cli.js", import.meta.url)) });
   t.after(() => runtime.cleanup());
   const env = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_CONFIG_PATH: join(f.root, "config.json"), MEMSPHERE_WORKSPACE_ROOT: f.cwd, MEMSPHERE_REVIEW_RUN_ID: f.runId, MEMSPHERE_REVIEW_ASSIGNMENT_ID: f.claimed.assignment.id!, MEMSPHERE_REVIEW_ATTEMPT_ID: f.bound.attemptId };
