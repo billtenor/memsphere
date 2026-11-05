@@ -200,6 +200,11 @@ export const testSuites = {
   core: { title: "Projects, Memory & Runtime", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core", "runtime-core"] }
 };
 
+// Default native jobs use the same category boundaries as full, with fixed exclusions.
+for (const [name, definition] of Object.entries({ ...testSuites })) {
+  if (definition.categories.length) testSuites[`native-${name}`] = definition;
+}
+
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
   const name = basename(file);
@@ -221,6 +226,9 @@ export function selectTests(files, sources, durations, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
+    if (suite.startsWith("native-")) {
+      return !defaultExclusions.has(testKey(file)) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
+    }
     if (["platform", "platform-and-upgrades", "platform-core", "platform-upgrades", "package-platform"].includes(suite)) {
       if (defaultExclusions.has(testKey(file))) return false;
       return suite === "platform" || suite === "platform-and-upgrades" || nativeGroup(file, sources[file]) === suite;

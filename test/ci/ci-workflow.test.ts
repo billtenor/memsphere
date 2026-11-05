@@ -17,12 +17,32 @@ test("exclusion-based selection preserves every prior default suite", async () =
   }
 });
 
+test("default preserves native coverage while using full's category groups and workers", () => {
+  const full = createCiPlan("full", files, sources).include;
+  const defaults = createCiPlan("default", files, sources).include;
+  assert.equal(defaults.length, 13);
+  for (const row of defaults) {
+    const suite = row.suite.replace(/^native-/, "");
+    const previous = full.find(candidate => candidate.os === row.os && candidate.suite === suite);
+    assert(previous);
+    assert.equal(row.workers, previous.workers);
+    assert.equal(row.title, previous.title);
+    const expected = selectTests(files, sources, {}, suite).filter(file => row.os === "ubuntu-24.04" || !defaultTestExclusions.includes(file));
+    assert.deepEqual(selectTests(files, sources, {}, row.suite), expected);
+  }
+  for (const os of ["macos-latest", "windows-latest"]) {
+    const assigned = defaults.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite)).sort();
+    assert.deepEqual(assigned, selectTests(files, sources, {}, "platform-and-upgrades").sort());
+  }
+});
+
 test("default excludes only fixed paths; all future files run once and full remains exhaustive", async () => {
   const future = {
     "nested/unmeasured-new-feature.test.ts": "",
     "nested/daemon-integration.test.ts": "",
     "project-upgrade-future.test.ts": "",
     "model-future-browser.test.ts": "helpers/browser",
+    "review-future-browser.test.ts": "helpers/browser",
     "future-cli.test.ts": ""
   };
   const exclusions = defaultTestExclusions;
@@ -32,10 +52,10 @@ test("default excludes only fixed paths; all future files run once and full rema
   const allSources = { ...sources, ...future };
   for (const profile of ["default", "full"]) {
     const rows = createCiPlan(profile, allFiles, allSources).include;
-    assert.equal(rows.length, profile === "full" ? 17 : 7);
+    assert.equal(rows.length, 17, "future browser tests activate the corresponding native UI jobs");
     for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
       const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
-      if (profile === "default" && os === "windows-latest") assigned.push(...selectTests(allFiles, allSources, {}, "package-platform"));
+
       const expected = profile === "default" && os !== "ubuntu-24.04" ? allFiles.filter(file => !exclusions.includes(file)) : allFiles;
       assert.deepEqual([...assigned].sort(), [...expected].sort(), `${profile}/${os}: no missing or duplicate files`);
       for (const file of Object.keys(future)) assert(assigned.includes(file), file);

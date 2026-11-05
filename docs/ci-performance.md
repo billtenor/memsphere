@@ -8,18 +8,18 @@
 
 ## 默认 PR
 
-统一 Node 22，Linux 固定 Ubuntu 24.04。默认矩阵保留 7 个测试 job，另有 Windows 打包 job：
+统一 Node 22，Linux 固定 Ubuntu 24.04。默认矩阵按 full 相同的职责边界分组，当前有 13 个非空测试 job，另有 Windows 打包 job：
 
 | 平台 | 套件 | 文件并发 |
 |---|---|---|
 | Linux | Browser UI / CLI & Packaging / Projects & Memory / Run, Data & SDK | 3 / 3 / 2 / 2 |
-| macOS | Platform & Upgrade Contracts | 4 |
-| Windows | Platform Core Contracts / Platform Publication & Upgrades | 4 / 4 |
-| Windows | 真实 npm 安装包、Run/View、四种 Shell 冒烟及 project-command 契约 | 独立 job，契约并发 2 |
+| macOS | CLI & Packaging / Projects & Memory / Run, Data & SDK | 4 / 3 / 3 |
+| Windows | Memory & Project CLI / App, Model & Data CLI / Project Lifecycle / Project Upgrades / Memory Stores & Changes / Run, Data & SDK | 2 / 2 / 3 / 3 / 2 / 3 |
+| Windows | 真实 npm 安装包、Run/View、四种 Shell 冒烟 | 独立 job |
 
-测试文件递归发现。Linux 默认与所有平台 full 均执行全部 `.test.ts`；macOS 和 Windows 默认仅排除 `scripts/ci/test-plan.mjs` 的 `defaultTestExclusions` 中的固定相对路径。该清单由原默认白名单对应的未选文件生成，现有测试的覆盖和执行分组保持一致。排除项只匹配精确路径，不使用目录或名称模式；新增测试路径自动纳入默认 CI，同名的其他目录文件也不会被排除。
+测试文件递归发现。Linux 默认与所有平台 full 均执行全部 `.test.ts`；macOS 和 Windows 默认仅排除 `scripts/ci/test-plan.mjs` 的 `defaultTestExclusions` 中的固定相对路径。该清单由原默认白名单对应的未选文件生成，现有测试覆盖保持一致，执行任务按 full 的分类与并发数分组。排除项只匹配精确路径，不使用目录或名称模式；新增测试路径自动纳入默认 CI，同名的其他目录文件也不会被排除。
 
-Windows 选中测试按职责分配到 core、upgrades 或打包 job，每个文件只运行一次。分组决定由哪个 job 执行，不用于拒绝新增测试。Chromium 安装依据实际选集自动计算。平台专属用例仍由测试代码声明适用条件，其他平台记录 skip。
+原生平台选中测试按 full 的职责类别分组，每个文件只运行一次；空分组不创建 job，新增测试使其非空时自动创建。分组决定由哪个 job 执行，不用于拒绝新增测试。Chromium 安装依据实际选集自动计算。平台专属用例仍由测试代码声明适用条件，其他平台记录 skip。
 
 测试发现、排除清单、分类、矩阵与覆盖回归均受 CI change guard 保护。增加排除项需要审查，新增普通测试不需要编辑 CI 文件。full 不应用默认排除清单，保持三平台全量验证。
 
