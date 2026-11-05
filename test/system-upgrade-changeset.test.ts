@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -18,7 +18,7 @@ const content = baseline.replace("Published", "Upgraded");
 const targets: changes.SystemUpgradeMemoryTarget[] = [{ reference, path, operation: "update", content }];
 
 async function fixture(store: "embedded" | "managed", run: (main: string, linked: string) => Promise<void>) {
-  const root = await mkdtemp(join(tmpdir(), "system-upgrade-changeset-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "system-upgrade-changeset-")));
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT, config: process.env.GIT_CONFIG_GLOBAL };
   const main = join(root, "main"), linked = join(root, "linked");
   try {
