@@ -20,7 +20,8 @@ export async function reviewNodeFixture(t: test.TestContext, graph: boolean, sec
       await g.enter(start.run.id, start.steps[0].id);
       return g.report(start.run.id, start.steps[0].id, { text: "Candidate" });
     });
-    runId = result.snapshot.run.id; input = { runsRoot: join(f.root, "runs"), reviewId: reviews.graphReviewHandle(runId, result.step.id), roundId: result.step.reviewRounds![0].id, actorId: "agent", ...(options.reuseService ? { service } : {}) };
+    // Reuse validated bindings; store reads still load current persisted records.
+    runId = result.snapshot.run.id; input = { runsRoot: join(f.root, "runs"), reviewId: reviews.graphReviewHandle(runId, result.step.id), roundId: result.step.reviewRounds![0].id, actorId: "agent", ...(options.reuseService !== false ? { service } : {}) };
   } else {
     const memoryRoot = join(f.root, "memory"); await mkdir(join(memoryRoot, "procedures"), { recursive: true });
     await writeFile(join(memoryRoot, "procedures", "p.yaml"), withCurrentMemorySyntax(`!procedure\nname: p\nflow:\n  - !action\n    action: Make result\n    asserts: [Check evidence, Check scope]\n    artifact: !artifact\n      name: Result\n      review: [reviewer]\n`));

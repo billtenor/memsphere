@@ -28,7 +28,7 @@ export async function reviewMaterialFixture(t: test.TestContext) {
     return { ...reported, materials };
   });
   const runId = result.snapshot.run.id, stepId = result.step.id;
-  const input = { runsRoot: join(base.root, "runs"), reviewId: reviews.graphReviewHandle(runId, stepId), roundId: result.step.reviewRounds!.at(-1)!.id, actorId: "agent" };
+  const input = { runsRoot: join(base.root, "runs"), reviewId: reviews.graphReviewHandle(runId, stepId), roundId: result.step.reviewRounds!.at(-1)!.id, actorId: "agent", service };
   const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
   const bound = { ...input, attemptId: claimed.attempt.id }; await reviews.markArtifactReviewAgentCliReady(bound);
   return { ...base, service, result, runId, stepId, input, claimed, bound };
