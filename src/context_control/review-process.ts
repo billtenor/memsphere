@@ -31,16 +31,31 @@ export async function captureProcessIdentity(pid: number): Promise<ProcessIdenti
     throw error;
   }
 }
+async function windowsProcesses(): Promise<Array<ProcessIdentity & { parent: number }>> {
+  const script = "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,@{Name='Started';Expression={$_.CreationDate.ToUniversalTime().Ticks.ToString()}} | ConvertTo-Json -Compress";
+  const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script]);
+  const parsed = JSON.parse(stdout || "[]"), rows = Array.isArray(parsed) ? parsed : [parsed];
+  return rows.map(row => ({ pid: Number(row.ProcessId), group: Number(row.ProcessId), parent: Number(row.ParentProcessId), started: String(row.Started) }));
+}
+async function windowsMembers(members: ProcessIdentity[]): Promise<ProcessIdentity[]> {
+  const ids = new Set(members.map(p => p.pid));
+  return (await windowsProcesses()).filter(p => ids.has(p.pid)).map(({ parent: _parent, ...identity }) => identity);
+}
 export async function captureProcessGroup(group: number): Promise<ProcessIdentity[]> {
   if (process.platform === "win32") {
-    const { stdout } = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress"]);
-    const parsed = JSON.parse(stdout || "[]"), rows = Array.isArray(parsed) ? parsed : [parsed];
-    const ids = new Set([group]); let more = true;
-    while (more) { more = false; for (const row of rows) if (ids.has(Number(row.ParentProcessId)) && !ids.has(Number(row.ProcessId))) { ids.add(Number(row.ProcessId)); more = true; } }
-    return (await Promise.all([...ids].map(captureProcessIdentity))).filter((p): p is ProcessIdentity => Boolean(p));
+    const rows = await windowsProcesses(), ids = new Set([group]); let more = true;
+    while (more) { more = false; for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) { ids.add(row.pid); more = true; } }
+    return rows.filter(p => ids.has(p.pid)).map(({ parent: _parent, ...identity }) => identity);
   }
-  const ids = process.platform === "linux" ? (await readdir("/proc")).filter(s => /^\d+$/.test(s)).map(Number)
-    : (await exec("ps", ["-e", "-o", "pid="])).stdout.trim().split(/\s+/).map(Number);
+  if (process.platform !== "linux") {
+    const { stdout } = await exec("ps", ["-axo", "pid=,pgid=,stat=,lstart="]);
+    return stdout.split("\n").flatMap(line => {
+      const match = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+      return match && Number(match[2]) === group && !match[3].includes("Z")
+        ? [{ pid: Number(match[1]), group, started: match[4].trim() }] : [];
+    });
+  }
+  const ids = (await readdir("/proc")).filter(s => /^\d+$/.test(s)).map(Number);
   const identities = await Promise.all(ids.map(captureProcessIdentity));
   return identities.filter((p): p is ProcessIdentity => Boolean(p && p.group === group));
 }
@@ -53,7 +68,7 @@ export async function stopRewindWorker(worker: RewindWorker) {
     throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Cannot safely identify old Reviewer; rewind is saved, retry status after resolving the worker");
   }
   const members = process.platform === "win32" && !leader
-    ? (await Promise.all((worker.members ?? []).map(p => captureProcessIdentity(p.pid)))).filter((p): p is ProcessIdentity => Boolean(p))
+    ? await windowsMembers(worker.members ?? [])
     : await captureProcessGroup(worker.identity.group);
   if (!members.length) return;
   if (leader && !same(worker.identity, leader) || !leader && members.some(p => !worker.members?.some(old => same(old, p))))
@@ -65,7 +80,7 @@ export async function stopRewindWorker(worker: RewindWorker) {
   });
   for (let i = 0; i < 40; i++) {
     const survivors = process.platform === "win32"
-      ? (await Promise.all(members.map(p => captureProcessIdentity(p.pid)))).filter((p): p is ProcessIdentity => Boolean(p))
+      ? await windowsMembers(members)
       : await captureProcessGroup(worker.identity.group);
     if (!survivors.length) return;
     await delay(25);

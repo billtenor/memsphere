@@ -37,6 +37,7 @@ for (const scenario of ["tree", "identity", "orphan"] as const) test(`Windows na
     const exited = once(related.worker, "exit");
     related.worker.send("orphan");
     await exited;
+    assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child, "fixture child survives leader exit");
     await assert.rejects(stopRewindWorker(related.rewind), { code: "PROCESS_TERMINATION_PENDING" });
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
     await writeFile(release, "exit");

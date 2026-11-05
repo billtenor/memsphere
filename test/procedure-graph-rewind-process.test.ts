@@ -40,7 +40,11 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
   await writeFile(input,JSON.stringify({config:join(f.root,'config.json'),review:reviews.graphReviewHandle(start.run.id,candidate.step.id),round:candidate.step.reviewRounds![0].id,assignment:'reviewer',cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url)),workspaceRoot:f.cwd,ready,...(orphan&&i===0?{release:join(f.directory,'release-orphans')}:{}) ,...(late&&i===0?{claimGate:join(f.directory,'release-claim')}:{})}));
   const worker=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/graph-review-worker.mjs',import.meta.url)),input],{detached:true,stdio:['ignore','ignore','pipe'],env:{...process.env,MEMSPHERE_HOME:f.home,...(resistant&&i===0?{REVIEW_TEST_RESISTANT:'yes'}:{})}});
   let errors='';worker.stderr!.on('data',s=>errors+=s);
-  t.after(async()=>{await terminateProcessTree(worker.pid!,'SIGKILL',process.platform,true).catch(()=>undefined);});
+  f.beforeCleanup(async()=>{
+   if(orphan)await writeFile(join(f.directory,'release-orphans'),'exit');
+   await terminateProcessTree(worker.pid!,'SIGKILL',process.platform,true).catch(()=>undefined);
+   await until(async()=>worker.exitCode!==null||worker.signalCode!==null?true:undefined);
+  });
   const info=await until(async()=>{try{return JSON.parse(await readFile(ready,'utf8'));}catch{if(worker.exitCode!==null)throw Error(errors);return undefined;}});
   processes.push({workerPid:worker.pid!,worker,exited:once(worker,'exit'),ready,...info});
  }

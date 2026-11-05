@@ -1,5 +1,6 @@
 {
   "linux": {
+    "acp-launch-fence.test.ts": 0.45,
     "agent-activity.test.ts": 0.75,
     "agent-review.test.ts": 17.23,
     "app-install.test.ts": 56.9,
@@ -92,6 +93,9 @@
     "pagination.test.ts": 0.25,
     "persistence.test.ts": 0.56,
     "procedure-graph-review.test.ts": 29.07,
+    "procedure-graph-rewind-process.test.ts": 46.03,
+    "procedure-graph-rewind-windows.test.ts": 0.27,
+    "procedure-graph-rewind.test.ts": 200.23,
     "procedure-graph-runtime.test.ts": 28.44,
     "product-positioning.test.ts": 0.58,
     "project-command.test.ts": 32.22,
@@ -107,6 +111,13 @@
     "report-execution.test.ts": 0.27,
     "reserved-models.test.ts": 0.41,
     "reserved-store.test.ts": 1.68,
+    "review-node-graph-paths.test.ts": 20.57,
+    "review-node-order.test.ts": 2.76,
+    "review-node-prompt-contract.test.ts": 6.03,
+    "review-node-receipts.test.ts": 16.34,
+    "review-node-regressions.test.ts": 17.63,
+    "review-node-rewind.test.ts": 1.97,
+    "review-node-store.test.ts": 6.18,
     "run-abandonment-view.test.ts": 1.23,
     "run-changeset.test.ts": 4.64,
     "run-command.test.ts": 0.79,
@@ -154,6 +165,7 @@
     "windows-prerequisites.test.ts": 0.4
   },
   "darwin": {
+    "acp-launch-fence.test.ts": 0.38,
     "agent-activity.test.ts": 0.71,
     "agent-review.test.ts": 37.69,
     "app-install.test.ts": 69.08,
@@ -243,6 +255,8 @@
     "page-layout-view.test.ts": 37.92,
     "pagination.test.ts": 0.23,
     "persistence.test.ts": 0.32,
+    "procedure-graph-rewind-process.test.ts": 73.36,
+    "procedure-graph-rewind-windows.test.ts": 0.32,
     "product-positioning.test.ts": 0.66,
     "project-command.test.ts": 73.2,
     "project-memory-provider.test.ts": 1.0,
@@ -304,6 +318,7 @@
     "windows-prerequisites.test.ts": 0.23
   },
   "win32": {
+    "acp-launch-fence.test.ts": 1.37,
     "agent-activity.test.ts": 1.62,
     "agent-review.test.ts": 73.03,
     "app-install.test.ts": 135.02,
@@ -393,6 +408,8 @@
     "page-layout-view.test.ts": 72.98,
     "pagination.test.ts": 0.53,
     "persistence.test.ts": 0.68,
+    "procedure-graph-rewind-process.test.ts": 95.41,
+    "procedure-graph-rewind-windows.test.ts": 38.32,
     "product-positioning.test.ts": 1.12,
     "project-command.test.ts": 130.01,
     "project-memory-provider.test.ts": 1.73,
