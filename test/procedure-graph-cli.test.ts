@@ -34,11 +34,22 @@ test("graph continuation preserves an unrelated auto-enter failure", async () =>
   await assert.rejects(graphNext(runtime, snapshot, "test-project"), error => error === failure);
 });
 
-async function fixture(t: test.TestContext, multiple = false, prepared = true, processBoundary = false) {
+async function fixture(t: test.TestContext, multiple = false, prepared = true, processBoundary = false, embedded = false) {
   const f = prepared ? await initializedContextFixture(t) : await businessFixture(t, {});
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), store: { type: "embedded", repository_path: f.root, memory_path: "memory" } }));
+  const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
+  if (embedded) config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+  else {
+    // These contracts concern graph commands, not linked-worktree discovery.
+    // Give Managed Memory a real committed baseline rather than paying for
+    // unrelated Embedded worktree enumeration on every Store read.
+    const cwd = join(f.root, "memory");
+    await exec("git", ["init", "-b", "master"], { cwd });
+    await exec("git", ["-c", "user.name=Graph Test", "-c", "user.email=graph@example.invalid", "commit", "--allow-empty", "-m", "Fixture baseline"], { cwd });
+    config.store = { type: "managed", branch: "master", published_revision: (await exec("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() };
+  }
+  await writeFile(join(f.root, "config.json"), JSON.stringify(config));
   const procedure = join(f.directory, "graph.yaml");
   const action = (id: string) => `  - !action\n    id: ${id}\n    description: Produce ${id}\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: ${id} output\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n`;
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
@@ -83,7 +94,7 @@ for (const language of ["zh-CN", "en"] as const) test(`graph CLI module ${langua
 });
 
 test("graph CLI auto-enters one Step, binds Continue and leaves show read-only", { timeout: 60000 }, async t => {
-  const f = await fixture(t, false, false, true);
+  const f = await fixture(t, false, false, true, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "CLI graph");
   assert.doesNotMatch(start.prompt, /context-/);
   const snapshot = await f.call("run", "show", "--run", start.runId);

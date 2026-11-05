@@ -4,11 +4,12 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { readBundledSystemModels } from "../../src/reserved/models.js";
 import { withCurrentMemorySyntax } from "./memory.js";
 
 const cli = resolve("dist/cli.js");
+const embeddedMemoryPath = ".memsphere/memory";
 // Upgrade tests need an installed baseline, not repeated coverage of project create.
 // Capture one real CLI-created baseline; each scenario owns a full byte copy and
 // its own registry, Git object directory, model records and subsequent changes.
@@ -64,10 +65,11 @@ export async function fixture() {
         const memoryRoot = realpathSync(options[embeddedIndex + 1]);
         cpSync(join(template, "memory"), memoryRoot, { recursive: true, filter: source => basename(source) !== ".git" });
         rmSync(join(project, "memory"), { recursive: true, force: true });
-        const repository = realpathSync(git(["rev-parse", "--show-toplevel"]));
+        const repository = realpathSync(workspace);
         const configPath = join(project, "config.json");
         const config = JSON.parse(readFileSync(configPath, "utf8"));
-        config.store = { type: "embedded", repository_path: repository, memory_path: relative(repository, memoryRoot).replaceAll("\\", "/") };
+        assert.equal(realpathSync(join(repository, embeddedMemoryPath)), memoryRoot, "seeded Embedded fixture uses its declared Memory root");
+        config.store = { type: "embedded", repository_path: repository, memory_path: embeddedMemoryPath };
         writeFileSync(configPath, JSON.stringify(config));
         const bound = run(["project", "bind", name]);
         assert.equal(bound.status, 0, bound.stderr || bound.stdout);
@@ -117,7 +119,7 @@ export async function registrations(projectRoot: string) {
 
 export async function embeddedFixture(f: Fixture, branch = "master") {
   f.git(["init", "-b", branch]);
-  const memoryRoot = join(f.workspace, ".memsphere/memory");
+  const memoryRoot = join(f.workspace, embeddedMemoryPath);
   await mkdir(memoryRoot, { recursive: true });
   const project = f.create("embedded", ["--embedded", memoryRoot, "--bind"]);
   await writeFile(join(memoryRoot, memoryPath), `${await readFile(join(memoryRoot, memoryPath), "utf8")}\n# Previous bundled version\n`);

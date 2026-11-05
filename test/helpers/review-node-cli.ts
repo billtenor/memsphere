@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./cli-module.js";
 import assert from "node:assert/strict";
 import type test from "node:test";
 import { join } from "node:path";
@@ -17,5 +18,16 @@ export async function reviewCliFixture(t: test.TestContext) {
     if (ok) assert.equal(r.status, 0, r.stderr + r.stdout); else assert.notEqual(r.status, 0, r.stdout);
     return ok ? JSON.parse(r.stdout) : r.stderr + r.stdout;
   };
-  return { ...f, cli, env };
+  const moduleCli = async (args: string[], ok = true) => {
+    let result;
+    try { result = await invokeCliModule(args, f.cwd, env, runtime.descriptor.cliEntrypoint); }
+    catch (error) {
+      if (ok) throw error;
+      const failure = error as Error & { stderr?: string; stdout?: string };
+      return (failure.stderr ?? failure.message) + (failure.stdout ?? "");
+    }
+    assert.equal(ok, true, "command unexpectedly accepted invalid content");
+    return JSON.parse(result.stdout);
+  };
+  return { ...f, cli, moduleCli, env };
 }

@@ -32,7 +32,7 @@ for (const command of ["report", "update", "comment add", "comment update", "sub
   for (const result of results) assert.deepEqual(result, results[0]);
 });
 
-test("restricted CLI: invalid artifact inputs fail atomically for every content command", { timeout: 120000 }, async t => {
+test("restricted command module: invalid artifact inputs fail atomically for every content command", { timeout: 120000 }, async t => {
   const f = await reviewCliFixture(t), n = currentReviewNode(f.claimed.assignment)!;
   const finding = { rulePath: n.asserts[0].rulePath, result: "undetermined" as const, body: "Need evidence", severity: "risk" as const };
   const added = await reviews.mutateArtifactReviewNodes({ ...f.bound, mutation: { operation: "comment-add", artifact: finding } });
@@ -41,7 +41,7 @@ test("restricted CLI: invalid artifact inputs fail atomically for every content 
   for (const cmd of [["report"], ["update", "--node", n.nodeId], ["comment", "add"], ["comment", "update", "--comment", id], ["submit"]]) {
     for (const input of [[], ["--artifact", "{}", "--artifact-file", valid], ["--artifact", "not json"], ["--artifact-file", malformed], ["--artifact-file", join(f.cwd, "missing.json")], ["--artifact", "{}"]]) {
       await t.test(`${cmd.slice(0, 2).join(" ")}: ${input.join(" ") || "missing content"}`, async () => {
-        f.cli(["continue", ...cmd, ...input, "--output", "json"], false);
+        await f.moduleCli(["continue", ...cmd, ...input, "--output", "json"], false);
         assert.deepEqual((await reviews.readArtifactReviewForActor(f.input)).assignment, before);
       });
     }
