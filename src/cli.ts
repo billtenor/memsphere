@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { registerReviewNodeCommands, reviewNodeCommand } from "./commands/review-nodes.js";
 import { registerDaemonCommands, registerWaitTaskCommands } from "./daemon/commands.js";
 import { registerContinueCommand } from "./commands/continue.js";
 import { registerExplorationCommands } from "./commands/context-control.js";
@@ -588,7 +589,7 @@ runReview
   .option("--summary <text>", "overall review summary")
   .option("--summary-file <path>", "read overall review summary from file")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
-  .action(runReviewSubmitCommand);
+  .action(o => o.artifact !== undefined || o.artifactFile !== undefined ? reviewNodeCommand("submit", o) : runReviewSubmitCommand(o));
 
 runReview
   .command("agent-worker", { hidden: true })
@@ -629,6 +630,7 @@ run
   .action(runStatusCommand);
 
 registerExplorationCommands(run);
+registerReviewNodeCommands(run);
 registerContinueCommand(program, run);
 
 const migrate = program

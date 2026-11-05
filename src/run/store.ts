@@ -1,3 +1,5 @@
+import { createFlowReviewNodes } from "./review-nodes.js";
+import { reviewSourceSchema, type ReviewSource, reviewNodeTreeSchema, reviewNodeStateSchema, assertReviewNodes, mutateReviewNode, reviewCommentId, type NodeMutation } from "../review-nodes.js";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, posix, relative, resolve } from "node:path";
@@ -139,6 +141,7 @@ export type RunAbandonment = {
 
 export type SchemaConstraintSource = {
   path: string;
+  reviewSource?: ReviewSource;
   type: string;
   format: ArtifactFormatSpec;
   defines?: string[];
@@ -233,6 +236,7 @@ export type RunSchemaContract =
   | { kind: "inline"; id: string; node: RunSchemaNode };
 
 export type RunSchemaNode = SchemaNode & {
+  reviewSource?: ReviewSource;
   assertTree?: EffectiveRuleTree;
   suggestTree?: EffectiveRuleTree;
 };
@@ -262,6 +266,7 @@ export type RunEvent = {
 
 export type RunProcedureTemplate = {
   memoryName: string;
+  defines?: string[];
   asserts?: string[];
   /** Frozen authority; asserts is derived from this tree. */
   assertTree?: EffectiveRuleTree;
@@ -424,11 +429,18 @@ const effectiveRuleEntrySchema: z.ZodType<EffectiveRuleTree["entries"][number]> 
     z.object({
       kind: z.literal("rule"),
       text: z.string(),
-      ruleId: z.string()
+      rulePath: z.string(),
+      source: z.string().optional()
     }).strict(),
+    z.object({ kind: z.literal("rule"), text: z.string(), ruleId: z.string() }).strict().transform(old => {
+      const split = old.ruleId.indexOf("#");
+      return { kind: "rule" as const, text: old.text, rulePath: split >= 0 ? old.ruleId.slice(split + 1) : old.ruleId.replace(/^local:/, ""), ...(split >= 0 ? { source: old.ruleId.slice(0, split) } : {}) };
+    }) as unknown as z.ZodType<EffectiveRuleTree["entries"][number]>,
     z.object({
       kind: z.literal("reference"),
       target: z.string(),
+      names: z.array(z.string()).optional(),
+      defines: z.array(z.string()).optional(),
       entries: z.array(effectiveRuleEntrySchema),
       sections: z.array(effectiveRuleSectionSchema)
     }).strict()
@@ -437,6 +449,7 @@ const effectiveRuleEntrySchema: z.ZodType<EffectiveRuleTree["entries"][number]> 
 
 const effectiveRuleSectionSchema: z.ZodType<EffectiveRuleTree["sections"][number]> = z.lazy(() =>
   z.object({
+    source: z.string().optional(),
     name: z.string(),
     defines: z.array(z.string()),
     entries: z.array(effectiveRuleEntrySchema),
@@ -481,6 +494,7 @@ const validationResultSchema: z.ZodType<ArtifactValidationResult> = z.object({
 
 const schemaConstraintSourceSchema: z.ZodType<SchemaConstraintSource> = z.object({
   path: z.string(),
+  reviewSource: reviewSourceSchema.optional(),
   type: z.string(),
   format: artifactFormatSpecSchema,
   defines: z.array(z.string()).optional(),
@@ -666,6 +680,7 @@ const runStateSchema: z.ZodType<RunState> = z.object({
 
 const runProcedureTemplateSchema: z.ZodType<RunProcedureTemplate> = z.object({
   memoryName: z.string(),
+  defines: z.array(z.string()).optional(),
   asserts: z.array(z.string()).optional(),
   assertTree: effectiveRuleTreeSchema.optional(),
   steps: z.array(runStepSchema)
@@ -680,13 +695,14 @@ const artifactReviewAnchorSchema = z.object({
 }).strict();
 
 const artifactReviewCommentSchema = z.object({
-  id: z.string(),
+  id: z.string().optional(),
+  commentId: z.string().optional(),
   body: z.string(),
   severity: z.enum(artifactReviewSeverityValues).optional(),
   anchor: artifactReviewAnchorSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string()
-}).strict();
+}).strict().superRefine((c, ctx) => { try { reviewCommentId(c); } catch { ctx.addIssue({ code: z.ZodIssueCode.custom, message: "review_comment_identity_invalid" }); } });
 
 const artifactReviewAgentAttemptSchema = z.object({
   id: z.string(),
@@ -714,6 +730,8 @@ const artifactReviewAgentAttemptSchema = z.object({
 }).strict();
 
 const artifactReviewAssignmentSchema = z.object({
+  nodeTree: reviewNodeTreeSchema.optional(),
+  nodeStates: z.array(reviewNodeStateSchema).optional(),
   id: z.string().optional(),
   actorId: z.string(),
   actorName: z.string(),
@@ -742,7 +760,7 @@ const artifactReviewAssignmentSchema = z.object({
     }).strict().optional()
   }).strict().optional(),
   attempts: z.array(artifactReviewAgentAttemptSchema).default([])
-}).strict();
+}).strict().superRefine((a, ctx) => { try { assertReviewNodes(a, a.status === "submitted" ? a.submitted!.comments : a.draft.comments, a.status === "submitted"); } catch (e) { ctx.addIssue({ code: z.ZodIssueCode.custom, message: String(e) }); } });
 
 const artifactReviewVoteSchema = z.object({
   id: z.string(),
@@ -1816,6 +1834,7 @@ async function reportReviewedArtifact(
     controlPlane: roundControlPlane,
     now
   });
+  for (const assignment of assignmentSet.assignments) if (assignment.actorKind === "agent" && run.procedureSnapshots?.[run.procedureName]?.defines !== undefined) Object.assign(assignment, createFlowReviewNodes(run, step));
   const createdArtifactFiles: string[] = [];
   try {
     const artifact = await buildRunEventArtifact(
@@ -1908,6 +1927,7 @@ export type ArtifactReviewDraftInput = {
   vote?: ArtifactReviewVoteValue;
   comments: Array<{
     id?: string;
+    commentId?: string;
     body: string;
     severity?: (typeof artifactReviewSeverityValues)[number];
     anchor?: ArtifactReviewAnchor;
@@ -2382,7 +2402,7 @@ export async function retryArtifactReviewAgentAssignment(input: {
     };
     attempts.push(attempt);
     assignment.status = "queued";
-    assignment.draft = { comments: [] };
+    if (!assignment.nodeTree) assignment.draft = { comments: [] };
     round.revision += 1;
     review.updatedAt = now;
     run.updatedAt = now;
@@ -2433,6 +2453,20 @@ export async function appendArtifactReviewAgentComment(input: {
   });
 }
 
+export async function mutateArtifactReviewNodes(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; mutation: NodeMutation }): Promise<ArtifactReviewAgentContext> {
+  const located = await findArtifactReview(input);
+  return withRunWriteLock(input.runsRoot, located.run.id, async () => {
+    const context = requireRunningAgentContext(await readRun(input.runsRoot, located.run.id), input);
+    const { assignment, review, round, run } = context;
+    const authorization = authorizeArtifactReviewActor({ controlPlane: artifactReviewRoundControlPlane(review, round), assignment, permission: assignment.binding === "decision" ? "decision.decide" : "decision.assess" });
+    if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
+    if (!assignment.nodeTree || !assignment.nodeStates) throw new Error("review_nodes_not_enabled");
+    assignment.draft.comments = mutateReviewNode({ nodeTree: assignment.nodeTree, nodeStates: assignment.nodeStates }, assignment.draft.comments, input.mutation, item => normalizeArtifactReviewComments([{ body: item.body, severity: item.severity, ...(item.anchor ? { anchor: artifactReviewAnchorSchema.parse({ ...item.anchor, submissionId: item.anchor.submissionId ?? round.submissionId }) } : {}) }], reviewSubmission(review, round.submissionId), new Date().toISOString())[0]);
+    const now = new Date().toISOString(); round.revision++; review.updatedAt = now; run.updatedAt = now;
+    await writeRun(input.runsRoot, run); return context;
+  });
+}
+
 export async function submitArtifactReviewAgentAssignment(input: {
   runsRoot: string;
   reviewId: string;
@@ -2460,6 +2494,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
     }
     const context = requireRunningAgentContext(run, input);
     if (!context.attempt.cliReadyAt) throw new Error("Agent Review CLI handshake is required before submit");
+    assertReviewNodes(context.assignment, context.assignment.draft.comments, true);
     if (
       (input.vote === "request_changes" || input.vote === "abstain")
       && context.assignment.draft.comments.length === 0
@@ -2530,7 +2565,7 @@ export async function resolveArtifactReviewComment(input: {
     const advisoryComment = round.assignments
       .filter((assignment) => assignment.binding === "advisory")
       .flatMap((assignment) => assignment.submitted?.comments ?? assignment.draft.comments)
-      .find((comment) => comment.id === input.commentId);
+      .find((comment) => reviewCommentId(comment) === input.commentId);
     if (!advisoryComment) throw new Error(`Advisory Artifact Review Comment not found: ${input.commentId}`);
     const note = input.note?.trim() || undefined;
     const validationSummary = input.validationSummary?.trim() || undefined;
@@ -2747,7 +2782,7 @@ function normalizeArtifactReviewComments(
   now: string,
   existingComments: readonly ArtifactReviewComment[] = []
 ): ArtifactReviewComment[] {
-  const existingById = new Map(existingComments.map((comment) => [comment.id, comment]));
+  const existingById = new Map(existingComments.map((comment) => [reviewCommentId(comment), comment]));
   const ids = new Set<string>();
   return comments.map((comment) => {
     const body = comment.body.trim();
@@ -2771,12 +2806,12 @@ function normalizeArtifactReviewComments(
         context: context || undefined
       };
     }
-    const id = comment.id?.trim() || makeReviewEntityId("comment", now);
+    const id = (comment.commentId ?? comment.id)?.trim() || makeReviewEntityId("comment", now);
     if (ids.has(id)) throw new Error(`Duplicate Artifact Review Comment id: ${id}`);
     ids.add(id);
     const existing = existingById.get(id);
     return {
-      id,
+      commentId: id,
       body,
       severity: comment.severity ?? existing?.severity,
       anchor,
@@ -3482,10 +3517,11 @@ async function snapshotReachableProcedureTemplates(
     visited.add(canonicalName);
 
     const steps = await compileProcedureSteps(procedure, memoryRoot, lookup);
-    await snapshotExternalSchemas(memoryRoot, steps, lookup);
+    await snapshotExternalSchemas(memoryRoot, steps, lookup, `procedures/${canonicalName}`);
     const procedureRules = await freezeRulePair(memoryRoot, procedure.asserts, undefined, lookup);
     const template: RunProcedureTemplate = {
       memoryName: canonicalName,
+      defines: [...procedure.defines],
       asserts: procedureRules.asserts,
       assertTree: procedureRules.assertTree,
       steps
@@ -4111,7 +4147,7 @@ async function expandAutoCallSteps(run: RunState): Promise<void> {
     if (!procedure) throw new Error(`procedure not found: ${step.target}`);
     const procedureMemory = procedure.entity as ProcedureMemory;
     const steps = await compileProcedureSteps(procedureMemory, run.memoryRoot);
-    await snapshotExternalSchemas(run.memoryRoot, steps);
+    await snapshotExternalSchemas(run.memoryRoot, steps, undefined, `procedures/${procedureMemory.names[0]}`);
     const procedureRules = await freezeRulePair(run.memoryRoot, procedureMemory.asserts);
     run.stack.push({
       type: "procedure",
@@ -4523,6 +4559,7 @@ function schemaConstraintSource(
     : undefined;
   return {
     path,
+    reviewSource: frozen.reviewSource,
     type: contract.type,
     format: structuredClone(contract.format),
     defines: defines.length ? defines : undefined,
@@ -4619,7 +4656,8 @@ function catalogLookup(catalog: MemoryCatalog, remember?: (descriptor: MemoryDes
 async function snapshotExternalSchemas(
   memoryRoot: string,
   steps: RunStep[],
-  lookup?: RunMemoryLookup
+  lookup?: RunMemoryLookup,
+  memoryRef?: string
 ): Promise<void> {
   for (const step of steps) {
     if (step.schema?.kind === "external" && !step.schema.node) {
@@ -4640,7 +4678,9 @@ async function snapshotExternalSchemas(
       step.schema.node = await resolveSchemaReferences(memoryRoot, step.schema.node, [`inline:${step.schema.id}`], lookup);
     }
     if (step.schema?.node) {
-      await freezeSchemaRuleTrees(memoryRoot, step.schema.node, lookup);
+      await freezeSchemaRuleTrees(memoryRoot, step.schema.node, lookup, step.schema.kind === "external"
+        ? { kind: "schema", memoryRef: step.schema.name.startsWith("schemas/") ? step.schema.name : `schemas/${step.schema.name}`, path: "." }
+        : { kind: "step", ...(memoryRef ? { memoryRef } : {}), path: `${step.id.replace(/\[(\d+)\]/g, (_, i) => `[${Number(i) - 1}]`)}.artifact.schema` });
     }
     if (step.schema?.node && step.artifact && step.type && step.format) {
       step.validationPlan = artifactValidatorRegistry.resolvePlan(stepContract(step));
@@ -4653,36 +4693,33 @@ async function snapshotExternalSchemas(
       throw new Error(`Schema Repeat is only supported by object markdown Artifacts with layout: outline: ${step.id}`);
     }
     if (step.branches) {
-      await snapshotExternalSchemas(memoryRoot, step.branches.truthy, lookup);
-      await snapshotExternalSchemas(memoryRoot, step.branches.falsy, lookup);
+      await snapshotExternalSchemas(memoryRoot, step.branches.truthy, lookup, memoryRef);
+      await snapshotExternalSchemas(memoryRoot, step.branches.falsy, lookup, memoryRef);
     }
-    if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body, lookup);
+    if (step.loop) await snapshotExternalSchemas(memoryRoot, step.loop.body, lookup, memoryRef);
   }
 }
 
 async function freezeSchemaRuleTrees(
   memoryRoot: string,
   node: RunSchemaNode,
-  lookup?: RunMemoryLookup
+  lookup?: RunMemoryLookup,
+  source?: ReviewSource
 ): Promise<void> {
+  node.reviewSource ??= source;
   const rules = await freezeRulePair(memoryRoot, node.asserts, node.suggests, lookup);
   node.assertTree = rules.assertTree;
   node.suggestTree = rules.suggestTree;
-  // RulePart arrays stay in the Schema snapshot as declarations; execution always
-  // consumes the frozen trees above.
-  const children: SchemaNode[] = [];
-  for (const field of node.fields ?? []) {
+  const child = async (value: SchemaNode, suffix: string) => freezeSchemaRuleTrees(memoryRoot, value, lookup, node.reviewSource ? { ...node.reviewSource, path: node.reviewSource.path === "." ? suffix : `${node.reviewSource.path}.${suffix}` } : undefined);
+  for (const [i, field] of (node.fields ?? []).entries()) {
     if (typeof field !== "object") continue;
-    if (field.tag === "!schema") children.push(field);
-    if (field.tag === "!repeat") {
-      for (const bodyField of field.body) {
-        if (typeof bodyField === "object" && bodyField.tag === "!schema") children.push(bodyField);
-      }
+    if (field.tag === "!schema") await child(field, `fields[${i}]`);
+    if (field.tag === "!repeat") for (const [j, body] of field.body.entries()) {
+      if (typeof body === "object" && body.tag === "!schema") await child(body, `fields[${i}].body[${j}]`);
     }
   }
-  if (node.item?.tag === "!schema") children.push(node.item);
-  for (const item of node.items ?? []) if (item.tag === "!schema") children.push(item);
-  for (const child of children) await freezeSchemaRuleTrees(memoryRoot, child, lookup);
+  if (node.item?.tag === "!schema") await child(node.item, "item");
+  for (const [i, item] of (node.items ?? []).entries()) if (item.tag === "!schema") await child(item, `items[${i}]`);
 }
 
 function artifactSchemaNeedsResolution(schema: ActionNode["artifact"]["schema"]): boolean {
@@ -4772,12 +4809,14 @@ async function resolveSchemaRef(
     ? await lookup("schemas", ref.target)
     : await findSchemaMemory(memoryRoot, ref.target);
   if (!memory) throw new Error(`schema not found: ${ref.target}`);
-  return resolveSchemaReferences(
+  const resolved: RunSchemaNode = await resolveSchemaReferences(
     memoryRoot,
     schemaNodeFromMemory(memory.entity as SchemaMemory),
     [...stack, ref.target],
     lookup
   );
+  resolved.reviewSource = { kind: "schema", memoryRef: ref.target, path: "." };
+  return resolved;
 }
 
 function schemaHasRef(schema: SchemaNode): boolean {

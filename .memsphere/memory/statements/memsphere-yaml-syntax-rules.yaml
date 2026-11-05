@@ -11,6 +11,7 @@ asserts:
   - 语法实现、Reserved Memory、技能文档、迁移工具和示例必须以本规则树中评审通过的规则为共同依据。
   - App 归属、安装状态及 ChangeSet 归属附件是宿主元数据，不是 Memory YAML 关键字；本次 App 整合不增加 YAML 字段或改变 syntax。
   - 上下文控制的 Run/Step/Artifact/External/Review JSON 模型及自由探索 CLI（continue、outputs、report、tags、dependencies）不属于 Memory YAML DSL，这些运行时字段不作为 YAML 关键字；graph 编排仅使用下文独立定义的 mode、actions 和依赖结构，不提供 foreach。
+  - 渐进 Artifact Review 的 nodeTree、nodeStates、nodeId、rulePath、commentId 和开放审查属于宿主审查协议，不是 Memory YAML 关键字；它们保留有效规则的来源和原始列表下标，不改变 asserts/suggests 的引用通道、强制程度或声明顺序。
 sections:
   - !statement
     names:

@@ -1,3 +1,4 @@
+import { assertReviewNodes } from "../review-nodes.js";
 import type { ModelRuntime } from "../data/api/model-runtime.js";
 import { failure } from "./errors.js";
 
@@ -25,6 +26,7 @@ function step(value: RecordValue, path: string) {
 }
 /** Application invariants for the reserved models; no new generic schema keywords. */
 export function assertContextControlRecord(modelRef: string, value: RecordValue) {
+  if (modelRef === "memsphere/context_control/review.json") assertReviewNodes(value, value.comments, value.status === "submitted");
   if (modelRef === "memsphere/context_control/step.json") step(value, "Step");
   if (modelRef !== "memsphere/context_control/run.json") return;
   for (const [i, frame] of (value.frames ?? []).entries()) {
@@ -40,7 +42,7 @@ export function assertContextControlRecord(modelRef: string, value: RecordValue)
 }
 
 export function contextControlRuntime(runtime: ModelRuntime): ModelRuntime {
-  if (!["memsphere/context_control/run.json", "memsphere/context_control/step.json"].includes(runtime.descriptor.id)) return runtime;
+  if (!["memsphere/context_control/run.json", "memsphere/context_control/step.json", "memsphere/context_control/review.json"].includes(runtime.descriptor.id)) return runtime;
   return { descriptor: runtime.descriptor, reflect(value) {
     const reflected = runtime.reflect(value);
     assertContextControlRecord(runtime.descriptor.id, value as RecordValue);

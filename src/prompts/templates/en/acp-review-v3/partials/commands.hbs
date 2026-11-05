@@ -1,0 +1,12 @@
+memsphere continue report --artifact '{"applicable":true}'
+memsphere run review report --assignment A --artifact '{"applicable":true,"comments":[]}'
+Omit comments to retain saved content/IDs; an explicit array replaces it. [] confirms all rules satisfied, or no extra open-review issues.
+memsphere continue comment add --artifact '{"body":"Issue","severity":"risk"}'
+memsphere continue comment update --comment C --artifact '{"body":"Updated issue"}'
+memsphere continue comment delete --comment C
+memsphere continue update --node N --artifact '{"applicable":true,"comments":[]}'
+Rule exceptions also require rulePath/result. Without a current node, add requires --node. All content commands accept --artifact-file F instead of --artifact. Editing does not advance. Repeated show is optional.
+memsphere continue list
+memsphere continue show
+memsphere continue show --node N
+memsphere continue show --all

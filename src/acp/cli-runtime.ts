@@ -29,7 +29,7 @@ export function currentCliRuntimeDescriptor(): CliRuntimeDescriptor {
 export async function createAgentReviewCliRuntime(descriptor: CliRuntimeDescriptor): Promise<AgentReviewCliRuntime> {
   assertCliRuntimeDescriptor(descriptor);
   const directory = await mkdtemp(join(tmpdir(), "memsphere-agent-review-"));
-  const commandName = "memsphere-review";
+  const commandName = "memsphere";
   const launcherPath = join(directory, process.platform === "win32" ? `${commandName}.cmd` : commandName);
   const guardPath = join(directory, "guard.mjs");
   const source = agentReviewCliSource(descriptor);
@@ -80,7 +80,8 @@ const options = name => args.slice(0, args.indexOf("--") < 0 ? args.length : arg
   if (arg === name) return [args[index + 1]];
   return arg.startsWith(name + "=") ? [arg.slice(name.length + 1)] : [];
 });
-const reviewWrite = args[0] === "run" && args[1] === "review" && ["comment", "submit"].includes(args[2]);
+const reviewWrite = args[0] === "run" && args[1] === "review" && ["comment", "submit", "report", "update", "show", "list"].includes(args[2]);
+const reviewerContinue = args[0] === "continue" && (["report", "update", "comment", "submit", "show", "list"].includes(args[1]) || args.length === 1 || args[1] === "--help");
 const assignmentShow = args[0] === "run" && args[1] === "review" && args[2] === "assignment" && args[3] === "show";
 const artifactShow = args[0] === "run" && args[1] === "artifact" && args[2] === "show";
 const artifactContractShow = args[0] === "run" && args[1] === "artifact" && args[2] === "contract" && args[3] === "show";
@@ -124,7 +125,8 @@ const allowed = (args.length === 1 && args[0] === "--version")
   || (artifactShow && boundAssignment && boundRun)
   || (artifactContractShow && boundAssignment)
   || (assignmentShow && boundAssignment)
-  || (reviewWrite && boundAssignment);
+  || (reviewWrite && boundAssignment)
+  || reviewerContinue;
 if (!allowed) {
   fail("command is not allowed in this Agent Review Session", "REVIEW_SESSION_DENIED", 2);
 }
