@@ -8,6 +8,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, stat } from "node:fs/pr
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { businessFixture } from "./helpers/business-data.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { readProjectConfig } from "../src/config.js";
 import { openCommandStates } from "../src/home/command-state-store.js";
@@ -82,7 +83,9 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
 }
 
 async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true) {
-  const f = await businessFixture(t, {});
+  // Installation and Embedded worktree discovery are not part of daemon
+  // delivery. Reuse installed models in separate Managed filesystem Stores.
+  const f = await initializedContextFixture(t);
   const bin = join(f.directory, "bin"); await mkdir(bin);
   const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
   const provider = join(bin, "codex-acp");
@@ -92,7 +95,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const fake = join(bin, "codex");
   await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
+  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });

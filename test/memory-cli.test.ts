@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -58,7 +59,7 @@ async function withScope(fn: (scope: { root: string; nested: string; memoryRoot:
   }
 }
 
-async function runCli(cwd: string, args: string[], home?: string): Promise<CommandResult> {
+async function runNativeCli(cwd: string, args: string[], home?: string): Promise<CommandResult> {
   return new Promise((resolveResult, reject) => {
     const child = spawn(process.execPath, [
       cliPath,
@@ -77,6 +78,17 @@ async function runCli(cwd: string, args: string[], home?: string): Promise<Comma
   });
 }
 
+// Parameter, formatting and Memory tree variants use the real command module.
+// Managed edits and nested-workspace discovery retain native CLI coverage.
+async function runCli(cwd: string, args: string[], home?: string): Promise<CommandResult> {
+  const env = { ...process.env, ...(home ? { MEMSPHERE_HOME: home } : {}) };
+  try { return { ...await invokeCliModule(args, cwd, env, cliPath), code: 0 }; }
+  catch (error) {
+    const failure = error as Error & CommandResult;
+    return { code: failure.code, stdout: failure.stdout, stderr: failure.stderr };
+  }
+}
+
 test("memory change validate checks the effective Store without expanding a sparse candidate", async () => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-change-cli-test-"));
   const home = join(root, "home");
@@ -87,10 +99,10 @@ test("memory change validate checks the effective Store without expanding a spar
     await mkdir(workspace);
     await writeFile(gitConfig, "[user]\n\tname = Test User\n\temail = test@example.com\n");
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
-    const createdProject = await runCli(workspace, ["project", "create", "project", "--bind"], home);
+    const createdProject = await runNativeCli(workspace, ["project", "create", "project", "--bind"], home);
     assert.equal(createdProject.code, 0, createdProject.stderr);
 
-    const repairHelp = await runCli(workspace, ["project", "repair", "--help"], home);
+    const repairHelp = await runNativeCli(workspace, ["project", "repair", "--help"], home);
     assert.equal(repairHelp.code, 0, repairHelp.stderr);
     assert.match(repairHelp.stdout, /only bundled System Memory/);
     assert.match(repairHelp.stdout, /user Memory is not\s+modified/);
@@ -101,7 +113,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.match(repairHelp.stdout, /If there are no differences, nothing is written/);
     assert.match(repairHelp.stdout, /Explicit \[name\], then global --project, then the current Primary Project/);
 
-    const repaired = await runCli(workspace, ["--project", "project", "project", "repair"], home);
+    const repaired = await runNativeCli(workspace, ["--project", "project", "project", "repair"], home);
     assert.equal(repaired.code, 0, repaired.stderr);
     assert.match(repaired.stdout, /^Project: project$/m);
     assert.match(repaired.stdout, /^Store: Managed$/m);
@@ -109,11 +121,11 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.match(repaired.stdout, /^Revision: [0-9a-f]{40,64}$/m);
     assert.doesNotMatch(repaired.stdout, /ChangeSet:|Candidate Root:|Validate:|Publish:/);
 
-    const removedAlias = await runCli(workspace, ["project", "reinitialize"], home);
+    const removedAlias = await runNativeCli(workspace, ["project", "reinitialize"], home);
     assert.notEqual(removedAlias.code, 0);
     assert.match(removedAlias.stderr, /unknown command ['‘]?reinitialize/);
 
-    const edited = await runCli(workspace, ["memory", "edit", "concepts/shared"], home);
+    const edited = await runNativeCli(workspace, ["memory", "edit", "concepts/shared"], home);
     assert.equal(edited.code, 0, edited.stderr);
     const changeId = /^ChangeSet: (.+)$/m.exec(edited.stdout)?.[1];
     const candidateRoot = /^Candidate Root: (.+)$/m.exec(edited.stdout)?.[1];
@@ -123,13 +135,13 @@ test("memory change validate checks the effective Store without expanding a spar
     const candidate = join(candidateRoot, "concepts", "shared.yaml");
     await writeFile(candidate, (await readFile(candidate, "utf8")).replace("defines: []", "defines: [Shared concept]"));
 
-    const deleted = await runCli(workspace, ["memory", "delete", "concepts/memsphere-memory"], home);
+    const deleted = await runNativeCli(workspace, ["memory", "delete", "concepts/memsphere-memory"], home);
     assert.equal(deleted.code, 0, deleted.stderr);
     const deleteChangeId = /^ChangeSet: (.+)$/m.exec(deleted.stdout)?.[1];
     assert(deleteChangeId);
     assert.match(deleted.stdout, new RegExp(`Next: memsphere memory change validate ${deleteChangeId}`));
 
-    const renamed = await runCli(workspace, [
+    const renamed = await runNativeCli(workspace, [
       "memory", "rename", "concepts/memsphere-framework", "memsphere-framework-renamed"
     ], home);
     assert.equal(renamed.code, 0, renamed.stderr);
@@ -141,7 +153,7 @@ test("memory change validate checks the effective Store without expanding a spar
     const recoveryRoot = join(changeRoot, "memory");
     const changeBeforeStoreValidation = await readFile(join(changeRoot, "change.json"), "utf8");
     await assert.rejects(access(recoveryRoot), /ENOENT/);
-    const storeValidation = await runCli(workspace, ["validate"], home);
+    const storeValidation = await runNativeCli(workspace, ["validate"], home);
     assert.equal(storeValidation.code, 0, storeValidation.stderr);
     assert.match(storeValidation.stdout, /Validation scope: current Project Store/);
     assert.match(storeValidation.stdout, /ChangeSet: not created or updated/);
@@ -149,7 +161,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.equal(await readFile(join(changeRoot, "change.json"), "utf8"), changeBeforeStoreValidation);
     await assert.rejects(access(recoveryRoot), /ENOENT/);
 
-    const textResult = await runCli(workspace, ["memory", "change", "validate", changeId], home);
+    const textResult = await runNativeCli(workspace, ["memory", "change", "validate", changeId], home);
     assert.equal(textResult.code, 0, textResult.stderr);
     assert.match(textResult.stdout, /ChangeSet validation passed/);
     assert.match(textResult.stdout, new RegExp(`ChangeSet: ${changeId}`));
@@ -160,7 +172,7 @@ test("memory change validate checks the effective Store without expanding a spar
     await access(recoveryRoot);
     assert.deepEqual(await readdir(candidateRoot), ["concepts"]);
 
-    const jsonResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
+    const jsonResult = await runNativeCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
     assert.equal(jsonResult.code, 0, jsonResult.stderr);
     const validPayload = JSON.parse(jsonResult.stdout);
     assert.equal(validPayload.valid, true);
@@ -168,7 +180,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.deepEqual(validPayload.issues, []);
 
     await writeFile(candidate, "!concept\nnames: [Broken\n");
-    const invalidResult = await runCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
+    const invalidResult = await runNativeCli(workspace, ["memory", "change", "validate", changeId, "--format", "json"], home);
     assert.equal(invalidResult.code, 1);
     assert.equal(invalidResult.stderr, "");
     const invalidPayload = JSON.parse(invalidResult.stdout);
@@ -299,7 +311,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
       withCurrentMemorySyntax("!schema\nnames: [record]\ndefines: []\n")
     );
 
-    const list = await runCli(nested, ["memory", "list"]);
+    const list = await runNativeCli(nested, ["memory", "list"]);
     assert.equal(list.code, 0);
     assert.equal(list.stderr, "");
     const page = parse(list.stdout);
@@ -311,7 +323,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert(!list.stdout.includes("random-95f2"));
     assert(!list.stdout.includes(memoryRoot));
 
-    const filtered = await runCli(nested, ["memory", "list", "--kind", "concepts", "--query", "记忆", "--output", "json"]);
+    const filtered = await runNativeCli(nested, ["memory", "list", "--kind", "concepts", "--query", "记忆", "--output", "json"]);
     assert.equal(filtered.code, 0);
     const filteredPage = JSON.parse(filtered.stdout);
     assert.deepEqual(filteredPage.items.map((item: { reference: string }) => item.reference), ["concepts/memory"]);
@@ -319,7 +331,7 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.equal(filteredPage.items[0].structured_defines, undefined);
 
     for (const reference of ["concepts/memory", "memory", "记忆"]) {
-      const read = await runCli(nested, ["memory", "read", reference]);
+      const read = await runNativeCli(nested, ["memory", "read", reference]);
       assert.equal(read.code, 0, read.stderr);
       assert.equal(read.stderr, "");
       assert.deepEqual(parseMemoryYaml(read.stdout), {
