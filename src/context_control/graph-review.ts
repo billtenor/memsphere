@@ -1,21 +1,22 @@
+import { reviewCommentId } from "../review-nodes.js";
 import { createHash, randomUUID } from "node:crypto";
 import { authorizeArtifactOperation, createControlPlaneSnapshot, type ArtifactControlPlane, type ControlPlaneConfig, type PermissionId } from "../control-plane/index.js";
 import { artifactReviewAgentsSubmitted, evaluateArtifactReviewRound, type ArtifactReviewAssignment, type ArtifactReviewComment, type ArtifactReviewRound, type ArtifactReviewVoteValue } from "../artifact-review.js";
 import type { GraphAction, GraphProcedureMemory } from "../memory/ast.js";
-import type { Review, ReviewRound, Run, Step } from "./types.js";
+import type { NewReviewComment, Review, ReviewRound, Run, Step } from "./types.js";
 import { failure } from "./errors.js";
 
 export const graphScope = (procedure: string, action: string) => `${procedure}#actions[${action}]`;
 export const graphReviewId = (roundId: string, actor: string) => `review-${createHash("sha256").update(JSON.stringify([roundId, actor])).digest("hex").slice(0, 32)}`;
-export function storeGraphComments(comments: ArtifactReviewComment[], artifactId: string, digest: string): Review["comments"] {
+export function storeGraphComments(comments: ArtifactReviewComment[], artifactId: string, digest: string): NewReviewComment[] {
   const ids = new Set<string>();
   return comments.map(comment => {
-    const id = comment.id || `comment-${randomUUID()}`;
+    const id = (comment.commentId ?? comment.id) || `comment-${randomUUID()}`;
     if (!comment.body.trim() || ids.has(id)) throw failure("INVALID_ARGUMENT", "Review comments require nonblank bodies and distinct ids");
     ids.add(id);
     if (comment.anchor && (comment.anchor.submissionId !== artifactId || comment.anchor.sourceHash !== digest)) throw failure("REVIEW_CONFLICT", "Comment anchor targets a stale Submission");
     if (comment.anchor && (!comment.anchor.target.trim() || (comment.anchor.context?.length ?? 0) > 500)) throw failure("INVALID_ARGUMENT", "Comment anchor requires a location and at most 500 context characters");
-    return { id, body: comment.body, createdAt: comment.createdAt || new Date().toISOString(), ...(comment.severity ? { severity: comment.severity } : {}),
+    return { commentId: id, body: comment.body, createdAt: comment.createdAt || new Date().toISOString(), ...(comment.severity ? { severity: comment.severity } : {}),
       ...(comment.anchor ? { anchor: { location: comment.anchor.location?.trim() || comment.anchor.target.trim(), ...(comment.anchor.context ? { context: comment.anchor.context } : {}) } } : {}) };
   });
 }
@@ -76,7 +77,7 @@ export function graphRoundControlPlane(run: Run, step: Step, round: ReviewRound)
     permissions: { runner: permission(round.reviewConfig.runner.permissions, "run:permissionConfig.runner"), ...Object.fromEntries(Object.entries(round.reviewConfig.reviewers).map(([id, a]) => [id, permission(a.permissions, `run:reviewRound.reviewers.${id}`)])) }
   };
 }
-export function projectGraphRound(run: Run, step: Step, round: ReviewRound, reviews: Review[], artifactDigest = ""): ArtifactReviewRound {
+export function projectGraphRound(run: Run, step: Step, round: ReviewRound, reviews: Review[], artifactDigest = "", materialDigests: ReadonlyMap<string, string> = new Map()): ArtifactReviewRound {
   reviews = reviews.filter(review => review.roundId === round.id).sort((a, b) => a.id.localeCompare(b.id));
   const cp = graphRoundControlPlane(run, step, round);
   const assignments: ArtifactReviewAssignment[] = Object.entries(round.reviewConfig.reviewers).map(([actorId, actor]) => {
@@ -86,8 +87,9 @@ export function projectGraphRound(run: Run, step: Step, round: ReviewRound, revi
     const submitted = review?.status === "submitted" && review.vote?.value;
     const comments = (review?.comments ?? []).map(c => {
       const { anchor, ...fields } = c;
-      return { ...fields, updatedAt: c.createdAt, ...(anchor ? { anchor: { submissionId: round.artifactId, sourceHash: artifactDigest,
-        target: anchor.location, location: anchor.location, context: anchor.context } } : {}) };
+      const targetId = anchor?.targetRef?.id ?? round.artifactId;
+      return { ...fields, updatedAt: c.createdAt, ...(anchor ? { anchor: { submissionId: targetId, sourceHash: targetId === round.artifactId ? artifactDigest : materialDigests.get(targetId) ?? "",
+        target: anchor.location, location: anchor.location, context: anchor.context, ...(anchor.targetRef ? { targetRef: structuredClone(anchor.targetRef) } : {}) } } : {}) };
     });
     const auth = authorizeArtifactOperation({ controlPlane: cp, subject: { kind: "actor", actorId }, permission: actor.permissions.includes("decision.decide") ? "decision.decide" : "decision.assess" });
     return {
@@ -95,6 +97,7 @@ export function projectGraphRound(run: Run, step: Step, round: ReviewRound, revi
       slotIds: Object.entries(round.reviewConfig.bindings).filter(([, b]) => b.actorIds.includes(actorId)).map(([key]) => key),
       permissions: actor.permissions, binding: actor.permissions.includes("decision.decide") ? "decision" : "advisory",
       status: submitted ? "submitted" : failed ? "failed" : review?.status === "cancelled" ? "cancelled" : review?.status === "running" ? "running" : actor.kind === "agent" ? "queued" : "draft",
+      ...(review?.nodeTree ? { nodeTree: review.nodeTree, nodeStates: review.nodeStates } : {}),
       draft: { comments, ...(review?.vote?.value ? { vote: review.vote.value } : {}) },
       ...(submitted ? { submitted: { comments, vote: review!.vote!.value, summary: review!.vote!.summary, submittedAt: review!.endedAt!, authorization: auth,
         ...(review!.vote!.delegationNote ? { delegation: { kind: "runner" as const, runId: run.id, humanActorId: actorId, authorizationNote: review!.vote!.delegationNote, authorization: authorizeArtifactOperation({ controlPlane: cp, subject: { kind: "runner" }, permission: "decision.decide" }) } } : {}) } } : {}),

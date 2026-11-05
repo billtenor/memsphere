@@ -1,3 +1,5 @@
+import { reviewNodeView } from "../review-nodes.js";
+import { reviewNodePromptModel } from "../prompts/review-nodes.js";
 import type { ArtifactReviewAgentContext } from "../run/store.js";
 import { activeProcedureAssertTrees, currentStep, renderEffectiveRuleTree } from "../run/store.js";
 import { renderPrompt, type PromptLocale } from "../prompts/index.js";
@@ -12,7 +14,7 @@ export async function buildArtifactReviewerPrompt(input: {
   promptVersion: string;
   locale?: PromptLocale;
 }): Promise<string> {
-  if (!["artifact-review-v1", "artifact-review-v2"].includes(input.promptVersion)) {
+  if (!["artifact-review-v1", "artifact-review-v2", "artifact-review-v3"].includes(input.promptVersion)) {
     throw new Error(`agent_prompt_version_unsupported: ${input.promptVersion}`);
   }
   const { run, review, round, assignment } = input.context;
@@ -35,6 +37,9 @@ export async function buildArtifactReviewerPrompt(input: {
         ?? (locale === "zh-CN" ? "本次产物评审已授予此权限。" : "Permission granted for this Artifact Review.")
     };
   });
+  if (assignment.nodeTree) {
+    return renderPrompt("acp.review-v3.initial", locale, reviewNodePromptModel(reviewNodeView(assignment, assignment.draft.comments, { status: assignment.status }), rolePrompts, JSON.stringify({ artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) }, inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name })), commands: { artifact: "memsphere run artifact show --assignment " + assignment.id, contract: "memsphere run artifact contract show --assignment " + assignment.id } }, null, 2), permissions));
+  }
   const promptId = input.promptVersion === "artifact-review-v1"
     ? "acp.artifact-review.initial"
     : "acp.artifact-review.initial-v2";
@@ -68,6 +73,7 @@ export function buildArtifactReviewerReminder(
   locale: PromptLocale = "zh-CN",
   promptVersion = "artifact-review-v2"
 ): string {
+  if (promptVersion === "artifact-review-v3") return renderPrompt("acp.review-v3.reminder", locale, reviewNodePromptModel({}));
   return renderPrompt(
     promptVersion === "artifact-review-v1"
       ? "acp.artifact-review.reminder"

@@ -12,6 +12,7 @@ import { openContextControl } from "../src/project/context-control.js";
 import { readProjectConfig } from "../src/config.js";
 import { openCommandStates } from "../src/home/command-state-store.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
+import { completeReview } from "./helpers/review-node-materials.js";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
 const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`;
@@ -181,8 +182,11 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const completeAgent = async () => {
     if (!includeAgent) return;
     const assignment = (await reviewState()).round.assignments.find(a => a.actorId === "agent")!;
-    if (assignment.status !== "submitted") await api.submitArtifactReviewAgentAssignment({ ...agentInput,
-      attemptId: assignment.attempts!.at(-1)!.id, vote: "approve" });
+    if (assignment.status !== "submitted") {
+      const bound = { ...agentInput, attemptId: assignment.attempts!.at(-1)!.id };
+      await completeReview(bound);
+      await api.submitArtifactReviewAgentAssignment({ ...bound, vote: "approve" });
+    }
   };
   const voteHuman = async (vote: "approve" | "request_changes", complete = true) => {
     if (complete) await completeAgent();

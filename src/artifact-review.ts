@@ -1,3 +1,4 @@
+import type { ReviewNodes } from "./review-nodes.js";
 import { randomUUID } from "node:crypto";
 import {
   authorizeArtifactOperation,
@@ -29,6 +30,8 @@ export type ArtifactReviewAnchor = {
   location?: string;
   sourceHash: string;
   context?: string;
+  /** Native graph material identity retained by the application projection. */
+  targetRef?: { kind: "artifact" | "external"; id: string };
 };
 
 export type ArtifactReviewAgentAnchorInput = Omit<ArtifactReviewAnchor, "submissionId"> & {
@@ -36,7 +39,8 @@ export type ArtifactReviewAgentAnchorInput = Omit<ArtifactReviewAnchor, "submiss
 };
 
 export type ArtifactReviewComment = {
-  id: string;
+  commentId?: string;
+  id?: string;
   body: string;
   severity?: ArtifactReviewSeverity;
   anchor?: ArtifactReviewAnchor;
@@ -93,6 +97,7 @@ export type ArtifactReviewCommentDisposition = {
 };
 
 export type ArtifactReviewContextArtifact<TArtifact = unknown> = {
+  artifactId?: string;
   stepId: string;
   artifact: TArtifact;
 };
@@ -118,6 +123,8 @@ export type ArtifactReviewAgentAttempt = {
 };
 
 export type ArtifactReviewAssignment = {
+  nodeTree?: ReviewNodes["nodeTree"];
+  nodeStates?: ReviewNodes["nodeStates"];
   id?: string;
   actorId: string;
   actorName: string;

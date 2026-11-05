@@ -1,3 +1,4 @@
+import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
 import { detectRunnerAgents } from "../runner/identity.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
@@ -2360,7 +2361,7 @@ function artifactReviewSummary(
       decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
       bindingSource: round.bindingSource,
       severity,
-      unresolvedBlocking: advisoryComments.filter((comment) => comment.severity === "blocking" && !resolvedCommentIds.has(comment.id)).length,
+      unresolvedBlocking: advisoryComments.filter((comment) => comment.severity === "blocking" && !resolvedCommentIds.has(reviewCommentId(comment))).length,
       failures,
       contextArtifactCount: submission?.contextArtifacts.length ?? 0,
       repeatedAdvisories: repeatedArtifactReviewAdvisories(review),
@@ -2374,6 +2375,7 @@ function artifactReviewSummary(
         binding: assignment.binding,
         status: assignment.status,
         attempt: publicArtifactReviewAttempt(assignment.attempts?.at(-1)),
+        reviewProgress: reviewNodeProgress(assignment, assignment.status),
         vote: assignment.submitted?.vote,
         summary: assignment.submitted?.summary
       })),
@@ -2554,6 +2556,7 @@ function publicArtifactReviewRounds(review: ArtifactReviewContext["review"],sele
       binding: assignment.binding,
       status: assignment.status,
       submitted: publicArtifactReviewOpinion(assignment.submitted,!selectedRoundId||assignment.actorId===opinionActor),
+      reviewProgress: reviewNodeProgress(assignment, assignment.status),
       attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
     })),
     votes: round.votes.map(vote=>selectedRoundId?{subject:vote.subject,binding:vote.binding,value:vote.value,automatic:vote.automatic,submittedAt:vote.submittedAt}:publicArtifactReviewVote(vote)),
@@ -3048,6 +3051,7 @@ function normalizeArtifactReviewDraft(input: { vote?: unknown; comments?: unknow
       };
     }
     return {
+      commentId: typeof comment.commentId === "string" ? comment.commentId : undefined,
       id: typeof comment.id === "string" ? comment.id : undefined,
       body: comment.body,
       severity: severity as ArtifactReviewDraftInput["comments"][number]["severity"],

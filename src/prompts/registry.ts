@@ -309,7 +309,18 @@ const schemaOverviewSchema = z.object({
   }).strict().optional()
 }).strict();
 
+const reviewNodePromptSchema = z.object({ data: z.string(), open: z.boolean(), hasNode: z.boolean(), rolePrompts: z.array(z.string()), materials: z.string(), permissions: z.array(permissionSchema) }).strict();
+
 const definitions = {
+  "acp.review-v3.initial": { path: "acp-review-v3/initial.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.node": { path: "acp-review-v3/node.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.summary": { path: "acp-review-v3/summary.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.edit-receipt": { path: "acp-review-v3/edit-receipt.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.submit-receipt": { path: "acp-review-v3/submit-receipt.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.list": { path: "acp-review-v3/list.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.results": { path: "acp-review-v3/results.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+  "acp.review-v3.reminder": { path: "acp-review-v3/reminder.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
+
   "run.async-wait": { path: "run/async-wait.hbs", schema: z.object({ taskId: z.string() }).strict(), audience: "runner", purpose: "receipt" },
   "run.graph-selection": { path: "run/graph-selection.hbs", schema: z.object({ runId: z.string(), steps: z.array(z.object({ id: z.string(), description: z.string(), actor: z.string(), artifact: z.string() }).strict()), command: z.string() }).strict(), audience: "runner", purpose: "next_action" },
   "run.graph-waiting": { path: "run/graph-waiting.hbs", schema: z.object({ runId: z.string(), message: z.string(), command: z.string() }).strict(), audience: "runner", purpose: "next_action" },

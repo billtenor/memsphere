@@ -17,3 +17,10 @@ defines:
   - 自由探索中的轻量 Review 是产物的评论记录，不具有正式评审的 Round、Assignment 和 Vote，也不构成产物接纳门禁。
   - graph 正式评审把不可变产物与参与名单固定在 Step.reviewRounds，每位 Actor 每轮独立保存个人 Review；Runner 的正式决定同样为个人 Review。对外通过临时投影复用评审协议、ACP 和 View，不在新 Run 持久化旧 artifactReviews。
   - graph 候选尚未通过评审时不会成为下游材料或 collect 成员；Agent Reviewer 失败保留未决状态，显式 retry 同轮同人新建 attempt，旧 attempt 失效。修订复用 Step 并创建新 Artifact 和轮次。
+  - 新 Agent Assignment 在审查启动前固定产物、合法输入与有效规则，自动把 Procedure、Step、Schema 和引用 Statement 的规则来源组织为节点树；每位 Reviewer 的节点判断、进度、意见和最终投票相互独立。已有无节点树的历史审查保持原交互协议，Human 直接提交结论。
+  - 节点按深度优先、父规则先于子规则的顺序渐进展开；当前节点展示自身定义和完整 asserts/suggests，以及简短祖先路径。无规则的组织节点自动经过；同一规则节点内规则保持一致作用域，不适用判断只跳过自身规则，子节点仍继续检查。角色职责可以决定节点不适用，但范围内证据不足属于无法判定。
+  - 节点上报按节点统一判定适用性，适用节点仅记录不满足或无法判定的规则；已报告适用节点中未列出的规则视为满足，未报告节点不产生满足结论。不适用必须记录原因，无法判定的意见说明缺失证据；节点已处理不等于规则满足。suggests 保持建议属性，严重性由 Reviewer 决定。
+  - Comment 是唯一意见对象，使用 commentId 标识；规则判断通过 commentIds 关联意见，节点不适用原因通过 reasonCommentId 关联。nodeId 在固定个人审查树内唯一，规则以当前节点内的 rulePath 定位原始 Memory 路径；不同 Memory 可以有相同 rulePath。删除意见保留规则判断，重复意见允许保留或由 Reviewer 删除。
+  - 节点内容编辑与进度分离：comment add/update/delete 和节点 update 保存修改而不推进；report 完成当前节点后自动展示下一节点；submit 在最终复核后一次提交个人投票、说明与现有意见，不要求再写一份意见。上报省略 comments 保留已保存内容，显式数组替换该节点内容，适用节点空数组表示未发现异常。
+  - 全部规则之后必须进行开放审查，结合角色职责与专业经验寻找 Statement 未覆盖的问题；空树或全部节点不适用也必须完成。开放节点没有规则来源，额外意见只关联该节点；可以报告没有额外问题，但不能按不适用跳过。之后最终复核先展示概览，Reviewer 可按需展开或修改已处理判断，并独立决定投票，系统不由逐项结果自动推导投票。
+  - 同轮同人 retry 保留规则树、内容和进度，但新建固定 Attempt；旧 Session 不得采用新 Attempt 写入。读取不触发写入或推进；并发报告固定目标节点，保存冲突不得改为推进新节点。新 Artifact 的新 Review 完全独立，不继承旧判断。View 仅增加简洁审查进度。

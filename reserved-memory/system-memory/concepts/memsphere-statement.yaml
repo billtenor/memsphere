@@ -11,3 +11,4 @@ defines:
   - sections 的树状层级用于组织和呈现规则，不改变规则的强制程度。
   - Statement 不用于解释领域术语，也不用于定义文档或数据结构；这些内容分别由 Concept 和 Schema 表达。
   - Statement 的合法 YAML 结构由 memsphere-statement-schema 定义。
+  - Statement 在渐进 Artifact Review 中保留来源和原始索引：节点记录来源 Memory 与 path，asserts/suggests 使用原始 rulePath，不通过规则文字匹配身份。节点自身的一批规则应保持一致作用域；父子节点可以有不同作用域，父节点不适用不代表子节点不适用。

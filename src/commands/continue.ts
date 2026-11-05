@@ -1,3 +1,4 @@
+import { reviewerContinue } from "./review-nodes.js";
 import { Command, Option } from "commander";
 import { currentCommandState } from "../home/command-state-store.js";
 import { readConfig } from "../config.js";
@@ -51,6 +52,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
   };
   continuation.action(async () => {
     const tail = continuation.args;
+    if (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID) { await reviewerContinue(nativeRun, tail); return; }
     await load();
     if (!tail.length || tail[0] === "--help" || tail[0] === "-h") { await help(router); return; }
     const configure = (command: Command) => { command.exitOverride(); command.configureOutput({ outputError() {} }); command.commands.forEach(configure); };

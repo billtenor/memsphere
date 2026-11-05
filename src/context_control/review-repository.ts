@@ -1,3 +1,4 @@
+import { reviewCommentId, mutateReviewNode, type NodeMutation } from "../review-nodes.js";
 /** Adapts model-backed graph Reviews to the existing Review application protocol.
  * These DTOs are transient; the graph Run never stores legacy artifactReviews.
  */
@@ -57,12 +58,19 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
         const value=body?decodeGraphContent(body.bytes,body.contentType):undefined;
         const contentType=body?.contentType??artifact.content?.payload.contentType??"text/plain";
         const dto:legacy.RunEvent["artifact"]={name:artifact.name,type:value===null?"null":Array.isArray(value)?"array":(typeof value==="undefined"?"string":typeof value),format:graphFormat(contentType),storage:"inline",contentType,...(!viewRoundId||round.id===viewRoundId?{value}:{})};
-        rounds.push(projectGraphRound(run, step, round, snapshot.reviews.filter(r => r.roundId === round.id), hash));
+        const personalReviews = snapshot.reviews.filter(r => r.roundId === round.id);
+        const materialDigests = new Map<string, string>();
+        for (const targetId of new Set(personalReviews.flatMap(r => r.comments.flatMap(c => c.anchor?.targetRef ? [c.anchor.targetRef.id] : [])))) {
+          const target = snapshot.artifacts.find(a => a.id === targetId);
+          if (!target) throw failure("INVALID_STATE", `Review anchor material is missing: ${targetId}`);
+          materialDigests.set(targetId, targetId === artifact.id && body ? hash : digest((await service.body(target)).bytes));
+        }
+        rounds.push(projectGraphRound(run, step, round, personalReviews, hash, materialDigests));
         const contextArtifacts = [];
         for (const id of new Set(Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id))) {
           const material = snapshot.artifacts.find(a => a.id === id);
           if (!material || !snapshot.completeIds.includes(id)) throw failure("INVALID_STATE", `Review material is not accepted: ${id}`);
-          contextArtifacts.push({stepId:material.stepId,artifact:viewRoundId&&!(round.id===viewRoundId&&contextArtifacts.length===viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
+          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&!(round.id===viewRoundId&&contextArtifacts.length===viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
         }
         submissions.push({ id: artifact.id, digest: hash, createdAt: round.createdAt, artifact: dto, contextArtifacts,
           ...(artifact.revisedSummary ? { revisionSummary: { body: artifact.revisedSummary, digest: digest(artifact.revisedSummary), createdAt: round.createdAt, previousSubmissionId: artifact.revisedFrom! } } : {}) });
@@ -130,7 +138,7 @@ export async function submitArtifactReviewRunnerVote(input: Parameters<typeof le
   return readArtifactReviewForRunner(input);
 }
 function comments(input: legacy.ArtifactReviewDraftInput["comments"]): ArtifactReviewComment[] {
-  return input.map(c => ({ ...c, id: c.id ?? `comment-${randomUUID()}`, createdAt: stamp(), updatedAt: stamp() }));
+  return input.map(c => ({ ...c, commentId: c.commentId ?? c.id ?? `comment-${randomUUID()}`, id: undefined, createdAt: stamp(), updatedAt: stamp() }));
 }
 export async function submitArtifactReviewHumanAssignmentForRunner(input: Parameters<typeof legacy.submitArtifactReviewHumanAssignmentForRunner>[0]) {
   if (!identity(input.reviewId)) return legacy.submitArtifactReviewHumanAssignmentForRunner(input);
@@ -208,7 +216,7 @@ export async function retryArtifactReviewAgentAssignment(input: Parameters<typeo
   input = { ...input, actorId };
   await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
     if (step.reviewRounds!.at(-1)!.reviewConfig.reviewers[input.actorId]?.kind !== "agent" || review.attempts?.at(-1)?.completion?.kind !== "failed") throw failure("INVALID_ARGUMENT", "Only a failed Agent assignment may be retried");
-    review.status = "pending"; review.comments = []; delete review.vote;
+    review.status = "pending"; if (!review.nodeTree) review.comments = []; delete review.vote;
     review.attempts = [...(review.attempts ?? []), { id: `attempt-${randomUUID()}`, createdAt: stamp() }];
   }));
   const context = await readArtifactReviewForActor(input);
@@ -243,7 +251,7 @@ export async function updateArtifactReviewDraft(input: Parameters<typeof legacy.
     const service = (await openContextControl(dirname(input.runsRoot)))!;
     const hash = digest((await service.body(artifact)).bytes);
     if (!permissions.includes("decision.decide") && input.draft.comments.some(c => !c.severity)) throw failure("INVALID_ARGUMENT", "Advisory comment requires severity");
-    review.comments = storeGraphComments(comments(input.draft.comments).map(comment => ({ ...comment, createdAt: review.comments.find(old => old.id === comment.id)?.createdAt ?? comment.createdAt })), round.artifactId, hash);
+    review.comments = storeGraphComments(comments(input.draft.comments).map(comment => ({ ...comment, createdAt: review.comments.find(old => reviewCommentId(old) === reviewCommentId(comment))?.createdAt ?? comment.createdAt })), round.artifactId, hash);
     if (input.draft.vote) review.vote = { value: input.draft.vote }; else delete review.vote;
   }));
   return readArtifactReviewForActor(input);
@@ -261,4 +269,28 @@ export async function resolveArtifactReviewComment(input: Parameters<typeof lega
   if (!artifactReviewDispositionValues.includes(input.disposition)) throw failure("INVALID_ARGUMENT", "Unknown comment disposition");
   await use(input, (g, id) => g.resolveComment(id.runId, id.stepId, input.roundId, { commentId: input.commentId, value: input.disposition, note: input.note ?? "", ...(input.validationSummary ? { validationSummary: input.validationSummary } : {}) }));
   return readArtifactReviewForRunner(input);
+}
+
+export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation: NodeMutation }) {
+  if (!identity(input.reviewId)) return legacy.mutateArtifactReviewNodes(input);
+  await agentContext(input);
+  const materialIds = await use(input, async (g, id) => {
+    const snapshot = await g.reviewSnapshot(id.runId, id.stepId);
+    const step = snapshot.steps.find(s => s.id === id.stepId)!;
+    const round = step.reviewRounds?.at(-1);
+    if (round?.id !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
+    return [round.artifactId, ...Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id)];
+  });
+  return mutateAttempt(input, review => {
+    if (!review.nodeTree || !review.nodeStates) throw failure("INVALID_STATE", "Review nodes are not enabled");
+    review.comments = mutateReviewNode({ nodeTree: review.nodeTree, nodeStates: review.nodeStates }, review.comments, input.mutation, item => {
+      const native = item.anchor;
+      if (native) {
+        if (Object.keys(native).some(k => !["location", "context", "targetRef"].includes(k)) || typeof native.location !== "string" || !native.location.trim() || native.context !== undefined && (typeof native.context !== "string" || native.context.length > 500)) throw failure("INVALID_ARGUMENT", "Invalid graph Comment anchor");
+        const ref = native.targetRef as { kind?: string; id?: string } | undefined;
+        if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || ref.kind !== "artifact" || !materialIds.includes(ref.id!))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
+      }
+      return { commentId: `comment-${randomUUID()}`, body: item.body, severity: item.severity, createdAt: stamp(), ...(native ? { anchor: native as NonNullable<Review["comments"][number]["anchor"]> } : {}) };
+    });
+  });
 }

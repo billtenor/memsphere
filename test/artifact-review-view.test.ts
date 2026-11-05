@@ -223,7 +223,7 @@ flow:
     assert.equal(afterBob.review.status, "pending");
     const advisoryCommentId = afterBob.rounds[0]?.assignments.find(
       (assignment) => assignment.actorId === "bob"
-    )?.submitted?.comments[0]?.id;
+    )?.submitted?.comments[0]?.commentId;
     assert(advisoryCommentId);
     await resolveArtifactReviewComment({
       runsRoot,

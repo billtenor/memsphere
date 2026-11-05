@@ -1,3 +1,4 @@
+import { currentReviewNode } from "../src/review-nodes.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
@@ -59,6 +60,8 @@ test("Agent claims once, requires handshake, and submits only its current attemp
   const input = { ...f.input, attemptId: claimed.attempt.id };
   await assert.rejects(reviews.submitArtifactReviewAgentAssignment({ ...input, vote: "approve" }), /handshake/);
   await reviews.markArtifactReviewAgentCliReady(input);
+  let pending = await reviews.readArtifactReviewForActor(input);
+  while (currentReviewNode(pending.assignment)) pending = await reviews.mutateArtifactReviewNodes({ ...input, mutation: { operation: "report", artifact: { applicable: true }, expectedNodeId: currentReviewNode(pending.assignment)!.nodeId } });
   await reviews.submitArtifactReviewAgentAssignment({ ...input, vote: "approve" });
   assert.equal((await reviews.readArtifactReviewForActor(f.input)).assignment.status, "submitted");
   assert.equal((await f.service.snapshot(f.result.snapshot.run.id)).steps[0].status, "awaiting_review");
@@ -126,6 +129,8 @@ for (const vote of ["approve", "request_changes"] as const) test(`Agent processi
   const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
   const agent = { ...f.input, attemptId: claimed.attempt.id };
   await reviews.markArtifactReviewAgentCliReady(agent);
+  let pending = await reviews.readArtifactReviewForActor(agent);
+  while (currentReviewNode(pending.assignment)) pending = await reviews.mutateArtifactReviewNodes({ ...agent, mutation: { operation: "report", artifact: { applicable: true }, expectedNodeId: currentReviewNode(pending.assignment)!.nodeId } });
   await reviews.submitArtifactReviewAgentAssignment({ ...agent, vote: "approve" });
   context = await waiting;
   assert.equal(reviewReady(context), true);

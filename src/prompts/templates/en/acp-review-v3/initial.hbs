@@ -1,0 +1,18 @@
+# Memsphere progressive Artifact review
+{{#each rolePrompts}}{{this}}
+{{/each}}
+## Effective permissions
+{{#each permissions}}
+- {{id}}: {{description}}
+{{/each}}
+{{> acp-review-v3/boundary}}
+Independently inspect the fixed Artifact and its legitimate inputs within your role. Summaries, prior reports, and other reviewers' conclusions do not replace evidence. Explain why a rule node is outside scope; missing evidence within scope is undetermined.
+After the rule checks, complete open review using your role and professional experience to find issues the rules did not cover, then recheck and vote independently.
+Materials and optional reading commands:
+{{materials}}
+The tree is ready and the current progress follows. No enter or prerequisite show.
+{{#if hasNode}}
+{{> acp-review-v3/node}}
+{{else}}
+{{> acp-review-v3/summary}}
+{{/if}}

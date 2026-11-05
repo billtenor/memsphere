@@ -1,3 +1,4 @@
+import { reviewCommentId } from "../review-nodes.js";
 import {
   repeatedArtifactReviewAdvisories,
   artifactReviewAgentsSubmitted,
@@ -63,7 +64,7 @@ export function buildArtifactReviewSummaryPromptModel(
       risk: advisoryComments.filter((comment) => comment.severity === "risk").length,
       suggestion: advisoryComments.filter((comment) => comment.severity === "suggestion").length,
       unresolvedBlocking: advisoryComments.filter(
-        (comment) => comment.severity === "blocking" && !resolved.has(comment.id)
+        (comment) => comment.severity === "blocking" && !resolved.has(reviewCommentId(comment))
       ).length
     },
     earlierArtifacts: review.submissions.find((candidate) => candidate.id === round.submissionId)
