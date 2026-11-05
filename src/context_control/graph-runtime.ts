@@ -139,6 +139,20 @@ export class GraphRuntime {
     requireEffectiveStep((await this.run(runId)).value, stepId);
     return result;
   }
+  async recordReviewProcesses(runId: string, stepId: string, roundId: string, actorId: string, attemptId: string, workerPid: number, providerPid?: number) {
+    const run = (await this.run(runId)).value;
+    const step = (await this.step(run, stepId)).value;
+    if (!step.reviewRounds?.some(round => round.id === roundId)) throw failure("NOT_FOUND", "Review Round not found");
+    const row = await this.records.require<Review>("review", runId, graphReviewId(roundId, actorId));
+    const value = structuredClone(row.value), attempt = value.attempts?.find(attempt => attempt.id === attemptId);
+    if (!attempt?.workerIdentity || attempt.workerPid !== workerPid || workerPid !== process.pid || !isDeepStrictEqual(await captureProcessIdentity(workerPid), attempt.workerIdentity))
+      throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Worker lifecycle evidence does not match its OS identity");
+    const members = await captureProcessGroup(attempt.workerIdentity.group);
+    if (!members.some(member => isDeepStrictEqual(member, attempt.workerIdentity))) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Worker missing from its lifecycle snapshot");
+    if (!providerPid || !members.some(member => member.pid === providerPid)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Provider exited before descendant evidence was recorded");
+    attempt.workerMembers = [...(attempt.workerMembers ?? []), ...members].filter((member, index, all) => all.findIndex(other => isDeepStrictEqual(member, other)) === index);
+    await this.records.update("review", runId, row, value);
+  }
   async recordReviewStop(runId: string, stepId: string, roundId: string, actorId: string, attemptId: string, stopReason: string) {
     const run = (await this.run(runId)).value;
     const step = (await this.step(run, stepId)).value;
@@ -453,7 +467,7 @@ export class GraphRuntime {
         if (!artifact || !plan.affectedStepIds.includes(artifact.stepId) || !attempt.workerPid) continue;
         const identity = attempt.workerIdentity;
         const current = await captureProcessIdentity(attempt.workerPid);
-        const members = identity && current && isDeepStrictEqual(identity, current) ? await captureProcessGroup(identity.group) : undefined;
+        const members = identity && current && isDeepStrictEqual(identity, current) ? [...(attempt.workerMembers ?? []), ...await captureProcessGroup(identity.group)] : attempt.workerMembers;
         workers.push({ reviewId: review.id, attemptId: attempt.id, pid: attempt.workerPid, ...(identity ? { identity } : {}), ...(members ? { members } : {}) });
       }
     }
@@ -498,7 +512,7 @@ export class GraphRuntime {
         if (!attempt.workerPid || intent.workers.some(w => w.reviewId === review.id && w.attemptId === attempt.id)) continue;
         const current = await captureProcessIdentity(attempt.workerPid), identity = attempt.workerIdentity;
         if (process.platform !== "win32" && !current && !(await captureProcessGroup(identity?.group ?? attempt.workerPid)).length) continue;
-        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:await captureProcessGroup(identity.group)}:{})});
+        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:await captureProcessGroup(identity.group)}:attempt.workerMembers?{members:attempt.workerMembers}:{})});
       }
     }
     if (missing.length) {
@@ -510,7 +524,20 @@ export class GraphRuntime {
     await this.cancelSupersededReviews(runId);
     for (const worker of intent.workers) {
       const review = (await this.records.require<Review>("review", runId, worker.reviewId)).value;
-      if (!review.attempts?.some(attempt => attempt.id === worker.attemptId)) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
+      const attempt = review.attempts?.find(attempt => attempt.id === worker.attemptId);
+      if (!attempt || !isDeepStrictEqual(attempt.workerIdentity, worker.identity)) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
+      // The worker may save its shutdown snapshot after rewind's initial read.
+      // Persist the new evidence before using it; status can then recover even
+      // when the leader exited between those two writes.
+      const members = [...(worker.members ?? []), ...(attempt.workerMembers ?? [])].filter((member, index, all) => all.findIndex(other => isDeepStrictEqual(member, other)) === index);
+      if (members.length && !isDeepStrictEqual(members, worker.members)) {
+        const latest = await this.run(runId), updated = structuredClone(latest.value);
+        const pending = this.frame(updated).pendingRewind;
+        if (!pending || !isDeepStrictEqual(pending, intent)) throw failure("REVISION_CONFLICT", "Rewind cleanup evidence changed");
+        pending.workers.find(saved => saved.reviewId === worker.reviewId && saved.attemptId === worker.attemptId)!.members = members;
+        await this.saveRun(latest, updated);
+        worker.members = members;
+      }
       await this.stopReviewer(worker);
     }
     // Only this recovery, after every saved worker was verified stopped, may

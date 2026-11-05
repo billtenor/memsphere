@@ -206,6 +206,11 @@ export async function recordArtifactReviewAgentSession(input: Parameters<typeof 
   if (!identity(input.reviewId)) return legacy.recordArtifactReviewAgentSession(input);
   return mutateAttempt(input, (_r, a) => { a.session = { ...a.session, protocolVersion: input.protocolVersion, id: input.sessionId, ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
 }
+/** Lifecycle evidence is saved before Provider termination, independently of voting. */
+export async function recordArtifactReviewAgentProcesses(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; workerPid: number; providerPid?: number }): Promise<void> {
+  if (!identity(input.reviewId)) return;
+  await use(input, (g, id) => g.recordReviewProcesses(id.runId, id.stepId, input.roundId, input.actorId, input.attemptId, input.workerPid, input.providerPid));
+}
 export async function recordArtifactReviewAgentStop(input: Parameters<typeof legacy.recordArtifactReviewAgentStop>[0]) {
   if (!identity(input.reviewId)) return legacy.recordArtifactReviewAgentStop(input);
   const context = await agentContext(input);

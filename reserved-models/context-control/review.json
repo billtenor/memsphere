@@ -418,6 +418,13 @@
             "group"
           ],
           "additionalProperties": false
+        },
+        "workerMembers": {
+          "type": "array",
+          "description": "停止Provider前按OS创建身份记录的Worker及后代，用于leader退出后的安全核验。",
+          "items": {
+            "$ref": "#/definitions/ReviewAttempt/properties/workerIdentity"
+          }
         }
       },
       "required": [

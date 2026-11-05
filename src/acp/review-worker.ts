@@ -8,6 +8,7 @@ import {
   failArtifactReviewAgentAssignment,
   readArtifactReviewForActor,
   recordArtifactReviewAgentSession,
+  recordArtifactReviewAgentProcesses,
   recordArtifactReviewAgentStop
 } from "../context_control/review-repository.js";
 import { runAgentReviewAcpSession } from "./client.js";
@@ -106,6 +107,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     const result = await (options.runSession ?? runAgentReviewAcpSession)({
       launch,
       assertLaunchValid: () => assertArtifactReviewAgentAttemptRunning(common),
+      onBeforeStop: providerPid => recordArtifactReviewAgentProcesses({ ...common, workerPid: process.pid, providerPid }),
       prompt: `${prompt}\n\n${claimed.run.language === "en"
         ? "Use the current directory for this Attempt. Read or download Artifacts only when needed and keep local material and temporary files here. No source code is copied into this directory."
         : "当前目录是本次 Attempt 的独立工作目录。按需读取或下载 Artifact，本地材料和临时文件自行在当前目录组织。此目录未复制代码。"}`,

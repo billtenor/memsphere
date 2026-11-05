@@ -23,6 +23,7 @@ export async function runAgentReviewAcpSession(input: {
   isSubmitted(): Promise<boolean>;
   assertLaunchValid?(): Promise<void>;
   waitForSubmission?(): Promise<void>;
+  onBeforeStop?(providerPid: number | undefined): Promise<void>;
   onSession(metadata: Omit<AgentReviewAcpSession, "stopReason" | "stderr">): Promise<void>;
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
@@ -45,7 +46,9 @@ export async function runAgentReviewAcpSession(input: {
   let stderr = "";
   let idleTimeout: TimeoutWatchdog | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
-  const terminate = () => {
+  let beforeStopPromise: Promise<void> | undefined;
+  const beforeStop = () => beforeStopPromise ??= input.onBeforeStop?.(process.pid) ?? Promise.resolve();
+  const signalTermination = () => {
     if (process.exitCode !== null) return;
     if (process.pid) void terminateProcessTree(process.pid, "SIGTERM").catch(() => process.kill("SIGTERM"));
     else process.kill("SIGTERM");
@@ -58,6 +61,9 @@ export async function runAgentReviewAcpSession(input: {
       }, 1_000);
     }
   };
+  // Capture descendant identities while the Provider is still attached. Voting
+  // completion alone cannot prove its process tree has stopped.
+  const terminate = () => { void beforeStop().then(signalTermination, signalTermination); };
   process.once("exit", () => {
     if (forceKillTimer) clearTimeout(forceKillTimer);
     forceKillTimer = undefined;
@@ -190,7 +196,7 @@ export async function runAgentReviewAcpSession(input: {
     startupTimeout.dispose();
     idleTimeout?.dispose();
     maxRuntimeTimeout?.dispose();
-    terminate();
+    try { await beforeStop(); } finally { terminate(); }
   }
 }
 

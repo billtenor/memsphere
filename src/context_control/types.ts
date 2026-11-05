@@ -51,6 +51,7 @@ export type Review = {
 export type ReviewAttempt = {
   id: string; createdAt: string; startedAt?: string; workerPid?: number; cliReadyAt?: string; promptVersion?: string;
   workerIdentity?: { pid: number; started: string; group: number };
+  workerMembers?: Array<{ pid: number; started: string; group: number }>;
   session?: { provider?: string; id?: string; protocolVersion?: number; agentName?: string; agentVersion?: string; model?: string };
   completion?: { at: string; kind: "completed" | "failed" | "cancelled"; stopReason?: string; failure?: { stage: string; code: string; message: string; category?: string } };
 };

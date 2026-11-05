@@ -191,7 +191,7 @@ for (const entity of ["run", "review"] as const) test(`rewind upgrade preserves 
  assert.deepEqual(await reopened.stores.review.get({},`${run.id}/${review.id}`),beforeReview);
 });
 
-for (const fixtureName of ["context-control-review-before-nodes.json", "context-control-review-master-release.json", "context-control-review-rewind-release.json"]) test(`known Review upgrade from ${fixtureName} preserves historical Comment IDs and revisions`, async t => {
+for (const fixtureName of ["context-control-review-before-members.json", "context-control-review-before-nodes.json", "context-control-review-master-release.json", "context-control-review-rewind-release.json"]) test(`known Review upgrade from ${fixtureName} preserves historical Comment IDs and revisions`, async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const run = await service.start("historical review"), artifact = (await service.report(run.id, { name: "A", content: textContent("A") })).artifact;
   const id = "review-history", key = `${run.id}/${id}`;

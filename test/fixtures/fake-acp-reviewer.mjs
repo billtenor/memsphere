@@ -65,7 +65,9 @@ const app = acp
       await new Promise(resolve=>child.once("message",resolve));
       if (process.env.REVIEW_TEST_SUBMITTED) await completeReview("approve", client, params.sessionId);
       await processGate(process.env.REVIEW_TEST_GATES,'publish',process.env.REVIEW_TEST_READY,{providerPid:process.pid,childPid:child.pid});
-      if (process.env.REVIEW_TEST_RELEASE) {
+      if (process.env.REVIEW_TEST_COMPLETE) {
+        await processGate(process.env.REVIEW_TEST_GATES,'wait',`finish-review:${process.env.REVIEW_TEST_READY}`,undefined,signal);
+      } else if (process.env.REVIEW_TEST_RELEASE) {
         await processGate(process.env.REVIEW_TEST_GATES,'wait',process.env.REVIEW_TEST_RELEASE,undefined,signal);
       } else if (!signal.aborted) {
         await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
