@@ -55,7 +55,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const processes=[];
  let dispatch:Promise<number>|undefined,releaseDispatch:(()=>void)|undefined;
  t.after(async()=>{releaseDispatch?.();await dispatch?.catch(()=>undefined);});
- for(const i of (nativeDispatch?[1,0]:[0,1])){
+ const launch=async(i:number)=>{
   if(nativeDispatch&&i===0){
    const candidate=candidates[0],config=await readConfig(join(f.root,'config.json'));
    const ready=join(f.directory,reviews.graphReviewHandle(start.run.id,candidate.step.id));
@@ -72,7 +72,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    const workerPid=draft.assignment.attempts!.at(-1)!.workerPid!;
    f.beforeCleanup(()=>terminateProcessTree(workerPid,'SIGKILL',process.platform,true).catch(()=>undefined));
    processes[0]={workerPid,ready,...info};
-   continue;
+   return;
   }
   const candidate=candidates[i],ready=join(f.directory,`ready-${i}.json`),input=join(f.directory,`worker-${i}.json`);
   await writeFile(input,JSON.stringify({config:join(f.root,'config.json'),review:reviews.graphReviewHandle(start.run.id,candidate.step.id),round:candidate.step.reviewRounds![0].id,assignment:'reviewer',cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url)),workspaceRoot:f.cwd,ready,gates:gates.endpoint,...(completed&&i===0?{completed:true}:{}),...(submitted&&i===0?{submitted:true}:{}),...(launchGate&&i===0?{launchGate}:{}),...(orphan?{release:join(f.directory,`release-orphans-${i}`)}:{}) ,...(late&&i===0?{claimGate:join(f.directory,'release-claim')}:{})}));
@@ -87,6 +87,13 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   worker.once('exit',()=>lifetime.abort(new Error(errors||'Fixture worker exited before readiness')));
   const info=await Promise.race([gates.wait(ready),new Promise((_,reject)=>lifetime.signal.addEventListener('abort',()=>reject(lifetime.signal.reason),{once:true}))]);
   processes[i]={workerPid:worker.pid!,worker,exited:once(worker,'exit'),ready,...info};
+ };
+ // Only the native dispatcher needs the unrelated assignment already claimed.
+ // Other workers use separate Review records and can reach readiness together.
+ if(nativeDispatch){await launch(1);await launch(0);}
+ else {
+  const results=await Promise.allSettled([0,1].map(launch));
+  for(const result of results)if(result.status==='rejected')throw result.reason;
  }
  const old=candidates[0],common={runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,old.step.id),roundId:old.step.reviewRounds![0].id,actorId:'reviewer'};
  const draft=await reviews.readArtifactReviewForActor(common);

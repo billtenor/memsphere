@@ -63,7 +63,7 @@ const app = acp
       invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
       const child = spawn(process.execPath,[fileURLToPath(new URL('./rewind-provider-child.mjs', import.meta.url))],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
-      if (process.env.REVIEW_TEST_SUBMITTED) await completeReview("approve", client, params.sessionId);
+      if (process.env.REVIEW_TEST_SUBMITTED) await completeReview("approve", client, params.sessionId, true);
       await processGate(process.env.REVIEW_TEST_GATES,'publish',process.env.REVIEW_TEST_READY,{providerPid:process.pid,childPid:child.pid});
       if (process.env.REVIEW_TEST_COMPLETE) {
         await processGate(process.env.REVIEW_TEST_GATES,'wait',`finish-review:${process.env.REVIEW_TEST_READY}`,undefined,signal);
@@ -97,7 +97,7 @@ app.connect(acp.ndJsonStream(
   Readable.toWeb(process.stdin)
 ));
 
-async function completeReview(vote, client, sessionId) {
+async function completeReview(vote, client, sessionId, graphAlreadyRead = false) {
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");
@@ -107,12 +107,14 @@ async function completeReview(vote, client, sessionId) {
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
     return invoke(cli, args);
   };
-  await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
-  await invokeReviewCli([
-    "run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"
-  ]);
-  const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
-  if (detail.reviewProgress) {
+  let graph = graphAlreadyRead;
+  if (!graphAlreadyRead) {
+    await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
+    await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
+    const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
+    graph = Boolean(detail.reviewProgress);
+  }
+  if (graph) {
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
