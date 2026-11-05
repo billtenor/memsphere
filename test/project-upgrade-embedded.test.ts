@@ -60,33 +60,29 @@ test("Embedded upgrade CLI isolates original user differences and creates a retr
   } finally { await f.cleanup(); }
 });
 
-test("Embedded upgrade CLI refuses main-only, master, detached and dirty Memory before model writes", async () => {
-  for (const boundary of ["main", "master", "detached", "dirty"] as const) {
-    const f = await fixture();
-    try {
-      const { project, memoryRoot } = await embeddedFixture(f, boundary === "main" ? "main" : "master");
-      await alterDefinition(project);
-      const modelBefore = await readFile(join(project, definitionPath), "utf8");
-      let upgradeWorkspace = f.workspace;
-      if (boundary === "detached" || boundary === "dirty") {
-        upgradeWorkspace = join(f.root, "upgrade-worktree");
-        f.git(["worktree", "add", "-b", "upgrade/system", upgradeWorkspace, "master"]);
-      }
-      const upgradeMemory = join(upgradeWorkspace, ".memsphere/memory");
-      if (boundary === "detached") f.git(["checkout", "--detach"], upgradeWorkspace);
-      if (boundary === "dirty") {
-        await writeFile(join(upgradeMemory, "concepts/user.yaml"), `${await readFile(join(upgradeMemory, "concepts/user.yaml"), "utf8")}\n# dirty\n`);
-      }
-      const memoryBefore = await readFile(join(memoryRoot, memoryPath), "utf8");
-      const failed = f.upgrade("embedded", [], upgradeWorkspace);
-      assert.notEqual(failed.result.status, 0, boundary);
-      assert.equal(failed.value.failure.stage, "preflight", boundary);
-      assert.equal(failed.value.models.status, "not_run", boundary);
-      assert.equal(await readFile(join(project, definitionPath), "utf8"), modelBefore);
-      assert.equal(await readFile(join(memoryRoot, memoryPath), "utf8"), memoryBefore);
-      assert.deepEqual(await readdir(join(project, "changes")), []);
-    } finally { await f.cleanup(); }
-  }
+test("Embedded upgrade CLI refuses dirty Memory before model writes", async () => {
+  // The API suite covers original/main, detached HEAD and missing master.
+  // This CLI boundary proves rejection happens before either resource is changed.
+  const f = await fixture();
+  try {
+    const { project, memoryRoot } = await embeddedFixture(f);
+    await alterDefinition(project);
+    const modelBefore = await readFile(join(project, definitionPath), "utf8");
+    const linked = join(f.root, "upgrade-worktree");
+    f.git(["worktree", "add", "-b", "upgrade/system", linked, "master"]);
+    const userPath = join(linked, ".memsphere/memory/concepts/user.yaml");
+    const dirty = `${await readFile(userPath, "utf8")}\n# dirty\n`;
+    await writeFile(userPath, dirty);
+    const memoryBefore = await readFile(join(memoryRoot, memoryPath), "utf8");
+    const failed = f.upgrade("embedded", [], linked);
+    assert.notEqual(failed.result.status, 0);
+    assert.equal(failed.value.failure.stage, "preflight");
+    assert.equal(failed.value.models.status, "not_run");
+    assert.equal(await readFile(join(project, definitionPath), "utf8"), modelBefore);
+    assert.equal(await readFile(join(memoryRoot, memoryPath), "utf8"), memoryBefore);
+    assert.equal(await readFile(userPath, "utf8"), dirty);
+    assert.deepEqual(await readdir(join(project, "changes")), []);
+  } finally { await f.cleanup(); }
 });
 
 test("Embedded upgrade CLI rolls back Memory when dedicated record creation fails and can restart cleanly", {

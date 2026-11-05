@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import { readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { embeddedFixture, fixture } from "./helpers/project-upgrade.js";
+import { fixture } from "./helpers/project-upgrade.js";
 import { systemMemoryRemovalDigest } from "../src/reserved/store.js";
-import { readSystemMemoryUpgradeTargets } from "../src/commands/project.js";
 
 type Historical = { path: string; reference: string; sha256: string; source: string };
 const root = join(process.cwd(), "test/fixtures/legacy-general-task");
 const historical = JSON.parse(await readFile(join(root, "manifest.json"), "utf8")) as Historical[];
-// Version bodies share the same publication path once their identity/digest is accepted.
-const upgradeRepresentatives = [...new Map(historical.map(entry => [`${entry.path}:${entry.reference}`, entry])).values()];
+// Identity/digest variants are exhaustively checked by the removal planner test.
+// Exercise real publication once per distinct destination path and Store type.
+const upgradeRepresentatives = [...new Map(historical.map(entry => [entry.path, entry])).values()];
 
 async function seedManaged(f: Awaited<ReturnType<typeof fixture>>, name: string, entry: Historical, content: Buffer) {
   const project = f.create(name);
@@ -25,7 +25,7 @@ async function seedManaged(f: Awaited<ReturnType<typeof fixture>>, name: string,
   return { project, memory };
 }
 
-test("Managed upgrade publishes deletion for each historical identity/path", async () => {
+test("Managed upgrade publishes deletion for each historical path", async () => {
   const f = await fixture();
   try {
     for (const [index, entry] of upgradeRepresentatives.entries()) {

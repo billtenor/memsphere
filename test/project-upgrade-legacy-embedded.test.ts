@@ -7,9 +7,11 @@ import { embeddedFixture, fixture } from "./helpers/project-upgrade.js";
 type Historical = { path: string; reference: string; sha256: string; source: string };
 const root = join(process.cwd(), "test/fixtures/legacy-general-task");
 const historical = JSON.parse(await readFile(join(root, "manifest.json"), "utf8")) as Historical[];
-const upgradeRepresentatives = [...new Map(historical.map(entry => [`${entry.path}:${entry.reference}`, entry])).values()];
+// Identity/digest variants are exhaustively checked by the removal planner test.
+// Exercise real publication once per distinct destination path and Store type.
+const upgradeRepresentatives = [...new Map(historical.map(entry => [entry.path, entry])).values()];
 
-test("Embedded upgrade deletes each historical identity/path only in its linked worktree", async () => {
+test("Embedded upgrade deletes each historical path only in its linked worktree", async () => {
   for (const [index, entry] of upgradeRepresentatives.entries()) {
     const f = await fixture();
     try {

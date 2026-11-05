@@ -41,6 +41,15 @@ export async function fixture() {
   const env = { ...process.env, HOME: root, USERPROFILE: root, MEMSPHERE_HOME: home, GIT_CONFIG_GLOBAL: gitconfig, GIT_CONFIG_NOSYSTEM: "1" };
   delete env.MEMSPHERE_PROJECT;
   const run = (args: string[], cwd = workspace) => spawnSync(process.execPath, [cli, ...args], { cwd, env, encoding: "utf8" });
+  const moduleRun = async (args: string[], cwd = workspace) => {
+    const { invokeCliModule } = await import("./cli-module.js");
+    try { return { status: 0, ...await invokeCliModule(args, cwd, env, cli) }; }
+    catch (error) {
+      const result = error as { code?: number; stdout?: string; stderr?: string };
+      if (typeof result.code !== "number" || result.stdout === undefined) throw error;
+      return { status: result.code, stdout: result.stdout, stderr: result.stderr ?? "" };
+    }
+  };
   const git = (args: string[], cwd = workspace) => {
     const result = spawnSync("git", args, { cwd, env, encoding: "utf8" });
     assert.equal(result.status, 0, `${args.join(" ")}: ${result.stderr}`);
@@ -94,7 +103,7 @@ export async function fixture() {
     assert.equal(result.stdout.trim().split("\n").length, 1, "JSON stdout is a single object");
     return { result, value };
   };
-  return { root, home, workspace, env, run, git, create, upgrade, cleanup: () => rm(root, { recursive: true, force: true }) };
+  return { root, home, workspace, env, run, moduleRun, git, create, upgrade, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 export async function alterDefinition(projectRoot: string) {
   const path = join(projectRoot, definitionPath);

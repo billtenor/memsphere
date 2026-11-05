@@ -25,6 +25,21 @@
 
 两个 profile 保留不同的触发、取消、门禁和时间标准：default 测试及打包 job 上限为 5 分钟，full 为 20 分钟；其他辅助 job 保持现有超时。整体排队时间不作为测试失败条件，测试失败或 job 超时均不得视为通过。
 
+### 升级测试的契约与层级
+
+升级覆盖按职责分层，不通过扩大 job 时限或固定等待降低失败概率：
+
+| 契约 | 验证位置与范围 |
+|---|---|
+| 项目选择优先级、目标缺失、参数错误 | project-upgrade-routing 使用真实命令树和最小登记信息，在资源预检处停止；真实子进程升级成功路径由 project-upgrade 保留。 |
+| 模型元数据刷新、原注册身份与用户内容保留、幂等 | model-upgrade 验证模型子系统；project-upgrade 保留模型/Memory 两阶段状态、部分更新、失败与重试，不重复整套元数据断言。 |
+| 专用候选保护、冻结范围、过期基线、合入与回滚 | system-upgrade-changeset 使用一个目标 Memory 和真实 Git 构造 Store，不安装无关模型与发行 Memory；16 个普通写入入口仍在两种 Store、两个 worktree 中验证具体拒绝原因及不变性。 |
+| Embedded 工作区准入 | system-upgrade-changeset 覆盖主工作区、detached HEAD、脏 Memory、缺失 master；project-upgrade-embedded 以脏 Memory 验证 CLI 在任何模型写入前拒绝。 |
+| 历史发行身份识别与安全删除 | legacy-general-task-upgrade 穷举历史 manifest 的全部身份/摘要；Managed、Embedded 端到端清理各按不同目标路径取代表，保留删除结果、专用记录、原 worktree 隔离与定制内容保护。不对同一路径的每个身份重复完整升级。 |
+| 多个候选互不破坏 | 两种 Store 均验证候选可校验、放弃一个后另一个仍 active、可校验且目标内容保留；仅记录数量不足以证明该契约。 |
+
+CLI 边界、真实 Git/worktree、失败回滚、用户定制内容与重试保护仍由集成测试承担；缩短的前置构造不宣称覆盖项目创建或安装，这些行为由对应套件验证。
+
 ### 测试取消与进程回收
 
 `run-tests.mjs` 收到 SIGINT、SIGTERM 或 SIGHUP 后停止调度，回收它已启动的测试进程树，再删除临时 Home 并保存已有结果；取消分别以 130、143、129 返回，不会误报成功。正常执行不扫描进程表，也不增加 worker 数、job 或测试执行期限。
