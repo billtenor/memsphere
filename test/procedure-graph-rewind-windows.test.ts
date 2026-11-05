@@ -7,7 +7,7 @@ import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
 import { terminateProcessTree } from "../src/platform-process.js";
 
-for (const scenario of ["tree", "identity", "orphan"] as const) test(`Windows native rewind process safety: ${scenario}`, {
+for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan"] as const) test(`Windows native rewind process safety: ${scenario}`, {
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
   t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM and taskkill /T`);
@@ -39,12 +39,13 @@ for (const scenario of ["tree", "identity", "orphan"] as const) test(`Windows na
     await assert.rejects(stopRewindWorker({ ...related.rewind, identity: { ...related.rewind.identity, started: "recycled PID" } }), { code: "PROCESS_IDENTITY_CHANGED" });
     assert.deepEqual(await captureProcessIdentity(related.worker.pid!), related.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
-  } else if (scenario === "orphan") {
+  } else if (scenario === "orphan" || scenario === "unrecorded-orphan") {
     const exited = once(related.worker, "exit");
     related.worker.send("orphan");
     await exited;
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child, "fixture child survives leader exit");
-    await assert.rejects(stopRewindWorker(related.rewind), { code: "PROCESS_TERMINATION_PENDING" });
+    const evidence = scenario === "unrecorded-orphan" ? { ...related.rewind, members: undefined } : related.rewind;
+    await assert.rejects(stopRewindWorker(evidence), { code: scenario === "unrecorded-orphan" ? "PROCESS_IDENTITY_UNAVAILABLE" : "PROCESS_TERMINATION_PENDING" });
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
     gates.publish("release");
     // Retry the actual OS probe until descendants have received their release message.

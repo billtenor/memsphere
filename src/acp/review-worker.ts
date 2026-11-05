@@ -28,6 +28,7 @@ export type AgentReviewWorkerOptions = {
   cliEntrypoint?: string;
   workspaceRoot?: string;
   providerResolver?: (id: string | undefined) => AgentReviewProvider;
+  runSession?: typeof runAgentReviewAcpSession;
 };
 
 export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOptions): Promise<void> {
@@ -102,7 +103,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       promptVersion: claimed.assignment.nodeTree ? "artifact-review-v3" : claimed.attempt.promptVersion ?? launch.promptVersion,
       locale: resolvePromptLocale(claimed.run.language)
     });
-    const result = await runAgentReviewAcpSession({
+    const result = await (options.runSession ?? runAgentReviewAcpSession)({
       launch,
       assertLaunchValid: () => assertArtifactReviewAgentAttemptRunning(common),
       prompt: `${prompt}\n\n${claimed.run.language === "en"

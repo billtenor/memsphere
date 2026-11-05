@@ -63,10 +63,12 @@ function same(a: ProcessIdentity, b: ProcessIdentity) { return a.pid === b.pid &
 export async function stopRewindWorker(worker: RewindWorker) {
   const leader = await captureProcessIdentity(worker.pid);
   if (!worker.identity) {
-    if (!leader && process.platform === "win32") return;
+    if (!leader && process.platform === "win32") throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer identity and descendant evidence are unavailable; rewind remains pending");
     if (!leader && !(await captureProcessGroup(worker.pid)).length) return;
     throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Cannot safely identify old Reviewer; rewind is saved, retry status after resolving the worker");
   }
+  if (process.platform === "win32" && !leader && !worker.members)
+    throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer leader exited before descendants were recorded; cleanup cannot be proven, rewind remains pending");
   const members = process.platform === "win32" && !leader
     ? await windowsMembers(worker.members ?? [])
     : await captureProcessGroup(worker.identity.group);

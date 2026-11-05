@@ -36,7 +36,7 @@ test('a mismatched OS start identity never signals a live detached process', {sk
  assert.equal(await alive(child.pid!),false);
 });
 
-for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:true},{resistant:false,late:false,failOnce:false,orphan:true}])test(`rewind stops the real ACP worker/provider group${resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' with orphaned Windows descendants':''} and preserves an unrelated reviewer`,{timeout:240000,skip:(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
+for(const {resistant,late,failOnce,orphan=false,launchGate=undefined} of [{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:true},{resistant:false,late:false,failOnce:false,orphan:true},{resistant:false,late:false,failOnce:false,launchGate:"before-provider"},{resistant:false,late:false,failOnce:false,launchGate:"after-provider"}])test(`rewind stops the real ACP worker/provider group${launchGate?` at ${launchGate}`:resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' with orphaned Windows descendants':''} and preserves an unrelated reviewer`,{timeout:240000,skip:(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
  const gates=await processGates(t.signal);
  const f=await initializedContextFixture(t);
  t.after(()=>gates.close());
@@ -51,11 +51,11 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
  const processes=[];
  for(let i=0;i<2;i++){
   const candidate=candidates[i],ready=join(f.directory,`ready-${i}.json`),input=join(f.directory,`worker-${i}.json`);
-  await writeFile(input,JSON.stringify({config:join(f.root,'config.json'),review:reviews.graphReviewHandle(start.run.id,candidate.step.id),round:candidate.step.reviewRounds![0].id,assignment:'reviewer',cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url)),workspaceRoot:f.cwd,ready,gates:gates.endpoint,...(orphan&&i===0?{release:join(f.directory,'release-orphans')}:{}) ,...(late&&i===0?{claimGate:join(f.directory,'release-claim')}:{})}));
+  await writeFile(input,JSON.stringify({config:join(f.root,'config.json'),review:reviews.graphReviewHandle(start.run.id,candidate.step.id),round:candidate.step.reviewRounds![0].id,assignment:'reviewer',cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url)),workspaceRoot:f.cwd,ready,gates:gates.endpoint,...(launchGate&&i===0?{launchGate}:{}),...(orphan?{release:join(f.directory,`release-orphans-${i}`)}:{}) ,...(late&&i===0?{claimGate:join(f.directory,'release-claim')}:{})}));
   const worker=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/graph-review-worker.mjs',import.meta.url)),input],{detached:true,stdio:['ignore','ignore','pipe'],env:{...process.env,MEMSPHERE_HOME:f.home,...(resistant&&i===0?{REVIEW_TEST_RESISTANT:'yes'}:{})}});
   let errors='';worker.stderr!.on('data',s=>errors+=s);
   f.beforeCleanup(async()=>{
-   if(orphan)gates.publish(join(f.directory,'release-orphans'));
+   if(orphan)gates.publish(join(f.directory,`release-orphans-${i}`));
    await terminateProcessTree(worker.pid!,'SIGKILL',process.platform,true).catch(()=>undefined);
    if(worker.exitCode===null&&worker.signalCode===null)await once(worker,'exit');
   });
@@ -66,7 +66,7 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
  }
  const old=candidates[0],common={runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,old.step.id),roundId:old.step.reviewRounds![0].id,actorId:'reviewer'};
  const draft=await reviews.readArtifactReviewForActor(common);
- if(!late)assert.ok(draft.assignment.attempts![0].cliReadyAt);
+ if(!late&&!launchGate)assert.ok(draft.assignment.attempts![0].cliReadyAt);
  if(orphan){
   await assert.rejects(service.withGraph(g=>{
    g.stopReviewer=async worker=>{
@@ -79,14 +79,36 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
   }),{code:'PROCESS_TERMINATION_PENDING'});
   assert.ok((await service.snapshot(start.run.id)).run.frames![0].graphFrame.pendingRewind);
   assert.equal(await alive(processes[0].childPid),true);
-  gates.publish(join(f.directory,'release-orphans'));
+  gates.publish(join(f.directory,'release-orphans-0'));
   await until(async()=>await alive(processes[0].childPid)||await alive(processes[0].providerPid)?undefined:true);
   await service.withGraph(g=>g.advance(start.run.id));
  }else if(failOnce){
-  await assert.rejects(service.withGraph(g=>{
-   g.stopReviewer=async()=>{throw Error('injected first termination failure');};
-   return g.rewind(start.run.id,product.step.id,'bad product');
-  }),/injected first termination failure/);
+  await service.withGraph(async g=>{
+   // Pause an advance after its entry cleanup check. Rewind then saves its
+   // intent and fails cleanup while this old invocation is still in flight.
+   const runtime=g as unknown as {materialize:(runId:string)=>Promise<void>};
+   const materialize=runtime.materialize.bind(g);
+   let reached!:()=>void,release!:()=>void;
+   const paused=new Promise<void>(resolve=>{reached=resolve;});
+   const resume=new Promise<void>(resolve=>{release=resolve;});
+   let first=true;
+   runtime.materialize=async id=>{if(first){first=false;reached();await resume;}return materialize(id);};
+   const stale=g.advance(start.run.id);
+   const staleResult=assert.rejects(stale,{code:'RECOVERY_REQUIRED'});
+   try{
+    await paused;
+    g.stopReviewer=async()=>{throw Error('injected first termination failure');};
+    await assert.rejects(g.rewind(start.run.id,product.step.id,'bad product'),/injected first termination failure/);
+    release();await staleResult;
+    const saved=await g.snapshot(start.run.id);
+    const replacement=saved.run.frames![0].graphFrame.rewinds!.at(-1)!.replacementStepId;
+    assert.equal(saved.steps.some(s=>s.id===replacement),false,'stale advance cannot materialize replacement');
+    await assert.rejects(g.enter(start.run.id,replacement),{code:'RECOVERY_REQUIRED'});
+    await assert.rejects(g.report(start.run.id,replacement,{text:'premature product'}),{code:'RECOVERY_REQUIRED'});
+    assert.equal((await g.snapshot(start.run.id)).artifacts.length,saved.artifacts.length);
+    for(const key of ['workerPid','providerPid','childPid'])assert.equal(await alive(processes[0][key]),true,key);
+   }finally{release();runtime.materialize=materialize;await stale.catch(()=>undefined);}
+  });
   const pending=await service.snapshot(start.run.id);
   assert.ok(pending.run.frames![0].graphFrame.pendingRewind);
   assert.equal(pending.reviews.find(r=>r.artifactId===old.artifact.id)!.status,'cancelled');
@@ -106,7 +128,7 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
   assert.notEqual(code,0,'superseded claim is rejected');
   assert.equal(gates.has(`provider-launched:${processes[0].ready}`),false,'no provider launched');
   assert.equal(await alive(processes[0].workerPid),false);
- }else for(const key of ['workerPid','providerPid','childPid'])assert.equal(await alive(processes[0][key]),false,key);
+ }else for(const key of ['workerPid','providerPid','childPid'].filter(key=>Number.isInteger(processes[0][key])))assert.equal(await alive(processes[0][key]),false,key);
  for(const key of ['workerPid','providerPid','childPid'])assert.equal(await alive(processes[1][key]),true,key);
  await assert.rejects(reviews.retryArtifactReviewAgentAssignment(common),{code:'STEP_SUPERSEDED'});
  await assert.rejects(reviews.markArtifactReviewAgentCliReady({...common,attemptId:draft.assignment.attempts?.[0]?.id??'stale-attempt'}),{code:'STEP_SUPERSEDED'});
@@ -114,4 +136,23 @@ for(const {resistant,late,failOnce,orphan=false} of [{resistant:false,late:false
  assert.equal(snapshot.run.frames![0].graphFrame.pendingRewind,undefined);
  assert.equal(snapshot.run.frames![0].graphFrame.rewinds!.length,1);
  assert.equal(snapshot.steps.filter(s=>s.source?.actionId==='A').length,2);
+ if(orphan){
+  // A second actual graph rewind starts only after the independent leader has
+  // exited. No descendant snapshot was persisted while that leader was alive.
+  process.kill(processes[1].workerPid,'SIGKILL');
+  await processes[1].exited;
+  assert.equal(await alive(processes[1].childPid),true,'unrecorded child survives before rewind');
+  await assert.rejects(service.withGraph(g=>g.rewind(start.run.id,candidates[1].step.id,'leader already gone')),{code:'PROCESS_IDENTITY_UNAVAILABLE'});
+  const blocked=await service.snapshot(start.run.id);
+  const pending=blocked.run.frames![0].graphFrame.pendingRewind!;
+  assert.ok(pending);
+  const replacement=blocked.run.frames![0].graphFrame.rewinds!.at(-1)!.replacementStepId;
+  await assert.rejects(service.withGraph(g=>g.enter(start.run.id,replacement)),{code:'RECOVERY_REQUIRED'});
+  assert.equal(await alive(processes[1].childPid),true,'no unknown descendant was signalled');
+  gates.publish(join(f.directory,'release-orphans-1'));
+  await until(async()=>await alive(processes[1].childPid)||await alive(processes[1].providerPid)?undefined:true);
+  await assert.rejects(service.withGraph(g=>g.advance(start.run.id)),{code:'PROCESS_IDENTITY_UNAVAILABLE'});
+  assert.deepEqual((await service.snapshot(start.run.id)).run.frames![0].graphFrame.pendingRewind,pending,'absence of evidence cannot clear the saved intent');
+ }
+
 });

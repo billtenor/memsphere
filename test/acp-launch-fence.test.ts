@@ -3,12 +3,14 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import test from "node:test";
+import { terminateProcessTree } from "../src/platform-process.js";
 import { runAgentReviewAcpSession } from "../src/acp/client.js";
 
-for (const invalidAt of [1, 2]) test(`ACP launch fence rejects invalidation at check ${invalidAt} and leaves no provider`, async () => {
+for (const invalidAt of [1, 2]) test(`ACP launch fence rejects invalidation at check ${invalidAt} and leaves no provider`, { timeout: 15000 }, async t => {
   let checks = 0;
   let provider: ChildProcessWithoutNullStreams | undefined;
   let exited: Promise<unknown> | undefined;
+  t.after(async () => { if (provider?.pid) await terminateProcessTree(provider.pid).catch(() => undefined); });
   await assert.rejects(runAgentReviewAcpSession({
     launch: { provider: "test", command: process.execPath, args: ["-e", "setInterval(()=>{},1000)"],
       cwd: tmpdir(), env: process.env, startupTimeoutMs: 5000, idleTimeoutMs: null,
@@ -20,7 +22,7 @@ for (const invalidAt of [1, 2]) test(`ACP launch fence rejects invalidation at c
     }
   }, { spawn: launch => {
     provider = spawn(launch.command, launch.args, { stdio: "pipe", env: launch.env });
-    exited = once(provider, "exit");
+    exited = once(provider, "exit", { signal: t.signal });
     return provider;
   } }), /attempt invalidated/);
   assert.equal(checks, invalidAt);
