@@ -22,7 +22,11 @@ for (const command of ["report", "update", "comment add", "comment update", "sub
       params.push("--comment", reviewCommentId(c.assignment.draft.comments[0])); body = { body: "Updated explanation", severity: "suggestion" };
     } else { await completeReview(f.bound); body = { vote: "approve", summary: "Reviewed" }; }
     const json = JSON.stringify(body), file = join(f.cwd, "artifact.json"); await writeFile(file, json);
-    f.cli([...route, ...args, ...params, ...(source === "string" ? ["--artifact", json] : ["--artifact-file", file]), "--output", "json"]);
+    const invocation = [...route, ...args, ...params, ...(source === "string" ? ["--artifact", json] : ["--artifact-file", file]), "--output", "json"];
+    // Every content command crosses the native restricted launcher. Remaining
+    // route/input combinations exercise the same real handlers in-process.
+    if (route[0] === "run" && source === (command === "report" ? "file" : "string")) f.cli(invocation);
+    else await f.moduleCli(invocation);
     const c = (await reviews.readArtifactReviewForActor(f.input)).assignment;
     assert.equal(reviewNodeProgress(c)?.processed, command === "report" ? 1 : command === "submit" ? 2 : 0);
     assert.deepEqual((c.submitted?.comments ?? c.draft.comments).map(x => x.body), command === "submit" ? [] : [command === "comment update" ? "Updated explanation" : "Need evidence"]);

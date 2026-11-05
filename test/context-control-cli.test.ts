@@ -41,8 +41,8 @@ test("native CLI finishes current outputs and lists/restores archived exploratio
   assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
 });
 
-test("direct production, Continue, independent reads, repeated comments and immutable revision", { timeout: 60000 }, async t => {
-  const f = await fixture(t, true); const run = await f.call("run", "start", "--name", "CLI探索");
+test("CLI module production, Continue, independent reads, repeated comments and immutable revision", { timeout: 60000 }, async t => {
+  const f = await fixture(t); const run = await f.call("run", "start", "--name", "CLI探索");
   assert.equal(run.sessionId, "cli-test-session");
   assert.equal(run.contextId, undefined);
   const help = await f.invoke("continue", "--help"); assert.match(help.stdout, /report.*review create/);

@@ -19,8 +19,8 @@ function installedBaseline() {
  * Copy the real installed definitions, registrations and empty filesystem Stores.
  * Each test still opens/validates its own bindings and persists its own records.
  */
-export async function initializedContextFixture(t: TestContext) {
-  const f = await businessFixture(t, {});
+export async function initializedContextFixture(t: TestContext, schemas: Record<string, unknown> = {}) {
+  const f = await businessFixture(t, schemas);
   const source = await installedBaseline();
   for (const entry of ["config.json", "models", "data"]) {
     await cp(join(source, entry), join(f.root, entry), { recursive: true });

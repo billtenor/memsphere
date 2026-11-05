@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { execFile, spawn } from "node:child_process";
@@ -82,7 +83,7 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true) {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false) {
   // Installation and Embedded worktree discovery are not part of daemon
   // delivery. Reuse installed models in separate Managed filesystem Stores.
   const f = await initializedContextFixture(t);
@@ -98,7 +99,11 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
-  const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
+  // These commands still communicate with the real daemon process. Keep
+  // native entry/exit and simultaneous registrations in dedicated scenarios.
+  const call = (...args: string[]) => processBoundary
+    ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
+    : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
   const { daemonStatus, stopDaemon: stop } = await import("../src/daemon/service.js");
   let daemon: ReturnType<typeof spawn> | undefined;
   const startDaemon = async () => {
@@ -205,7 +210,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
 }
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { call, queue } = f;
   await f.startDaemon();
   const wait = await call("continue", "review", "wait");
@@ -403,7 +408,7 @@ for (const state of ["passed", "awaiting_revision"] as const) {
 }
 
 test("native report refuses another session binding until the caller explicitly enters its target", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { openContextControl } = await import("../src/project/context-control.js");
   const service = (await openContextControl(f.root))!;
   // The fixture session is already bound to a different (graph) Run.
@@ -459,7 +464,7 @@ for (const async of [false, true]) test(`Human-only wait returns immediately wit
 });
 
 test("a completed historical wait does not block a fresh pending wait in the same round", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { listTasks, updateTask } = await import("../src/daemon/tasks.js");
   await f.startDaemon();
   const first = await f.call("continue", "review", "wait");
