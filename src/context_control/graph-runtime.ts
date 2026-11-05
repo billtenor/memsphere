@@ -47,13 +47,13 @@ export class GraphRuntime {
     return row;
   }
   private active(run: Run) { if (run.status !== "running" || run.archived) throw failure("RUN_FINISHED", `Run is ${run.status}`); }
-  private productionReady(run: Run, cleanedRewindId?: string) {
+  private productionReady(run: Run, cleanedRewind?: GraphFrame["pendingRewind"]) {
     this.active(run);
-    if (this.frame(run).pendingRewind && this.frame(run).pendingRewind!.id !== cleanedRewindId) throw Object.assign(failure("RECOVERY_REQUIRED", "Reviewer cleanup is pending; recover run status before producing or advancing"), { details: { runId: run.id, recoveryCommand: `memsphere run status --run ${run.id}` } });
+    if (this.frame(run).pendingRewind && !isDeepStrictEqual(this.frame(run).pendingRewind, cleanedRewind)) throw Object.assign(failure("RECOVERY_REQUIRED", "Reviewer cleanup is pending; recover run status before producing or advancing"), { details: { runId: run.id, recoveryCommand: `memsphere run status --run ${run.id}` } });
   }
-  private async productionStep(runId: string, stepId: string, cleanedRewindId?: string) {
+  private async productionStep(runId: string, stepId: string, cleanedRewind?: GraphFrame["pendingRewind"]) {
     const run = (await this.run(runId)).value;
-    this.productionReady(run, cleanedRewindId); requireEffectiveStep(run, stepId);
+    this.productionReady(run, cleanedRewind); requireEffectiveStep(run, stepId);
     return run;
   }
 
@@ -335,16 +335,16 @@ export class GraphRuntime {
       } else frame.triggers.push({ ...trigger, inputs });
       join.arrivals = {};
   }
-  private async materialize(runId: string, cleanedRewindId?: string) {
-    let row = await this.run(runId); this.productionReady(row.value, cleanedRewindId);
+  private async materialize(runId: string, cleanedRewind?: GraphFrame["pendingRewind"]) {
+    let row = await this.run(runId); this.productionReady(row.value, cleanedRewind);
     const order = new Map(this.frame(row.value).triggers.map((t, i) => [t.stepId, i]));
     const pending = [...this.frame(row.value).pendingSteps].sort((a, b) => order.get(a.id)! - order.get(b.id)!);
     for (const step of pending) {
-      await this.productionStep(runId, step.id, cleanedRewindId);
+      await this.productionStep(runId, step.id, cleanedRewind);
       const found = await this.records.get<Step>("step", runId, step.id);
       if (!found) await this.records.create("step", runId, step);
       else for (const key of ["id", "runId", "source", "inputs", "createdAt"] as const) if (!isDeepStrictEqual(found.value[key], step[key])) throw failure("RECOVERY_CONFLICT", `Step creation material differs: ${step.id}.${key}`);
-      row = await this.run(runId); const run = structuredClone(row.value); this.productionReady(run, cleanedRewindId);
+      row = await this.run(runId); const run = structuredClone(row.value); this.productionReady(run, cleanedRewind);
       if (!this.frame(run).pendingSteps.some(s => s.id === step.id)) continue;
       this.frame(run).pendingSteps = this.frame(run).pendingSteps.filter(s => s.id !== step.id);
       await this.saveRun(row, run);
@@ -510,8 +510,9 @@ export class GraphRuntime {
     }
     // Only this recovery, after every saved worker was verified stopped, may
     // materialize under the intent. Keep the intent if materialization fails.
-    await this.materialize(runId, intent.id);
+    await this.materialize(runId, intent);
     const latest = await this.run(runId), run = structuredClone(latest.value);
+    this.productionReady(run, intent);
     if (this.frame(run).pendingRewind?.id === intent.id) { delete this.frame(run).pendingRewind; await this.saveRun(latest, run); }
   }
   private async releaseCollects(runId: string) {

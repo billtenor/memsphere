@@ -1062,3 +1062,32 @@ test("editing a returned Action cannot alter a Run's frozen execution", async t 
     assert.equal(result.step.status, "done");
   });
 });
+
+
+test("cleanup proof cannot materialize a replacement after the saved worker set changes", { timeout: 15000 }, async t => {
+  const { service } = await fixture(t);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "changed cleanup intent", procedure: procedure([action("A")]) });
+    const old = await produce(g, start.run.id, start.steps[0].id);
+    const runtime = g as unknown as { materialize: (id: string, proof?: unknown) => Promise<void> };
+    const materialize = runtime.materialize.bind(g);
+    runtime.materialize = async (id, proof) => {
+      if (proof) {
+        // Model a second recovery persisting a late registered worker after
+        // this recovery finished verifying its earlier worker set.
+        const row = (await service.stores.run.get({}, id))!;
+        const value = structuredClone(row.value) as typeof start.run;
+        value.frames![0].graphFrame.pendingRewind!.workers.push({ reviewId: "late-review", attemptId: "late-attempt", pid: 12345 });
+        await service.stores.run.update({}, id, value, { expectedRevision: row.revision });
+      }
+      return materialize(id, proof);
+    };
+    await assert.rejects(g.rewind(start.run.id, old.step.id, "new product"), { code: "RECOVERY_REQUIRED" });
+    const saved = await g.snapshot(start.run.id);
+    assert.equal(saved.run.frames![0].graphFrame.pendingRewind!.workers.length, 1);
+    const replacement = saved.run.frames![0].graphFrame.rewinds!.at(-1)!.replacementStepId;
+    assert.equal(saved.steps.some(s => s.id === replacement), false);
+    await assert.rejects(g.enter(start.run.id, replacement), { code: "RECOVERY_REQUIRED" });
+    assert.equal(saved.artifacts.length, old.snapshot.artifacts.length);
+  });
+});
