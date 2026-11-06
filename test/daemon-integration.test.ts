@@ -1,4 +1,5 @@
 import { processGates } from "./fixtures/process-gates.mjs";
+import { fileURLToPath } from "node:url";
 import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";

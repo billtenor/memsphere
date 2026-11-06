@@ -10,6 +10,16 @@ import { editMemories, publishMemoryChange, renameMemory, validateMemoryChange }
 import { readProjectRegistry } from "../../src/project/registry.js";
 import { createAgentReviewCliRuntime } from "../../src/acp/cli-runtime.js";
 import { invokeCliModule } from "./cli-module.js";
+import type { SpawnSyncReturns } from "node:child_process";
+
+export function assertChangeShowRejected(result: SpawnSyncReturns<string>, status: number, diagnostic: RegExp) {
+  assert.equal(result.error ?? undefined, undefined, "CLI must finish without a launch error or timeout");
+  assert.equal(result.signal, null, "CLI rejection must not be a signal termination");
+  assert.equal(result.status, status, result.stderr);
+  assert.equal(result.stdout, "", "rejected reads must not emit material");
+  assert.match(result.stderr, /^error: /, "failure must be a handled CLI rejection");
+  assert.match(result.stderr, diagnostic);
+}
 
 export async function changeShowFixture(t: test.TestContext) {
   const cli = resolve("dist/cli.js");

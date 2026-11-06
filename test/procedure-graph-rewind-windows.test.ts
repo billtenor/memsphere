@@ -84,16 +84,20 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     }
     await stopRewindWorker(related.rewind);
   } else {
-    await stopRewindWorker(related.rewind);
-    for (const member of related.rewind.members) assert.equal(await captureProcessIdentity(member.pid), undefined);
-    // Simulate reuse of a historical PID with a real unrelated live process.
-    // The retired Job is empty; neither the replacement nor its child may die.
-    await stopRewindWorker({
-      ...related.rewind, pid: unrelated.worker.pid!,
-      identity: { pid: unrelated.worker.pid!, group: unrelated.worker.pid!, started: "1" }
+    await t.test("terminates the owned worker tree", async () => {
+      await stopRewindWorker(related.rewind);
+      for (const member of related.rewind.members) assert.equal(await captureProcessIdentity(member.pid), undefined);
+    });
+    await t.test("an empty retired Job tolerates PID reuse without harming the new process", async () => {
+      // Simulate reuse of a historical PID with a real unrelated live process.
+      // The retired Job is empty; neither the replacement nor its child may die.
+      await stopRewindWorker({
+        ...related.rewind, pid: unrelated.worker.pid!,
+        identity: { pid: unrelated.worker.pid!, group: unrelated.worker.pid!, started: "1" }
     });
     assert.deepEqual(await captureProcessIdentity(unrelated.worker.pid!), unrelated.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(unrelated.child.pid), unrelated.child);
+    });
   }
 });
 
