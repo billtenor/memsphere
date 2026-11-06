@@ -7,6 +7,7 @@ import { parseMemoryEntity } from "../memory/store.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
 import { serializeMemoryYaml } from "../memory/serializer.js";
 import { openContextControl } from "../project/context-control.js";
+import { effectiveStep, supersedingRewind } from "../context_control/graph-rewind.js";
 import { isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.js";
 import { failure } from "../context_control/errors.js";
 import type { Run, Snapshot, Step } from "../context_control/types.js";
@@ -78,7 +79,9 @@ export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: st
   const run = snapshot.run;
   if (run.status !== "running") return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.status, command: `memsphere run show --run ${run.id}` });
   const ready = g.ready(snapshot);
-  if (ready.length === 1 && enter) {
+  const explicitReplacement = ready.length === 1 && ready[0].status === "pending" &&
+    run.frames?.[0].graphFrame.rewinds?.some(r => r.replacementStepId === ready[0].id);
+  if (ready.length === 1 && enter && !explicitReplacement) {
     let entered: Awaited<ReturnType<GraphRuntime["enter"]>>;
     try { entered = await g.enter(run.id, ready[0].id); }
     catch (error) {
@@ -92,11 +95,12 @@ export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: st
     await createCommandState(project, run.id, entered.step.id).catch(() => undefined);
     return stepPrompt(g, entered.snapshot, entered.step, project);
   }
-  if (ready.length > 0) return renderPrompt("run.graph-selection", run.language, { runId: run.id, steps: ready.map(s => { const a = g.action(run, s); return { id: s.id, description: a.description, actor: a.actor ?? "agent", artifact: a.artifact!.name }; }), command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step <step-id>` });
-  const reviewing = snapshot.steps.filter(s => s.status === "awaiting_review");
+  if (ready.length > 0) return renderPrompt("run.graph-selection", run.language, { runId: run.id, steps: ready.map(s => { const a = g.action(run, s); return { id: s.id, description: a.description, actor: a.actor ?? "agent", artifact: a.artifact!.name }; }), command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step ${ready.length === 1 ? ready[0].id : "<step-id>"}` });
+  const reviewing = snapshot.steps.filter(s => effectiveStep(run, s.id) && s.status === "awaiting_review");
   const partial = run.frames![0].graphFrame.joins.filter(j => Object.keys(j.arrivals).length);
-  const complete = !reviewing.length && !partial.length;
-  return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: complete ? (run.language === "en" ? "All Steps completed; finish the Run." : "全部 Step 已完成，可以结束 Run。") : (run.language === "en" ? `${reviewing.length} Steps awaiting review; ${partial.length} incomplete joins.` : `${reviewing.length} 个 Step 等待评审；${partial.length} 个 Join 尚未凑齐。`), command: complete ? `memsphere --project ${quote(project)} run finish --run ${run.id}` : `memsphere --project ${quote(project)} run status --run ${run.id}` });
+  const deferred = run.frames![0].graphFrame.deferredCollects?.length ?? 0;
+  const complete = !reviewing.length && !partial.length && !deferred;
+  return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: complete ? (run.language === "en" ? "All Steps completed; finish the Run." : "全部 Step 已完成，可以结束 Run。") : (run.language === "en" ? `${reviewing.length} Steps awaiting review; ${partial.length} incomplete joins; ${deferred} collect replays waiting for replacement producers.` : `${reviewing.length} 个 Step 等待评审；${partial.length} 个 Join 尚未凑齐；${deferred} 个聚合等待替代成员。`), command: complete ? `memsphere --project ${quote(project)} run finish --run ${run.id}` : `memsphere --project ${quote(project)} run status --run ${run.id}` });
 }
 export async function printGraphStart(snapshot: Snapshot, output?: "text" | "json") {
   const config = await readConfig(); const service = (await openContextControl(config.scopeRoot))!;
@@ -117,7 +121,7 @@ export async function printGraphReviewOutput(review: ArtifactReview<import("../r
   return true;
 }
 export async function graphCommand(operation: string, input: object): Promise<boolean> {
-  const options = input as Options & { slot?: string; skip?: boolean };
+  const options = input as Options & { slot?: string; skip?: boolean; dryRun?: boolean; reason?: string; reasonFile?: string };
   if (!options.run) return false;
   const config = await readConfig(); const service = await openContextControl(config.scopeRoot);
   const run = service && await service.findRun(options.run);
@@ -140,7 +144,21 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const snapshot = await g.snapshot(run.id);
       const step = options.step && snapshot.steps.find(s => s.id === options.step);
       if (options.step && !step) throw failure("NOT_FOUND", `Step not found: ${options.step}`);
-      emitCommandResult(step ? { runId: run.id, step, action: g.action(run, step) } : snapshot, options.output ?? "text"); return true;
+      const projectStep = (s: Step) => ({ ...s, effective: effectiveStep(snapshot.run, s.id), ...(supersedingRewind(snapshot.run, s.id) ? { supersededBy: supersedingRewind(snapshot.run, s.id) } : {}) });
+      emitCommandResult(step ? { runId: run.id, step: projectStep(step), action: g.action(run, step) } : { ...snapshot, steps: snapshot.steps.map(projectStep) }, options.output ?? "text"); return true;
+    }
+    if (operation === "rewind") {
+      const stepId = needed(options.step, "--step");
+      if (options.reason !== undefined && options.reasonFile !== undefined) throw failure("INVALID_ARGUMENT", "Choose --reason or --reason-file");
+      const reason = options.reasonFile ? await readFile(options.reasonFile, "utf8") : options.reason;
+      if (!options.dryRun && !reason?.trim()) throw failure("INVALID_ARGUMENT", "Rewind reason is required");
+      const result = options.dryRun ? await g.rewindPreview(run.id, stepId) : await g.rewind(run.id, stepId, reason!);
+      const { snapshot: _snapshot, ...plan } = result as typeof result & { snapshot?: Snapshot };
+      const replacement = "replacementStepId" in plan ? String(plan.replacementStepId) : undefined;
+      emitCommandResult({ runId: run.id, dryRun: Boolean(options.dryRun), ...plan,
+        message: run.language === "en" ? "History is retained. Existing code, commits, PRs and external side effects require coordination; they are not rolled back." : "旧步骤、产物和依赖持续保留。已有代码、commit、PR 及外部副作用需自行协调，回溯不会自动撤销它们。",
+        ...(replacement ? { command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step ${replacement}` } : {}) }, options.output ?? "text");
+      return true;
     }
     if (operation === "enter") { const entered = await g.enter(run.id, needed(options.step, "--step")); await createCommandState(project, run.id, entered.step.id); console.log(await stepPrompt(g, entered.snapshot, entered.step, project)); return true; }
     if (operation === "status") { const snapshot = await g.advance(run.id); const prompt = await graphNext(g, snapshot, project, !await currentIdentity()); if (options.output === "json") emitCommandResult({ snapshot: await g.snapshot(run.id), prompt }, "json"); else console.log(prompt); return true; }

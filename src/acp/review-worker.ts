@@ -3,10 +3,12 @@ import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
 import {
+  assertArtifactReviewAgentAttemptRunning,
   claimArtifactReviewAgentAssignment,
   failArtifactReviewAgentAssignment,
   readArtifactReviewForActor,
   recordArtifactReviewAgentSession,
+  recordArtifactReviewAgentProcesses,
   recordArtifactReviewAgentStop
 } from "../context_control/review-repository.js";
 import { runAgentReviewAcpSession } from "./client.js";
@@ -17,6 +19,8 @@ import { getAgentReviewProvider, type AgentReviewProvider } from "./provider.js"
 import { AcpProviderConfigurationError } from "./validation.js";
 import { resolvePromptLocale } from "../prompts/index.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
+import { captureProcessIdentity } from "../context_control/review-process.js";
+import { startWindowsReviewJob } from "../context_control/windows-review-job.js";
 
 export type AgentReviewWorkerOptions = {
   config?: string;
@@ -27,6 +31,7 @@ export type AgentReviewWorkerOptions = {
   cliEntrypoint?: string;
   workspaceRoot?: string;
   providerResolver?: (id: string | undefined) => AgentReviewProvider;
+  runSession?: typeof runAgentReviewAcpSession;
 };
 
 export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOptions): Promise<void> {
@@ -36,12 +41,24 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   const nodeExecutable = requiredOption(options.nodeExecutable, "--node-executable");
   const cliEntrypoint = requiredOption(options.cliEntrypoint, "--cli-entrypoint");
   const config = await readConfig(requiredOption(options.config, "--config"));
+  let workerJob: string | undefined;
+  let enrollmentFailure: unknown;
+  if (process.platform === "win32" && reviewId.startsWith("graph-review-")) {
+    try {
+      const identity = await captureProcessIdentity(process.pid);
+      if (!identity) throw new Error("Worker creation identity unavailable");
+      workerJob = await startWindowsReviewJob(identity);
+    } catch (error) { enrollmentFailure = error; }
+  }
   const claimed = await claimArtifactReviewAgentAssignment({
     runsRoot: config.runsRoot,
     reviewId,
     roundId,
     actorId: assignmentId,
-    workerPid: process.pid
+    // Failed enrollment has not run provider preparation or spawned a Provider.
+    // No uncontained Reviewer is allowed to continue after this failure.
+    workerPid: enrollmentFailure ? undefined : process.pid,
+    ...(workerJob ? { workerJob } : {})
   });
   if (!claimed) return;
 
@@ -69,6 +86,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
+    if (enrollmentFailure) throw enrollmentFailure;
     const temporaryRoot = join(callerDirectory, "tmp");
     await mkdir(temporaryRoot, { recursive: true });
     attemptDirectory = await mkdtemp(join(temporaryRoot, "memsphere-review-"));
@@ -101,8 +119,10 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       promptVersion: claimed.assignment.nodeTree ? "artifact-review-v3" : claimed.attempt.promptVersion ?? launch.promptVersion,
       locale: resolvePromptLocale(claimed.run.language)
     });
-    const result = await runAgentReviewAcpSession({
+    const result = await (options.runSession ?? runAgentReviewAcpSession)({
       launch,
+      assertLaunchValid: () => assertArtifactReviewAgentAttemptRunning(common),
+      onBeforeStop: providerPid => recordArtifactReviewAgentProcesses({ ...common, workerPid: process.pid, providerPid }),
       prompt: `${prompt}\n\n${claimed.run.language === "en"
         ? "Use the current directory for this Attempt. Read or download Artifacts only when needed and keep local material and temporary files here. No source code is copied into this directory."
         : "当前目录是本次 Attempt 的独立工作目录。按需读取或下载 Artifact，本地材料和临时文件自行在当前目录组织。此目录未复制代码。"}`,
@@ -138,9 +158,16 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       stopReason: "worker_error"
     });
   } finally {
-    await activity.close();
     await cliRuntime?.cleanup().catch(() => undefined);
-    if (attemptDirectory) await rm(attemptDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (attemptDirectory) {
+      try { await rm(attemptDirectory,{recursive:true,force:true}); }
+      catch (error) {
+        // A surviving process can own its cwd on Windows. Keep the original
+        // Review outcome and retain the directory for later recovery/cleanup.
+        activity.recordLifecycle("cleanup_failed",`Attempt directory retained: ${attemptDirectory}; ${(error as NodeJS.ErrnoException).code ?? String(error)}`);
+      }
+    }
+    await activity.close();
   }
 }
 

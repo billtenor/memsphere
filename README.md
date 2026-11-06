@@ -519,3 +519,13 @@ Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 C
 `memsphere daemon start/status/stop/restart` 管理 Home 后台进程。View 仍用 `view start/status/stop/restart` 管理；停止 View 不影响等待任务，daemon 重启恢复之前的 View 启停意图。不安装操作系统开机自启服务。
 
 Step 在依赖满足时提前创建，enter 幂等，Continue 固定同一 Step 至完成。正式评审还支持 `continue review resolve` 处置意见和 `continue review submit-for-human` 记录已明确授权的 Human 票，参数与权限沿用对应原生命令。入口 Action 负责准备业务材料，启动不接收结构化业务 input。graph 使用模型 Store；已有 Project 按提示显式 `project models initialize` 升级。完整语法、model/payload 契约与示例见 [graph 流程](docs/procedure-graph-syntax.md)。
+
+新建流程默认推荐显式使用 `mode: graph`，敏捷需求开发流程已采用 graph；省略 mode 仍按 flow 解析。CLI 支持回溯上游步骤并保留历史产物和依赖：
+
+```bash
+memsphere run step rewind --run R --step S --dry-run --output json
+memsphere run step rewind --run R --step S --reason "Revise product plan"
+memsphere run step enter --run R --step <replacementStepId>
+```
+
+执行后须显式 enter 新 pending 目标；受影响后继重建、独立分支保留，旧步骤不能继续提交。写入失败用同一 Run 的 status 恢复。回溯不撤销代码或外部副作用。
