@@ -56,55 +56,21 @@ actions:
         - 架构师
         - 测试工程师
   - !action
-    id: development_plan
-    description: 基于已确认的实施与验证方案产出开发计划或 Task List。
-    actor: agent
-    dependencies:
-      - !dependency
-        from: implementation_plan
-    artifact:
-      name: 开发计划
-      model:
-        definedBy: json-schema/draft-07.json
-        definition: '{"type":"string"}'
-      payload:
-        contentType: text/markdown
-  - !action
     id: implement
-    description: 按需求契约、实施方案、开发计划和适用开发规范完成开发。
+    description: 按需求契约、实施与验证方案及适用开发和测试规范完成开发、本地验证与问题修复。
     actor: agent
     asserts:
-      - 实现成果须包含相互一致的代码、测试及必要文档、Skill 和 Memory。
-      - 功能实现摘要须包含修改文件、关键代码路径和主要 diff、需求映射、行为与兼容性影响、采用的开发规范、测试结果和未验证项。
-      - 存在 Memory 差异时，摘要须引用匹配当前内容且通过校验的 ChangeSet，包含 ID、校验状态和 View 入口。
+      - 交付的代码、测试及必要文档、Skill 和 Memory 须相互一致。
+      - 摘要须说明主要改动与需求落实情况、行为及兼容性影响、实际检查及结果、未执行项和残留问题。
+      - 适用本地检查须全部通过，未执行项须有不适用依据；发现的问题须说明处置和修复验证结果。
+      - 本轮存在 Memory 差异时，摘要须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
     dependencies:
       - !dependency
         from:
           - requirements
           - implementation_plan
-          - development_plan
     artifact:
-      name: 功能实现摘要
-      model:
-        definedBy: json-schema/draft-07.json
-        definition: '{"type":"string"}'
-      payload:
-        contentType: text/markdown
-  - !action
-    id: initial_validation
-    description: 按验证方案和适用测试规范执行本地验证，修复问题并验证修复结果。
-    actor: agent
-    asserts:
-      - 验证报告须包含实际执行的检查、结果和未执行项；适用本地检查全部通过，未执行项须有不适用依据。
-      - 失败记录须区分本轮问题、历史问题和环境阻塞，并说明处置结果。
-      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
-    dependencies:
-      - !dependency
-        from:
-          - implementation_plan
-          - implement
-    artifact:
-      name: 初始验证报告
+      name: 开发与测试摘要
       model:
         definedBy: json-schema/draft-07.json
         definition: '{"type":"string"}'
@@ -121,7 +87,7 @@ actions:
       - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
     dependencies:
       - !dependency
-        from: initial_validation
+        from: implement
     artifact:
       name: GitHub PR 提交结果
       model:
