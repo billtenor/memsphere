@@ -3,6 +3,8 @@ import type { ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { captureProcessIdentity, queryWindowsProcesses, type ProcessIdentity } from "../../src/context_control/review-process.js";
 import { inspectWindowsReviewJob } from "../../src/context_control/windows-review-job.js";
+import type { TestContext } from "node:test";
+import { processGates } from "../fixtures/process-gates.mjs";
 
 export async function bounded<T>(operation: Promise<T>, description: string, ms = 15_000): Promise<T> {
   const timer = new AbortController();
@@ -100,6 +102,35 @@ export async function cleanupFixtureResources(actions: Array<() => unknown | Pro
     try { await action(); } catch (error) { errors.push(error); }
   }
   if (errors.length) throw new AggregateError(errors, "Fixture cleanup failed");
+}
+
+/** Register ownership before the next fallible await; dispose dependents first. */
+export async function rewindFixtureResources(t: Pick<TestContext, "after" | "signal">, options: {
+  createGates?: typeof processGates;
+  createObserver?: typeof createFixtureProcesses;
+} = {}) {
+  const actions: Array<() => unknown | Promise<unknown>> = [];
+  let closed = false;
+  const defer = (action: () => unknown | Promise<unknown>) => {
+    if (closed) throw Error("Cannot register a closed rewind fixture");
+    actions.push(action);
+  };
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    await cleanupFixtureResources(actions.reverse());
+  };
+  t.after(close);
+  try {
+    const gates = await (options.createGates ?? processGates)(t.signal);
+    defer(() => gates.close());
+    const observed = await (options.createObserver ?? createFixtureProcesses)(t.signal);
+    defer(() => observed.close());
+    return { gates, observed, defer, close };
+  } catch (error) {
+    try { await close(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], "Rewind fixture initialization and cleanup failed"); }
+    throw error;
+  }
 }
 
 export async function untilFixture(read: () => Promise<boolean>, description = "fixture state"): Promise<void> {

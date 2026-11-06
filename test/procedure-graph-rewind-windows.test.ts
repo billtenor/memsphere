@@ -1,4 +1,3 @@
-import { processGates } from './fixtures/process-gates.mjs';
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
@@ -6,7 +5,7 @@ import { release as osRelease } from "node:os";
 import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
-import {cleanupFixtureResources, createFixtureProcesses, stopFixtureChild, stopFixtureJob, verifyFixtureTreeExit} from "./helpers/fixture-process.js";
+import {cleanupFixtureResources, rewindFixtureResources, stopFixtureChild, stopFixtureJob, verifyFixtureTreeExit} from "./helpers/fixture-process.js";
 import {pinWindowsProcess} from "./helpers/windows-process-handle.js";
 import type {ProcessIdentity} from "../src/context_control/review-process.js";
 
@@ -14,17 +13,15 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
   t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM, kernel Job Objects; owned ChildProcess/immutable Job fixture cleanup`);
-  const gates = await processGates(t.signal);
+  const resources = await rewindFixtureResources(t);
+  const { gates, observed } = resources;
   const workers: Array<ReturnType<typeof fork>> = [];
   const jobs: string[] = [];
-  const observed=await createFixtureProcesses(t.signal);
   const alive=async(pid:number)=>(await observed.alive(pid))[0];
-  t.after(() => cleanupFixtureResources([
+  resources.defer(() => cleanupFixtureResources([
     () => gates.publish("release"),
     ...jobs.map(job => () => stopFixtureJob(job)),
-    ...workers.map(worker => () => stopFixtureChild(worker)),
-    () => gates.close(),
-    () => observed.close()
+    ...workers.map(worker => () => stopFixtureChild(worker))
   ]));
   const start = async () => {
     const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint), scenario], {
@@ -55,7 +52,7 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
   } else if(scenario === "host-loss"){
     assert.ok(related.host);
     const controller=await pinWindowsProcess(related.host,t.signal);
-    t.after(()=>controller.close());
+    resources.defer(()=>controller.close());
     // armed proves identity on the retained handle before host-loss injection.
     await controller.terminate();
     const deadline=Date.now()+20000;

@@ -1,9 +1,8 @@
-import {processGates} from './fixtures/process-gates.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {createFixtureProcesses, stopFixtureChild, stopFixtureJob, untilFixture} from './helpers/fixture-process.js';
+import {cleanupFixtureResources, createFixtureProcesses, fixtureProcesses, rewindFixtureResources, stopFixtureChild, stopFixtureJob, untilFixture} from './helpers/fixture-process.js';
 import {writeFile, readdir} from 'node:fs/promises';
 import {readConfig} from '../src/config.js';
 import {dispatchArtifactReviewAgents} from '../src/acp/dispatcher.js';
@@ -43,8 +42,19 @@ test('a mismatched OS start identity never signals a live detached process', {sk
 });
 
 for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=false,nativeDispatch=false,completed=false,failedBeforeProvider=false,lateDescendant=false} of [{resistant:false,late:false,failOnce:false,submitted:true,completed:true,failedBeforeProvider:true},{resistant:false,late:false,failOnce:false,submitted:true,completed:true,lateDescendant:true},{resistant:false,late:false,failOnce:false,submitted:true,completed:true},{resistant:false,late:false,failOnce:true,nativeDispatch:true},{resistant:false,late:false,failOnce:true,submitted:true},{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:false,orphan:true},{resistant:false,late:false,failOnce:false,launchGate:"before-provider"},{resistant:false,late:false,failOnce:false,launchGate:"after-provider"}])test(`rewind stops the real ACP worker/provider group${failedBeforeProvider?" after Provider construction failure and successful retry":lateDescendant?" with a descendant born after the saved lifecycle snapshot":completed?" after normal completion and exit":nativeDispatch?" through the native dispatcher":submitted?" after voting but before prompt returns":launchGate?` at ${launchGate}`:resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' after forced Windows worker exit':''} and preserves an unrelated reviewer`,{timeout:240000,skip:((failedBeforeProvider||lateDescendant)&&process.platform!=='win32')||(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
- const gates=await processGates(t.signal);
- const observed=await createFixtureProcesses(t.signal);
+ const resources=await rewindFixtureResources(t);
+ const {gates,observed}=resources;
+ const cleanups:Array<()=>unknown|Promise<unknown>>=[];
+ const beforeCleanup=(cleanup:()=>unknown|Promise<unknown>)=>{cleanups.push(cleanup);};
+ let dispatch:Promise<number>|undefined,releaseDispatch:(()=>void)|undefined;
+ resources.defer(()=>cleanupFixtureResources([...cleanups,async()=>{releaseDispatch?.();if(dispatch)await boundedCleanup(dispatch,"dispatcher cleanup");}]));
+ let failCleanupJob=false;
+ const cleanupFailure=Error('injected first owned Job probe failure');
+ const jobCleanupAttempts:number[]=[];
+ const cleanupJob=async(job:string|undefined,i:number)=>{
+  if(failCleanupJob){jobCleanupAttempts.push(i);if(i===0)throw cleanupFailure;}
+  if(process.platform==='win32'&&job)await stopFixtureJob(job);
+ };
  const alive=async(pid:number)=>(await observed.alive(pid))[0];
  const assertProcesses=async(record:any,keys:string[],expected:boolean)=>{
   const pids=keys.map(key=>record[key]);
@@ -52,9 +62,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   keys.forEach((key,index)=>assert.equal(states[index],expected,`${key}: ${observed.diagnostic(pids[index])}`));
  };
  const f=await initializedContextFixture(t);
- t.after(()=>gates.close());
- t.after(()=>observed.close());
- if(nativeDispatch){const previous=process.env.MEMSPHERE_HOME;process.env.MEMSPHERE_HOME=f.home;f.beforeCleanup(async()=>{if(previous===undefined)delete process.env.MEMSPHERE_HOME;else process.env.MEMSPHERE_HOME=previous;});}
+ if(nativeDispatch){const previous=process.env.MEMSPHERE_HOME;process.env.MEMSPHERE_HOME=f.home;beforeCleanup(async()=>{if(previous===undefined)delete process.env.MEMSPHERE_HOME;else process.env.MEMSPHERE_HOME=previous;});}
  const service=(await openContextControl(f.root))!;
  const spec={name:'body',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}};
  const actor={kind:'agent' as const,name:'reviewer',permissions:['artifact.read' as const,'decision.assess' as const],agent:{provider:'test',providerType:'traex' as const,command:process.execPath,args:[fileURLToPath(new URL('./fixtures/fake-acp-reviewer.mjs',import.meta.url)),'rewind-gated'],env:{REVIEW_TEST_GATES:String(gates.endpoint),REVIEW_TEST_SETUP_API:"yes",REVIEW_TEST_READY_PREFIX:f.directory},startupTimeoutMs:10000,idleTimeoutMs:null}};
@@ -66,15 +74,13 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const processes=[];
  let verifiedCleanup=false;
  let failedAttempt:any, failureConsumed=false;
- let dispatch:Promise<number>|undefined,releaseDispatch:(()=>void)|undefined;
- t.after(async()=>{releaseDispatch?.();if(dispatch)await boundedCleanup(dispatch,"dispatcher cleanup");});
  const launch=async(i:number)=>{
   if(nativeDispatch&&i===0){
    const candidate=candidates[0],config=await readConfig(join(f.root,'config.json'));
    const ready=join(f.directory,reviews.graphReviewHandle(start.run.id,candidate.step.id));
    const previousControl={endpoint:process.env.REWIND_DISPATCH_GATES,ready:process.env.REWIND_DISPATCH_CONTROL};
    process.env.REWIND_DISPATCH_GATES=String(gates.endpoint);process.env.REWIND_DISPATCH_CONTROL=ready;
-   f.beforeCleanup(()=>{
+   beforeCleanup(()=>{
     for(const [key,value] of [['REWIND_DISPATCH_GATES',previousControl.endpoint],['REWIND_DISPATCH_CONTROL',previousControl.ready]])
      if(value===undefined)delete process.env[key!];else process.env[key!]=value;
    });
@@ -92,7 +98,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
     if(process.platform==='win32'&&job&&!processes[0]?.retired)await stopFixtureJob(job);
     await untilFixture(async()=>!(await alive(pid)),'native dispatcher original worker exit');
    };
-   f.beforeCleanup(cleanupNative);
+   beforeCleanup(cleanupNative);
    let reads=0,reached!:()=>void;
    const paused=new Promise<void>(resolve=>{reached=resolve;});
    const release=new Promise<void>(resolve=>{releaseDispatch=resolve;});
@@ -115,7 +121,9 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   const worker=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/graph-review-worker.mjs',import.meta.url)),input],{detached:true,stdio:['ignore','ignore','pipe'],env:{...process.env,MEMSPHERE_HOME:f.home,...(resistant&&i===0?{REVIEW_TEST_RESISTANT:'yes'}:{})}});
   let ownedJob:string|undefined;
   let errors='';worker.stderr!.on('data',s=>errors+=s);
-  f.beforeCleanup(async()=>{
+  beforeCleanup(async()=>{
+   const wasAlive=worker.exitCode===null&&worker.signalCode===null;
+   await cleanupFixtureResources([()=>{
    gates.publish(join(f.directory,`release-orphans-${i}`));
    gates.publish(join(f.directory,'release-claim'));
    gates.publish(`finish-review:${ready}`);
@@ -123,12 +131,12 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    gates.publish(`release-provider:${ready}`);
    gates.publish(`cleanup-child:${ready}`);
    if(lateDescendant){gates.publish(`release-late:${ready}`);gates.publish(`snapshot-continue:${ready}`);gates.publish(`spawn-late:${ready}`);}
-   const wasAlive=worker.exitCode===null&&worker.signalCode===null;
-   await stopFixtureChild(worker);
+   },()=>stopFixtureChild(worker),async()=>{
    const current=await reviews.readArtifactReviewForActor({runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,candidate.step.id),roundId:candidate.step.reviewRounds![0].id,actorId:'reviewer'});
    const attempt=current.assignment.attempts?.find(a=>a.workerPid===worker.pid&&observed.original(worker.pid!)?.started===a.workerIdentity?.started);
    const job=ownedJob??attempt?.workerJob;
-   if(process.platform==='win32'&&job&&(wasAlive||!verifiedCleanup))await stopFixtureJob(job);
+   if(wasAlive||!verifiedCleanup)await cleanupJob(job,i);
+   }]);
   });
   if(failProviderBuild){
    const [code]=await once(worker,'exit');
@@ -328,5 +336,18 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   assert.deepEqual((await service.snapshot(start.run.id)).run.frames![0].graphFrame.pendingRewind,pending,'absence of evidence cannot clear the saved intent');
  }
  verifiedCleanup=true;
+ if(failOnce&&submitted&&!completed)await t.test('ACP teardown still cleans the second original execution after the first Job probe rejects',async()=>{
+  // Exercise the actual registered ACP cleanup chain, not just the aggregator.
+  // The related execution is retired; its Job probe fails before cleanup of the
+  // still-live unrelated execution, whose original worker/provider/child must exit.
+  const pids=[...new Set(processes.flatMap(p=>[p.workerPid,p.providerPid,p.childPid]).filter(Number.isInteger))];
+  const verification=fixtureProcesses();
+  verification.rememberSnapshot(...pids.map(pid=>observed.original(pid)!));
+  failCleanupJob=true;verifiedCleanup=false;
+  const includesOriginal=(error:unknown):boolean=>error===cleanupFailure||error instanceof AggregateError&&error.errors.some(includesOriginal);
+  await assert.rejects(resources.close(),includesOriginal);
+  assert.deepEqual(jobCleanupAttempts,[0,1],'the second owned Job is attempted after the first fails');
+  await untilFixture(async()=>!(await verification.alive(...pids)).some(Boolean),'all original ACP executions exit after a cleanup probe failure');
+ });
 
 });

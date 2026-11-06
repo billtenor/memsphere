@@ -6,6 +6,9 @@ import { captureProcessIdentity, type ProcessIdentity } from "../src/context_con
 import { bounded, cleanupFixtureResources, createFixtureProcesses, fixtureProcesses, sameProcess, stopFixtureChild, verifyFixtureTreeExit } from "./helpers/fixture-process.js";
 import { pinWindowsProcess } from "./helpers/windows-process-handle.js";
 import { ownedProcessObserver } from "./helpers/windows-process-observer.js";
+import { rewindFixtureResources } from "./helpers/fixture-process.js";
+import { processGates } from "./fixtures/process-gates.mjs";
+import { createConnection } from "node:net";
 
 const original = { pid: 123, group: 123, started: "original creation" };
 
@@ -157,6 +160,23 @@ test("a timed out CIM transport closes its owned host and rejects queued queries
   assert.notEqual(host.signalCode ?? host.exitCode, null, "failed host is already terminated");
   host.stdout.emit("data", Buffer.from('{"ok":true,"processes":[]}\n'));
   await assert.rejects(observer.query([789]), /Timed out: fresh fixture CIM response/);
+});
+
+test("observer initialization failure closes the already-listening rewind gate", async t => {
+  const failure = Error("injected observer readiness failure");
+  let endpoint = 0;
+  await assert.rejects(rewindFixtureResources(t, {
+    createGates: async signal => {
+      const gates = await processGates(signal);
+      endpoint = gates.endpoint;
+      return gates;
+    },
+    createObserver: async () => { throw failure; }
+  }), error => error === failure);
+  assert.ok(endpoint, "the real gate had acquired a listening port before failure");
+  const connection = createConnection({ host: "127.0.0.1", port: endpoint, signal: AbortSignal.timeout(5_000) });
+  try { await assert.rejects(once(connection, "connect"), { code: "ECONNREFUSED" }); }
+  finally { connection.destroy(); }
 });
 
 test("Windows pinned handle converts the creation epoch and terminates only the original object", { skip: process.platform !== "win32", timeout: 60_000 }, async t => {
