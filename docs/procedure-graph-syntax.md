@@ -528,7 +528,7 @@ memsphere run step enter --run R --step <replacementStepId>
 
 上游输入保持不变，受影响后继以新产物重建依赖。旧步骤的状态、产物正文、依赖和评审保留，退出当前有效链路；旧上下文的上报和投票拒绝。独立汇合输入根据实际派发记录恢复；collect 的独立控制信号等待被替代成员路径正式完成或被条件消除，再收集有效产物。历史来源无法精确重建时明确拒绝。首次新产物关联旧目标候选，没有旧候选时不伪造产物修订。
 
-运行写入失败后按回执执行同一 Run 的 `run status`，恢复同一目标并重试取消旧评审进程。Reviewer 的 OS 创建身份用于防止 PID 复用；投票完成本身不代表进程退出。Windows graph worker 在 claim 前加入禁止 breakaway、关闭即终止的全局命名 Job Object（跨 Windows Session 可查询），claim 原子保存 Job 身份；内核持续跟踪 Provider 和后代，包括快照后才出生或父进程退出后的进程。keeper 在 Job 为空时退出，意外退出也会关闭句柄并终止关联进程。Provider 准备失败的 Attempt 仍保留 Job 证据，重试不删除旧 Attempt。回溯在停止前持久化 Job 身份，状态恢复只在内核确认关联进程全部退出后移除 intent；leader 已退出而 Job 仍有成员时保留 intent。历史 Windows 记录若只有 PID 快照、没有 Job 证据，则不能证明完整子树退出，继续拒绝清理，不把未知当作已退出。POSIX 按隔离进程组及 OS 创建身份核验，PID 身份不匹配时不发送信号。`show` 和预览不恢复运行。回溯不撤销已有代码、Git 或外部副作用；此功能仅提供 CLI 操作入口。
+运行写入失败后按回执执行同一 Run 的 `run status`，恢复同一目标并重试取消旧评审进程。Reviewer 的 OS 创建身份用于防止 PID 复用；投票完成本身不代表进程退出。Windows graph worker 在 claim 前加入禁止 breakaway 的全局命名 Job Object（跨 Windows Session 可查询），claim 原子保存 Job 身份；内核持续跟踪 Provider 和后代，包括快照后才出生或父进程退出后的进程。登记为一次性操作；Job 在关联进程全部退出且句柄全部关闭后销毁，不依赖常驻辅助进程。Provider 准备失败的 Attempt 仍保留 Job 证据，重试不删除旧 Attempt。回溯在停止前持久化 Job 身份，状态恢复只在内核确认关联进程全部退出后移除 intent；leader 已退出而 Job 仍有成员时保留 intent。历史 Windows 记录若只有 PID 快照、没有 Job 证据，则不能证明完整子树退出，继续拒绝清理，不把未知当作已退出。POSIX 按隔离进程组及 OS 创建身份核验，PID 身份不匹配时不发送信号。`show` 和预览不恢复运行。回溯不撤销已有代码、Git 或外部副作用；此功能仅提供 CLI 操作入口。
 
 连续回溯独立成员或控制来源时，同一 collect 依赖合并所有替代成员路径和控制到达。正常 dispatch 的新控制信号也等待这些路径接纳或被条件消除；多个历史同槽信号按实际派发顺序保留各来源最新者，只恢复一次聚合与下游推进。
 
