@@ -16,7 +16,7 @@ export function sameProcess(expected: ProcessIdentity, current: ProcessIdentity 
   return current !== undefined && expected.pid === current.pid && expected.started === current.started && expected.group === current.group;
 }
 
-async function identities(pids: number[]): Promise<Map<number, ProcessIdentity>> {
+async function identities(pids: number[], query = queryWindowsProcesses): Promise<Map<number, ProcessIdentity>> {
   if (process.platform !== "win32") {
     const result = await Promise.all(pids.map(async pid => [pid, await captureProcessIdentity(pid)] as const));
     return new Map(result.filter((row): row is readonly [number, ProcessIdentity] => row[1] !== undefined));
@@ -27,10 +27,18 @@ async function identities(pids: number[]): Promise<Map<number, ProcessIdentity>>
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
   }));
   if (!selected.size) return new Map();
-  return new Map((await queryWindowsProcesses()).filter(row => selected.has(row.pid)).map(row => {
+  return new Map((await query()).filter(row => selected.has(row.pid)).map(row => {
     if (!row.started) throw Error(`Process ${row.pid} has no creation identity`);
     return [row.pid, { pid: row.pid, group: row.group, started: row.started }];
   }));
+}
+
+export async function createFixtureProcesses(signal?: AbortSignal) {
+  if (process.platform !== "win32") return { ...fixtureProcesses(), close: async () => {} };
+  const { windowsProcessObserver } = await import("./windows-process-observer.js");
+  const observer = await windowsProcessObserver(signal);
+  return { ...fixtureProcesses(pids => identities(pids, () => queryWindowsProcesses(undefined,
+    async () => ({ stdout: await observer.query(pids) })))), close: () => observer.close() };
 }
 
 /** Ready barriers must keep these original processes alive until remember ends. */

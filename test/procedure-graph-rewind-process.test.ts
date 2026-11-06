@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {fixtureProcesses, stopFixtureChild, stopFixtureJob, untilFixture} from './helpers/fixture-process.js';
+import {createFixtureProcesses, stopFixtureChild, stopFixtureJob, untilFixture} from './helpers/fixture-process.js';
 import {writeFile, readdir} from 'node:fs/promises';
 import {readConfig} from '../src/config.js';
 import {dispatchArtifactReviewAgents} from '../src/acp/dispatcher.js';
@@ -29,8 +29,9 @@ async function until<T>(read:()=>Promise<T|undefined>){const end=Date.now()+6000
 test('a mismatched OS start identity never signals a live detached process', {skip:process.platform==='win32'}, async t=>{
  const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore'});
  t.after(()=>stopFixtureChild(child));
- const observed=fixtureProcesses();
+ const observed=await createFixtureProcesses(t.signal);
  const alive=async(pid:number)=>(await observed.alive(pid))[0];
+ t.after(()=>observed.close());
  await once(child,'spawn');
  await observed.remember(child.pid!);
  const identity=await captureProcessIdentity(child.pid!);
@@ -43,7 +44,7 @@ test('a mismatched OS start identity never signals a live detached process', {sk
 
 for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=false,nativeDispatch=false,completed=false,failedBeforeProvider=false,lateDescendant=false} of [{resistant:false,late:false,failOnce:false,submitted:true,completed:true,failedBeforeProvider:true},{resistant:false,late:false,failOnce:false,submitted:true,completed:true,lateDescendant:true},{resistant:false,late:false,failOnce:false,submitted:true,completed:true},{resistant:false,late:false,failOnce:true,nativeDispatch:true},{resistant:false,late:false,failOnce:true,submitted:true},{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:false,orphan:true},{resistant:false,late:false,failOnce:false,launchGate:"before-provider"},{resistant:false,late:false,failOnce:false,launchGate:"after-provider"}])test(`rewind stops the real ACP worker/provider group${failedBeforeProvider?" after Provider construction failure and successful retry":lateDescendant?" with a descendant born after the saved lifecycle snapshot":completed?" after normal completion and exit":nativeDispatch?" through the native dispatcher":submitted?" after voting but before prompt returns":launchGate?` at ${launchGate}`:resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' after forced Windows worker exit':''} and preserves an unrelated reviewer`,{timeout:240000,skip:((failedBeforeProvider||lateDescendant)&&process.platform!=='win32')||(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
  const gates=await processGates(t.signal);
- const observed=fixtureProcesses();
+ const observed=await createFixtureProcesses(t.signal);
  const alive=async(pid:number)=>(await observed.alive(pid))[0];
  const assertProcesses=async(record:any,keys:string[],expected:boolean)=>{
   const pids=keys.map(key=>record[key]);
@@ -52,6 +53,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  };
  const f=await initializedContextFixture(t);
  t.after(()=>gates.close());
+ t.after(()=>observed.close());
  if(nativeDispatch){const previous=process.env.MEMSPHERE_HOME;process.env.MEMSPHERE_HOME=f.home;f.beforeCleanup(async()=>{if(previous===undefined)delete process.env.MEMSPHERE_HOME;else process.env.MEMSPHERE_HOME=previous;});}
  const service=(await openContextControl(f.root))!;
  const spec={name:'body',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}};

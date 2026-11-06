@@ -3,7 +3,7 @@ import test from "node:test";
 import { EventEmitter, once } from "node:events";
 import { spawn, type ChildProcess } from "node:child_process";
 import { captureProcessIdentity, type ProcessIdentity } from "../src/context_control/review-process.js";
-import { bounded, fixtureProcesses, sameProcess, stopFixtureChild } from "./helpers/fixture-process.js";
+import { bounded, createFixtureProcesses, fixtureProcesses, sameProcess, stopFixtureChild } from "./helpers/fixture-process.js";
 import { pinWindowsProcess } from "./helpers/windows-process-handle.js";
 
 const original = { pid: 123, group: 123, started: "original creation" };
@@ -121,4 +121,17 @@ test("Windows controller cancellation closes its owned process without terminati
   cancel.abort();
   await assert.rejects(controller.close(), /controller/i);
   assert.ok(sameProcess(live.identity, await captureProcessIdentity(live.child.pid!)));
+});
+
+test("Windows fixture CIM host reads fresh identities and never reuses evidence after it closes", { skip: process.platform !== "win32", timeout: 60_000 }, async t => {
+  const old = await liveChild(t), unrelated = await liveChild(t);
+  const watched = await createFixtureProcesses(t.signal);
+  t.after(() => watched.close());
+  await watched.remember(old.child.pid!, unrelated.child.pid!);
+  assert.deepEqual(await watched.alive(old.child.pid!, unrelated.child.pid!), [true, true]);
+  await stopFixtureChild(old.child);
+  assert.deepEqual(await watched.alive(old.child.pid!, unrelated.child.pid!), [false, true]);
+  await watched.close();
+  await assert.rejects(watched.alive(unrelated.child.pid!), /observer is closed/);
+  assert.ok(sameProcess(unrelated.identity, await captureProcessIdentity(unrelated.child.pid!)));
 });
