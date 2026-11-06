@@ -1280,57 +1280,63 @@ export async function validateMemoryChange(
   {
     const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
     if (context.primary.config.store.type === "managed") {
-      await assertManagedHealthy(context.primary);
-      const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
-      const change = await readReconciledChange(context.primary, resolvedId);
-      if (change.intent === "system_upgrade") {
-        if (!changeId) throw new Error(`Use memsphere memory change validate ${change.id} for this system_upgrade candidate`);
-        return validateSystemUpgradeLocked(context, change);
-      }
-      assertDraftOwner(change, context.primary.name, workspace.key);
-      if (change.store_type !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
-      const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
-      if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
-      const effectiveChange = change.origin === "view"
-        ? await resolveViewManagedTargets(change, candidateRoot, context.primary.memoryRoot)
-        : await resolveEffectiveSyncTargets(change, candidateRoot);
-      await assertChangeTargetsCurrent(context.primary, effectiveChange);
-      const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, effectiveChange.targets);
-      try {
-        const issues = await validateEffectiveMemoryChange(
-          context.primary,
-          effectiveChange,
-          checkpointCandidate,
-          candidateRoot
-        );
-        if ((change.intent === "market_import" || change.intent === "app_install")) {
-          const centralCandidateRoot = marketCandidateRoot(context.primary, change.id);
-          await rm(centralCandidateRoot, { recursive: true, force: true });
-          await mkdir(dirname(centralCandidateRoot), { recursive: true });
-          await cp(candidateRoot, centralCandidateRoot, { recursive: true });
+      return withMemoryWriteAccess(context.primary.memoryRoot, async () => {
+        // Read the configuration after admission: a publication may have finished
+        // between resolving the Project and acquiring its physical write claim.
+        const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
+        assertManaged(context.primary);
+        await assertManagedHealthy(context.primary);
+        const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
+        const change = await readReconciledChange(context.primary, resolvedId);
+        if (change.intent === "system_upgrade") {
+          if (!changeId) throw new Error(`Use memsphere memory change validate ${change.id} for this system_upgrade candidate`);
+          return validateSystemUpgradeLocked(context, change);
         }
-        effectiveChange.store_type = "managed";
-        const checkpointRoot = await persistValidatedCheckpoint(
-          context.primary,
-          effectiveChange,
-          checkpointCandidate,
-          context.primary.config.store.published_revision,
-          issues,
-          context.primary.memoryRoot,
-          candidateRoot,
-          changeReadTokens.get(change) ?? null
-        );
-        return validationResult(
-          effectiveChange,
-          context.primary.memoryRoot,
-          candidateRoot,
-          checkpointRoot,
-          context.primary.config.store.published_revision,
-          issues
-        );
-      } finally {
-        await rm(resolve(checkpointCandidate, ".."), { recursive: true, force: true });
-      }
+        assertDraftOwner(change, context.primary.name, workspace.key);
+        if (change.store_type !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
+        const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
+        if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
+        const effectiveChange = change.origin === "view"
+          ? await resolveViewManagedTargets(change, candidateRoot, context.primary.memoryRoot)
+          : await resolveEffectiveSyncTargets(change, candidateRoot);
+        await assertChangeTargetsCurrent(context.primary, effectiveChange);
+        const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, effectiveChange.targets);
+        try {
+          const issues = await validateEffectiveMemoryChange(
+            context.primary,
+            effectiveChange,
+            checkpointCandidate,
+            candidateRoot
+          );
+          if ((change.intent === "market_import" || change.intent === "app_install")) {
+            const centralCandidateRoot = marketCandidateRoot(context.primary, change.id);
+            await rm(centralCandidateRoot, { recursive: true, force: true });
+            await mkdir(dirname(centralCandidateRoot), { recursive: true });
+            await cp(candidateRoot, centralCandidateRoot, { recursive: true });
+          }
+          effectiveChange.store_type = "managed";
+          const checkpointRoot = await persistValidatedCheckpoint(
+            context.primary,
+            effectiveChange,
+            checkpointCandidate,
+            context.primary.config.store.published_revision,
+            issues,
+            context.primary.memoryRoot,
+            candidateRoot,
+            changeReadTokens.get(change) ?? null
+          );
+          return validationResult(
+            effectiveChange,
+            context.primary.memoryRoot,
+            candidateRoot,
+            checkpointRoot,
+            context.primary.config.store.published_revision,
+            issues
+          );
+        } finally {
+          await rm(resolve(checkpointCandidate, ".."), { recursive: true, force: true });
+        }
+      });
     }
 
     if (changeId) {
@@ -2892,6 +2898,20 @@ async function pendingEmbeddedMarketTargets(
 }
 
 async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {
+  const expected = changeReadTokens.get(change) ?? checkpointRecordToken(change);
+  return withCheckpointRecordLock(project.paths.runtimeRoot, change.id, async () => {
+    const current = await readChange(project, change.id);
+    if (checkpointRecordToken(current) !== expected) {
+      throw Object.assign(new Error(`ChangeSet ${change.id} changed before publication; retry the operation`), { code: "CHECKPOINT_CONFLICT" });
+    }
+    // Keep the same lock through Git/config commit and every rollback. No
+    // checkpoint, scope or Comment writer can commit between these boundaries.
+    return publishWithRecordLock(project, current, candidateRoot, message);
+  });
+}
+
+/** Caller holds both the physical Memory write claim and this record's lock. */
+async function publishWithRecordLock(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {
   await assertManagedHealthy(project);
   assertManaged(project);
   const publishedRevision = project.config.store.published_revision;
@@ -2918,19 +2938,29 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
       published_revision: revision,
       updated_at: new Date().toISOString()
     });
-    await writeChange(project, published);
+    await writeChangeUnlocked(project, published);
     return published;
   } catch (error) {
     const rollbackErrors: unknown[] = [];
     await runGit(["reset", "--hard", publishedRevision], { cwd: project.memoryRoot }).catch((rollbackError) => rollbackErrors.push(rollbackError));
     await runGit(["clean", "-fd"], { cwd: project.memoryRoot }).catch((rollbackError) => rollbackErrors.push(rollbackError));
     await restoreJsonIfChanged(project.paths.configPath, project.config).catch((rollbackError) => rollbackErrors.push(rollbackError));
-    await restoreJsonIfChanged(changePath(project, change.id), change).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    await restoreChangeRecordUnlocked(project, change).catch((rollbackError) => rollbackErrors.push(rollbackError));
     if (rollbackErrors.length > 0) {
       throw new AggregateError([error, ...rollbackErrors], "Memory publish failed and rollback was incomplete");
     }
     throw error;
   }
+}
+
+/** Only used while publication still owns the record lock and its snapshot. */
+async function restoreChangeRecordUnlocked(project: ResolvedProject, original: MemoryChangeSet): Promise<void> {
+  const current = await readChange(project, original.id).catch(error => {
+    if (isCode(error, "ENOENT")) return undefined;
+    throw error;
+  });
+  if (current && checkpointRecordToken(current) === checkpointRecordToken(original)) return;
+  await writeChangeUnlocked(project, original);
 }
 
 async function resolveEffectiveSyncTargets(change: MemoryChangeSet, candidateRoot: string): Promise<MemoryChangeSet> {
