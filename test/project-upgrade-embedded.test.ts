@@ -5,7 +5,7 @@ import test from "node:test";
 import { applyEmbeddedSystemMemoryRepair, prepareEmbeddedSystemMemoryRepair } from "../src/commands/project.js";
 import { alterDefinition, definitionPath, embeddedFixture, fixture, memoryPath } from "./helpers/project-upgrade.js";
 
-test("Embedded upgrade CLI isolates original user differences and creates a retryable dedicated ChangeSet", async () => {
+test("Embedded upgrade CLI isolates original user differences in a dedicated ChangeSet", async () => {
   const f = await fixture();
   try {
     const { project, memoryRoot } = await embeddedFixture(f);
@@ -34,30 +34,58 @@ test("Embedded upgrade CLI isolates original user differences and creates a retr
     assert.equal(f.git(["rev-parse", "HEAD"], linked), head, "Command does not commit");
     assert.equal(await readFile(userPath, "utf8"), dirtyUser);
     assert.equal(await readFile(ordinaryPath, "utf8"), ordinaryBefore);
-    const noId = f.upgrade("embedded", [], linked);
-    assert.notEqual(noId.result.status, 0);
-    assert.match(noId.value.failure.message, new RegExp(id));
-    const retry = f.upgrade("embedded", ["--change", id], linked);
-    assert.equal(retry.result.status, 0, JSON.stringify(retry.value));
-    const wrongWorktree = f.upgrade("embedded", ["--change", id]);
-    assert.notEqual(wrongWorktree.result.status, 0);
-    assert.equal(wrongWorktree.value.models.status, "not_run");
-    const upgradePath = join(linked, ".memsphere/memory", memoryPath);
-    const upgradedBytes = await readFile(upgradePath, "utf8");
-    f.git(["restore", "--", ".memsphere/memory"], linked);
-    const rollback = f.upgrade("embedded", ["--change", id], linked);
-    assert.notEqual(rollback.result.status, 0, "Reverting to valid old baseline must not report success");
-    assert.equal(rollback.value.overall, "failed");
-    const validate = f.run(["memory", "change", "validate", id], linked);
-    assert.notEqual(validate.status, 0, "Direct validation also rejects rollback");
-    await writeFile(upgradePath, upgradedBytes);
-    assert.equal(f.upgrade("embedded", ["--change", id], linked).result.status, 0);
-    assert.equal(await readFile(ordinaryPath, "utf8"), ordinaryBefore);
-    f.git(["add", "--", ".memsphere/memory"], linked);
-    f.git(["commit", "-m", "Upgrade System Memory only"], linked);
-    assert.deepEqual(f.git(["show", "--format=", "--name-only", "HEAD"], linked).split("\n"), [`.memsphere/memory/${memoryPath}`]);
-    assert.equal(JSON.parse(await readFile(join(project, "changes", id, "change.json"), "utf8")).status, "active", "A commit is not integration");
   } finally { await f.cleanup(); }
+});
+
+// Retry and integration guards use the domain repair/ChangeSet API to prepare
+// an upgraded worktree; each test crosses only its own CLI boundary.
+async function upgradedFixture(){
+ const f=await fixture();const {project}=await embeddedFixture(f);
+ const linked=join(f.root,"upgrade-worktree");f.git(["worktree","add","-b","upgrade/system",linked,"master"]);
+ const cwd=process.cwd(),keys=["MEMSPHERE_HOME","MEMSPHERE_PROJECT","GIT_CONFIG_GLOBAL","GIT_CONFIG_NOSYSTEM"] as const;
+ const previous=Object.fromEntries(keys.map(k=>[k,process.env[k]]));
+ try{
+  process.chdir(linked);for(const k of keys){if(k==="MEMSPHERE_PROJECT")process.env[k]="embedded";else process.env[k]=f.env[k];}
+  const {resolveProjectContext}=await import("../src/project/resolver.js");
+  const {readSystemMemoryUpgradeTargets}=await import("../src/commands/project.js");
+  const {readBundledSystemMemories,readReservedMemoryManifest,bundledReservedMemoryRoot,reservedSystemMemoryRemovalTombstones}=await import("../src/reserved/store.js");
+  const {createHash}=await import("node:crypto");
+  const {createSystemUpgradeMemoryChange}=await import("../src/memory/changeset.js");
+  const context=await resolveProjectContext({project:"embedded"}),plan=await readSystemMemoryUpgradeTargets("embedded");
+  const bundled=await readBundledSystemMemories(bundledReservedMemoryRoot());
+  const catalog=await Promise.all(bundled.map(async item=>({reference:item.reference,path:item.path,content:await readFile(item.sourcePath,"utf8")})));
+  const removals=reservedSystemMemoryRemovalTombstones(await readReservedMemoryManifest(bundledReservedMemoryRoot()));
+  const sourceDigest=createHash("sha256").update(JSON.stringify({catalog,removals})).digest("hex");
+  const prepared=await prepareEmbeddedSystemMemoryRepair("embedded");assert.ok(prepared);
+  let id="";await applyEmbeddedSystemMemoryRepair(prepared,{afterApply:async()=>{id=(await createSystemUpgradeMemoryChange({context,targets:plan.targets,sourceDigest})).change.id;}});
+  return {...f,project,linked,id};
+ }catch(error){await f.cleanup();throw error;}
+ finally{process.chdir(cwd);for(const k of keys){if(previous[k]===undefined)delete process.env[k];else process.env[k]=previous[k];}}
+}
+test("Embedded upgrade retry requires the dedicated ID and accepts that ID",async()=>{
+ const f=await upgradedFixture();try{
+  const missing=f.upgrade("embedded",[],f.linked);assert.notEqual(missing.result.status,0);assert.match(missing.value.failure.message,new RegExp(f.id));
+  const retry=f.upgrade("embedded",["--change",f.id],f.linked);assert.equal(retry.result.status,0,JSON.stringify(retry.value));
+ }finally{await f.cleanup();}
+});
+test("Embedded upgrade retry rejects a different worktree before model changes",async()=>{
+ const f=await upgradedFixture();try{const wrong=f.upgrade("embedded",["--change",f.id]);assert.notEqual(wrong.result.status,0);assert.equal(wrong.value.models.status,"not_run");}finally{await f.cleanup();}
+});
+test("Embedded upgrade retry and direct validation reject a restored old baseline",async()=>{
+ const f=await upgradedFixture();try{
+  const target=join(f.linked,".memsphere/memory",memoryPath),upgraded=await readFile(target,"utf8");
+  f.git(["restore","--",".memsphere/memory"],f.linked);
+  const retry=f.upgrade("embedded",["--change",f.id],f.linked);assert.notEqual(retry.result.status,0);assert.equal(retry.value.overall,"failed");
+  assert.notEqual(f.run(["memory","change","validate",f.id],f.linked).status,0);
+  await writeFile(target,upgraded);assert.equal(f.upgrade("embedded",["--change",f.id],f.linked).result.status,0);
+ }finally{await f.cleanup();}
+});
+test("Committing Embedded upgrade targets does not mark the ChangeSet integrated",async()=>{
+ const f=await upgradedFixture();try{
+  f.git(["add","--",".memsphere/memory"],f.linked);f.git(["commit","-m","Upgrade System Memory only"],f.linked);
+  assert.deepEqual(f.git(["show","--format=","--name-only","HEAD"],f.linked).split("\n"),[`.memsphere/memory/${memoryPath}`]);
+  assert.equal(JSON.parse(await readFile(join(f.project,"changes",f.id,"change.json"),"utf8")).status,"active");
+ }finally{await f.cleanup();}
 });
 
 test("Embedded upgrade CLI refuses dirty Memory before model writes", async () => {

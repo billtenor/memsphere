@@ -5,6 +5,7 @@ import { once } from "node:events";
 import { release as osRelease } from "node:os";
 import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
+import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
 import { terminateProcessTree } from "../src/platform-process.js";
 
 for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late-descendant"] as const) test(`Windows native rewind process safety: ${scenario}`, {
@@ -102,4 +103,10 @@ test("Windows native CIM errors propagate from the identity query", {skip:proces
     assert.match((error as {stderr:string}).stderr, /injected CIM query failure/);
     return true;
   });
+});
+
+
+test("legacy or malformed Job names cannot provide complete process exit evidence",async()=>{
+ for(const name of ["Global\\Memsphere.Reviewer.00000000-0000-4000-8000-000000000000","Local\\Memsphere.Reviewer.00000000-0000-4000-8000-000000000000","untrusted"])
+  await assert.rejects(inspectWindowsReviewJob(name),{code:"PROCESS_IDENTITY_UNAVAILABLE"});
 });

@@ -16,6 +16,12 @@ import {captureProcessIdentity,stopRewindWorker} from '../src/context_control/re
 import * as reviews from '../src/context_control/review-repository.js';
 import type {GraphProcedureMemory} from '../src/memory/ast.js';
 import type {Run} from '../src/context_control/types.js';
+// Hooks have their own deadline; a test timeout does not bound an exit event.
+async function boundedCleanup<T>(operation:Promise<T>,description:string):Promise<T>{
+ const controller=new AbortController();
+ const deadline=delay(10000,undefined,{signal:controller.signal}).then(()=>{throw Error(`Timed out: ${description}`);});
+ try{return await Promise.race([operation,deadline]);}finally{controller.abort();}
+}
 // OS liveness has no portable exit event for non-child descendants. Bound each
 // observation loop; success always requires the actual identity probe.
 async function until<T>(read:()=>Promise<T|undefined>){const end=Date.now()+60000;while(Date.now()<end){const value=await read();if(value)return value;await delay(25);}throw Error('Timed out waiting for process readiness');}
@@ -55,7 +61,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const processes=[];
  let failedAttempt:any, failureConsumed=false;
  let dispatch:Promise<number>|undefined,releaseDispatch:(()=>void)|undefined;
- t.after(async()=>{releaseDispatch?.();await dispatch?.catch(()=>undefined);});
+ t.after(async()=>{releaseDispatch?.();if(dispatch)await boundedCleanup(dispatch,"dispatcher cleanup");});
  const launch=async(i:number)=>{
   if(nativeDispatch&&i===0){
    const candidate=candidates[0],config=await readConfig(join(f.root,'config.json'));
@@ -84,7 +90,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    if(orphan)gates.publish(join(f.directory,`release-orphans-${i}`));
    if(lateDescendant){gates.publish(`release-late:${ready}`);gates.publish(`snapshot-continue:${ready}`);gates.publish(`spawn-late:${ready}`);}
    await terminateProcessTree(worker.pid!,'SIGKILL',process.platform,true).catch(()=>undefined);
-   if(worker.exitCode===null&&worker.signalCode===null)await once(worker,'exit');
+   if(worker.exitCode===null&&worker.signalCode===null)await boundedCleanup(once(worker,'exit'),`fixture worker ${worker.pid} exit`);
   });
   if(failProviderBuild){
    const [code]=await once(worker,'exit');
@@ -103,7 +109,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   const lifetime=new AbortController();
   worker.once('exit',()=>lifetime.abort(new Error(errors||'Fixture worker exited before readiness')));
   const info=await Promise.race([gates.wait(ready),new Promise((_,reject)=>lifetime.signal.addEventListener('abort',()=>reject(lifetime.signal.reason),{once:true}))]);
-  processes[i]={workerPid:worker.pid!,worker,exited:once(worker,'exit'),ready,...info};
+  processes[i]={workerPid:worker.pid!,worker,exited:once(worker,'exit'),errors:()=>errors,ready,...info};
  };
  // Only the native dispatcher needs the unrelated assignment already claimed.
  // Other workers use separate Review records and can reach readiness together.
@@ -130,7 +136,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    gates.publish(`snapshot-continue:${processes[0].ready}`);
   }
   const [code]=await processes[0].exited;
-  assert.equal(code,0,'Reviewer completes the actual ACP session normally');
+  assert.equal(code,0,`Reviewer completes the actual ACP session normally: ${processes[0].errors?.()??''}`);
   await until(async()=>await alive(processes[0].providerPid)||await alive(processes[0].childPid)?undefined:true);
   const attempt=(await service.snapshot(start.run.id)).reviews.find(r=>r.artifactId===old.artifact.id)!.attempts!.at(-1)!;
   assert.ok(attempt.workerMembers?.some(member=>member.pid===processes[0].childPid),'descendant identity persisted before Provider stop');

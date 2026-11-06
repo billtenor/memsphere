@@ -41,32 +41,50 @@ test("native CLI finishes current outputs and lists/restores archived exploratio
   assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
 });
 
-test("CLI module production, Continue, independent reads, repeated comments and immutable revision", { timeout: 60000 }, async t => {
-  const f = await fixture(t); const run = await f.call("run", "start", "--name", "CLI探索");
-  assert.equal(run.sessionId, "cli-test-session");
-  assert.equal(run.contextId, undefined);
-  const help = await f.invoke("continue", "--help"); assert.match(help.stdout, /report.*review create/);
-  await assert.rejects(f.invoke("continue", "missing", "--help"), /unknown command/);
-  const a = await f.call("continue", "report", "--name", "要求", "--artifact", "离线查询", "--tag", "requirements");
-  const out = join(f.directory, "input.md");
-  await f.call("run", "artifact", "show", "--run", run.id, "--artifact", a.artifactId, "--out", out);
-  assert.equal(await readFile(out, "utf8"), "离线查询");
-  const b = await f.call("continue", "report", "--name", "方案", "--artifact", "快照", "--depends-on", "tag:requirements");
-  assert.deepEqual(b.candidates, []);
-  const review = await f.call("continue", "review", "create", "--artifact", b.artifactId, "--reviewer", "human", "--comment", "恢复路径", "--comment", "补充测试");
-  assert.equal(review.comments.length, 2);
-  const revised = await f.call("continue", "report", "--revised-from", b.artifactId, "--artifact", "完整快照");
-  const snapshot = await f.call("run", "show", "--run", run.id);
-  assert.equal(snapshot.steps.length, 3); assert.equal(snapshot.artifacts.length, 3);
-  assert.ok(snapshot.steps.find((s: any) => s.id === b.stepId).reads[`artifact:${a.artifactId}`]);
-  assert.deepEqual(snapshot.outputArtifactIds, [revised.artifactId]);
-  assert.equal(snapshot.commandStates[0].sessionId, run.sessionId);
-  assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
-  await f.call("continue", "finish", "--artifact", revised.artifactId, "--authorization", "用户明确确认修订版并同意结束");
-  assert.match((await f.invoke("continue", "--help")).stdout, /No further transitions/);
-  await assert.rejects(f.call("continue", "report", "--name", "late", "--artifact", "no"), /No transitions/);
-  const record = JSON.parse(await readFile(join(f.root, "data/context_control/artifacts", run.id, `${b.artifactId}.json`), "utf8"));
-  assert.equal(record.id, `${run.id}/${b.artifactId}`); assert.equal(record.value.content.payload.content, "快照");
+test("CLI start binds Continue to the current session and rejects unknown commands", {timeout:30000}, async t=>{
+ const f=await fixture(t),run=await f.call("run","start","--name","binding");
+ assert.equal(run.sessionId,"cli-test-session");assert.equal(run.contextId,undefined);
+ assert.match((await f.invoke("continue","--help")).stdout,/report.*review create/);
+ await assert.rejects(f.invoke("continue","missing","--help"),/unknown command/);
+});
+
+async function artifactFixture(t:test.TestContext){
+ const f=await fixture(t),service=(await openContextControl(f.root))!;
+ const run=await service.start("artifact contract");
+ const original=(await service.report(run.id,{name:"original",content:textContent("快照")})).artifact;
+ return {...f,service,run,original};
+}
+test("CLI artifact export preserves original body",{timeout:30000},async t=>{
+ const f=await artifactFixture(t),out=join(f.directory,"input.md");
+ await f.call("run","artifact","show","--run",f.run.id,"--artifact",f.original.id,"--out",out);
+ assert.equal(await readFile(out,"utf8"),"快照");
+});
+test("CLI report resolves tag dependencies to the actual source Artifact",{timeout:30000},async t=>{
+ const f=await fixture(t),run=await f.call("run","start","--name","dependency");
+ const service=(await openContextControl(f.root))!;
+ const source=(await service.report(run.id,{name:"source",content:textContent("requirements"),tags:["requirements"]})).artifact;
+ await f.call("run","artifact","show","--run",run.id,"--artifact",source.id);
+ const result=await f.call("continue","report","--name","dependent","--artifact","方案","--depends-on","tag:requirements");
+ assert.deepEqual(result.candidates,[]);
+ const snapshot=await f.call("run","show","--run",run.id);
+ assert.ok(snapshot.steps.find((s:any)=>s.id===result.stepId)!.reads[`artifact:${source.id}`]);
+ assert.equal((await findCommandStates("test-project",run.id,f.home))[0].value.sessionId,"cli-test-session");
+ assert.ok((await f.call("run","status")).runs.some((r:any)=>r.id===run.id));
+});
+test("CLI review create retains multiple feedback comments",{timeout:30000},async t=>{
+ const f=await artifactFixture(t);
+ const review=await f.call("run","review","create","--run",f.run.id,"--artifact",f.original.id,"--reviewer","human","--comment","恢复路径","--comment","补充测试");
+ assert.equal(review.comments.length,2);
+ assert.deepEqual(review.comments.map((c:any)=>c.body),["恢复路径","补充测试"]);
+});
+test("CLI revision replaces the output while preserving original Artifact bytes",{timeout:30000},async t=>{
+ const f=await artifactFixture(t);
+ const revised=await f.call("run","report","--run",f.run.id,"--revised-from",f.original.id,"--artifact","完整快照");
+ const snapshot=await f.service.snapshot(f.run.id);
+ assert.equal(snapshot.steps.length,2);assert.equal(snapshot.artifacts.length,2);
+ assert.deepEqual(snapshot.outputArtifactIds,[revised.artifactId]);
+ const record=JSON.parse(await readFile(join(f.root,"data/context_control/artifacts",f.run.id,`${f.original.id}.json`),"utf8"));
+ assert.equal(record.id,`${f.run.id}/${f.original.id}`);assert.equal(record.value.content.payload.content,"快照");
 });
 
 for (const entry of ["native", "continue"] as const) {
@@ -105,6 +123,8 @@ for (const entry of ["native", "continue"] as const) {
     assert.equal(ended.reviews[0].comments[0].body, "补充结论边界");
     assert.equal(ended.artifacts.find(a => a.id === revised.artifactId)!.revisedFrom, original.id);
     assert.equal((await findCommandStates("test-project", run.id, f.home))[0].value.status, "closed");
+    assert.match((await f.invoke("continue", "--help")).stdout, /No further transitions/);
+    await assert.rejects(f.call("continue", "report", "--name", "late", "--artifact", "no"), /No transitions/);
   });
 }
 
@@ -128,7 +148,7 @@ for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201
   });
 }
 
-test("CLI module derived outputs retain manual removals and removed production-boundary flags are rejected", { timeout: 30000 }, async t => {
+test("CLI output selection preserves manual removals after later production", { timeout: 30000 }, async t => {
   const f = await fixture(t); const r = await f.call("run", "start", "--name", "outputs");
   const a = await f.call("continue", "report", "--name", "A", "--artifact", "A");
   await f.call("continue", "outputs", "update", "--remove", a.artifactId);
@@ -136,6 +156,10 @@ test("CLI module derived outputs retain manual removals and removed production-b
   const outputs = await f.call("run", "outputs", "list", "--run", r.id); assert.deepEqual(outputs.items.map((a: any) => a.id), [b.artifactId]);
   await f.call("continue", "outputs", "update", "--remove", b.artifactId, "--add", a.artifactId);
   await assert.rejects(f.call("continue", "outputs", "update", "--remove", a.artifactId, "--add", a.artifactId));
+ });
+
+test("CLI rejects removed production-boundary options and caller-supplied identity", {timeout:30000},async t=>{
+ const f=await artifactFixture(t),r=f.run,a={artifactId:f.original.id},b={artifactId:f.original.id};
   await assert.rejects(f.call("run", "artifact", "create", "--run", r.id, "--name", "no"));
   await assert.rejects(f.call("run", "artifact", "show", "--run", r.id, "--artifact", a.artifactId, "--for", b.artifactId));
   await assert.rejects(f.call("run", "report", "--run", r.id, "--target", a.artifactId, "--artifact", "no"));

@@ -216,6 +216,10 @@ actions:
     description: 按需求契约和实施方案验收当前 PR 的实现与验证成果；修正问题后完成 master 同步、本地验证、PR 更新及 CI 验证，提交技术评审。
     actor: agent
     asserts:
+      - !ref
+        target: statements/memsphere-repository-development-rules
+      - !ref
+        target: statements/memsphere-repository-testing-rules
       - 验收对象须覆盖当前候选的完整代码、测试、文档及 Memory 改动；已确认范围正确实现、验收标准有充分证据且无阻塞交付的问题或风险。
       - 验收材料须固定 PR URL、head SHA、目标分支 SHA 和实际 diff；该 HEAD 须包含最新目标提交，全部适用本地检查和 CI 已通过。
       - 评审结论须体现各角色的审查依据，区分亲自检查或执行的内容与引用的证据，并记录问题、修正结果及残余风险。

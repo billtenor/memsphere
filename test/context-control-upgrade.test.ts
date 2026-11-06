@@ -205,3 +205,16 @@ for (const fixtureName of ["context-control-review-before-job.json", "context-co
   assert.equal(await readFile(path, "utf8"), bytes);
   assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
 });
+
+
+for(const entity of ["run","review"] as const)test(`Tracked Job name upgrade preserves ${entity} records from the preceding enrolled-Job schema`,async t=>{
+ const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!,run=await service.start("enrolled job model");
+ const before=await service.stores.run.get({},run.id),path=join(f.root,"data/context_control/runs",`${run.id}.json`),bytes=await readFile(path,"utf8");
+ const model=JSON.parse(await readFile(new URL(`../reserved-models/context-control/${entity}.json`,import.meta.url),"utf8"));
+ const restore=(v:any)=>{if(v&&typeof v==="object"){if(typeof v.pattern==="string"&&v.pattern.includes("Reviewer"))v.pattern="^(Global|Local)\\\\Memsphere\\.Reviewer\\.[0-9a-f-]{36}$";Object.values(v).forEach(restore);}};restore(model);
+ const {definitionHash}=await import("../src/context_control/model-assets.js");
+ assert.equal(definitionHash(model),entity==="run"?"edc72333e9994d3af34efb5c214c94cccaadf868bd25cc6fc243d3b7901696c3":"099b094d127fcfa7966ae78965c4f481fa1de837d2f888cbad4a8d7ea286173d");
+ await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`,JSON.stringify(model));
+ assert.equal((await withModelMaintenance(f.root,()=>upgradeContextControlOutputs(f.root)))?.records,0);
+ const reopened=(await openContextControl(f.root))!;assert.deepEqual(await reopened.stores.run.get({},run.id),before);assert.equal(await readFile(path,"utf8"),bytes);
+});

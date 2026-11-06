@@ -47,6 +47,7 @@ export async function runAgentReviewAcpSession(input: {
   let idleTimeout: TimeoutWatchdog | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
   let beforeStopPromise: Promise<void> | undefined;
+  let failureInFlight: unknown;
   const beforeStop = () => beforeStopPromise ??= input.onBeforeStop?.(process.pid) ?? Promise.resolve();
   const signalTermination = () => {
     if (process.exitCode !== null) return;
@@ -167,6 +168,7 @@ export async function runAgentReviewAcpSession(input: {
       });
     return { ...result, stderr };
   } catch (error) {
+    failureInFlight = error;
     const timeoutError = timeoutReason(startupTimeout, idleTimeout, maxRuntimeTimeout);
     const transportError = transport.signal.aborted ? transport.signal.reason : undefined;
     const exitCode = process.exitCode;
@@ -196,7 +198,13 @@ export async function runAgentReviewAcpSession(input: {
     startupTimeout.dispose();
     idleTimeout?.dispose();
     maxRuntimeTimeout?.dispose();
-    try { await beforeStop(); } finally { terminate(); }
+    try { await beforeStop(); }
+    catch (cleanupError) {
+      if (!failureInFlight) throw cleanupError;
+      const primary = timeoutReason(startupTimeout, idleTimeout, maxRuntimeTimeout) ?? (transport.signal.aborted ? transport.signal.reason : failureInFlight);
+      const message = primary instanceof Error ? primary.message : String(primary);
+      throw new AggregateError([primary, cleanupError], `${message}\nReviewer lifecycle capture failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`, { cause: primary });
+    } finally { terminate(); }
   }
 }
 

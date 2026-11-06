@@ -33,3 +33,19 @@ for (const invalidAt of [1, 2]) test(`ACP launch fence rejects invalidation at c
     assert.ok(provider.exitCode !== null || provider.signalCode !== null);
   }
 });
+
+for (const mode of ["missing-executable", "provider-exited"] as const) test(`ACP preserves ${mode} diagnostics when lifecycle capture also fails`, { timeout:15000 }, async t => {
+  let captured = false;
+  await assert.rejects(runAgentReviewAcpSession({
+    launch:{provider:"test",command:mode==="missing-executable"?`missing-provider-${process.pid}`:process.execPath,args:mode==="missing-executable"?[]:["-e","process.exit(7)"],cwd:tmpdir(),env:process.env,startupTimeoutMs:5000,idleTimeoutMs:null,maxRuntimeMs:null,promptVersion:"artifact-review-v1"},
+    prompt:"review",reminder:"submit",workspaceRoot:tmpdir(),isSubmitted:async()=>false,onSession:async()=>assert.fail("failed provider connected"),
+    onBeforeStop:async pid=>{captured=true;if(mode==="missing-executable")assert.equal(pid,undefined);throw Error("capture unavailable");}
+  }), (error:unknown)=>{
+    assert.ok(error instanceof AggregateError);
+    assert.match(error.message,mode==="missing-executable"?/agent_process_spawn:/ : /agent_process_exit:|agent_connection_closed:/);
+    assert.match(error.message,/capture unavailable/);
+    assert.equal(error.errors.length,2);
+    return true;
+  });
+  assert.equal(captured,true);
+});

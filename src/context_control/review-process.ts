@@ -87,7 +87,7 @@ export async function stopRewindWorker(worker: RewindWorker) {
     if (leader && !same(worker.identity, leader)) throw failure("PROCESS_IDENTITY_CHANGED", "Reviewer process identity changed; no termination signal sent");
     const job = await inspectWindowsReviewJob(worker.job, Boolean(leader));
     if (job.active) throw failure("PROCESS_TERMINATION_PENDING", "Reviewer job still has associated processes; rewind remains pending");
-    if (leader && !job.exists) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Live Reviewer is missing its enrolled job");
+    if (!job.exists && (leader || !worker.job.includes(".Reviewer.Tracked."))) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer job is unavailable; complete exit is not proven");
     return;
   }
   // A historical snapshot cannot exclude descendants born after it. Only the
