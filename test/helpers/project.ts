@@ -12,7 +12,7 @@ import { runGit } from "../../src/git.js";
 let systemFiles: Promise<{ path: string; bytes: Buffer }[]> | undefined;
 
 /** Construct an existing healthy Store; Project creation/bootstrap is tested separately. */
-export async function managedProjectFixture(name: string, options: { bind?: boolean } = {}): Promise<void> {
+export async function managedProjectFixture(name: string, options: { bind?: boolean; systemMemory?: boolean } = {}): Promise<void> {
   if (!process.env.MEMSPHERE_HOME) throw new Error("Project fixtures require an isolated MEMSPHERE_HOME");
   const home = resolveMemsphereHome();
   const root = join(homePaths(home).projectsRoot, name);
@@ -22,17 +22,19 @@ export async function managedProjectFixture(name: string, options: { bind?: bool
   await writeFile(paths.manifestPath, JSON.stringify({ format_version: 1, name, created_at: "2026-10-06T00:00:00.000Z" }));
   await writeFile(paths.configPath, JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" } }));
   await initializeProjectModelRegistrations({}, { root });
-  systemFiles ??= readBundledSystemMemories().then(files => Promise.all(files.map(async file => ({
-    path: file.path, bytes: await readFile(file.sourcePath)
-  }))));
-  await Promise.all((await systemFiles).map(async file => {
-    const path = join(paths.memoryRoot, file.path);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, file.bytes);
-  }));
+  if (options.systemMemory !== false) {
+    systemFiles ??= readBundledSystemMemories().then(files => Promise.all(files.map(async file => ({
+      path: file.path, bytes: await readFile(file.sourcePath)
+    }))));
+    await Promise.all((await systemFiles).map(async file => {
+      const path = join(paths.memoryRoot, file.path);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, file.bytes);
+    }));
+  }
   await runGit(["init", "-b", "master"], { cwd: paths.memoryRoot });
   await runGit(["add", "."], { cwd: paths.memoryRoot });
-  await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "Existing Store fixture"], { cwd: paths.memoryRoot });
+  await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", ...(options.systemMemory === false ? ["--allow-empty"] : []), "-m", "Existing Store fixture"], { cwd: paths.memoryRoot });
   const config = JSON.parse(await readFile(paths.configPath, "utf8"));
   config.store.published_revision = (await runGit(["rev-parse", "HEAD"], { cwd: paths.memoryRoot })).stdout;
   await writeFile(paths.configPath, JSON.stringify(config));

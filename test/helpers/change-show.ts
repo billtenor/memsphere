@@ -31,7 +31,7 @@ export async function changeShowFixture(t: test.TestContext) {
   delete process.env.MEMSPHERE_PROJECT;
   process.chdir(workspace);
   await runGit(["init", "-b", "master"], { cwd: workspace });
-  await managedProjectFixture("project", { bind: true });
+  await managedProjectFixture("project", { bind: true, systemMemory: false });
   const projectRoot = (await readProjectRegistry(home)).projects.project.root;
   const seed = await editMemories({ references: ["concepts/existing", "concepts/deleted", "concepts/old-name", "concepts/late-delete", "concepts/late-rename", "concepts/scope-only", "statements/dependency"] });
   const dependency = join(seed.candidateRoot, "statements/dependency.yaml");
