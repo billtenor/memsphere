@@ -55,7 +55,6 @@
     "market-store.test.ts": 2.55,
     "market-view.test.ts": 4.99,
     "memory-catalog.test.ts": 0.37,
-    "memory-change-show.test.ts": 87.2,
     "memory-changeset-collaboration.test.ts": 5.1,
     "memory-changeset.test.ts": 12.06,
     "memory-cli.test.ts": 52.19,
