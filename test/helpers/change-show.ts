@@ -9,6 +9,7 @@ import { runGit } from "../../src/git.js";
 import { editMemories, publishMemoryChange, renameMemory, validateMemoryChange } from "../../src/memory/changeset.js";
 import { readProjectRegistry } from "../../src/project/registry.js";
 import { createAgentReviewCliRuntime } from "../../src/acp/cli-runtime.js";
+import { invokeCliModule } from "./cli-module.js";
 
 export async function changeShowFixture(t: test.TestContext) {
   const cli = resolve("dist/cli.js");
@@ -53,7 +54,17 @@ export async function changeShowFixture(t: test.TestContext) {
   const read = (extra: string[] = []) => {
     const r = invoke(extra); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout);
   };
-  const snapshot = () => [read(), read(["--part", "diff"]), read(["--part", "memory", "--reference", "concepts/existing"]), read(["--part", "validation"])];
+  // Material stability exercises the real command tree without repeatedly
+  // starting an OS shell. read/invoke/command retain the Reviewer subprocess
+  // boundary for defaults, body/diff output, authorization and failure cases.
+  const snapshot = async () => {
+    const result = [];
+    for (const extra of [[], ["--part", "diff"], ["--part", "memory", "--reference", "concepts/existing"], ["--part", "validation"]]) {
+      const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, env, cli);
+      result.push(JSON.parse(receipt.stdout));
+    }
+    return result;
+  };
   const versionRoot = (version = digest) => join(projectRoot, "changes", edit.change.id, "checkpoints", version);
   return { root, home, projectRoot, edit, candidate, metadata, checkpoint, command, invoke, read, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
 }

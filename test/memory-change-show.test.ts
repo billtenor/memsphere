@@ -40,18 +40,18 @@ test("Reviewer reads correct checkpoint bodies and diffs for create, update, del
 
 test("Checkpoint evidence stays fixed across unvalidated body, scope and target edits until revalidation", async t => {
   const f = await changeShowFixture(t);
-  const original = f.snapshot();
+  const original = await f.snapshot();
   await writeFile(f.candidate, (await readFile(f.candidate, "utf8")).replace("Pinned content", "Unvalidated content"));
-  assert.deepEqual(f.snapshot(), original);
+  assert.deepEqual(await f.snapshot(), original);
   await addMemoryChangeScope({ home: f.home, project: "project", changeId: f.edit.change.id, reference: "concepts/scope-only" });
-  assert.deepEqual(f.snapshot(), original);
+  assert.deepEqual(await f.snapshot(), original);
   assert.notEqual(f.invoke(["--part", "memory", "--reference", "concepts/scope-only"]).status, 0);
   await editMemories({ references: ["concepts/later-target"], changeId: f.edit.change.id });
-  assert.deepEqual(f.snapshot(), original);
+  assert.deepEqual(await f.snapshot(), original);
   await editMemories({ references: ["concepts/late-delete"], operation: "delete", changeId: f.edit.change.id });
-  assert.deepEqual(f.snapshot(), original);
+  assert.deepEqual(await f.snapshot(), original);
   await renameMemory({ reference: "concepts/late-rename", newName: "late-renamed", changeId: f.edit.change.id });
-  assert.deepEqual(f.snapshot(), original);
+  assert.deepEqual(await f.snapshot(), original);
   const newer = await validateMemoryChange(f.edit.change.id);
   assert.notEqual(newer.checkpointDigest, f.checkpoint.checkpointDigest);
   assert.match(f.invoke().stderr, /checkpoint mismatch/);
@@ -65,13 +65,13 @@ test("Checkpoint validation identity changes with a non-target dependency and pr
   await writeFile(join(added.candidateRoot, "statements/uses-dependency.yaml"), `!statement\nsyntax: ${currentMemorySyntax}\nnames: [uses-dependency]\nasserts:\n  - !ref\n    target: statements/dependency\n`);
   const first = await validateMemoryChange(f.edit.change.id); assert.deepEqual(first.issues, []);
   f.setDigest(first.checkpointDigest);
-  const before = f.snapshot();
+  const before = await f.snapshot();
   const identical = await validateMemoryChange(f.edit.change.id);
   assert.equal(identical.checkpointDigest, first.checkpointDigest);
-  assert.deepEqual(f.snapshot(), before);
+  assert.deepEqual(await f.snapshot(), before);
   const other = await editMemories({ references: ["statements/dependency"], operation: "delete" });
   await publishMemoryChange(other.change.id);
-  assert.deepEqual(f.snapshot(), before);
+  assert.deepEqual(await f.snapshot(), before);
   const failed = await validateMemoryChange(f.edit.change.id);
   assert.ok(failed.issues.length > 0);
   assert.notEqual(failed.checkpointDigest, first.checkpointDigest);
@@ -87,7 +87,7 @@ test("Checkpoint validation identity changes with a non-target dependency and pr
 test("Reviewer ChangeSet entrypoint remains read-only and rejects unauthorized selectors and writes", async t => {
   const f = await changeShowFixture(t);
   const original = await readFile(f.metadata, "utf8");
-  const material = f.snapshot();
+  const material = await f.snapshot();
   assert.doesNotMatch(JSON.stringify(material), /candidateRoot|source_worktree|memoryRoot/);
   assert.equal(await readFile(f.metadata, "utf8"), original);
   for (const extra of [["--part", "memory"], ["--reference", "../../config.json"], ["--project", "other"], ["--project=other"], ["--project", "project", "--project=other"]]) assert.notEqual(f.invoke(extra).status, 0);
@@ -116,18 +116,18 @@ for (const damage of ["directory", "body", "description", "legacy", "version"] a
 
 test("Candidate metadata writes coordinate with checkpoint publication and preserve its current reference", async t => {
   const f = await changeShowFixture(t);
-  const original = f.snapshot();
+  const original = await f.snapshot();
   await withCheckpointRecordLock(join(f.projectRoot, ".runtime"), f.edit.change.id, async () => {
     await assert.rejects(addMemoryChangeScope({ home: f.home, project: "project", changeId: f.edit.change.id, reference: "concepts/scope-only" }), { code: "CHANGESET_WRITE_BUSY" });
   });
   await addMemoryChangeScope({ home: f.home, project: "project", changeId: f.edit.change.id, reference: "concepts/scope-only" });
-  assert.deepEqual(f.snapshot(), original);
+  assert.deepEqual(await f.snapshot(), original);
   assert.equal(JSON.parse(await readFile(f.metadata, "utf8")).checkpoint.digest, f.checkpoint.checkpointDigest);
 });
 
 test("Checkpoint commit failure leaves the previous four CLI evidence views intact and validation can retry", async t => {
   const f = await changeShowFixture(t);
-  const before = f.snapshot();
+  const before = await f.snapshot();
   const original = JSON.parse(await readFile(f.metadata, "utf8"));
   const description = JSON.parse(await readFile(join(f.versionRoot(), "checkpoint.json"), "utf8"));
   await assert.rejects(publishCheckpoint({
@@ -139,7 +139,7 @@ test("Checkpoint commit failure leaves the previous four CLI evidence views inta
     verify: async directory => JSON.parse(await readFile(join(directory, "checkpoint.json"), "utf8")),
     commit: async () => { throw new Error("Injected after directory preparation, before reference commit"); }
   }), /Injected/);
-  assert.deepEqual(f.snapshot(), before);
+  assert.deepEqual(await f.snapshot(), before);
   await writeFile(f.candidate, (await readFile(f.candidate, "utf8")).replace("Pinned content", "Retry content"));
   const retried = await validateMemoryChange(f.edit.change.id);
   assert.deepEqual(retried.issues, []); assert.notEqual(retried.checkpointDigest, f.checkpoint.checkpointDigest);
