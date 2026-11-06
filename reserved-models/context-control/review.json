@@ -428,7 +428,7 @@
         },
         "workerJob": {
           "type": "string",
-          "pattern": "^Local\\\\Memsphere\\.Reviewer\\.[0-9a-f-]{36}$"
+          "pattern": "^(Global|Local)\\\\Memsphere\\.Reviewer\\.[0-9a-f-]{36}$"
         }
       },
       "required": [

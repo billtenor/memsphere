@@ -24,3 +24,11 @@ const runSession = input.lateDescendant ? session => runAgentReviewAcpSession({.
  }},{spawn:launch=>{provider=spawn(launch.command,launch.args,{cwd:launch.cwd,env:launch.env,stdio:'pipe'});return provider;}});
 } : undefined;
 await runArtifactReviewAgentWorker({...input, runSession, nodeExecutable:process.execPath, providerResolver:()=>({id:'traex',buildLaunch:({actor,workspaceRoot,sessionEnv})=>{if(input.failProviderBuild)throw new Error('agent_provider_configuration: injected before Provider spawn');return ({provider:'fake-test-provider',command:actor.agent.command,args:actor.agent.args,cwd:workspaceRoot,env:{...process.env,...sessionEnv,REVIEW_TEST_READY:input.ready,REVIEW_TEST_GATES:String(input.gates),...(input.lateDescendant?{REVIEW_TEST_LATE_DESCENDANT:'yes'}:{}),...(input.release?{REVIEW_TEST_RELEASE:input.release}:{}),...(input.submitted?{REVIEW_TEST_SUBMITTED:"yes"}:{}),...(input.completed?{REVIEW_TEST_COMPLETE:"yes"}:{})},startupTimeoutMs:10000,idleTimeoutMs:null,maxRuntimeMs:null,promptVersion:'artifact-review-v1'});}})});
+
+if(!input.failProviderBuild){
+ const {readConfig}=await import('../../dist/config.js');
+ const {readArtifactReviewForActor}=await import('../../dist/context_control/review-repository.js');
+ const config=await readConfig(input.config);
+ const current=await readArtifactReviewForActor({runsRoot:config.runsRoot,reviewId:input.review,roundId:input.round,actorId:input.assignment});
+ if(current.assignment.status==='failed')throw new Error(current.assignment.attempts.at(-1)?.failure?.message??'fixture worker failed');
+}

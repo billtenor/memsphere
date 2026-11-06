@@ -26,7 +26,7 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
       detached: true, stdio: ["ignore", "ignore", "inherit", "ipc"]
     });
     workers.push(worker);
-    const [ready] = await once(worker, "message");
+    const [ready] = await Promise.race([once(worker, "message"), once(worker, "exit").then(([code]) => { throw new Error(`Native worker exited before readiness (${code})`); })]);
     const identity = await captureProcessIdentity(worker.pid!);
     assert.ok(identity);
     const members = await captureProcessGroup(worker.pid!);

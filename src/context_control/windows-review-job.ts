@@ -7,6 +7,7 @@ import type { ProcessIdentity } from "./review-process.js";
 // A snapshot cannot prove that a descendant did not spawn another process and
 // exit between probes. Job membership is maintained by the Windows kernel,
 // including children born after the worker/provider exit. Breakaway is disabled.
+// Global names remain addressable when Runner resumes in another Windows session.
 // The keeper starts BEFORE the worker is enrolled, so it is outside this job.
 // It closes the job only after ActiveProcesses reaches zero; unexpected keeper
 // exit closes its handle with KILL_ON_JOB_CLOSE. No helper remains after the job.
@@ -32,7 +33,9 @@ public static class ReviewerJob {
  static uint Active(IntPtr job) { Accounting a; Check(QueryInformationJobObject(job, 1, out a, (uint)Marshal.SizeOf(typeof(Accounting)), IntPtr.Zero)); return a.Active; }
  public static void Keep(string name, int pid, string started) {
   using (Process worker = Process.GetProcessById(pid)) {
-   if (worker.StartTime.ToUniversalTime().Ticks.ToString() != started) throw new Exception("Worker identity changed");
+   // CIM_DATETIME records microseconds; GetProcessTimes/.NET also retains the final 100ns digit.
+   long actual = worker.StartTime.ToUniversalTime().Ticks;
+   if (actual / 10 != long.Parse(started) / 10) throw new Exception("Worker identity changed: expected " + started + ", observed " + actual);
    IntPtr job = CreateJobObject(IntPtr.Zero, name); int error = Marshal.GetLastWin32Error();
    if (job == IntPtr.Zero) throw new Win32Exception(error);
    try {
@@ -66,11 +69,11 @@ public static class ReviewerJob {
 `;
 const script = (body: string) => `$ErrorActionPreference='Stop'; try { Add-Type -TypeDefinition @'\n${native}\n'@; ${body} } catch { [Console]::Error.WriteLine($_.ToString()); exit 2 }`;
 const encoded = (body: string) => ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script(body), "utf16le").toString("base64")];
-const validName = (name: string) => /^Local\\Memsphere\.Reviewer\.[0-9a-f-]{36}$/.test(name);
+const validName = (name: string) => /^Global\\Memsphere\.Reviewer\.[0-9a-f-]{36}$/.test(name);
 
 /** Enroll before claim and before ANY provider preparation can spawn children. */
 export async function startWindowsReviewJob(identity: ProcessIdentity): Promise<string> {
-  const name = `Local\\Memsphere.Reviewer.${randomUUID()}`;
+  const name = `Global\\Memsphere.Reviewer.${randomUUID()}`;
   if (!/^\d+$/.test(identity.started)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Invalid Windows worker creation identity");
   const child = spawn("powershell.exe", encoded(`[ReviewerJob]::Keep('${name}', ${identity.pid}, '${identity.started}')`), {
     detached: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
@@ -78,10 +81,10 @@ export async function startWindowsReviewJob(identity: ProcessIdentity): Promise<
   await new Promise<void>((resolve, reject) => {
     let output = "", errors = "";
     const timer = setTimeout(() => { child.kill(); reject(failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows Reviewer job enrollment timed out")); }, 15000);
-    const done = () => { clearTimeout(timer); child.removeListener("error", failed); child.removeListener("exit", exited); };
+    const done = () => { clearTimeout(timer); child.removeListener("error", failed); child.removeListener("close", exited); };
     const failed = (error: Error) => { done(); reject(error); };
-    const exited = () => failed(failure("PROCESS_IDENTITY_UNAVAILABLE", `Windows Reviewer job enrollment failed: ${errors.slice(-2000)}`));
-    child.once("error", failed); child.once("exit", exited);
+    const exited = (code: number | null, signal: NodeJS.Signals | null) => failed(failure("PROCESS_IDENTITY_UNAVAILABLE", `Windows Reviewer job enrollment failed (${code ?? signal}): ${errors.slice(-2000)}; output=${JSON.stringify(output.slice(-2000))}`));
+    child.once("error", failed); child.once("close", exited);
     child.stderr.on("data", data => { errors = (errors + data).slice(-4000); });
     child.stdout.on("data", data => {
       output += data;

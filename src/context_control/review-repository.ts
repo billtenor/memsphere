@@ -195,8 +195,12 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
     let attempt = review.attempts?.at(-1);
     if (!attempt) { attempt = { id: `attempt-${randomUUID()}`, createdAt: stamp() }; review.attempts = [attempt]; }
     if (attempt.startedAt || attempt.completion) throw failure("REVIEW_CONFLICT", "Queued Agent attempt is not available");
-    attempt.startedAt = stamp(); attempt.workerPid = input.workerPid;
-    attempt.workerIdentity = input.workerPid ? await captureProcessIdentity(input.workerPid) : undefined;
+    attempt.startedAt = stamp();
+    if (input.workerPid !== undefined) {
+      attempt.workerPid = input.workerPid;
+      const identity = await captureProcessIdentity(input.workerPid);
+      if (identity) attempt.workerIdentity = identity;
+    }
     if (input.workerJob) {
       if (input.workerPid !== process.pid || process.platform !== "win32" || !attempt.workerIdentity)
         throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Only the enrolled Windows worker may register its job");

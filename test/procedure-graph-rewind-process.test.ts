@@ -93,7 +93,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    const failed=await reviews.readArtifactReviewForActor(common);
    failedAttempt=(await service.snapshot(start.run.id)).reviews.find(r=>r.artifactId===candidate.artifact.id)!.attempts!.at(-1)!;
    assert.equal(failedAttempt.completion.kind,'failed');
-   assert.ok(failedAttempt.workerJob,'enrollment proof was saved with claim before Provider preparation');
+   assert.ok(failedAttempt.workerJob,failedAttempt.completion.failure?.message??'enrollment proof was saved with claim before Provider preparation');
    assert.equal(failed.assignment.attempts!.length,1);
    assert.equal(gates.has(`provider-launched:${ready}`),false);
    await reviews.retryArtifactReviewAgentAssignment(common);

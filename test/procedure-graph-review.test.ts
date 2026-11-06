@@ -70,6 +70,17 @@ test("Agent claims once, requires handshake, and submits only its current attemp
   assert.equal((await f.service.snapshot(f.result.snapshot.run.id)).steps[0].status, "awaiting_review");
 });
 
+test("Reviewer failure before OS enrollment remains retryable without an undefined PID record", async t => {
+  const f = await fixture(t, true);
+  const first = (await reviews.claimArtifactReviewAgentAssignment(f.input))!;
+  await reviews.failArtifactReviewAgentAssignment({ ...f.input, attemptId: first.attempt.id, failure: { stage: "spawn", code: "containment_failed", message: "No Provider or contained worker started" } });
+  assert.equal((await reviews.waitForArtifactReview(f.input)).round.assignments[0].status, "failed");
+  await reviews.retryArtifactReviewAgentAssignment(f.input);
+  const next = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+  assert.notEqual(next.attempt.id, first.attempt.id);
+  assert.equal(next.attempt.workerPid, process.pid);
+});
+
 test("failed Agent Review remains undecided until explicit retry; retry invalidates old attempt", async t => {
   const f = await fixture(t, true);
   const first = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
