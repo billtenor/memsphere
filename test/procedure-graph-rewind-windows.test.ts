@@ -24,12 +24,17 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
   });
   const start = async () => {
     const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint), scenario], {
-      detached: true, stdio: ["ignore", "ignore", "inherit", "ipc"]
+      detached: true, execArgv: [], stdio: ["ignore", "ignore", "inherit", "ipc"]
     });
     workers.push(worker);
-    const [ready] = await Promise.race([once(worker, "message"), once(worker, "exit").then(([code]) => { throw new Error(`Native worker exited before readiness (${code})`); })]);
+    const exitedEarly = once(worker, "exit").then(([code]) => { throw new Error(`Native worker exited before readiness (${code})`); });
+    const [request] = await Promise.race([once(worker, "message"), exitedEarly]);
+    assert.equal(request.identityRequired, true);
     const identity = await captureProcessIdentity(worker.pid!);
     assert.ok(identity);
+    const waiting = once(worker, "message");
+    worker.send(identity);
+    const [ready] = await Promise.race([waiting, exitedEarly]);
     const members = await captureProcessGroup(worker.pid!);
     const child = members.find(p => p.pid === ready.childPid);
     assert.ok(child, "CIM observes the real child creation identity");

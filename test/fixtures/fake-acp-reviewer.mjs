@@ -59,8 +59,14 @@ const app = acp
     if (mode === "rewind-gated") {
       await processGate(process.env.REVIEW_TEST_GATES,'publish',`provider-launched:${process.env.REVIEW_TEST_READY}`);
       if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
-      invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
-      invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
+      if (process.env.REVIEW_TEST_SETUP_API) {
+        // These cancellation tests target OS/ACP lifecycle, not CLI dispatch.
+        const {mutateBoundReviewNode} = await import('../../dist/acp/review-session.js');
+        await mutateBoundReviewNode({operation:'report',artifact:{applicable:true}});
+      } else {
+        invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
+        invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
+      }
       const child = spawn(process.execPath,[fileURLToPath(new URL(process.env.REVIEW_TEST_LATE_DESCENDANT ? './rewind-late-child.mjs' : './rewind-provider-child.mjs', import.meta.url))],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
       if (process.env.REVIEW_TEST_SUBMITTED) await completeReview("approve", client, params.sessionId, true);
@@ -98,6 +104,14 @@ app.connect(acp.ndJsonStream(
 ));
 
 async function completeReview(vote, client, sessionId, graphAlreadyRead = false) {
+  if (mode === 'rewind-gated' && process.env.REVIEW_TEST_SETUP_API) {
+    assert.equal(vote,'approve');
+    const {boundReviewNodeView,mutateBoundReviewNode,submitBoundReviewNodes} = await import('../../dist/acp/review-session.js');
+    let view=await boundReviewNodeView();
+    while(view.node)view=await mutateBoundReviewNode({operation:'report',artifact:{applicable:true}});
+    await submitBoundReviewNodes({vote:'approve',summary:'Fake ACP review completed'});
+    return;
+  }
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");

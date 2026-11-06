@@ -142,7 +142,7 @@ gh run list --workflow ci.yml --branch <repair-branch>
 gh workflow run full-health.yml --ref master
 ```
 
-API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通 PR 由覆盖三平台全部文件的 default 检查保护。
+API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通 PR 由三平台按默认选集运行的 default 检查保护；Linux default 和三平台 full 覆盖全部测试文件。
 
 ### 首次安装与回滚
 

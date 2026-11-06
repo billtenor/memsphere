@@ -47,8 +47,10 @@ export async function processGates(signal) {
   } };
 }
 
-export async function processGate(endpoint, operation, key, value, signal = AbortSignal.timeout(60000)) {
-  signal.throwIfAborted();
+export async function processGate(endpoint, operation, key, value, signal = operation === 'wait' ? undefined : AbortSignal.timeout(60000)) {
+  // A release barrier belongs to the parent test lifecycle, not a hidden timer.
+  // Its server closes/aborts the socket when that test ends.
+  signal?.throwIfAborted();
   const socket = createConnection({ host: '127.0.0.1', port: Number(endpoint), signal });
   try {
     await once(socket, 'connect');
@@ -60,5 +62,7 @@ export async function processGate(endpoint, operation, key, value, signal = Abor
     });
     socket.write(JSON.stringify({ operation, key, value }) + '\n');
     return await result;
+  } catch (error) {
+    throw new Error(`Process gate ${operation}:${key} failed: ${error.message}`, { cause: error });
   } finally { socket.destroy(); }
 }
