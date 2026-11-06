@@ -6,7 +6,7 @@ import { release as osRelease } from "node:os";
 import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
-import {createFixtureProcesses, stopFixtureChild, stopFixtureJob, verifyFixtureTreeExit} from "./helpers/fixture-process.js";
+import {cleanupFixtureResources, createFixtureProcesses, stopFixtureChild, stopFixtureJob, verifyFixtureTreeExit} from "./helpers/fixture-process.js";
 import {pinWindowsProcess} from "./helpers/windows-process-handle.js";
 import type {ProcessIdentity} from "../src/context_control/review-process.js";
 
@@ -19,14 +19,13 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
   const jobs: string[] = [];
   const observed=await createFixtureProcesses(t.signal);
   const alive=async(pid:number)=>(await observed.alive(pid))[0];
-  t.after(async () => {
-    gates.publish("release");
-    try {
-      for (const job of jobs) await stopFixtureJob(job);
-      for (const worker of workers) await stopFixtureChild(worker);
-    } finally { await gates.close(); }
-  });
-  t.after(()=>observed.close());
+  t.after(() => cleanupFixtureResources([
+    () => gates.publish("release"),
+    ...jobs.map(job => () => stopFixtureJob(job)),
+    ...workers.map(worker => () => stopFixtureChild(worker)),
+    () => gates.close(),
+    () => observed.close()
+  ]));
   const start = async () => {
     const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint), scenario], {
       detached: true, execArgv: [], stdio: ["ignore", "ignore", "inherit", "ipc"]

@@ -93,6 +93,15 @@ export async function stopFixtureJob(job: string): Promise<void> {
   if (state.active !== 0) throw Error(`Fixture Job still has ${state.active} processes`);
 }
 
+/** One broken probe must not prevent cleanup of the other owned resources. */
+export async function cleanupFixtureResources(actions: Array<() => unknown | Promise<unknown>>): Promise<void> {
+  const errors: unknown[] = [];
+  for (const action of actions) {
+    try { await action(); } catch (error) { errors.push(error); }
+  }
+  if (errors.length) throw new AggregateError(errors, "Fixture cleanup failed");
+}
+
 export async function untilFixture(read: () => Promise<boolean>, description = "fixture state"): Promise<void> {
   const end = Date.now() + 60_000;
   while (!await read()) {
