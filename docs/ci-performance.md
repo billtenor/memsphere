@@ -53,6 +53,8 @@ Run 锁与 View 读取测试的模型、Store 和服务初始化移至 `beforeEa
 
 ## 合入 master / 发布前完整检查
 
+Reviewer Session 读取修复补充了新 ChangeSet 集成测试及三个已有重型 CLI 文件的 Linux 实测耗时，让既有 longest-first 调度优先执行这些文件。另将 Home daemon 生命周期及通知集成测试归入 Project Lifecycle，由现有 Projects & Memory 作业执行；同一候选上该作业曾用时169秒，而 Runtime 作业连续触及5分钟时限。该调整平衡已有两个Linux作业，全部文件仍各执行一次，跨平台full覆盖、原生风险清单、job数量、并发与时限均不变。原先取消的运行仍保留为取消结果，修复后以新head实际CI结果核验。
+
 每次合入master（push master）自动运行full，不再配置每日schedule。GitHub Actions的CI工作流支持手动选择ref和profile（default/full，手动默认full）：
 
 ```bash

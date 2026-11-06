@@ -60,10 +60,10 @@ test("system and historical upgrades run in upgrade groups without duplicating n
   const upgrades = ["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"];
   const files = [...upgrades, "daemon-integration.test.ts"];
   const sources = Object.fromEntries(files.map(file => [file, ""]));
-  assert.deepEqual(selectTests(files, sources, {}, "runtime-core"), ["daemon-integration.test.ts"]);
-  for (const suite of ["project-upgrade", "memory-and-projects"]) {
-    assert.deepEqual(selectTests(files, sources, {}, suite).sort(), upgrades);
-  }
+  assert.deepEqual(selectTests(files, sources, {}, "runtime-core"), []);
+  assert.deepEqual(selectTests(files, sources, {}, "project-upgrade").sort(), upgrades);
+  assert.deepEqual(selectTests(files, sources, {}, "project-core"), ["daemon-integration.test.ts"]);
+  assert.deepEqual(selectTests(files, sources, {}, "memory-and-projects").sort(), [...files].sort());
   for (const suite of ["platform-upgrades", "platform-and-upgrades"]) {
     assert.deepEqual(selectTests(files, sources, {}, suite), ["system-upgrade-changeset.test.ts"]);
   }

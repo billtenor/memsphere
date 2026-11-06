@@ -88,6 +88,9 @@ export const testSuites = {
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
   const name = basename(file);
+  // Home daemon lifecycle and notification integration fit the Project lifecycle
+  // job; keep its measured workload out of the crowded Run/Data/SDK job.
+  if (name === "daemon-integration.test.ts") return "project-core";
   if (["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"].includes(name)) return "runtime-upgrades";
   if (name === "embedded-changeset.test.ts") return "memory-core";
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
