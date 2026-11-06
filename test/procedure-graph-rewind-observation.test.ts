@@ -38,6 +38,19 @@ test("missing readiness and failed identity probes cannot become exit evidence",
   await assert.rejects(watched.alive(999), /not recorded at readiness/);
 });
 
+test("a ready-time group snapshot preserves its original identities without adopting later owners", async () => {
+  const captured = { ...original };
+  let current = { ...original };
+  const watched = fixtureProcesses(async () => new Map([[current.pid, current]]));
+  watched.rememberSnapshot(captured);
+  captured.started = "caller mutated snapshot";
+  assert.deepEqual(await watched.alive(original.pid), [true]);
+  current = { ...original, started: "new owner" };
+  assert.deepEqual(await watched.alive(original.pid), [false]);
+  assert.throws(() => watched.rememberSnapshot(current), /Cannot replace original identity/);
+  assert.throws(() => fixtureProcesses().rememberSnapshot({ ...original, started: "" }), /no process identity/);
+});
+
 test("cleanup addresses the owned ChildProcess object even if its numeric PID has a new owner", async () => {
   const child = new EventEmitter() as ChildProcess;
   Object.assign(child, { pid: original.pid, exitCode: null, signalCode: null });

@@ -37,15 +37,22 @@ async function identities(pids: number[]): Promise<Map<number, ProcessIdentity>>
 export function fixtureProcesses(read = identities) {
   const originals = new Map<number, ProcessIdentity>();
   const observed = new Map<number, ProcessIdentity | undefined>();
+  const record = (identity: ProcessIdentity) => {
+    if (!identity.started) throw Error(`Ready fixture ${identity.pid} has no process identity`);
+    const previous = originals.get(identity.pid);
+    if (previous && !sameProcess(previous, identity)) throw Error(`Cannot replace original identity for ${identity.pid}`);
+    originals.set(identity.pid, Object.freeze({ ...identity }));
+  };
   return {
+    // The native test already obtained these identities from its ready-time CIM
+    // group snapshot; querying the same live barrier again adds no evidence.
+    rememberSnapshot(...members: ProcessIdentity[]) { members.forEach(record); },
     async remember(...pids: number[]) {
       const rows = await read(pids);
       for (const pid of pids) {
         const identity = rows.get(pid);
         if (!identity?.started) throw Error(`Ready fixture ${pid} has no process identity`);
-        const previous = originals.get(pid);
-        if (previous && !sameProcess(previous, identity)) throw Error(`Cannot replace original identity for ${pid}`);
-        originals.set(pid, Object.freeze({ ...identity }));
+        record(identity);
       }
     },
     async alive(...pids: number[]) {

@@ -43,7 +43,7 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     const members = await captureProcessGroup(worker.pid!);
     const child = members.find(p => p.pid === ready.childPid);
     assert.ok(child, "CIM observes the real child creation identity");
-    await observed.remember(...members.map(member=>member.pid));
+    observed.rememberSnapshot(...members);
     return { worker, child, host:ready.host as ProcessIdentity|undefined, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
   };
   const [related, unrelated] = await Promise.all([start(), start()]);

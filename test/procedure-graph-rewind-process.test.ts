@@ -62,6 +62,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const candidates=[];
  for(const name of ['T','independent'])candidates.push(await service.withGraph(async g=>{const s=product.snapshot.steps.find(s=>s.source?.actionId===name)!;await g.enter(start.run.id,s.id);return g.report(start.run.id,s.id,{text:name});}));
  const processes=[];
+ let verifiedCleanup=false;
  let failedAttempt:any, failureConsumed=false;
  let dispatch:Promise<number>|undefined,releaseDispatch:(()=>void)|undefined;
  t.after(async()=>{releaseDispatch?.();if(dispatch)await boundedCleanup(dispatch,"dispatcher cleanup");});
@@ -86,7 +87,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
     gates.publish(`cleanup-child:${ready}`);
     const current=await reviews.readArtifactReviewForActor({runsRoot:config.runsRoot,reviewId:reviews.graphReviewHandle(start.run.id,candidate.step.id),roundId:candidate.step.reviewRounds![0].id,actorId:'reviewer'});
     const job=current.assignment.attempts?.find(a=>a.workerPid===pid&&a.workerIdentity?.started===observed.original(pid)?.started)?.workerJob;
-    if(process.platform==='win32'&&job)await stopFixtureJob(job);
+    if(process.platform==='win32'&&job&&!processes[0]?.retired)await stopFixtureJob(job);
     await untilFixture(async()=>!(await alive(pid)),'native dispatcher original worker exit');
    };
    f.beforeCleanup(cleanupNative);
@@ -120,11 +121,12 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    gates.publish(`release-provider:${ready}`);
    gates.publish(`cleanup-child:${ready}`);
    if(lateDescendant){gates.publish(`release-late:${ready}`);gates.publish(`snapshot-continue:${ready}`);gates.publish(`spawn-late:${ready}`);}
+   const wasAlive=worker.exitCode===null&&worker.signalCode===null;
    await stopFixtureChild(worker);
    const current=await reviews.readArtifactReviewForActor({runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,candidate.step.id),roundId:candidate.step.reviewRounds![0].id,actorId:'reviewer'});
    const attempt=current.assignment.attempts?.find(a=>a.workerPid===worker.pid&&observed.original(worker.pid!)?.started===a.workerIdentity?.started);
    const job=ownedJob??attempt?.workerJob;
-   if(process.platform==='win32'&&job)await stopFixtureJob(job);
+   if(process.platform==='win32'&&job&&(wasAlive||!verifiedCleanup))await stopFixtureJob(job);
   });
   if(failProviderBuild){
    const [code]=await once(worker,'exit');
@@ -144,9 +146,9 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   const lifetime=new AbortController();
   worker.once('exit',()=>lifetime.abort(new Error(errors||'Fixture worker exited before readiness')));
   const info=await Promise.race([gates.wait(ready),new Promise((_,reject)=>lifetime.signal.addEventListener('abort',()=>reject(lifetime.signal.reason),{once:true}))]);
-  await observed.remember(...[worker.pid,info.providerPid,info.childPid].filter(Number.isInteger));
   const own=await reviews.readArtifactReviewForActor({runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,candidate.step.id),roundId:candidate.step.reviewRounds![0].id,actorId:'reviewer'});
-  ownedJob=own.assignment.attempts?.find(a=>a.workerPid===worker.pid&&a.workerIdentity?.started===observed.original(worker.pid!)?.started)?.workerJob;
+  const ownAttempt=own.assignment.attempts?.at(-1);
+  if(ownAttempt?.workerPid===worker.pid)ownedJob=ownAttempt.workerJob;
   processes[i]={workerPid:worker.pid!,worker,exited:once(worker,'exit'),errors:()=>errors,ready,...info};
  };
  // Only the native dispatcher needs the unrelated assignment already claimed.
@@ -156,6 +158,8 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   const results=await Promise.allSettled([0,1].map(launch));
   for(const result of results)if(result.status==='rejected')throw result.reason;
  }
+ // Both ready barriers are still held: capture all roles in one fresh CIM query.
+ await observed.remember(...new Set(processes.flatMap(p=>[p.workerPid,p.providerPid,p.childPid]).filter(Number.isInteger)));
  const old=candidates[0],common={runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,old.step.id),roundId:old.step.reviewRounds![0].id,actorId:'reviewer'};
  const draft=await reviews.readArtifactReviewForActor(common);
  if(!late&&!launchGate)assert.ok(draft.assignment.attempts!.at(-1)!.cliReadyAt);
@@ -276,7 +280,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   assert.equal(gates.has(`provider-launched:${processes[0].ready}`),false,'no provider launched');
   assert.equal(await alive(processes[0].workerPid),false);
  }else await assertProcesses(processes[0],['workerPid','providerPid','childPid'].filter(key=>Number.isInteger(processes[0][key])),false);
- if(nativeDispatch)await processes[0].cleanup();
+ if(nativeDispatch){processes[0].retired=true;await processes[0].cleanup();}
  await assertProcesses(processes[1],['workerPid','providerPid','childPid'],true);
  await assert.rejects(reviews.retryArtifactReviewAgentAssignment(common),{code:'STEP_SUPERSEDED'});
  await assert.rejects(reviews.markArtifactReviewAgentCliReady({...common,attemptId:draft.assignment.attempts?.[0]?.id??'stale-attempt'}),{code:'STEP_SUPERSEDED'});
@@ -321,5 +325,6 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   await assert.rejects(service.withGraph(g=>g.advance(start.run.id)),{code:'PROCESS_IDENTITY_UNAVAILABLE'});
   assert.deepEqual((await service.snapshot(start.run.id)).run.frames![0].graphFrame.pendingRewind,pending,'absence of evidence cannot clear the saved intent');
  }
+ verifiedCleanup=true;
 
 });
