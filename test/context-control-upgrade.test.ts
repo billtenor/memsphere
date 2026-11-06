@@ -164,7 +164,7 @@ test("making idle timeout optional upgrades the known definition without rewriti
   const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!;
   const run = await s.start("idle timeout migration");
   const path = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
-  const old = JSON.parse(await readFile(path, "utf8"));
+  const old = JSON.parse(await readFile(new URL("./fixtures/context-control-run-before-rewind.json", import.meta.url), "utf8"));
   const agent = old.definitions.PermissionConfig.properties.actors.additionalProperties.properties.agent;
   agent.required.push("idleTimeoutMs");
   agent.properties.idleTimeoutMs.description = "空闲超时的毫秒数。";
@@ -176,18 +176,45 @@ test("making idle timeout optional upgrades the known definition without rewriti
   assert.deepEqual(await reopened.stores.run.get({}, run.id), before);
 });
 
+for (const [entity, version] of [["run", "before-rewind"], ["review", "before-rewind"], ["run", "before-job"]] as const) test(`rewind upgrade preserves ${entity} ${version} records and revisions`, async t => {
+ const f = await businessFixture(t, {}), s = (await openContextControl(f.root,true))!;
+ const run = await s.start("prior rewind model");
+ const artifact=(await s.report(run.id,{name:"old",content:textContent("before rewind")})).artifact;
+ const review={id:"historical-review",artifactId:artifact.id,reviewer:{role:"reviewer",source:"human"},status:"submitted",createdAt:new Date().toISOString(),comments:[{id:"historical-comment",body:"preserve this comment",createdAt:new Date().toISOString()}]};
+ await s.stores.review.create({},`${run.id}/${review.id}`,review);
+ const before = await s.stores.run.get({},run.id), beforeReview=await s.stores.review.get({},`${run.id}/${review.id}`);
+ await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`, await readFile(new URL(`./fixtures/context-control-${entity}-${version}.json`,import.meta.url),"utf8"));
+ await assert.rejects(openContextControl(f.root),{code:"MODEL_INCOMPATIBLE"});
+ assert.equal((await withModelMaintenance(f.root,()=>upgradeContextControlOutputs(f.root)))?.records,0);
+ const reopened=(await openContextControl(f.root))!;
+ assert.deepEqual(await reopened.stores.run.get({},run.id),before);
+ assert.deepEqual(await reopened.stores.review.get({},`${run.id}/${review.id}`),beforeReview);
+});
 
-test("known pre-node Review upgrades additively without rewriting historical Comment IDs or revisions", async t => {
+for (const fixtureName of ["context-control-review-before-job.json", "context-control-review-before-members.json", "context-control-review-before-nodes.json", "context-control-review-master-release.json", "context-control-review-rewind-release.json"]) test(`known Review upgrade from ${fixtureName} preserves historical Comment IDs and revisions`, async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const run = await service.start("historical review"), artifact = (await service.report(run.id, { name: "A", content: textContent("A") })).artifact;
   const id = "review-history", key = `${run.id}/${id}`;
   await service.stores.review.create({}, key, { id, roundId: "historical-round", artifactId: artifact.id, reviewer: { role: "runner" }, status: "submitted", createdAt: new Date().toISOString(), endedAt: new Date().toISOString(), comments: [{ id: "comment-original", body: "Keep history", createdAt: new Date().toISOString(), severity: "suggestion" }], vote: { value: "approve" } });
   const before = await service.stores.review.get({}, key), path = join(f.root, "data/context_control/reviews", run.id, `${id}.json`), bytes = await readFile(path, "utf8");
-  await publishFixtureDefinition(f.root, "memsphere/context_control/review.json", await readFile(new URL("./fixtures/context-control-review-before-nodes.json", import.meta.url), "utf8"));
+  await publishFixtureDefinition(f.root, "memsphere/context_control/review.json", await readFile(new URL(`./fixtures/${fixtureName}`, import.meta.url), "utf8"));
   await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
   assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
   const reopened = (await openContextControl(f.root))!;
   assert.deepEqual(await reopened.stores.review.get({}, key), before);
   assert.equal(await readFile(path, "utf8"), bytes);
   assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
+});
+
+
+for(const entity of ["run","review"] as const)test(`Tracked Job name upgrade preserves ${entity} records from the preceding enrolled-Job schema`,async t=>{
+ const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!,run=await service.start("enrolled job model");
+ const before=await service.stores.run.get({},run.id),path=join(f.root,"data/context_control/runs",`${run.id}.json`),bytes=await readFile(path,"utf8");
+ const model=JSON.parse(await readFile(new URL(`../reserved-models/context-control/${entity}.json`,import.meta.url),"utf8"));
+ const restore=(v:any)=>{if(v&&typeof v==="object"){if(typeof v.pattern==="string"&&v.pattern.includes("Reviewer"))v.pattern="^(Global|Local)\\\\Memsphere\\.Reviewer\\.[0-9a-f-]{36}$";Object.values(v).forEach(restore);}};restore(model);
+ const {definitionHash}=await import("../src/context_control/model-assets.js");
+ assert.equal(definitionHash(model),entity==="run"?"edc72333e9994d3af34efb5c214c94cccaadf868bd25cc6fc243d3b7901696c3":"099b094d127fcfa7966ae78965c4f481fa1de837d2f888cbad4a8d7ea286173d");
+ await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`,JSON.stringify(model));
+ assert.equal((await withModelMaintenance(f.root,()=>upgradeContextControlOutputs(f.root)))?.records,0);
+ const reopened=(await openContextControl(f.root))!;assert.deepEqual(await reopened.stores.run.get({},run.id),before);assert.equal(await readFile(path,"utf8"),bytes);
 });

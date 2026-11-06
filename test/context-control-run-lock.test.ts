@@ -13,15 +13,15 @@ import type { GraphProcedureMemory } from "../src/memory/ast.js";
 import type { GraphRuntime } from "../src/context_control/graph-runtime.js";
 import type { Run, Step } from "../src/context_control/types.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
-import { businessFixture } from "./helpers/business-data.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 
-type PreparedFixture = Awaited<ReturnType<typeof businessFixture>> & {
+type PreparedFixture = Awaited<ReturnType<typeof initializedContextFixture>> & {
   service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
 };
 const fixtures = new Map<string, PreparedFixture>();
 beforeEach(async t => {
-  const f = await businessFixture(t, {});
-  const service = (await openContextControl(f.root, true))!;
+  const f = await initializedContextFixture(t);
+  const service = (await openContextControl(f.root))!;
   fixtures.set(t.name, { ...f, service });
   t.after(() => { fixtures.delete(t.name); });
 });

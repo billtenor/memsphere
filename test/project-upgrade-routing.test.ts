@@ -2,38 +2,57 @@ import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { fixture } from "./helpers/project-upgrade.js";
 
-test("project upgrade CLI selects explicit name over global project over Primary and routes JSON errors", async () => {
+test("project upgrade command tree selects explicit name over global project over Primary before resource work", async () => {
   const f = await fixture();
   try {
     f.git(["init", "-b", "master"]);
-    f.create("primary", ["--bind"]);
-    f.create("other");
+    // Selection needs registered identities, not installed models or an upgrade.
+    // A deliberately absent Memory repository fails preflight after selection.
+    const projects: Record<string, { root: string }> = {};
+    for (const name of ["primary", "other"]) {
+      const root = join(f.home, "projects", name);
+      await mkdir(root, { recursive: true });
+      await writeFile(join(root, "project.json"), JSON.stringify({ format_version: 1, name, created_at: "2026-10-06T00:00:00.000Z" }));
+      await writeFile(join(root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" } }));
+      projects[name] = { root };
+    }
+    const workspace = await resolveWorkspaceIdentity(f.workspace);
+    await writeFile(join(f.home, "registry.json"), JSON.stringify({ format_version: 1, projects, workspaces: { [workspace.key]: { primary: "primary", mounted: [] } } }));
     for (const [args, expected] of [
       [["project", "upgrade", "--output", "json"], "primary"],
       [["--project", "other", "project", "upgrade", "--output", "json"], "other"],
       [["--project", "other", "project", "upgrade", "primary", "--output", "json"], "primary"]
     ] as const) {
-      const result = f.run([...args]);
-      assert.equal(result.status, 0, result.stderr || result.stdout);
-      assert.equal(JSON.parse(result.stdout).project, expected);
+      const result = await f.moduleRun([...args]);
+      assert.notEqual(result.status, 0);
+      const value = JSON.parse(result.stdout);
+      assert.equal(value.project, expected);
+      assert.equal(value.failure.stage, "preflight");
+      assert.equal(value.models.status, "not_run");
     }
-    const missing = f.upgrade("missing");
-    assert.notEqual(missing.result.status, 0);
-    assert.equal(missing.value.overall, "failed");
-    assert.equal(missing.value.failure.stage, "target");
+    const missing = await f.moduleRun(["project", "upgrade", "missing", "--output", "json"]);
+    assert.notEqual(missing.status, 0);
+    assert.equal(JSON.parse(missing.stdout).failure.stage, "target");
     const unbound = join(f.root, "unbound");
     await mkdir(unbound);
-    const noPrimary = f.run(["project", "upgrade", "--output", "json"], unbound);
+    const noPrimary = await f.moduleRun(["project", "upgrade", "--output", "json"], unbound);
     assert.notEqual(noPrimary.status, 0);
     const noPrimaryError = JSON.parse(noPrimary.stdout || noPrimary.stderr);
-    assert.ok(noPrimaryError.failure || noPrimaryError.error);
-    const invalid = f.run(["project", "upgrade", "--unknown", "--output", "json"]);
+    assert.equal(noPrimaryError.failure.stage, "target");
+  } finally { await f.cleanup(); }
+});
+
+test("project upgrade rejects unknown options and invalid output formats as JSON errors", async () => {
+  const f = await fixture();
+  try {
+    const invalid = await f.moduleRun(["project", "upgrade", "--unknown", "--output", "json"]);
     assert.notEqual(invalid.status, 0);
     assert.ok(JSON.parse(invalid.stderr).error);
     assert.equal(invalid.stdout, "");
-    const badOutput = f.run(["project", "upgrade", "--output", "xml"]);
+    const badOutput = await f.moduleRun(["project", "upgrade", "--output", "xml"]);
     assert.notEqual(badOutput.status, 0);
   } finally { await f.cleanup(); }
 });

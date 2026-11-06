@@ -29,23 +29,40 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     });
     server.listen(0, "127.0.0.1"); await once(server, "listening");
     let runner: ReturnType<typeof spawn> | undefined;
-    let verified = false;
+    let verified = false, stage = "setup", output = "";
     let observed: Awaited<ReturnType<typeof processTable>> | undefined;
     t.after(async () => {
-      if (!verified) {
-        // A failing regression must reclaim its fixture even if the broken
-        // runner has already exited and orphaned the recorded browser/workers.
-        const roots = ready.flatMap(fixture => [fixture.wrapper, fixture.worker, fixture.browser, fixture.stubborn])
-          .filter((pid): pid is number => pid !== undefined).map(pid => ({ pid }));
-        if (runner?.pid) roots.push({ pid: runner.pid });
-        const live = new Map((await processTable()).map(row => [row.pid, row.started]));
-        const originals = new Map(observed?.map(row => [row.pid, row.started]));
-        await terminateTestProcesses(new Set(roots.filter(({ pid }) => !observed ||
-          (originals.has(pid) && live.get(pid) === originals.get(pid)))), "SIGTERM");
+      const cleanupSignal = AbortSignal.timeout(10000);
+      let failure: unknown;
+      try {
+        if (!verified) {
+          t.diagnostic(`Runner lifecycle incomplete at ${stage}; child output: ${output}`);
+          const roots = ready.flatMap(fixture => [fixture.wrapper, fixture.worker, fixture.browser, fixture.stubborn])
+            .filter((pid): pid is number => pid !== undefined).map(pid => ({ pid }));
+          if (runner?.pid) roots.push({ pid: runner.pid });
+          const live = new Map((await processTable({ signal: cleanupSignal })).map(row => [row.pid, row.started]));
+          const originals = new Map(observed?.map(row => [row.pid, row.started]));
+          await terminateTestProcesses(new Set(roots.filter(({ pid }) => !observed ||
+            (originals.has(pid) && live.get(pid) === originals.get(pid)))), "SIGTERM", { signal: cleanupSignal });
+        }
+      } catch (error) {
+        failure = error;
+        t.diagnostic(`Runner fixture cleanup failed: ${String(error)}`);
+        // The ChildProcess handle is owned even if the OS snapshot failed.
+        if (runner && runner.exitCode === null && runner.signalCode === null) runner.kill("SIGKILL");
+      } finally {
+        for (const response of barriers) response.destroy();
+        const serverClosed = once(server, "close", { signal: cleanupSignal });
+        server.close(); server.closeAllConnections();
+        try { await serverClosed; await rm(directory, { recursive: true, force: true }); }
+        catch (error) { failure ??= error; t.diagnostic(`Runner fixture finalization failed: ${String(error)}`); }
+        if (failure && runner) {
+          if (runner.connected) runner.disconnect();
+          runner.stdout?.destroy(); runner.stderr?.destroy(); runner.unref();
+        }
       }
-      server.closeAllConnections(); await new Promise<void>(done => server.close(() => done()));
-      await rm(directory, { recursive: true, force: true });
-    });
+      if (failure) throw failure;
+    }, { timeout: 15000 });
     await mkdir(join(directory, "scripts/ci"), { recursive: true }); await mkdir(join(directory, "test"));
     // Run the actual runner code against a tiny isolated suite, never the whole
     // repository recursively. All four files are copied without modification.
@@ -69,23 +86,37 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
       env,
       detached: process.platform !== "win32", stdio: ["ignore", "pipe", "pipe", "ipc"]
     });
-    let output = ""; runner.stdout!.on("data", data => { output += data; }); runner.stderr!.on("data", data => { output += data; });
+    runner.stdout!.on("data", data => { output += data; }); runner.stderr!.on("data", data => { output += data; });
     const closed = once(runner, "close", { signal: t.signal });
     const allReady = async () => {
       while (ready.length < count) {
-        const changed = new Promise<void>(done => { notify = done; });
-        if (ready.length < count) await changed;
+        t.signal.throwIfAborted();
+        await new Promise<void>((done, reject) => {
+          const abort = () => { notify = () => {}; reject(t.signal.reason); };
+          notify = () => { t.signal.removeEventListener("abort", abort); notify = () => {}; done(); };
+          t.signal.addEventListener("abort", abort, { once: true });
+        });
       }
     };
+    stage = "fixture readiness";
     await Promise.race([allReady(), closed.then(() => { throw new Error(`Runner exited before fixture ready: ${output}`); })]);
-    const before = await processTable();
-    observed = before;
+    stage = "process snapshot";
+    const actual = await processTable({ signal: t.signal });
+    observed = actual;
+    // Synthetic ancestry belongs only to expectation calculation, never cleanup.
+    const before = signal ? actual : [...actual,
+      { pid: -1, parent: -2, started: "synthetic cycle" }, { pid: -2, parent: -1, started: "synthetic cycle" }];
+    stage = "expected ancestry";
     const parents = new Map(before.map(row => [row.pid, row.parent]));
     const expected = before.filter(row => {
       let pid = row.pid;
-      while (pid && parents.has(pid) && pid !== runner!.pid) pid = parents.get(pid)!;
+      const visited = new Set();
+      while (pid && parents.has(pid) && pid !== runner!.pid && !visited.has(pid)) {
+        visited.add(pid); pid = parents.get(pid)!;
+      }
       return pid === runner!.pid;
     });
+    assert.ok(expected.every(row => row.pid > 0), "unrelated parent cycles are not owned descendants");
     for (const fixture of ready) {
       for (const pid of [fixture.worker, fixture.wrapper, fixture.browser, fixture.stubborn].filter(Boolean)) {
         assert.ok(expected.some(row => row.pid === pid), `snapshot includes fixture process ${pid}`);
@@ -96,12 +127,14 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
       if (process.platform === "win32") runner.send!(signal);
       else runner.kill(signal);
     }
+    stage = "runner exit";
     const [code, exitSignal] = await closed;
     assert.equal(exitSignal, null, output);
     assert.equal(code, signal === "SIGTERM" ? 143 : signal === "SIGINT" ? 130 : 0, output);
     assert.ok(!events.includes("/unexpected"), "cancellation must stop scheduling queued tests");
     if (!signal) assert.equal(events.filter(event => event === "/cleanup").length, count);
-    const live = new Map((await processTable()).filter(row => !row.zombie).map(row => [row.pid, row]));
+    stage = "exit snapshot";
+    const live = new Map((await processTable({ signal: t.signal })).filter(row => !row.zombie).map(row => [row.pid, row]));
     // Windows can reuse a terminated process's PID before this second snapshot.
     // Check the recorded process's birth identity, as the runner itself does.
     for (const original of expected) assert.notEqual(live.get(original.pid)?.started, original.started,

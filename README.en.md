@@ -229,6 +229,21 @@ memsphere memory change validate <change-id>
 memsphere memory publish --change <change-id>
 ~~~
 
+For ChangeSet review, record its ID, the checkpoint digest returned by validation, and relevant logical Memory references in the review materials. Read evidence through these read-only commands:
+
+~~~bash
+memsphere memory change show <change-id> --checkpoint <digest> --part summary
+memsphere memory change show <change-id> --checkpoint <digest> --part diff
+memsphere memory change show <change-id> --checkpoint <digest> --part validation
+memsphere memory change show <change-id> --checkpoint <digest> --part memory --reference concepts/example --side after
+~~~
+
+Omitting `--part` is equivalent to explicitly passing `--part summary`. For Memory content, omitting `--side` is equivalent to `--side after`. Explicit options remain supported; `--reference` only filters and does not select content. Each checkpoint pins its scope, baseline, content and validation result. Unvalidated candidate edits do not change it. Identical revalidation retains the record; changes to scope, baseline or diagnostics produce a new digest. Older checkpoints without a frozen material description require explicit revalidation.
+
+Output is JSON. Use `--side before` for the original Memory; an absent side returns `null`. Stale digests, missing checkpoints and failed integrity checks are rejected. Update review references after revalidation. Reviewers can use this read-only entrypoint without internal storage paths or copying full Memory into an Artifact; ChangeSet writes remain unavailable.
+
+In Reviewer Sessions, `memory list/read` still reads current Project Memory by default, without adding `--run`. Explicitly pass `--run <run-id>` for the bound Run snapshot. Formal review rules and contracts always use the frozen version.
+
 #### 6.4.2 Embedded Project
 
 To keep Memory and code in the same Git repository, create and bind an Embedded Project:
@@ -502,3 +517,13 @@ Continue uses the calling Agent session. Detect Codex/Traex under Settings → R
 Manage the Home background process with `memsphere daemon start/status/stop/restart`. View retains `view start/status/stop/restart`; stopping View leaves waiting tasks active, and restarting the daemon restores the previous View running/stopped intent. No operating-system boot service is installed.
 
 Dependencies create pending Step instances before production. Enter is idempotent; Continue stays bound to one Step until completion. Formal reviews also support `continue review resolve` and `continue review submit-for-human`, with the native commands’ explicit authorization, options and permission checks. An entry Action prepares business materials; startup accepts no structured business input. Graph runs use model Stores; existing Projects explicitly upgrade with `project models initialize` when prompted. See the [graph syntax and examples](docs/procedure-graph-syntax.md) for model/payload contracts.
+
+Explicit `mode: graph` is recommended for new procedures and is used by the agile development procedure. Omitting mode still parses as flow. The CLI can rewind an upstream Step while retaining historical artifacts and dependencies:
+
+```bash
+memsphere run step rewind --run R --step S --dry-run --output json
+memsphere run step rewind --run R --step S --reason "Revise product plan"
+memsphere run step enter --run R --step <replacementStepId>
+```
+
+Enter the new pending target explicitly. Dependent work is rebuilt, independent branches remain, and superseded Steps reject submissions. Recover saved operations with status on the same Run. Rewind does not undo code or external side effects.

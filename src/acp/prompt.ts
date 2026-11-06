@@ -38,7 +38,25 @@ export async function buildArtifactReviewerPrompt(input: {
     };
   });
   if (assignment.nodeTree) {
-    return renderPrompt("acp.review-v3.initial", locale, reviewNodePromptModel(reviewNodeView(assignment, assignment.draft.comments, { status: assignment.status }), rolePrompts, JSON.stringify({ artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) }, inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name })), commands: { artifact: "memsphere run artifact show --assignment " + assignment.id, contract: "memsphere run artifact contract show --assignment " + assignment.id } }, null, 2), permissions));
+    const materials = {
+      artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) },
+      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name })),
+      memoryReads: {
+        project: "memsphere memory list --output json",
+        frozen: (run.memorySnapshot || run.frozenMemoryRunId) ? `memsphere memory list --run ${run.id} --output json` : undefined,
+        change: run.memorySource
+          ? `memsphere memory change show ${run.memorySource.changeId} --checkpoint ${run.memorySource.checkpointDigest} --part summary`
+          : undefined
+      },
+      commands: {
+        artifact: "memsphere run artifact show --assignment " + assignment.id,
+        contract: "memsphere run artifact contract show --assignment " + assignment.id
+      }
+    };
+    return renderPrompt("acp.review-v3.initial", locale, reviewNodePromptModel(
+      reviewNodeView(assignment, assignment.draft.comments, { status: assignment.status }),
+      rolePrompts, JSON.stringify(materials, null, 2), permissions
+    ));
   }
   const promptId = input.promptVersion === "artifact-review-v1"
     ? "acp.artifact-review.initial"

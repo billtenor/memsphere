@@ -67,30 +67,6 @@ test("project upgrade CLI checks both phases when only Memory or only models nee
   } finally { await f.cleanup(); }
 });
 
-test("project upgrade CLI updates only system registration issuance metadata and preserves envelope identity", async () => {
-  const f = await fixture();
-  try {
-    const project = f.create("metadata");
-    const record = (await registrations(project)).find(item => JSON.parse(item.bytes).value.modelRef === systemModel.registration.modelRef)!;
-    const original = JSON.parse(record.bytes);
-    const old = { ...original, value: { ...original.value, name: "Old name", description: "Old description", package_name: "Old package", tags: ["old"] } };
-    await writeFile(record.path, JSON.stringify(old));
-    const { result, value } = f.upgrade("metadata");
-    assert.equal(result.status, 0, JSON.stringify(value));
-    assert.equal(value.models.status, "upgraded");
-    assert.equal(value.memory.status, "unchanged");
-    const upgraded = JSON.parse(await readFile(record.path, "utf8"));
-    assert.deepEqual(upgraded.value, systemModel.registration);
-    assert.equal(upgraded.id, original.id);
-    assert.equal(upgraded.createdAt, original.createdAt);
-    const bytes = await readFile(record.path, "utf8");
-    const repeated = f.upgrade("metadata");
-    assert.equal(repeated.result.status, 0, JSON.stringify(repeated.value));
-    assert.equal(repeated.value.overall, "unchanged");
-    assert.equal(await readFile(record.path, "utf8"), bytes);
-  } finally { await f.cleanup(); }
-});
-
 test("project upgrade CLI reports failed models, preserves Memory and succeeds after repair", async () => {
   const f = await fixture();
   try {

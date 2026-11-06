@@ -158,9 +158,10 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     const concurrentB = await editMemories({ references: ["concepts/concurrent-b"] });
     await withMemoryWriteAccess(memoryRoot, async () => {
       await assert.rejects(publishMemoryChange(concurrentA.change.id), { code: "MEMORY_PUBLISH_BUSY" });
-      // Candidate operations do not participate in publication admission.
+      // Candidate edits remain independent, but validation reads the formal
+      // root and must not observe an in-progress publication or rollback.
       const independent = await editMemories({ references: ["concepts/independent"] });
-      assert.deepEqual((await validateMemoryChange(independent.change.id)).issues, []);
+      await assert.rejects(validateMemoryChange(independent.change.id), { code: "MEMORY_PUBLISH_BUSY" });
       assert.equal((await readMemoryChange({ home, project: "project", changeId: concurrentB.change.id })).id, concurrentB.change.id);
     });
     await withFileLock(join(registry.projects.project.root, ".runtime/memory-publish.lock"), async () => {

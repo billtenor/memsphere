@@ -50,6 +50,9 @@ export type Review = {
 };
 export type ReviewAttempt = {
   id: string; createdAt: string; startedAt?: string; workerPid?: number; cliReadyAt?: string; promptVersion?: string;
+  workerIdentity?: { pid: number; started: string; group: number };
+  workerMembers?: Array<{ pid: number; started: string; group: number }>;
+  workerJob?: string;
   session?: { provider?: string; id?: string; protocolVersion?: number; agentName?: string; agentVersion?: string; model?: string };
   completion?: { at: string; kind: "completed" | "failed" | "cancelled"; stopReason?: string; failure?: { stage: string; code: string; message: string; category?: string } };
 };
@@ -64,15 +67,19 @@ export type ReviewRound = {
   resolutionSummary?: string;
   resolutions?: Array<{ reviewId: string; commentId: string; value: import("../artifact-review.js").ArtifactReviewDispositionValue; note: string; validationSummary?: string; updatedAt: string }>;
 };
-export type Arrival = { kind: "artifact"; id: string } | { kind: "collect"; items: Record<string, string[]> } | { kind: "start" };
-export type GraphTrigger = { id: string; actionId: string; dependencyIndex: number; stepId?: string; inputs?: Record<string, Ref[]> };
+export type Arrival = ({ kind: "artifact"; id: string } | { kind: "collect"; items: Record<string, string[]> }) & { stepId?: string } | { kind: "start" };
+export type GraphTrigger = { id: string; actionId: string; dependencyIndex: number; stepId?: string; inputs?: Record<string, Ref[]>; arrivals?: Record<string, Arrival>; collection?: { items: Record<string, string[]>; triggerIds: string[] } };
 export type GraphJoin = { actionId: string; dependencyIndex: number; arrivals: Record<string, Arrival> };
+export type GraphRewind = { id: string; createdAt: string; reason: string; targetStepId: string; replacementStepId: string; affectedStepIds: string[]; affectedTriggerIds: string[] };
+export type DeferredCollect = { rewindId: string; triggerId: string; actionId: string; dependencyIndex: number; arrivals: Record<string, Arrival>; memberStepIds: string[]; memberSourceStepIds: string[]; waits: Array<{ rootStepId: string; waitActionIds: string[] }> };
+export type RewindWorker = { reviewId: string; attemptId: string; pid: number; identity?: { pid: number; started: string; group: number }; members?: Array<{ pid: number; started: string; group: number }>; job?: string };
 export type GraphFrame = {
   memoryRef: string; triggers: GraphTrigger[]; pendingSteps: Step[]; joins: GraphJoin[];
   processedStepIds: string[]; nextCompletionSequence: number;
+  rewinds?: GraphRewind[]; pendingRewind?: { id: string; workers: RewindWorker[] }; deferredCollects?: DeferredCollect[];
 };
 export type SubmissionFrame = { artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
 export type GraphContract = { procedure: GraphProcedureMemory; artifactSpecs: Record<string, GraphArtifactSpec>; rules: Record<string, { asserts: EffectiveRuleTree; suggests: EffectiveRuleTree }> };
-export type Snapshot = { run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; outputArtifactIds: string[] };
+export type Snapshot = { run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
 export type ReportInput = Body & { target?: string; name?: string; revisedFrom?: string; revisedSummary?: string; tags?: string[]; dependencies?: Ref[]; dependsOn?: string[] };
 export const textContent = (content: string, contentType = "text/plain"): Content => ({ model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType, content } });

@@ -229,6 +229,21 @@ memsphere memory change validate <change-id>
 memsphere memory publish --change <change-id>
 ```
 
+评审 ChangeSet 时，在材料中保留 ChangeSet ID、校验返回的 checkpoint digest 和相关 Memory 逻辑引用，通过只读命令获取证据：
+
+```bash
+memsphere memory change show <change-id> --checkpoint <digest> --part summary
+memsphere memory change show <change-id> --checkpoint <digest> --part diff
+memsphere memory change show <change-id> --checkpoint <digest> --part validation
+memsphere memory change show <change-id> --checkpoint <digest> --part memory --reference concepts/example --side after
+```
+
+`--part` 省略时默认为 `summary`，与显式 `--part summary` 完全等价；正文的 `--side` 省略时默认为 `after`，与显式 `--side after` 等价。`--reference` 只筛选，不自动切换为正文。checkpoint 同时固定范围、基线和校验结果；未重新校验的候选编辑不改变此版本。无变化复验保留原记录，范围、基线或诊断变化产生新 digest；缺少冻结材料描述的旧 checkpoint 需显式重新校验。
+
+这些命令返回 JSON；`--side before` 读取修改前正文，不存在的一侧返回 `null`。digest 与当前 checkpoint 不符、checkpoint 缺失或内容校验失败时拒绝读取；重新校验后须更新评审引用。无需访问底层存储文件或把 Memory 全文复制进 Artifact。Reviewer 仅开放这一只读入口，不开放 ChangeSet 写操作。
+
+Reviewer 中 `memory list/read` 默认仍读取当前 Project Memory，不自动添加 `--run`。需要 Run 冻结快照时显式传入 `--run <run-id>`，Session 只允许绑定的快照；正式评审规则和契约始终采用冻结版本。
+
 #### 6.4.2 Embedded Project
 
 如果希望 Memory 与代码保存在同一个 Git 仓库中，创建并绑定一个 Embedded Project：
@@ -504,3 +519,13 @@ Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 C
 `memsphere daemon start/status/stop/restart` 管理 Home 后台进程。View 仍用 `view start/status/stop/restart` 管理；停止 View 不影响等待任务，daemon 重启恢复之前的 View 启停意图。不安装操作系统开机自启服务。
 
 Step 在依赖满足时提前创建，enter 幂等，Continue 固定同一 Step 至完成。正式评审还支持 `continue review resolve` 处置意见和 `continue review submit-for-human` 记录已明确授权的 Human 票，参数与权限沿用对应原生命令。入口 Action 负责准备业务材料，启动不接收结构化业务 input。graph 使用模型 Store；已有 Project 按提示显式 `project models initialize` 升级。完整语法、model/payload 契约与示例见 [graph 流程](docs/procedure-graph-syntax.md)。
+
+新建流程默认推荐显式使用 `mode: graph`，敏捷需求开发流程已采用 graph；省略 mode 仍按 flow 解析。CLI 支持回溯上游步骤并保留历史产物和依赖：
+
+```bash
+memsphere run step rewind --run R --step S --dry-run --output json
+memsphere run step rewind --run R --step S --reason "Revise product plan"
+memsphere run step enter --run R --step <replacementStepId>
+```
+
+执行后须显式 enter 新 pending 目标；受影响后继重建、独立分支保留，旧步骤不能继续提交。写入失败用同一 Run 的 status 恢复。回溯不撤销代码或外部副作用。

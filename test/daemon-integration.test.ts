@@ -1,13 +1,18 @@
+import { processGates } from "./fixtures/process-gates.mjs";
+import { fileURLToPath } from "node:url";
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
 import { watch } from "node:fs";
 import { promisify } from "node:util";
+import { setTimeout as delay } from "node:timers/promises";
 import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { businessFixture } from "./helpers/business-data.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { readProjectConfig } from "../src/config.js";
 import { openCommandStates } from "../src/home/command-state-store.js";
@@ -60,15 +65,18 @@ async function writeTestCommand(command: string, source: string) {
 async function observe<T>(t: TestContext, directory: string, read: () => Promise<T>, ready: (value: T) => boolean, signal = t.signal) {
   let wake = () => {};
   let failure: Error | undefined;
-  const watcher = watch(directory, () => wake());
-  watcher.on("error", error => { failure = error; wake(); });
+  let watcher:ReturnType<typeof watch>|undefined;
+  try{watcher=watch(directory,()=>wake());}
+  catch(error){if(!["EMFILE","ENOSPC"].includes((error as NodeJS.ErrnoException).code??""))throw error;}
+  watcher?.on("error", error => { failure = error; wake(); });
   const abort = () => wake();
   signal.addEventListener("abort", abort);
   try {
     for (;;) {
       signal.throwIfAborted();
       if (failure) throw failure;
-      const changed = new Promise<void>(resolve => { wake = resolve; });
+      // When the host has exhausted watchers, bounded state probes retain the same assertion.
+      const changed = watcher ? new Promise<void>(resolve => { wake = resolve; }) : delay(25,undefined,{signal});
       const value = await read();
       if (ready(value)) return value;
       signal.throwIfAborted();
@@ -76,13 +84,15 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
       await changed;
     }
   } finally {
-    watcher.close();
+    watcher?.close();
     signal.removeEventListener("abort", abort);
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true) {
-  const f = await businessFixture(t, {});
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false) {
+  // Installation and Embedded worktree discovery are not part of daemon
+  // delivery. Reuse installed models in separate Managed filesystem Stores.
+  const f = await initializedContextFixture(t);
   const bin = join(f.directory, "bin"); await mkdir(bin);
   const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
   const provider = join(bin, "codex-acp");
@@ -92,10 +102,14 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const fake = join(bin, "codex");
   await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" }, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
+  await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
-  const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env });
+  // These commands still communicate with the real daemon process. Keep
+  // native entry/exit and simultaneous registrations in dedicated scenarios.
+  const call = (...args: string[]) => processBoundary
+    ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
+    : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
   const { daemonStatus, stopDaemon: stop } = await import("../src/daemon/service.js");
   let daemon: ReturnType<typeof spawn> | undefined;
   const startDaemon = async () => {
@@ -106,8 +120,10 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
     daemon.once("error", error => lifetime.abort(error));
     daemon.once("exit", (code, signal) => lifetime.abort(new Error(`Fixture daemon exited: ${code ?? signal}`)));
     try {
-      await observe(t, join(f.home, ".runtime"), () => daemonStatus(f.home), state => state.running,
-        AbortSignal.any([t.signal, lifetime.signal]));
+      const signal=AbortSignal.any([t.signal,lifetime.signal,AbortSignal.timeout(10000)]);
+      // Probe the actual control socket; no watcher resource or elapsed-time
+      // guess is needed to establish readiness.
+      while(!(await daemonStatus(f.home)).running){signal.throwIfAborted();await delay(25,undefined,{signal});}
     } catch (error) {
       if (daemon.exitCode === null && daemon.signalCode === null && daemon.pid) {
         const exited = once(daemon, "exit", { signal: AbortSignal.timeout(20000) });
@@ -144,7 +160,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   // Run creation, candidate production and session binding are preconditions,
   // not the CLI boundary under test. Construct them through domain APIs/Stores.
   const config = await readProjectConfig("test-project", f.home);
-  const service = (await openContextControl(f.root, true))!;
+  const service = (await openContextControl(f.root))!;
   const procedure: GraphProcedureMemory = {
     tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
     actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
@@ -198,11 +214,11 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
       authorizationNote: "Isolated fixture vote" });
   };
   const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } } }));
-  return { ...f, call, env, queue, queueLog, started, reviewId, reviewState, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, waitForTask };
+  return { ...f, call, env, queue, queueLog, queueCommand:fake, started, reviewId, reviewState, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, waitForTask };
 }
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { call, queue } = f;
   await f.startDaemon();
   const wait = await call("continue", "review", "wait");
@@ -400,7 +416,7 @@ for (const state of ["passed", "awaiting_revision"] as const) {
 }
 
 test("native report refuses another session binding until the caller explicitly enters its target", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { openContextControl } = await import("../src/project/context-control.js");
   const service = (await openContextControl(f.root))!;
   // The fixture session is already bound to a different (graph) Run.
@@ -456,7 +472,7 @@ for (const async of [false, true]) test(`Human-only wait returns immediately wit
 });
 
 test("a completed historical wait does not block a fresh pending wait in the same round", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t);
+  const f = await reviewFixture(t, "success", true, true);
   const { listTasks, updateTask } = await import("../src/daemon/tasks.js");
   await f.startDaemon();
   const first = await f.call("continue", "review", "wait");
@@ -495,4 +511,40 @@ test("explicit task retry and fresh registration share the active-task deduplica
   const [retry, registration] = await Promise.all([retryFailedTask(first.id, f.home), registerTask(input, f.home)]);
   assert.equal(retry.id, registration.id);
   assert.equal((await listTasks(f.home)).filter(r => ["queued", "running"].includes(r.value.status)).length, 1);
+});
+
+
+test("synchronous CLI wait observes pending Agent work and returns its completed result without queue registration",{timeout:30000},async t=>{
+ const f=await reviewFixture(t),gates=await processGates(t.signal);t.after(()=>gates.close());
+ await f.setAsync(false);
+ const child=spawn(process.execPath,["--import",new URL("./fixtures/review-wait-barrier.mjs",import.meta.url).href,cli,"--project","test-project","continue","review","wait"],{cwd:f.root,env:{...f.env,REVIEW_WAIT_GATES:String(gates.endpoint)},stdio:["ignore","pipe","pipe"]});
+ let stdout="",stderr="";child.stdout.on("data",data=>stdout+=data);child.stderr.on("data",data=>stderr+=data);
+ const exited=once(child,"exit",{signal:t.signal});
+ f.beforeCleanup(async()=>{gates.publish("release-poll");if(child.exitCode===null&&child.signalCode===null){const done=once(child,"exit",{signal:AbortSignal.timeout(10000)});child.kill();await done;}});
+ await Promise.race([gates.wait("pending-poll"),exited.then(()=>{throw Error(`wait exited before observing pending work: ${stderr}`);})]);
+ assert.equal((await f.reviewState()).round.assignments.find(a=>a.actorId==="agent")!.status,"running");
+ await f.completeAgent();gates.publish("release-poll");
+ const [code]=await exited;assert.equal(code,0,stderr);assert.ok(stdout.includes(f.reviewId));assert.doesNotMatch(stdout,/已登记异步等待/);
+ const {listTasks}=await import("../src/daemon/tasks.js");assert.deepEqual(await listTasks(f.home),[]);
+});
+
+test("daemon suspends a delivered notification after terminal CAS conflict until explicit recovery",{timeout:30000},async t=>{
+ const f=await reviewFixture(t),gates=await processGates(t.signal);t.after(()=>gates.close());
+ const gateModule=new URL("./fixtures/process-gates.mjs",import.meta.url).href;
+ await writeTestCommand(f.queueCommand,`#!${process.execPath}\nimport {writeFile,appendFile} from 'node:fs/promises';import {processGate} from ${JSON.stringify(gateModule)};const args=process.argv.slice(2);if(args[0]==='--version')console.log('codex test');else if(args.includes('--help'))console.log('queue --thread --message');else{await writeFile(${JSON.stringify(f.queue)},JSON.stringify(args));await appendFile(${JSON.stringify(f.queueLog)},JSON.stringify(args)+'\\n');await processGate(${gates.endpoint},'publish','send-observed');await processGate(${gates.endpoint},'wait','release-send');}`);
+ f.beforeCleanup(()=>{gates.publish("release-send");});
+ await f.startDaemon();await f.call("continue","review","wait");await f.completeAgent();await gates.wait("send-observed");
+ const {listTasks,updateTask}=await import("../src/daemon/tasks.js");const row=(await listTasks(f.home))[0];
+ await updateTask(row,{status:"running"},f.home); // Real concurrent writer advances revision while send is held.
+ gates.publish("release-send");
+ const {daemonStatus}=await import("../src/daemon/service.js");
+ // Status is an actual control request. Await the observable failure; no elapsed-time inference.
+ let status:any;const deadline=Date.now()+10000;
+ do{status=await daemonStatus(f.home);assert.ok(Date.now()<deadline,"daemon exposes terminal write conflict");}while(!status.taskErrors.some((e:any)=>e.id===row.id));
+ assert.match(status.taskErrors.find((e:any)=>e.id===row.id).error,/TASK_STATE_WRITE_FAILED/);
+ assert.equal((await listTasks(f.home))[0].value.status,"running");
+ assert.equal((await readFile(f.queueLog,"utf8")).trim().split("\n").length,1);
+ await f.stopDaemon();await f.startDaemon();const recovered=(await listTasks(f.home))[0];
+ assert.equal(recovered.value.status,"failed");assert.equal(recovered.value.error?.code,"execution_interrupted");
+ assert.equal((await readFile(f.queueLog,"utf8")).trim().split("\n").length,1,"restart exposes uncertain outcome without automatic redelivery");
 });

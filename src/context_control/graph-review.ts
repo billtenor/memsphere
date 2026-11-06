@@ -104,7 +104,7 @@ export function projectGraphRound(run: Run, step: Step, round: ReviewRound, revi
       attempts: review?.attempts?.map((attempt, index) => ({ id: attempt.id, sequence: index + 1,
         status: attempt.completion?.kind === "failed" ? "failed" : attempt.completion?.kind === "cancelled" ? "cancelled" : review.status === "submitted" ? "submitted" : !attempt.startedAt ? "queued" : "running",
         provider: run.permissionConfig!.actors[actorId].kind === "agent" ? (run.permissionConfig!.actors[actorId] as Extract<NonNullable<Run["permissionConfig"]>["actors"][string], { kind: "agent" }>).agent.provider : "",
-        createdAt: attempt.createdAt, startedAt: attempt.startedAt, workerPid: attempt.workerPid, cliReadyAt: attempt.cliReadyAt, promptVersion: attempt.promptVersion,
+        createdAt: attempt.createdAt, startedAt: attempt.startedAt, workerPid: attempt.workerPid, workerJob: attempt.workerJob, cliReadyAt: attempt.cliReadyAt, promptVersion: attempt.promptVersion,
         sessionId: attempt.session?.id, protocolVersion: attempt.session?.protocolVersion, agentName: attempt.session?.agentName, agentVersion: attempt.session?.agentVersion, model: attempt.session?.model,
         completedAt: attempt.completion?.at, stopReason: attempt.completion?.stopReason,
         failure: attempt.completion?.failure as import("../artifact-review.js").ArtifactReviewAgentFailure | undefined }))

@@ -116,6 +116,8 @@ sections:
 
   - !statement
     names: [graph 字段职责]
+    suggests:
+      - "新建 Procedure 默认建议显式使用 mode: graph；省略 mode 仍按 flow 解析。需要过程控制的既有 flow 流程保留适用边界。"
     asserts:
       - graph 使用 description 承载普通 Action 的工作说明，artifact.model/payload 承载机器契约，asserts/suggests 仅补充尚未表达的强制或建议要求，仍遵守本文语义去重与作用域规则。
       - graph dependencies 只表达触发来源与条件；不要在 description 模拟调度，不要求 Agent 手动执行 collect，不添加启动业务 input。

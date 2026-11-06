@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -612,7 +612,7 @@ test("Agent Review CLI launcher injects Session bindings without shell environme
     });
     assert.equal(memory.status, 0);
     assert.deepEqual(JSON.parse(memory.stdout.trim()), [
-      "memory", "read", "example", "--output", "json", "--run", "bound-run"
+      "memory", "read", "example", "--output", "json"
     ]);
 
     const equalsMemory = crossSpawn.sync(runtime.launcherPath, [
@@ -656,11 +656,11 @@ test("Agent Review CLI reads the Session manifest and binds Project and ordinary
         const injected = invoke(args, env);
         assert.equal(injected.status, 0, injected.stderr);
         assert.equal(injected.stderr, "");
-        assert.deepEqual(JSON.parse(injected.stdout), [...args, ...(frozen ? ["--run", "frozen-run"] : []), "--project", "session-project"]);
+        assert.deepEqual(JSON.parse(injected.stdout), [...args, "--project", "session-project"]);
         for (const explicit of [["--project", "session-project"], ["--project=session-project"]]) {
           const matched = invoke([...args, ...explicit], env);
           assert.equal(matched.status, 0, matched.stderr);
-          assert.deepEqual(JSON.parse(matched.stdout), [...args, ...explicit, ...(frozen ? ["--run", "frozen-run"] : [])]);
+          assert.deepEqual(JSON.parse(matched.stdout), [...args, ...explicit]);
         }
         for (const deniedArgs of [
           ["--project", "other"], ["--project=other"], ["--project", "session-project", "--project=other"],
@@ -681,7 +681,7 @@ test("Agent Review CLI reads the Session manifest and binds Project and ordinary
       const literalArgs = ["memory", "list", "--output=json", "--", "--project", "literal-name"];
       const literal = invoke(literalArgs, env);
       assert.equal(literal.status, 0, literal.stderr);
-      assert.deepEqual(JSON.parse(literal.stdout), ["memory", "list", "--output=json", ...(frozen ? ["--run", "frozen-run"] : []),
+      assert.deepEqual(JSON.parse(literal.stdout), ["memory", "list", "--output=json",
         "--project", "session-project", "--", "--project", "literal-name"]);
     }
   } finally { await runtime.cleanup(); await rm(root, { recursive: true, force: true }); }
@@ -740,11 +740,14 @@ test("Agent Review CLI reads live and frozen Memory from its actual Session Proj
     for (const frozen of [false, true]) {
       const env = launcherEnv({ MEMSPHERE_HOME: root, MEMSPHERE_CONFIG_PATH: configPath, MEMSPHERE_REVIEW_RUN_ID: "session-run",
         ...(frozen ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: runId } : {}) });
-      const listed = invoke(["memory", "list", "--output=json"], env);
+      const currentProject = invoke(["memory", "list", "--output=json"], env);
+      assert.equal(currentProject.status, 0, currentProject.stderr);
+      assert.deepEqual(JSON.parse(currentProject.stdout).items.map((item: { reference: string }) => item.reference), ["concepts/live"]);
+      const listed = invoke(["memory", "list", ...(frozen ? ["--run", runId] : []), "--output=json"], env);
       assert.equal(listed.status, 0, listed.stderr);
       assert.deepEqual(JSON.parse(listed.stdout).items.map((item: { reference: string; project_name: string }) => [item.reference, item.project_name]),
         [[frozen ? "concepts/frozen" : "concepts/live", "session-project"]]);
-      const read = invoke(["memory", "read", frozen ? "frozen" : "live", "--project=session-project", "--output=json"], env);
+      const read = invoke(["memory", "read", frozen ? "frozen" : "live", ...(frozen ? ["--run", runId] : []), "--project=session-project", "--output=json"], env);
       assert.equal(read.status, 0, read.stderr);
       assert.match(read.stdout, frozen ? /Frozen Session Memory/ : /Live Session Memory/);
       for (const extra of [["--project", "other"], ["--run", "other"]]) {
@@ -753,7 +756,7 @@ test("Agent Review CLI reads live and frozen Memory from its actual Session Proj
         assert.equal(denied.stdout, "");
         assert.equal(JSON.parse(denied.stderr).error.code, "REVIEW_SESSION_DENIED");
       }
-      const absent = invoke(["memory", "read", frozen ? "live" : "frozen", "--output=json"], env);
+      const absent = invoke(["memory", "read", frozen ? "live" : "frozen", ...(frozen ? ["--run", runId] : []), "--output=json"], env);
       assert.equal(absent.status, 1);
       assert.equal(absent.stdout, "");
       assert.match(absent.stderr, /not found/i);
@@ -1302,4 +1305,21 @@ test("Windows queue passes complete multiline messages through direct and npm No
   }
   await writeFile(shim, '@echo unknown %*\r\n');
   await assert.rejects(checkQueueCapability(shim), /QUEUE_BATCH_UNSUPPORTED/);
+});
+
+
+test("Attempt directory cleanup failure retains the original Reviewer failure and a queryable cleanup diagnostic",{skip:process.platform==="win32"||process.getuid?.()===0},async()=>{
+ await withAgentReviewFixture("no-submit",async({configPath,runsRoot,runId})=>{
+  const run=await readRun(runsRoot,runId),review=currentArtifactReview(run)!;
+  const round=review.rounds[0],assignment=round.assignments[0];let directory="";
+  try{
+   await runArtifactReviewAgentWorker({config:configPath,review:review.id,round:round.id,assignment:artifactReviewAssignmentId(assignment),nodeExecutable:process.execPath,cliEntrypoint:fakeCli,providerResolver:resolveFakeProvider,
+    runSession:async input=>{directory=input.workspaceRoot;const blocked=join(directory,"blocked");await mkdir(blocked);await writeFile(join(blocked,"entry"),"held");await chmod(blocked,0o555);throw Error("agent_connection_closed: controlled primary transport failure");}});
+   const failed=currentArtifactReview(await readRun(runsRoot,runId))!.rounds[0].assignments[0];
+   assert.equal(failed.status,"failed");assert.match(failed.attempts![0].failure!.message,/controlled primary transport failure/);
+   assert.ok((await readdir(directory)).includes("blocked"));
+   const activity=await readAgentActivitySnapshot({runsRoot,runId,reviewId:review.id,roundId:round.id,assignmentId:artifactReviewAssignmentId(assignment),attemptId:failed.attempts![0].id});
+   assert.ok(activity.events.some(e=>e.status==="cleanup_failed"&&e.title.includes(directory)));
+  }finally{if(directory)await chmod(join(directory,"blocked"),0o755).catch(()=>undefined);}
+ });
 });

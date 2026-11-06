@@ -21,29 +21,48 @@ export async function runAgentReviewAcpSession(input: {
   reminder: string;
   workspaceRoot: string;
   isSubmitted(): Promise<boolean>;
+  assertLaunchValid?(): Promise<void>;
   waitForSubmission?(): Promise<void>;
+  onBeforeStop?(providerPid: number | undefined): Promise<void>;
   onSession(metadata: Omit<AgentReviewAcpSession, "stopReason" | "stderr">): Promise<void>;
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }, dependencies: { spawn?: typeof spawnAgent } = {}): Promise<AgentReviewAcpSession> {
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
+  await input.assertLaunchValid?.();
   const process = (dependencies.spawn ?? spawnAgent)(input.launch);
   const transport = new AbortController();
+  let spawnFailure: Error | undefined;
+  let hasClosed = false;
+  const closed = new Promise<void>(resolveClose => process.once("close", () => { hasClosed = true; resolveClose(); }));
+  const settle = async () => {
+    process.stdin.destroy(); process.stdout.destroy(); process.stderr.destroy();
+    if (hasClosed) return;
+    let timer:ReturnType<typeof setTimeout>;
+    try { await Promise.race([closed,new Promise<void>(resolve=>{timer=setTimeout(resolve,2000);})]); }
+    finally { clearTimeout(timer!); }
+  };
   const onExit = (code: number | null, signal: string | null) => {
     transport.abort(new Error(`agent_process_exit: ${signal ? `signal ${signal}` : `exited ${code}`}`));
   };
-  const onProcessError = (error: Error) => transport.abort(new Error(`agent_process_spawn: ${error.message}`, { cause: error }));
+  const onProcessError = (error: Error) => {
+    spawnFailure = new Error(`agent_process_spawn: ${error.message}`, { cause: error });
+    transport.abort(spawnFailure);
+  };
   const onDisconnect = () => transport.abort(new Error("agent_connection_closed: ACP output stream closed"));
   const onStreamError = (error: Error) => transport.abort(new Error(`agent_connection_closed: ${error.message}`, { cause: error }));
   process.once("exit", onExit);
-  process.once("error", onProcessError);
+  process.on("error", onProcessError);
   process.stdout.once("end", onDisconnect);
   process.stdout.once("close", onDisconnect);
   process.stdout.once("error", onStreamError);
   let stderr = "";
   let idleTimeout: TimeoutWatchdog | undefined;
   let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
-  const terminate = () => {
+  let beforeStopPromise: Promise<void> | undefined;
+  let failureInFlight: unknown;
+  const beforeStop = () => beforeStopPromise ??= input.onBeforeStop?.(process.pid) ?? Promise.resolve();
+  const signalTermination = () => {
     if (process.exitCode !== null) return;
     if (process.pid) void terminateProcessTree(process.pid, "SIGTERM").catch(() => process.kill("SIGTERM"));
     else process.kill("SIGTERM");
@@ -56,6 +75,9 @@ export async function runAgentReviewAcpSession(input: {
       }, 1_000);
     }
   };
+  // Capture descendant identities while the Provider is still attached. Voting
+  // completion alone cannot prove its process tree has stopped.
+  const terminate = () => { void beforeStop().then(signalTermination, signalTermination); };
   process.once("exit", () => {
     if (forceKillTimer) clearTimeout(forceKillTimer);
     forceKillTimer = undefined;
@@ -82,6 +104,7 @@ export async function runAgentReviewAcpSession(input: {
   });
   try {
     await waitForSpawn(process, startupSignal);
+    await input.assertLaunchValid?.();
     const stream = acp.ndJsonStream(
       Writable.toWeb(process.stdin) as WritableStream<Uint8Array>,
       Readable.toWeb(process.stdout) as ReadableStream<Uint8Array>
@@ -159,7 +182,8 @@ export async function runAgentReviewAcpSession(input: {
     return { ...result, stderr };
   } catch (error) {
     const timeoutError = timeoutReason(startupTimeout, idleTimeout, maxRuntimeTimeout);
-    const transportError = transport.signal.aborted ? transport.signal.reason : undefined;
+    const transportAtFailure = transport.signal.aborted ? transport.signal.reason : undefined;
+    failureInFlight = timeoutError ?? transportAtFailure ?? error;
     const exitCode = process.exitCode;
     startupTimeout.dispose();
     idleTimeout?.dispose();
@@ -167,27 +191,44 @@ export async function runAgentReviewAcpSession(input: {
     // RPC stdout and diagnostic stderr are separate pipes. Drain stderr during
     // shutdown before constructing the error, even when stdout arrived first.
     terminate();
+    await beforeStop().catch(() => undefined);
     await drainAgentStderr(process.stderr);
+    await settle();
+    const transportError = spawnFailure ?? transportAtFailure;
+    // Keep the complete diagnostic error if lifecycle capture also fails.
     if (timeoutError) {
-      throw new Error(withAgentStderr(timeoutError.message, stderr), { cause: error });
+      failureInFlight = new Error(withAgentStderr(timeoutError.message, stderr), { cause: error });
+    } else if (transportError) {
+      failureInFlight = new Error(withAgentStderr(transportError.message, stderr), { cause: error });
+    } else if (error instanceof Error && error.message.startsWith("agent_process_spawn:")) {
+      failureInFlight = error;
+    } else if (exitCode !== null && exitCode !== 0) {
+      failureInFlight = new Error(withAgentStderr(`agent_process_exit: exited ${exitCode}`, stderr), { cause: error });
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      failureInFlight = new Error(withAgentStderr(message, stderr), { cause: error });
     }
-    if (transportError) throw new Error(withAgentStderr(transportError.message, stderr), { cause: error });
-    if (error instanceof Error && error.message.startsWith("agent_process_spawn:")) throw error;
-    if (exitCode !== null && exitCode !== 0) {
-      throw new Error(withAgentStderr(`agent_process_exit: exited ${exitCode}`, stderr), { cause: error });
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(withAgentStderr(message, stderr), { cause: error });
+    throw failureInFlight;
   } finally {
-    process.off("exit", onExit);
-    process.off("error", onProcessError);
-    process.stdout.off("end", onDisconnect);
-    process.stdout.off("close", onDisconnect);
-    process.stdout.off("error", onStreamError);
-    startupTimeout.dispose();
-    idleTimeout?.dispose();
-    maxRuntimeTimeout?.dispose();
-    terminate();
+    startupTimeout.dispose();idleTimeout?.dispose();maxRuntimeTimeout?.dispose();
+    try { await beforeStop(); }
+    catch (cleanupError) {
+      if (!failureInFlight) throw cleanupError;
+      const primary = failureInFlight;
+      const message = primary instanceof Error ? primary.message : String(primary);
+      throw new AggregateError([primary,cleanupError],`${message}\nReviewer lifecycle capture failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,{cause:primary});
+    } finally {
+      terminate();
+      await drainAgentStderr(process.stderr);
+      await settle();
+      const detach = () => {
+        process.off("exit",onExit);process.off("error",onProcessError);
+        process.stdout.off("end",onDisconnect);process.stdout.off("close",onDisconnect);process.stdout.off("error",onStreamError);
+      };
+      // cross-spawn may synthesize ENOENT on a Windows wrapper's exit after
+      // stdout EOF. Never remove its error listener before close.
+      if(hasClosed)detach();else void closed.then(detach);
+    }
   }
 }
 

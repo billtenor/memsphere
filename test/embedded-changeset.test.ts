@@ -78,6 +78,14 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     const first = await validateMemoryChange();
     assert.equal(first.storeType, "embedded");
     assert.deepEqual(first.issues, []);
+    await withMemoryChangeDetailSnapshot({ home, project: "embedded", changeId: first.changeId,
+      checkpointDigest: first.checkpointDigest, use: async snapshot => {
+        const shared = snapshot.files.find(file => file.reference === "concepts/shared")!;
+        assert.match(await readFile(shared.basePath!, "utf8"), /Published/);
+        assert.match(await readFile(shared.candidatePath!, "utf8"), /Linked preview/);
+      } });
+    await assert.rejects(withMemoryChangeDetailSnapshot({ home, project: "embedded", changeId: first.changeId,
+      checkpointDigest: "stale", use: async () => undefined }), /checkpoint mismatch/);
     assert.equal(await readFile(join(mainMemory, "concepts", "shared.yaml"), "utf8"), mainSource);
     const changesAfterFirst = (await readdir(join(project.root, "changes"))).filter((name) => name.startsWith("change-"));
     assert.deepEqual(changesAfterFirst, [first.changeId]);
@@ -504,6 +512,15 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     await runGit(["add", ".memsphere/memory"], { cwd: linked });
     await runGit(["commit", "-m", "advance linked head"], { cwd: linked });
     await writeFile(join(linkedMemory, "concepts", "shared.yaml"), linkedSource.replace("Linked preview", "Next round"));
+    const pinnedMetadataPath = join(project.root, "changes", first.changeId, "change.json");
+    const pinnedMetadata = await readFile(pinnedMetadataPath, "utf8");
+    await withMemoryChangeDetailSnapshot({ home, project: "embedded", changeId: first.changeId,
+      checkpointDigest: JSON.parse(pinnedMetadata).checkpoint.digest,
+      use: async snapshot => {
+        const shared = snapshot.files.find(file => file.reference === "concepts/shared")!;
+        assert.match(await readFile(shared.candidatePath!, "utf8"), /Linked preview/);
+      } });
+    assert.equal(await readFile(pinnedMetadataPath, "utf8"), pinnedMetadata);
     const firstRead = await readMemoryChange({ home, project: "embedded", changeId: first.changeId });
     assert.equal(firstRead.status, "active");
     assert.match(firstRead.candidate_revision ?? "", /^[0-9a-f]{40,64}$/);

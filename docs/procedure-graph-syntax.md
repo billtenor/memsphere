@@ -1,6 +1,6 @@
 # 流程记忆依赖图语法设计
 
-本文整理以 Action 和依赖关系定义 Procedure 的图编排语法。Procedure 通过 `mode` 区分原有的 `flow` 模式和新的 `graph` 模式，两种模式并行保留。下文除模式说明外，均描述 `graph` 模式：Action 描述生产工作、产物和评审要求；依赖关系决定何时执行；聚合 Action 收集具体产物的引用。
+本文整理以 Action 和依赖关系定义 Procedure 的图编排语法。Procedure 通过 `mode` 区分原有的 `flow` 模式和新的 `graph` 模式，两种模式并行保留。新流程默认建议显式使用 `mode: graph`；省略 mode 的解析默认仍为 flow。下文除模式说明外，均描述 `graph` 模式：Action 描述生产工作、产物和评审要求；依赖关系决定何时执行；聚合 Action 收集具体产物的引用。
 
 运行语法：`memsphere-20261027-stable`。新建 graph Procedure 必须填写该版本；旧 `memsphere-20260721-stable` 按原 flow 语义保留。完整示例可通过 `run start --file` 执行。
 
@@ -515,3 +515,29 @@ Artifact 模型定义及实际内容不可混淆；普通 Action 对应的产物
 正常界面只提供图形展示。布局资源或布局计算失败时，在原页保留可键盘操作的节点与关系入口、错误提示及重试，不恢复常规图/列表切换。定义未变时刷新复用布局，仅更新状态计数；详情保持所选执行、产物、展开态与阅读位置。
 
 单个冻结规则来源缺失或损坏时，规则正文按不可得展示，其余有效规则仍可读，不阻断 Run 总览或已成功写操作的响应。隐藏的流程视角不参与尺寸测量，回到可见视角时校验几何；状态更新只有真实尺寸变化才重新布局。
+
+## CLI 阶段回溯
+
+```bash
+memsphere run step rewind --run R --step S --dry-run --output json
+memsphere run step rewind --run R --step S --reason-file reason.md --output json
+memsphere run step enter --run R --step <replacementStepId>
+```
+
+目标使用具体 Step ID，须为当前已开始的普通生产步骤。`--dry-run` 只读预览；执行理由使用 `--reason` 或 `--reason-file` 二选一且非空。回执列出影响范围、保留分支与新 pending Step，须显式 enter 才切换 Continue。
+
+上游输入保持不变，受影响后继以新产物重建依赖。旧步骤的状态、产物正文、依赖和评审保留，退出当前有效链路；旧上下文的上报和投票拒绝。独立汇合输入根据实际派发记录恢复；collect 的独立控制信号等待被替代成员路径正式完成或被条件消除，再收集有效产物。历史来源无法精确重建时明确拒绝。首次新产物关联旧目标候选，没有旧候选时不伪造产物修订。
+
+运行写入失败后按回执执行同一 Run 的 `run status`，恢复同一目标并重试取消旧评审进程。Reviewer 的 OS 创建身份用于防止 PID 复用；投票完成本身不代表进程退出。Windows graph worker 在 claim 前加入禁止 breakaway 的全局命名 Job Object（跨 Windows Session 可查询），claim 原子保存 Job 身份；内核持续跟踪 Provider 和后代，包括快照后才出生或父进程退出后的进程。Tracked Job 由脱离 worker 生命周期的宿主持有句柄至全部关联进程退出；宿主意外退出时关闭句柄会终止整个 Job。旧版本 Job 名称或缺失的登记证据不能作为完整退出证明。Provider 准备失败的 Attempt 仍保留 Job 证据，重试不删除旧 Attempt。回溯在停止前持久化 Job 身份，状态恢复只在内核确认关联进程全部退出后移除 intent；leader 已退出而 Job 仍有成员时保留 intent。历史 Windows 记录若只有 PID 快照、没有 Job 证据，则不能证明完整子树退出，继续拒绝清理，不把未知当作已退出。POSIX 按隔离进程组及 OS 创建身份核验，PID 身份不匹配时不发送信号。`show` 和预览不恢复运行。回溯不撤销已有代码、Git 或外部副作用；此功能仅提供 CLI 操作入口。
+
+连续回溯独立成员或控制来源时，同一 collect 依赖合并所有替代成员路径和控制到达。正常 dispatch 的新控制信号也等待这些路径接纳或被条件消除；多个历史同槽信号按实际派发顺序保留各来源最新者，只恢复一次聚合与下游推进。
+
+恢复等待同时追踪实际控制祖先、新条件激活的同一 collect 声明成员及其前置路径（不限于旧集合已有成员）、部分 Join 和上游 collect 恢复槽。控制替代路径被条件消除且相关等待收敛时，撤销不再能触发的恢复槽，保留历史，不生成新聚合或下游步骤。
+
+回溯产生的 pending 替代目标必须显式 `run step enter`；`run status`、独立分支上报与正式评审完成回执均保持它为 pending，并返回精确的进入命令，不自动改绑 Continue。
+
+空集合也固定当时的成员路径与条件触发来源，并随历史保留；同槽恢复等待合并所有历史成员路径与条件来源，连续回溯多个独立条件根仍等待完整新链；恢复槽清除后再次回溯条件根，仍重建相关聚合及下游。物化重试复用已固定的集合。旧记录缺少足够成员或条件来源证据时，相关回溯报错，不推断一个来源不明的空集合。
+
+影响计算与恢复等待都沿具体聚合实例固定的成员路径/条件来源继续追踪。内层集合为空仍可能触发后继生产，外层不会把内层成员消除等同于后继成员消除；必须等待后继正式接纳。
+
+`run step rewind --output json` 的参数错误和运行时拒绝均通过 stderr 返回单个结构化 JSON（`error.code`、`message`），stdout 为空并以非零状态退出。
