@@ -71,13 +71,23 @@ public static class ReviewerJob {
 // stdin is closed for the detached worker; no interactive/here-string parsing is used.
 const encoded = (body: string) => ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; try { Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(native).toString("base64")}'))); ${body} } catch { [Console]::Error.WriteLine($_.ToString()); exit 2 }`];
 const validName = (name: string) => /^Global\\Memsphere\.Reviewer\.[0-9a-f-]{36}$/.test(name);
+// libuv kills non-detached children when their parent exits on Windows. Keep
+// PowerShell outside the worker's libuv job using a detached Node host, while
+// preserving PowerShell's normal (non-detached) pipe/command execution. The
+// host stays alive until Keep returns; killing it also closes the native job.
+const keeperHost = `
+const {spawn}=require('node:child_process');
+const child=spawn('powershell.exe',JSON.parse(process.argv[1]),{windowsHide:true,stdio:['ignore','inherit','inherit']});
+child.once('error',error=>{console.error(error);process.exitCode=1;});
+child.once('exit',code=>{process.exitCode=code??1;});
+`;
 
 /** Enroll before claim and before ANY provider preparation can spawn children. */
 export async function startWindowsReviewJob(identity: ProcessIdentity): Promise<string> {
   const name = `Global\\Memsphere.Reviewer.${randomUUID()}`;
   if (!/^\d+$/.test(identity.started)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Invalid Windows worker creation identity");
-  const child = spawn("powershell.exe", encoded(`[ReviewerJob]::Keep('${name}', ${identity.pid}, '${identity.started}')`), {
-    windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
+  const child = spawn(process.execPath, ["-e", keeperHost, JSON.stringify(encoded(`[ReviewerJob]::Keep('${name}', ${identity.pid}, '${identity.started}')`))], {
+    detached: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
   });
   await new Promise<void>((resolve, reject) => {
     let output = "", errors = "";

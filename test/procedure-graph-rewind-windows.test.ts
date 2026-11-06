@@ -10,7 +10,7 @@ import { terminateProcessTree } from "../src/platform-process.js";
 for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late-descendant"] as const) test(`Windows native rewind process safety: ${scenario}`, {
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
-  t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM and taskkill /T`);
+  t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM, kernel Job Objects; taskkill /T fixture cleanup`);
   const gates = await processGates(t.signal);
   const workers: Array<ReturnType<typeof fork>> = [];
   t.after(async () => {
