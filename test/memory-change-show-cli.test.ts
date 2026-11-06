@@ -117,13 +117,13 @@ test("Reviewer ChangeSet read boundary", async t => {
   });
   for (const extra of [["--project", "other"], ["--project=other"], ["--project", "project", "--project=other"]]) {
     await t.test(`cross-Project selector is denied: ${extra.join(" ")}`, () => {
-      assertChangeShowRejected(f.invoke(extra), 2, /not allowed/);
+      assertChangeShowRejected(f.invoke(extra), 1, /conflicts with this Agent Review Session/);
     });
   }
   for (const operation of ["validate", "claim", "resume", "complete", "finish"]) {
     await t.test(`Reviewer cannot mutate a ChangeSet using ${operation}`, () => {
       const result = f.command(["memory", "change", operation, f.edit.change.id]);
-      assertChangeShowRejected(result, 2, /not allowed/);
+      assertChangeShowRejected(result, 1, /conflicts with this Agent Review Session|command is not allowed/);
     });
   }
 });

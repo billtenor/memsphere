@@ -19,6 +19,12 @@ import {
   type RunEvent
 } from "../context_control/review-repository.js";
 import { buildAgentReviewContract } from "./review-contract.js";
+import { realpath } from "node:fs/promises";
+import { openContextControl } from "../project/context-control.js";
+import { dirname } from "node:path";
+import type { Review } from "../context_control/types.js";
+import { effectiveStep } from "../context_control/graph-rewind.js";
+import { graphReviewHandle } from "../context_control/review-repository.js";
 
 type BoundAgentReviewSession = {
   runsRoot: string;
@@ -53,7 +59,17 @@ export async function agentReviewArtifactContractPayload(): Promise<unknown> {
 export async function agentReviewAssignmentDetailPayload(): Promise<unknown> {
   const binding = await boundAgentReviewSession();
   const context = await readBoundContext(binding);
+  const resources = await (await import("./reviewer-resources.js")).reviewerResources();
   return {
+    ...(resources ? {
+      artifactId: resources.candidate.id,
+      references: [
+        ...resources.artifacts.map(a => ({ kind: "artifact", id: a.id, stepId: a.stepId, confirmation: resources.confirmations.some(r => r.artifactId === a.id) ? "submitted-reviews" : a.id === resources.candidate.id ? "current-candidate" : "accepted-without-independent-review", readCommand: `memsphere run artifact show --run ${resources.run.id} --artifact ${a.id} --out ${a.id}.md` })),
+        ...resources.externals.map(e => ({ kind: "external", id: e.id, source: e.source, viaArtifactIds: resources.artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id), readCommand: `memsphere run external show --run ${resources.run.id} --external ${e.id} --out ${e.id}.txt` })),
+        ...resources.confirmations.map(r => ({ kind: "review", id: r.id, artifactId: r.artifactId, roundId: r.roundId, readCommand: `memsphere run review show --review ${r.id} --output json` }))
+      ]
+    } : {}),
+    memoryReads: { project: "memsphere memory list --output json", frozen: process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID ? `memsphere memory list --run ${context.run.id} --output json` : undefined },
     status: context.assignment.status,
     reviewProgress: reviewNodeProgress(context.assignment, context.assignment.status),
     binding: context.assignment.binding,
@@ -85,26 +101,41 @@ export async function submitBoundAgentReview(input: {
   return agentAssignmentReceipt(context, "submit");
 }
 
-async function boundAgentReviewSession(write = false): Promise<BoundAgentReviewSession> {
+export async function boundAgentReviewSession(write = false): Promise<BoundAgentReviewSession> {
   const configPath = requiredEnv("MEMSPHERE_CONFIG_PATH");
   const workspaceRoot = resolve(requiredEnv("MEMSPHERE_WORKSPACE_ROOT"));
   const runId = requiredEnv("MEMSPHERE_REVIEW_RUN_ID");
   const assignmentId = requiredEnv("MEMSPHERE_REVIEW_ASSIGNMENT_ID");
   const config = await readConfig(configPath);
-  const currentDirectory = resolve(process.cwd());
-  const workspaceRelative = relative(workspaceRoot, currentDirectory);
-  if (workspaceRelative.startsWith("..") || isAbsolute(workspaceRelative)) {
+  const currentDirectory = await realpath(process.cwd());
+  const workspaceRelative = relative(await realpath(workspaceRoot), currentDirectory);
+  if (workspaceRelative === ".." || workspaceRelative.startsWith("../") || workspaceRelative.startsWith("..\\") || isAbsolute(workspaceRelative)) {
     throw new Error("cli_workspace_mismatch");
   }
-  const run = await readRun(config.runsRoot, runId);
+  const service = await openContextControl(dirname(config.runsRoot));
+  const modelRun = service && await service.findRun(runId);
+  let directed: Awaited<ReturnType<typeof readArtifactReviewForActor>> | undefined;
+  if (modelRun?.frames?.some(f => f.type === "graph")) {
+    directed = await service!.withGraph(async g => {
+      const review = (await g.records.require<Review>("review", runId, assignmentId)).value;
+      if (!review.roundId || !review.reviewer.actorId) throw new Error("review_assignment_not_bound");
+      const artifact = (await g.records.require<import("../context_control/types.js").Artifact>("artifact", runId, review.artifactId)).value;
+      if (!effectiveStep(modelRun, artifact.stepId)) throw new Error("review_attempt_not_current");
+      return readArtifactReviewForActor({ runsRoot: config.runsRoot, reviewId: graphReviewHandle(runId, artifact.stepId), roundId: review.roundId, actorId: review.reviewer.actorId });
+    });
+  }
+  const run = directed?.run ?? await readRun(config.runsRoot, runId);
   for (const review of run.artifactReviews ?? []) {
-    const round = review.rounds.find((candidate) => candidate.id === review.currentRoundId);
+    const round = review.rounds.find((candidate) => candidate.id === (directed?.round.id ?? process.env.MEMSPHERE_REVIEW_ROUND_ID ?? review.currentRoundId));
     const assignment = round?.assignments.find((candidate) => artifactReviewAssignmentId(candidate) === assignmentId);
     if (!round || !assignment) continue;
+    if (review.status === "cancelled" || assignment.status === "cancelled" || run.status === "abandoned") throw new Error("review_attempt_not_current");
+    if (process.env.MEMSPHERE_REVIEW_HANDLE && process.env.MEMSPHERE_REVIEW_HANDLE !== review.id || process.env.MEMSPHERE_REVIEW_ROUND_ID && process.env.MEMSPHERE_REVIEW_ROUND_ID !== round.id) throw new Error("review_session_identity_conflict");
     const attemptId = process.env.MEMSPHERE_REVIEW_ATTEMPT_ID;
     if (assignment.nodeTree && !attemptId) throw new Error("review_attempt_binding_required");
     const attempt = attemptId ? assignment.attempts?.find(a => a.id === attemptId) : assignment.attempts?.at(-1);
     if (!attempt) throw new Error(`Agent Review attempt not found: ${assignmentId}`);
+    if (assignment.attempts?.at(-1)?.id !== attempt.id || !["running", "submitted"].includes(attempt.status) || !["running", "submitted"].includes(assignment.status)) throw new Error("review_attempt_not_current");
     if (write && (assignment.attempts?.at(-1)?.id !== attempt?.id || assignment.status !== "running")) throw new Error("review_attempt_not_current");
     if (write) await markArtifactReviewAgentCliReady({
       runsRoot: config.runsRoot,

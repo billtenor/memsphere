@@ -1,3 +1,4 @@
+import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { currentIdentity, readRunnerAgents, detectRunnerAgents, checkQueueCapability } from "../runner/identity.js";
 import { currentCommandState, assertSessionTarget } from "../home/command-state-store.js";
 import { inspectReview, renderReviewResult, reviewReady } from "../daemon/review.js";
@@ -159,6 +160,8 @@ type RunBindingUpdateOptions = RunShowOptions & {
 };
 
 type RunArtifactShowOptions = RunShowOptions & {
+  artifact?: string;
+  out?: string;
   assignment?: string;
   step?: string;
 };
@@ -631,6 +634,7 @@ export async function runReviewResolveCommand(options: ReviewResolveOptions): Pr
 }
 
 export async function runShowCommand(options: RunShowOptions): Promise<void> {
+  if (await tryReviewerResource("run-show", options)) return;
   if (await tryContextCommand("show", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
@@ -696,6 +700,7 @@ export async function runTryRunCommand(options: RunIdOptions): Promise<void> {
 }
 
 export async function runStepShowCommand(options: RunStepShowOptions): Promise<void> {
+  if (await tryReviewerResource("step-show", options)) return;
   if (await graphCommand("step-show", options)) return;
   const runId = requireRunId(options.run);
   const stepRef = requireStepRef(options.step);
@@ -705,6 +710,7 @@ export async function runStepShowCommand(options: RunStepShowOptions): Promise<v
 }
 
 export async function runArtifactShowCommand(options: RunArtifactShowOptions): Promise<void> {
+  if (await tryReviewerResource("artifact-show", options)) return;
   if (await tryContextCommand("artifact-show", options)) return;
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
@@ -768,6 +774,7 @@ export async function exportRunArtifact(runsRoot: string, run: RunState, referen
 }
 
 export async function runArtifactContractShowCommand(options: RunArtifactShowOptions): Promise<void> {
+  if (await tryReviewerResource("artifact-contract", options)) return;
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);

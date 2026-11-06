@@ -1,3 +1,4 @@
+import { reviewerCommands } from "./reviewer-commands.js";
 import { reviewNodeView } from "../review-nodes.js";
 import { reviewNodePromptModel } from "../prompts/review-nodes.js";
 import type { ArtifactReviewAgentContext } from "../run/store.js";
@@ -39,16 +40,17 @@ export async function buildArtifactReviewerPrompt(input: {
   });
   if (assignment.nodeTree) {
     const materials = {
+      allowedOperations: reviewerCommands,
       artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) },
-      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name })),
+      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: a.artifactId ? `memsphere run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt` : undefined })),
+      externals: submission.contextExternals?.map(e => ({ ...e, readCommand: `memsphere run external show --run ${run.id} --external ${e.externalId} --out ${e.externalId}.txt` })),
+      memorySource: run.memorySource,
       memoryReads: {
         project: "memsphere memory list --output json",
-        frozen: (run.memorySnapshot || run.frozenMemoryRunId) ? `memsphere memory list --run ${run.id} --output json` : undefined,
-        change: run.memorySource
-          ? `memsphere memory change show ${run.memorySource.changeId} --checkpoint ${run.memorySource.checkpointDigest} --part summary`
-          : undefined
+        frozen: (run.memorySnapshot || run.frozenMemoryRunId) ? `memsphere memory list --run ${run.id} --output json` : undefined
       },
       commands: {
+        assignment: "memsphere run review assignment show --assignment " + assignment.id,
         artifact: "memsphere run artifact show --assignment " + assignment.id,
         contract: "memsphere run artifact contract show --assignment " + assignment.id
       }

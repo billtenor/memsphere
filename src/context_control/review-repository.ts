@@ -62,19 +62,22 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
         const dto:legacy.RunEvent["artifact"]={name:artifact.name,type:value===null?"null":Array.isArray(value)?"array":(typeof value==="undefined"?"string":typeof value),format:graphFormat(contentType),storage:"inline",contentType,...(!viewRoundId||round.id===viewRoundId?{value}:{})};
         const personalReviews = snapshot.reviews.filter(r => r.roundId === round.id);
         const materialDigests = new Map<string, string>();
-        for (const targetId of new Set(personalReviews.flatMap(r => r.comments.flatMap(c => c.anchor?.targetRef ? [c.anchor.targetRef.id] : [])))) {
-          const target = snapshot.artifacts.find(a => a.id === targetId);
+        for (const targetId of new Set((viewRoundId && round.id !== viewRoundId ? [] : personalReviews).flatMap(r => r.comments.flatMap(c => c.anchor?.targetRef ? [c.anchor.targetRef.id] : [])))) {
+          const target = snapshot.artifacts.find(a => a.id === targetId) ?? snapshot.externals.find(e => e.id === targetId);
           if (!target) throw failure("INVALID_STATE", `Review anchor material is missing: ${targetId}`);
           materialDigests.set(targetId, targetId === artifact.id && body ? hash : digest((await service.body(target)).bytes));
         }
         rounds.push(projectGraphRound(run, step, round, personalReviews, hash, materialDigests));
-        const contextArtifacts = [];
-        for (const id of new Set(Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id))) {
+        const contextArtifacts: import("../artifact-review.js").ArtifactReviewContextArtifact<legacy.RunEvent["artifact"]>[] = [];
+        for (const id of new Set((viewRoundId && round.id !== viewRoundId ? [] : artifact.dependencies).filter(r => r.kind === "artifact").map(r => r.id))) {
           const material = snapshot.artifacts.find(a => a.id === id);
           if (!material || !(snapshot.historicalCompleteIds ?? snapshot.completeIds).includes(id)) throw failure("INVALID_STATE", `Review material is not accepted: ${id}`);
-          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&!(round.id===viewRoundId&&contextArtifacts.length===viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
+          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&(round.id!==viewRoundId || viewMaterialIndex!==undefined&&contextArtifacts.length!==viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
         }
-        submissions.push({ id: artifact.id, digest: hash, createdAt: round.createdAt, artifact: dto, contextArtifacts,
+        const readable = [artifact, ...snapshot.artifacts.filter(a => contextArtifacts.some(c => c.artifactId === a.id))];
+        const externalIds = new Set(readable.flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id)));
+        const contextExternals = snapshot.externals.filter(e => externalIds.has(e.id)).map(e => ({ externalId: e.id, source: e.source, capturedAt: e.capturedAt }));
+        submissions.push({ id: artifact.id, digest: hash, createdAt: round.createdAt, artifact: dto, contextArtifacts, contextExternals,
           ...(artifact.revisedSummary ? { revisionSummary: { body: artifact.revisedSummary, digest: digest(artifact.revisedSummary), createdAt: round.createdAt, previousSubmissionId: artifact.revisedFrom! } } : {}) });
       }
       const last = rounds.at(-1)!;
@@ -114,7 +117,7 @@ export async function findArtifactReview(input: Parameters<typeof legacy.findArt
 }
 export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0]) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForActor(input);
-  return legacy.artifactReviewForActor({ ...await findArtifactReview(input), roundId: input.roundId, actorId: input.actorId });
+  return legacy.artifactReviewForActor({ ...await findArtifactReview({ ...input, viewRoundId: input.roundId }), roundId: input.roundId, actorId: input.actorId });
 }
 export async function readArtifactReviewForRunner(input: Parameters<typeof legacy.readArtifactReviewForRunner>[0]) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForRunner(input);
@@ -312,7 +315,10 @@ export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation
     const step = snapshot.steps.find(s => s.id === id.stepId)!;
     const round = step.reviewRounds?.at(-1);
     if (round?.id !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
-    return [round.artifactId, ...Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id)];
+    const candidate = snapshot.artifacts.find(a => a.id === round.artifactId)!;
+    const artifactIds = new Set([candidate.id, ...candidate.dependencies.filter(r => r.kind === "artifact").map(r => r.id)]);
+    const externalIds = snapshot.artifacts.filter(a => artifactIds.has(a.id)).flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id));
+    return [...[...artifactIds].map(id => `artifact:${id}`), ...externalIds.map(id => `external:${id}`)];
   });
   return mutateAttempt(input, review => {
     if (!review.nodeTree || !review.nodeStates) throw failure("INVALID_STATE", "Review nodes are not enabled");
@@ -321,7 +327,7 @@ export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation
       if (native) {
         if (Object.keys(native).some(k => !["location", "context", "targetRef"].includes(k)) || typeof native.location !== "string" || !native.location.trim() || native.context !== undefined && (typeof native.context !== "string" || native.context.length > 500)) throw failure("INVALID_ARGUMENT", "Invalid graph Comment anchor");
         const ref = native.targetRef as { kind?: string; id?: string } | undefined;
-        if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || ref.kind !== "artifact" || !materialIds.includes(ref.id!))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
+        if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || !["artifact", "external"].includes(ref.kind!) || !materialIds.includes(`${ref.kind}:${ref.id}`))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
       }
       return { commentId: `comment-${randomUUID()}`, body: item.body, severity: item.severity, createdAt: stamp(), ...(native ? { anchor: native as NonNullable<Review["comments"][number]["anchor"]> } : {}) };
     });

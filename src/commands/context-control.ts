@@ -1,3 +1,4 @@
+import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { assertSessionTarget, currentCommandState, closeRunCommandStates, openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, type CommandStateRow } from "../home/command-state-store.js";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
@@ -12,7 +13,7 @@ import { emitCommandResult } from "./cli-errors.js";
 import { graphCommand } from "./procedure-graph.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
 
-export type Options = { authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
+export type Options = { checkpoint?: string; authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: "human" | "agent"; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
 function strictObject(value: unknown, allowed: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("INVALID_ARGUMENT", "Expected an object");
@@ -37,6 +38,7 @@ async function reportInput(o: Options): Promise<ReportInput> {
 /** Return false only for a proven legacy Run, never for a failed new Store. */
 export async function tryContextCommand(operation: string, options: object): Promise<boolean> {
   const o = options as Options;
+  if (["artifact-show", "external-show", "review-show", "review-list"].includes(operation) && await tryReviewerResource(operation, o)) return true;
   if (await graphCommand(operation, o)) return true;
   const newFlags = [o.target, o.for, o.out, o.root, o.revisedFrom, o.file].some(v => v !== undefined) || !!o.dependsOn?.length || !!o.tag?.length || operation === "artifact-show" && o.artifact !== undefined;
   if (!o.run) { if (newFlags) throw failure("INVALID_ARGUMENT", "Free exploration options require --run"); return false; }
@@ -109,6 +111,14 @@ export async function tryContextCommand(operation: string, options: object): Pro
   } else if (operation === "artifact-tag") result = await s.tag(runId, requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"), o.tag ?? []);
   else if (operation === "artifact-impact") result = { runId, artifactIds: downstream(await s.snapshot(runId), requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact")) };
   else if (operation === "external-add") {
+    if (o.change !== undefined || o.checkpoint !== undefined) {
+      if (!o.change || !o.checkpoint || [o.file, o.source, o.content, o.contentType].some(v => v !== undefined)) throw failure("INVALID_ARGUMENT", "Use --change C --checkpoint D or source/content/file");
+      const { captureMemoryChange } = await import("./memory-change-show.js");
+      const captured = await captureMemoryChange(o.change, o.checkpoint);
+      const external = await s.addExternal(runId, `memsphere:changeset:${o.change}@${o.checkpoint}`, { content: textContent(JSON.stringify(captured), "application/json") });
+      emitCommandResult({ runId, externalId: external.id, source: external.source, checkpointDigest: o.checkpoint }, o.output);
+      return true;
+    }
     if (o.file && (o.source !== undefined || o.content !== undefined || o.contentType !== undefined)) throw failure("INVALID_ARGUMENT", "Use file or source/content");
     const input = o.file ? strictObject(JSON.parse(await readFile(o.file, "utf8")), ["source", "content", "contentRef"]) : { source: o.source, content: textContent(requireOption(o.content, "--content"), o.contentType) };
     const external = await s.addExternal(runId, requireOption(input.source as string, "--source"), input as Body); result = { runId, externalId: external.id };
@@ -165,7 +175,7 @@ export function registerExplorationCommands(run: import("commander").Command) {
   scoped(run.command("enter").description("Bind this Agent session to an existing free exploration Run.")).action(o => contextOnlyCommand("enter", o));
   output(find(run, "report"))
     .option("--name <name>", "free exploration Artifact name")
-    .option("--file <path>", "free exploration structured report; exclusive with --artifact/--artifact-file")
+    .option("--file <path>", "structured Artifact report; graph accepts content/contentRef and supplemental dependencies; exclusive with --artifact/--artifact-file")
     .option("--content-type <mime>", "free exploration text content type")
     .option("--revised-from <id>", "free exploration Artifact ID being revised")
     .option("--depends-on <selector>", "artifact:ID, external:ID or tag:NAME", repeated)
@@ -180,8 +190,8 @@ export function registerExplorationCommands(run: import("commander").Command) {
   const outputs = run.command("outputs").description("Inspect or adjust free exploration output roots.");
   scoped(outputs.command("list").description("List current free exploration output roots.")).action(o => contextOnlyCommand("outputs-list", o));
   scoped(outputs.command("update").description("Add or remove free exploration output roots.").option("--add <id>", "Add an output", repeated).option("--remove <id>", "Remove an output", repeated)).action(o => contextOnlyCommand("outputs-update", o));
-  const external = run.command("external").description("Record or read free exploration source material.");
-  scoped(external.command("add").description("Add source material; use --source/--content or structured --file.").option("--source <text>").option("--content <text>").option("--content-type <mime>").option("--file <path>"))
+  const external = run.command("external").description("Record or read fixed Run source material.");
+  scoped(external.command("add").description("Add source material; use --source/--content or structured --file.").option("--source <text>").option("--content <text>").option("--content-type <mime>").option("--file <path>").option("--change <id>", "Capture a validated ChangeSet as fixed External evidence").option("--checkpoint <digest>"))
     .action(o => contextOnlyCommand("external-add", o));
   scoped(external.command("show").description("Preview an External; --out writes its complete original content.").requiredOption("--external <id>").option("--out <path>", "Write original content to a new file"))
     .action(o => contextOnlyCommand("external-show", o));

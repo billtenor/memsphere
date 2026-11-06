@@ -106,6 +106,10 @@ collect Action 由命令自动完成，Agent 不执行 enter/report；结果是�
 `run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store，但自由探索仍在 report 完整成果时才创建 Step。
 
 
+graph 可用 `run external add --run R --source S --content C` 登记原始依据，或用 `--change C --checkpoint D` 捕获同一固定 ChangeSet 的完整证据；两种来源互斥。External 由当前 Step 生产的 Artifact.dependencies 引用，不由 Step 直接引用。上报时用 `--depends-on artifact:A|external:E` 或结构化 `--file` 的 dependencies（互斥），补充 Artifact 须是本实例固定数据/控制来源中已接纳且当前有效的具体版本。强制输入不变；修订省略继承前身补充依赖，空数组清空，非空完整替换。不要为传递验收依据增加调度边或默认读取同 Action 最新产物。
+
+Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
+
 #### graph：CLI 回溯
 
 发现上游方案有问题时，先查询具体 Step ID，再只读预览影响范围：

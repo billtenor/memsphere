@@ -10,6 +10,7 @@ defines:
   - 只保留会改变执行、判断或验收结果的内容，不把对话记录、临时尝试和通用常识照搬进 Memory。
   - 同一交付意图下围绕目标 Procedure 产生的相关 Memory 修改，可以在一个 Run 中复用同一 ChangeSet 多轮完成，直到 human 接受整个 ChangeSet 候选。
 asserts:
+  - "graph 的验收步骤需要已确认需求、方案或 External 时，在说明中要求 Runner 为当前候选 Artifact 显式声明具体固定依赖并提供读取入口；不要仅为传递依据增加调度边。确认数据或控制来源属于本执行实例，循环及回溯不得按同 Action 的最新产物替代。"
   - 同一交付意图必须在一个 Run 中持续复用同一个 ChangeSet，且只能包含与主要目标 Procedure 直接相关的 Memory；转入无关任务或改变主要目标时必须新建 Run 和 ChangeSet。
 goals:
   - 明确 Procedure 的触发场景、边界、目标和最终交付物。

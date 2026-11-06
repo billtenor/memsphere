@@ -16,6 +16,8 @@ export function errorCode(error: unknown): string {
     };
     return Object.hasOwn(codes, error.code) ? codes[error.code] : error.code;
   }
+  if (error instanceof Error && /review_attempt_not_current|review_assignment_not_bound|review_attempt_binding_required|cli_workspace_mismatch|Session environment is missing/.test(error.message)) return "REVIEW_SESSION_INVALID";
+  if (error instanceof Error && /review_session_identity_conflict|review_assignment_conflict/.test(error.message)) return "REVIEW_IDENTITY_CONFLICT";
   if (error instanceof SyntaxError) return "INVALID_INPUT";
   if (error instanceof TypeError || error instanceof RangeError) return "INVALID_ARGUMENT";
   const names: Record<string, string> = {
@@ -76,7 +78,7 @@ export function requestedCliOutput(program: Command, args: readonly string[]): "
     || (path[1] === "list" && ["project", "memory", "archive"].includes(path[0]))
     || (path[0] === "run" && path[1] === "step" && path[2] === "rewind")
     || (path[0] === "run" && ["start", "report", "status", "show", "abandon", "finish", "artifact", "external", "review", "outputs"].includes(path[1]));
-  return structured && output === "json" ? "json" : "text";
+  return (structured || Boolean(process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID)) && output === "json" ? "json" : "text";
 }
 
 /** Existing non-list commands keep their text errors; new commands and lists share JSON errors. */

@@ -88,3 +88,15 @@ test("All supported legacy reviewer prompts describe explicit Run reads and equi
     assert.doesNotMatch(prompt, /automatically bind their frozen|会自动绑定其冻结/);
   }
 });
+
+// Run startup provenance can outlive a current ChangeSet checkpoint. Frozen Run
+// Memory remains readable; delivery evidence is an explicitly referenced External.
+test("startup ChangeSet provenance is metadata rather than an assumed live checkpoint command", async t => {
+  const f = await reviewNodeFixture(t, true);
+  const context = await reviews.readArtifactReviewForActor(f.input);
+  context.run.memorySource = { kind: "changeset", project: "test-project", changeId: "old-start-source", checkpointDigest: "a".repeat(64), baseRevision: "old-base" };
+  const prompt = await buildArtifactReviewerPrompt({ context, locale: "en", promptVersion: "artifact-review-v3" });
+  assert.match(prompt, /old-start-source/);
+  assert.ok(prompt.includes(`memsphere memory list --run ${context.run.id}`));
+  assert.doesNotMatch(prompt, /memsphere memory change show old-start-source/);
+});

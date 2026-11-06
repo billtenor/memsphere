@@ -21,6 +21,7 @@ import { terminateProcessTree } from "../platform-process.js";
 import { assertContextControlRecord } from "./invariants.js";
 import { collectMemberTriggerIds, collectReplayReady, effectiveStep, mergeArrivals, planRewind, requireEffectiveStep, triggerArrivals } from "./graph-rewind.js";
 import { captureProcessGroup, stopRewindWorker } from "./review-process.js";
+import { graphEvidence, supplementalDependencies } from "./graph-evidence.js";
 
 const now = () => new Date().toISOString();
 const newId = (kind: string) => `${kind}-${randomUUID()}`;
@@ -31,7 +32,7 @@ export type GraphStartInput = {
   memorySnapshot?: Run["memorySnapshot"]; memorySource?: Run["memorySource"];
   controlPlane?: ControlPlaneConfig; reviewConfiguration?: RunReviewConfiguration;
 };
-export type GraphReport = { text?: string; content?: Body["content"]; contentRef?: ContentRef; revisionSummary?: string };
+export type GraphReport = { text?: string; content?: Body["content"]; contentRef?: ContentRef; revisionSummary?: string; dependencies?: Ref[] };
 
 /** Graph persistence uses the same model Stores as exploration, with its own completion/recovery rules. */
 export class GraphRuntime {
@@ -116,14 +117,20 @@ export class GraphRuntime {
   /** Selected review reads must not enumerate other Steps, Artifacts or Reviews. */
   async reviewSnapshot(runId: string, stepId: string, roundId?: string): Promise<Snapshot> {
     const run = (await this.run(runId)).value, step = (await this.step(run, stepId)).value;
-    const ids = new Set([...(step.reviewRounds ?? []).map(r => r.artifactId), ...Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id)]);
-    const artifacts = await Promise.all([...ids].map(async id => (await this.records.require<Artifact>("artifact", runId, id)).value));
-    const sources = await Promise.all([...new Set(artifacts.filter(a => a.stepId !== step.id).map(a => a.stepId))].map(async id => (await this.step(run, id)).value));
     const selected = roundId === "current" ? step.reviewRounds?.at(-1)?.id : roundId;
+    const candidates = await Promise.all((step.reviewRounds ?? []).map(async r => (await this.records.require<Artifact>("artifact", runId, r.artifactId)).value));
+    const visibleCandidates = roundId ? candidates.filter(a => a.id === step.reviewRounds?.find(r => r.id === selected)?.artifactId) : candidates;
+    const ids = new Set(visibleCandidates.flatMap(a => a.dependencies.filter(r => r.kind === "artifact").map(r => r.id)));
+    const artifacts = [...candidates, ...await Promise.all([...ids].filter(id => !candidates.some(a => a.id === id)).map(async id => (await this.records.require<Artifact>("artifact", runId, id)).value))];
+    const sources = await Promise.all([...new Set(artifacts.filter(a => a.stepId !== step.id).map(a => a.stepId))].map(async id => (await this.step(run, id)).value));
+    const externalIds = new Set([...visibleCandidates, ...artifacts.filter(a => ids.has(a.id))].flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id)));
+    const externals = await Promise.all([...externalIds].map(async id => (await this.records.require<External>("external", runId, id)).value));
     const keys = (step.reviewRounds ?? []).filter(r => !roundId || r.id === selected || r.id === step.reviewRounds?.at(-1)?.id).flatMap(r => [...Object.keys(r.reviewConfig.reviewers), "runner"].map(actor => graphReviewId(r.id, actor)));
     const reviews = (await Promise.all(keys.map(id => this.records.get<Review>("review", runId, id)))).flatMap(row => row ? [row.value] : []);
-    return { run, steps: [step, ...sources], artifacts, externals: [], reviews, completeIds: sources.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id), outputArtifactIds: [] };
+    const accepted = sources.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id);
+    return { run, steps: [step, ...sources], artifacts, externals, reviews, completeIds: accepted.filter(id => effectiveStep(run, artifacts.find(a => a.id === id)!.stepId)), historicalCompleteIds: accepted, outputArtifactIds: [] };
   }
+
   async snapshot(runId: string): Promise<Snapshot> { return this.snapshotValue(runId); }
   /** Personal Review writes use their own record revision; graph recovery is separate. */
   async mutateReview<T>(runId: string, stepId: string, roundId: string, actor: string, action: (value: Review, run: Run, step: Step) => Promise<T>): Promise<T> {
@@ -673,7 +680,26 @@ export class GraphRuntime {
     const rewind = this.frame(run).rewinds?.find(r => r.replacementStepId === stepId);
     const previousStep = rewind && (await this.step(run, rewind.targetStepId)).value;
     const previousArtifact = previousStep?.artifact?.mode === "produce" ? previousStep.artifact.id : undefined;
-    const dependencies = [...new Map(Object.values(step.inputs ?? {}).flat().map(r => [`${r.kind}:${r.id}`, r])).values()];
+    const predecessorId = step.artifact?.mode === "produce" ? step.artifact.id : previousArtifact;
+    let extra = input.dependencies === undefined ? undefined : structuredClone(input.dependencies);
+    if (extra === undefined && predecessorId) {
+      const predecessor = (await this.records.require<Artifact>("artifact", runId, predecessorId)).value;
+      extra = supplementalDependencies(predecessor, (await this.step(run, predecessor.stepId)).value);
+    }
+    if (extra === undefined) extra = [];
+    if (!Array.isArray(extra) || extra.some(r => !r || !["artifact", "external"].includes(r.kind) || typeof r.id !== "string" || !r.id || Object.keys(r).some(k => !["kind", "id"].includes(k)))) throw failure("INVALID_ARGUMENT", "dependencies must contain artifact/external references");
+    const eligible = extra.some(r => r.kind === "artifact") ? graphEvidence(await this.snapshotValue(runId), step, this.procedure(run)) : new Set<string>();
+    for (const ref of extra) {
+      if (ref.kind === "artifact") {
+        if (!eligible.has(ref.id)) throw failure("PERMISSION_DENIED", `Artifact is outside this Step's fixed data/control sources: ${ref.id}`);
+        await this.contentValue(run, ref.id);
+      } else {
+        const external = (await this.records.require<External>("external", runId, ref.id)).value;
+        if (external.runId !== runId) throw failure("INVALID_ARGUMENT", "External belongs to another Run");
+        await graphBody(external, this.reader);
+      }
+    }
+    const dependencies = [...new Map([...Object.values(step.inputs ?? {}).flat(), ...extra].map(r => [`${r.kind}:${r.id}`, r])).values()];
     for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
     const artifact: Artifact = { id: newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
       ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : previousArtifact ? { revisedFrom: previousArtifact, revisedSummary: rewind!.reason } : {}) };

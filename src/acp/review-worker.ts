@@ -2,6 +2,7 @@ import { delimiter, join, resolve } from "node:path";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
+import { resolveMemsphereHome } from "../home.js";
 import {
   assertArtifactReviewAgentAttemptRunning,
   claimArtifactReviewAgentAssignment,
@@ -105,6 +106,10 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         TMP: workspaceRoot,
         TEMP: workspaceRoot,
         MEMSPHERE_CLI: cliRuntime.launcherPath,
+        MEMSPHERE_HOME: resolveMemsphereHome(),
+        MEMSPHERE_REVIEW_SOURCE_WORKSPACE: callerDirectory,
+        MEMSPHERE_REVIEW_HANDLE: reviewId,
+        MEMSPHERE_REVIEW_ROUND_ID: roundId,
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
         ...((claimed.run.memorySnapshot || claimed.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: claimed.run.id } : {}),
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: artifactReviewAssignmentId(claimed.assignment),
