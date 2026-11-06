@@ -106,6 +106,7 @@ export async function boundAgentReviewSession(write = false): Promise<BoundAgent
   const workspaceRoot = resolve(requiredEnv("MEMSPHERE_WORKSPACE_ROOT"));
   const runId = requiredEnv("MEMSPHERE_REVIEW_RUN_ID");
   const assignmentId = requiredEnv("MEMSPHERE_REVIEW_ASSIGNMENT_ID");
+  const attemptId = requiredEnv("MEMSPHERE_REVIEW_ATTEMPT_ID");
   const config = await readConfig(configPath);
   const currentDirectory = await realpath(process.cwd());
   const workspaceRelative = relative(await realpath(workspaceRoot), currentDirectory);
@@ -126,14 +127,15 @@ export async function boundAgentReviewSession(write = false): Promise<BoundAgent
   }
   const run = directed?.run ?? await readRun(config.runsRoot, runId);
   for (const review of run.artifactReviews ?? []) {
-    const round = review.rounds.find((candidate) => candidate.id === (directed?.round.id ?? process.env.MEMSPHERE_REVIEW_ROUND_ID ?? review.currentRoundId));
+    const selectedRound = directed?.round.id ?? process.env.MEMSPHERE_REVIEW_ROUND_ID;
+    const matches = review.rounds.filter(candidate => (!selectedRound || candidate.id === selectedRound) && candidate.assignments.some(a => artifactReviewAssignmentId(a) === assignmentId && a.attempts?.some(attempt => attempt.id === attemptId)));
+    if (matches.length > 1) throw new Error("review_assignment_not_bound");
+    const round = matches[0];
     const assignment = round?.assignments.find((candidate) => artifactReviewAssignmentId(candidate) === assignmentId);
     if (!round || !assignment) continue;
     if (review.status === "cancelled" || assignment.status === "cancelled" || run.status === "abandoned") throw new Error("review_attempt_not_current");
     if (process.env.MEMSPHERE_REVIEW_HANDLE && process.env.MEMSPHERE_REVIEW_HANDLE !== review.id || process.env.MEMSPHERE_REVIEW_ROUND_ID && process.env.MEMSPHERE_REVIEW_ROUND_ID !== round.id) throw new Error("review_session_identity_conflict");
-    const attemptId = process.env.MEMSPHERE_REVIEW_ATTEMPT_ID;
-    if (assignment.nodeTree && !attemptId) throw new Error("review_attempt_binding_required");
-    const attempt = attemptId ? assignment.attempts?.find(a => a.id === attemptId) : assignment.attempts?.at(-1);
+    const attempt = assignment.attempts?.find(a => a.id === attemptId);
     if (!attempt) throw new Error(`Agent Review attempt not found: ${assignmentId}`);
     if (assignment.attempts?.at(-1)?.id !== attempt.id || !["running", "submitted"].includes(attempt.status) || !["running", "submitted"].includes(assignment.status)) throw new Error("review_attempt_not_current");
     if (write && (assignment.attempts?.at(-1)?.id !== attempt?.id || assignment.status !== "running")) throw new Error("review_attempt_not_current");
@@ -188,7 +190,7 @@ function agentAssignmentReceipt(context: ArtifactReviewAgentContext, operation: 
   return {
     reviewId: context.review.id,
     reviewRoundId: context.round.id,
-    assignmentId: context.assignment.id,
+    assignmentId: artifactReviewAssignmentId(context.assignment),
     status: context.assignment.status,
     reviewProgress: reviewNodeProgress(context.assignment, context.assignment.status),
     vote: context.assignment.submitted?.vote,

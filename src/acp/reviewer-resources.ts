@@ -1,3 +1,4 @@
+import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
 import { open, realpath, rm } from "node:fs/promises";
 import { readConfig } from "../config.js";
@@ -71,7 +72,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
   const scope = await reviewerResources();
   if (!scope) {
     const context = await boundReviewNodeContext();
-    if (o.run && o.run !== context.run.id || o.assignment && o.assignment !== context.assignment.id) throw failure("REVIEW_IDENTITY_CONFLICT", "Session identity conflicts with target");
+    if (o.run && o.run !== context.run.id || o.assignment && o.assignment !== artifactReviewAssignmentId(context.assignment)) throw failure("REVIEW_IDENTITY_CONFLICT", "Session identity conflicts with target");
     const submission = context.review.submissions.find(s => s.id === context.round.submissionId)!;
     const allowedSteps = [context.review.stepId, ...submission.contextArtifacts.map(a => a.stepId)];
     if (o.step && !allowedSteps.includes(o.step)) throw denied(o.step);
