@@ -109,6 +109,9 @@ test("Reviewer ChangeSet read boundary", async t => {
   await t.test("body reads require an explicit reference", () => {
     assertChangeShowRejected(f.invoke(["--part", "memory"]), 1, /requires --reference/);
   });
+  await t.test("pinned reads require an explicit checkpoint", () => {
+    assertChangeShowRejected(f.command(["memory", "change", "show", f.edit.change.id]), 1, /required option.*--checkpoint/);
+  });
   await t.test("unknown references do not resolve outside the change", () => {
     assertChangeShowRejected(f.invoke(["--reference", "../../config.json"]), 1, /reference not found or ambiguous/);
   });
