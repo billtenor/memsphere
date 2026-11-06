@@ -275,10 +275,10 @@ test("Reviewer Memory pagination stays on the frozen Run and rejects another Ses
     }));
     const env = { ...f.env, MEMSPHERE_CONFIG_PATH: join(f.project, "config.json"), MEMSPHERE_REVIEW_MEMORY_RUN_ID: runId };
     const review = (args: string[]) => crossSpawn.sync(runtime.launcherPath, args, { cwd: f.workspace, env, encoding: "utf8", timeout: 20_000 });
-    const first = result(review(["memory", "list", "--limit", "1", "--output=json"]));
+    const first = result(review(["memory", "list", "--run", runId, "--limit", "1", "--output=json"]));
     assert.equal(first.items[0].reference, "concepts/alpha");
     await f.writeMemory("new-live-memory");
-    const last = result(review(["memory", "list", "--cursor", first.nextCursor, "--limit", "1000", "--output=json"]));
+    const last = result(review(["memory", "list", "--run", runId, "--cursor", first.nextCursor, "--limit", "1000", "--output=json"]));
     assert.deepEqual(last.items.map((item: { reference: string }) => item.reference), ["concepts/zed"]);
     assert.equal(last.nextCursor, undefined);
     for (const option of [["--run", "other"], ["--project", "other"]]) {

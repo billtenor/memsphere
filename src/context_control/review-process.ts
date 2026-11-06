@@ -84,7 +84,13 @@ export async function stopRewindWorker(worker: RewindWorker) {
   const leader = rows ? leaderRow ? windowsIdentity(leaderRow) : undefined : await captureProcessIdentity(worker.pid);
   if (worker.job) {
     if (process.platform !== "win32" || !worker.identity || worker.identity.group !== worker.pid || worker.pid === process.pid) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows Reviewer job identity unavailable");
-    if (leader && !same(worker.identity, leader)) throw failure("PROCESS_IDENTITY_CHANGED", "Reviewer process identity changed; no termination signal sent");
+    if (leader && !same(worker.identity, leader)) {
+      // The saved PID may have been recycled after this attempt exited. Only
+      // the immutable tracked Job can prove that the old attempt is finished;
+      // never send a termination request using the replacement PID.
+      if ((await inspectWindowsReviewJob(worker.job)).active === 0) return;
+      throw failure("PROCESS_IDENTITY_CHANGED", "Reviewer process identity changed; no termination signal sent");
+    }
     const job = await inspectWindowsReviewJob(worker.job, Boolean(leader));
     if (job.active) throw failure("PROCESS_TERMINATION_PENDING", "Reviewer job still has associated processes; rewind remains pending");
     if (!job.exists && (leader || !worker.job.includes(".Reviewer.Tracked."))) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer job is unavailable; complete exit is not proven");

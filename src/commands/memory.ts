@@ -300,8 +300,9 @@ export async function memoryChangeValidateCommand(
   const format = parseOutput(options.format ?? "text", ["text", "json"] as const, "memory change validate");
   const result = await validateMemoryChange(changeId);
   const preview = await memoryChangePreview(result.changeId);
+  const reviewCommand = `memsphere memory change show ${result.changeId} --checkpoint ${result.checkpointDigest}`;
   if (format === "json") {
-    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result, previewUrl: preview.url }, null, 2)}\n`);
+    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result, previewUrl: preview.url, previewPath: preview.path, reviewCommand }, null, 2)}\n`);
     if (result.issues.length > 0) process.exitCode = 1;
     return;
   }
@@ -317,7 +318,9 @@ export async function memoryChangeValidateCommand(
   console.log(`ChangeSet: ${result.changeId}`);
   console.log(`Store: ${result.storeType}`);
   console.log(`Base Revision: ${result.baseRevision}`);
-  console.log(`Content Digest: ${result.checkpointDigest}`);
+  console.log(`Checkpoint Digest: ${result.checkpointDigest}`);
+  console.log(`Review materials: ${reviewCommand} --part summary`);
+  console.log("Use --part diff|validation, or --part memory --reference <reference> --side before|after.");
   console.log(`memoryRoot: ${result.memoryRoot}`);
   if (preview.url) console.log(`Preview: ${preview.url}`);
   else console.log(`Preview: start memsphere View, then open ${preview.path}`);
