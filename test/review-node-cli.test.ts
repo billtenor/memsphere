@@ -37,7 +37,7 @@ test("restricted CLI: an old Attempt cannot report after retry", async t => {
   const f = await reviewCliFixture(t);
   await reviews.failArtifactReviewAgentAssignment({ ...f.bound, failure: { stage: "process", code: "fixture", message: "Retry" } });
   await reviews.retryArtifactReviewAgentAssignment(f.input);
-  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input }))!;
   await reviews.markArtifactReviewAgentCliReady({ ...f.input, attemptId: claimed.attempt.id });
   f.cli(["continue", "report", "--artifact", '{"applicable":true}', "--output", "json"], false);
   assert.equal(reviewNodeProgress((await reviews.readArtifactReviewForActor(f.input)).assignment)?.processed, 0);

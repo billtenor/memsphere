@@ -517,7 +517,7 @@ test("explicit task retry and fresh registration share the active-task deduplica
 test("synchronous CLI wait observes pending Agent work and returns its completed result without queue registration",{timeout:30000},async t=>{
  const f=await reviewFixture(t),gates=await processGates(t.signal);t.after(()=>gates.close());
  await f.setAsync(false);
- const child=spawn(process.execPath,["--import",fileURLToPath(new URL("./fixtures/review-wait-barrier.mjs",import.meta.url)),cli,"--project","test-project","continue","review","wait"],{cwd:f.root,env:{...f.env,REVIEW_WAIT_GATES:String(gates.endpoint)},stdio:["ignore","pipe","pipe"]});
+ const child=spawn(process.execPath,["--import",new URL("./fixtures/review-wait-barrier.mjs",import.meta.url).href,cli,"--project","test-project","continue","review","wait"],{cwd:f.root,env:{...f.env,REVIEW_WAIT_GATES:String(gates.endpoint)},stdio:["ignore","pipe","pipe"]});
  let stdout="",stderr="";child.stdout.on("data",data=>stdout+=data);child.stderr.on("data",data=>stderr+=data);
  const exited=once(child,"exit",{signal:t.signal});
  f.beforeCleanup(async()=>{gates.publish("release-poll");if(child.exitCode===null&&child.signalCode===null){const done=once(child,"exit",{signal:AbortSignal.timeout(10000)});child.kill();await done;}});

@@ -30,7 +30,8 @@ export async function reviewNodeFixture(t: test.TestContext, graph: boolean, sec
     const pending = await flow.reportRun({ runsRoot: join(f.root, "runs"), runId: started.id, artifact: { kind: "inline", value: "Candidate" } });
     const review = pending.artifactReviews![0]; runId = pending.id; input = { runsRoot: join(f.root, "runs"), reviewId: review.id, roundId: review.currentRoundId, actorId: "agent" };
   }
-  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
+  // Node/CLI fixtures have no OS worker. Only the legacy flow API requires a PID.
+  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...input, ...(graph ? {} : { workerPid: process.pid }) }))!;
   const bound = { ...input, attemptId: claimed.attempt.id }; await reviews.markArtifactReviewAgentCliReady(bound);
   return { ...f, runId, input, bound, claimed, controlPlane };
 }
