@@ -6,7 +6,7 @@ import { release as osRelease } from "node:os";
 import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
-import {createFixtureProcesses, stopFixtureChild, stopFixtureJob} from "./helpers/fixture-process.js";
+import {createFixtureProcesses, stopFixtureChild, stopFixtureJob, verifyFixtureTreeExit} from "./helpers/fixture-process.js";
 import {pinWindowsProcess} from "./helpers/windows-process-handle.js";
 import type {ProcessIdentity} from "../src/context_control/review-process.js";
 
@@ -48,6 +48,7 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     return { worker, child, host:ready.host as ProcessIdentity|undefined, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
   };
   const [related, unrelated] = await Promise.all([start(), start()]);
+  t.diagnostic(JSON.stringify({ workload: [related.worker.pid, related.child.pid], recorded: related.rewind.members }));
   if (scenario === "identity") {
     await assert.rejects(stopRewindWorker({ ...related.rewind, identity: { ...related.rewind.identity, started: "recycled PID" } }), { code: "PROCESS_IDENTITY_CHANGED" });
     assert.deepEqual(await captureProcessIdentity(related.worker.pid!), related.rewind.identity);
@@ -97,7 +98,11 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
   } else {
     await t.test("terminates the owned worker tree", async () => {
       await stopRewindWorker(related.rewind);
-      for (const member of related.rewind.members) assert.equal(await alive(member.pid), false, observed.diagnostic(member.pid));
+      // The only workload processes in this native fixture are the worker and
+      // child. Keeper hosts were launched before enrollment, outside its Job;
+      // they observe zero membership and then close/exit asynchronously.
+      const workload = [related.worker.pid!, related.child.pid];
+      await verifyFixtureTreeExit(observed, workload, related.rewind.members.filter(member=>!workload.includes(member.pid)).map(member=>member.pid));
     });
     await t.test("an empty retired Job tolerates PID reuse without harming the new process", async () => {
       // Simulate reuse of a historical PID with a real unrelated live process.

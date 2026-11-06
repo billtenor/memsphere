@@ -100,3 +100,12 @@ export async function untilFixture(read: () => Promise<boolean>, description = "
     await delay(25);
   }
 }
+
+/** Job completion covers the workload, while the external keeper subsequently
+ * closes its handle and exits. Both must be gone before fixture completion. */
+export async function verifyFixtureTreeExit(observed: ReturnType<typeof fixtureProcesses>, workload: number[], keepers: number[]) {
+  const workloadStates = await observed.alive(...workload);
+  const survivors = workload.filter((_, index) => workloadStates[index]);
+  if (survivors.length) throw Error(`Original fixture workload has not exited: ${survivors.map(pid => observed.diagnostic(pid)).join(", ")}`);
+  if (keepers.length) await untilFixture(async () => !(await observed.alive(...keepers)).some(Boolean), "external fixture keepers exit after the Job drains");
+}
