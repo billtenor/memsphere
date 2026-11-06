@@ -539,7 +539,7 @@ test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, 
       for (const reviewCommand of reviewCommands) {
         const result = crossSpawn.sync(command, [...prefix, reviewCommand], { encoding: "utf8", env });
         assert.equal(result.status, 0, `${command}: ${result.stderr || result.stdout}`);
-        assert.match(result.stdout, /bound-assignment/);
+        assert.deepEqual(JSON.parse(result.stdout), reviewCommand.split(" ").slice(1));
       }
     }
   } finally {

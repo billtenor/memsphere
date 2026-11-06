@@ -38,7 +38,7 @@ function graphFormat(contentType: string) {
   const mime = mimeType(contentType);
   return { name: mime === "text/markdown" ? "markdown" : mime === "application/json" ? "json" : mime.includes("yaml") ? "yaml" : "plain", options: {} };
 }
-async function artifactDto(service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>, artifact: Artifact): Promise<legacy.RunEvent["artifact"]> {
+export async function graphArtifactDto(service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>, artifact: Artifact): Promise<legacy.RunEvent["artifact"]> {
   const body = await service.body(artifact);
   const value = decodeGraphContent(body.bytes, body.contentType);
   return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType };
@@ -72,7 +72,7 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
         for (const id of new Set((viewRoundId && round.id !== viewRoundId ? [] : artifact.dependencies).filter(r => r.kind === "artifact").map(r => r.id))) {
           const material = snapshot.artifacts.find(a => a.id === id);
           if (!material || !(snapshot.historicalCompleteIds ?? snapshot.completeIds).includes(id)) throw failure("INVALID_STATE", `Review material is not accepted: ${id}`);
-          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&(round.id!==viewRoundId || viewMaterialIndex!==undefined&&contextArtifacts.length!==viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
+          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&(round.id!==viewRoundId || viewMaterialIndex!==undefined&&contextArtifacts.length!==viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await graphArtifactDto(service,material)});
         }
         const readable = [artifact, ...snapshot.artifacts.filter(a => contextArtifacts.some(c => c.artifactId === a.id))];
         const externalIds = new Set(readable.flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id)));

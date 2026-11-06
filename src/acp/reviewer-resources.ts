@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { graphArtifactDto } from "../context_control/review-repository.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
 import { open, realpath, rm } from "node:fs/promises";
@@ -50,7 +52,9 @@ function contained(root: string, path: string) {
 export async function exportReviewerBody(file: string, bytes: Uint8Array) {
   const root = await realpath(process.env.MEMSPHERE_WORKSPACE_ROOT!);
   const target = resolve(file), parent = await realpath(dirname(target));
-  if (!contained(root, target) || !contained(root, parent)) throw denied(file);
+  // Authorize the canonical parent: Windows short paths and workspace aliases
+  // can name the same directory without sharing the root's lexical spelling.
+  if (!contained(root, parent)) throw denied(file);
   const canonical = join(parent, basename(target));
   const handle = await open(canonical, "wx");
   let complete = false;
@@ -103,7 +107,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     return matches[0]!;
   };
   if (operation === "artifact-show" && !o.artifact && !o.step && !o.out) {
-    result = { artifactId: candidate.id, artifact: await expanded(candidate), contextArtifacts: await Promise.all(artifacts.filter(a => a.id !== candidate.id).map(async a => ({ artifactId: a.id, stepId: a.stepId, artifact: await expanded(a) }))), contextExternals: externals.map(e => ({ externalId: e.id, source: e.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id) })), confirmations, revisionSummary: candidate.revisedSummary };
+    result = { artifactId: candidate.id, artifact: await expanded(candidate), contextArtifacts: await Promise.all(artifacts.filter(a => a.id !== candidate.id).map(async a => ({ artifactId: a.id, stepId: a.stepId, artifact: await expanded(a) }))), contextExternals: externals.map(e => ({ externalId: e.id, source: e.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id) })), confirmations, revisionSummary: candidate.revisedSummary ? { body: candidate.revisedSummary, digest: createHash("sha256").update(candidate.revisedSummary).digest("hex"), createdAt: steps.find(s => s.id === candidate.stepId)!.reviewRounds!.find(r => r.id === own.roundId)!.createdAt, previousSubmissionId: candidate.revisedFrom } : undefined };
   } else if (["artifact-show", "external-show"].includes(operation)) {
     const item = operation === "artifact-show" ? selectArtifact() : externals.find(e => e.id === o.external);
     if (!item) throw denied(String(o.external));
@@ -130,5 +134,5 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
   } else return false;
   emitCommandResult(result, o.output);
   return true;
-  async function expanded(a: Artifact) { const b = await service.body(a); return { name: a.name, value: Buffer.from(b.bytes).toString("utf8"), contentType: b.contentType, dependencies: a.dependencies }; }
+  async function expanded(a: Artifact) { return { ...await graphArtifactDto(service, a), dependencies: a.dependencies }; }
 }

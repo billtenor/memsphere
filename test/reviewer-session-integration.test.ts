@@ -157,3 +157,25 @@ test("restricted Embedded Memory uses the launching worktree with a custom Home 
  const bad=crossSpawn.sync(runtime.launcherPath,['memory','read','workspace-evidence','--output','json'],{cwd:f.cwd,env:{...env,MEMSPHERE_REVIEW_SOURCE_WORKSPACE:main,MEMSPHERE_CONFIG_PATH:join(f.cwd,'config.json')},encoding:'utf8',timeout:20000});
  assert.notEqual(bad.status,0);assert.equal(bad.stdout,'');assert.match(bad.stderr,/REVIEW_SESSION_INVALID/);
 });
+
+
+test("scoped candidate reads preserve decoded JSON, format and structured revision metadata", async t => {
+ const f=await initializedContextFixture(t), service=(await openContextControl(f.root))!;
+ const {reviewerSessionEnvironment}=await import('./helpers/reviewer-session.js');
+ const session=await reviewerSessionEnvironment(f.root,f.home,f.cwd,{contentType:'application/json',text:'{"version":1}'});
+ const runId=session.MEMSPHERE_REVIEW_RUN_ID, step=(await service.snapshot(runId)).steps[0];
+ const input={service,runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(runId,step.id),roundId:step.reviewRounds![0].id,actorId:'reader',attemptId:session.MEMSPHERE_REVIEW_ATTEMPT_ID};
+ await reviews.markArtifactReviewAgentCliReady(input);let c=await reviews.readArtifactReviewForActor(input);
+ while(currentReviewNode(c.assignment))c=await reviews.mutateArtifactReviewNodes({...input,mutation:{operation:'report',expectedNodeId:currentReviewNode(c.assignment)!.nodeId,artifact:{applicable:true}}});
+ await reviews.submitArtifactReviewAgentAssignment({...input,vote:'approve'});
+ await reviews.submitArtifactReviewRunnerVote({...input,vote:'request_changes',comment:'Revise JSON'});
+ const revised=await service.withGraph(g=>g.report(runId,step.id,{text:'{"version":2}',revisionSummary:'Updated JSON evidence'}));
+ const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input,roundId:revised.step.reviewRounds!.at(-1)!.id,workerPid:process.pid}))!;
+ const env={...process.env,...session,MEMSPHERE_REVIEW_ASSIGNMENT_ID:claimed.assignment.id!,MEMSPHERE_REVIEW_ATTEMPT_ID:claimed.attempt.id};
+ const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:entrypoint});t.after(()=>runtime.cleanup());
+ const r=crossSpawn.sync(runtime.launcherPath,['run','artifact','show','--output','json'],{cwd:f.cwd,env,encoding:'utf8',timeout:20000});assert.equal(r.status,0,r.stderr);
+ const payload=JSON.parse(r.stdout);assert.deepEqual(payload.artifact.value,{version:2});assert.equal(payload.artifact.type,'object');assert.equal(payload.artifact.format.name,'json');assert.equal(payload.artifact.storage,'inline');assert.equal(payload.revisionSummary.body,'Updated JSON evidence');assert.equal(payload.revisionSummary.previousSubmissionId,step.artifact!.mode==='produce'?step.artifact.id:undefined);assert.match(payload.revisionSummary.digest,/^[a-f0-9]{64}$/);
+ const alias=join(f.directory,'workspace-alias');await symlink(f.cwd,alias,'junction');
+ const exported=crossSpawn.sync(runtime.launcherPath,['run','artifact','show','--out',join(alias,'candidate.json'),'--output','json'],{cwd:f.cwd,env,encoding:'utf8',timeout:20000});
+ assert.equal(exported.status,0,exported.stderr);assert.equal(await readFile(join(f.cwd,'candidate.json'),'utf8'),'{"version":2}');
+});
