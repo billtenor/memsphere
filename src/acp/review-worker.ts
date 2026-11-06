@@ -19,6 +19,8 @@ import { getAgentReviewProvider, type AgentReviewProvider } from "./provider.js"
 import { AcpProviderConfigurationError } from "./validation.js";
 import { resolvePromptLocale } from "../prompts/index.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
+import { captureProcessIdentity } from "../context_control/review-process.js";
+import { startWindowsReviewJob } from "../context_control/windows-review-job.js";
 
 export type AgentReviewWorkerOptions = {
   config?: string;
@@ -39,12 +41,24 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   const nodeExecutable = requiredOption(options.nodeExecutable, "--node-executable");
   const cliEntrypoint = requiredOption(options.cliEntrypoint, "--cli-entrypoint");
   const config = await readConfig(requiredOption(options.config, "--config"));
+  let workerJob: string | undefined;
+  let enrollmentFailure: unknown;
+  if (process.platform === "win32" && reviewId.startsWith("graph-review-")) {
+    try {
+      const identity = await captureProcessIdentity(process.pid);
+      if (!identity) throw new Error("Worker creation identity unavailable");
+      workerJob = await startWindowsReviewJob(identity);
+    } catch (error) { enrollmentFailure = error; }
+  }
   const claimed = await claimArtifactReviewAgentAssignment({
     runsRoot: config.runsRoot,
     reviewId,
     roundId,
     actorId: assignmentId,
-    workerPid: process.pid
+    // Failed enrollment has not run provider preparation or spawned a Provider.
+    // No uncontained Reviewer is allowed to continue after this failure.
+    workerPid: enrollmentFailure ? undefined : process.pid,
+    ...(workerJob ? { workerJob } : {})
   });
   if (!claimed) return;
 
@@ -72,6 +86,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
+    if (enrollmentFailure) throw enrollmentFailure;
     const temporaryRoot = join(callerDirectory, "tmp");
     await mkdir(temporaryRoot, { recursive: true });
     attemptDirectory = await mkdtemp(join(temporaryRoot, "memsphere-review-"));

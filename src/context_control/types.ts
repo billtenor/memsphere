@@ -52,6 +52,7 @@ export type ReviewAttempt = {
   id: string; createdAt: string; startedAt?: string; workerPid?: number; cliReadyAt?: string; promptVersion?: string;
   workerIdentity?: { pid: number; started: string; group: number };
   workerMembers?: Array<{ pid: number; started: string; group: number }>;
+  workerJob?: string;
   session?: { provider?: string; id?: string; protocolVersion?: number; agentName?: string; agentVersion?: string; model?: string };
   completion?: { at: string; kind: "completed" | "failed" | "cancelled"; stopReason?: string; failure?: { stage: string; code: string; message: string; category?: string } };
 };
@@ -71,7 +72,7 @@ export type GraphTrigger = { id: string; actionId: string; dependencyIndex: numb
 export type GraphJoin = { actionId: string; dependencyIndex: number; arrivals: Record<string, Arrival> };
 export type GraphRewind = { id: string; createdAt: string; reason: string; targetStepId: string; replacementStepId: string; affectedStepIds: string[]; affectedTriggerIds: string[] };
 export type DeferredCollect = { rewindId: string; triggerId: string; actionId: string; dependencyIndex: number; arrivals: Record<string, Arrival>; memberStepIds: string[]; memberSourceStepIds: string[]; waits: Array<{ rootStepId: string; waitActionIds: string[] }> };
-export type RewindWorker = { reviewId: string; attemptId: string; pid: number; identity?: { pid: number; started: string; group: number }; members?: Array<{ pid: number; started: string; group: number }> };
+export type RewindWorker = { reviewId: string; attemptId: string; pid: number; identity?: { pid: number; started: string; group: number }; members?: Array<{ pid: number; started: string; group: number }>; job?: string };
 export type GraphFrame = {
   memoryRef: string; triggers: GraphTrigger[]; pendingSteps: Step[]; joins: GraphJoin[];
   processedStepIds: string[]; nextCompletionSequence: number;

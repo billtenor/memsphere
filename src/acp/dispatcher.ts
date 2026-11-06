@@ -86,10 +86,12 @@ export async function dispatchArtifactReviewAgents(input: {
       const latest = await loadRun(input.config.runsRoot, input.run.id);
       const latestReview = latest.artifactReviews?.find(r => r.id === review.id);
       const latestRound = latestReview?.rounds.find(r => r.id === round.id);
+      const latestAttempt = latestRound?.assignments.find(a => artifactReviewAssignmentId(a) === assignmentId)?.attempts?.at(-1);
       if (latest.status !== "running" || latestReview?.status === "cancelled" ||
           latestReview?.currentRoundId !== round.id || latestRound?.status === "cancelled") {
         if (worker.pid && identity) await stopRewindWorker({
           pid: worker.pid, identity, members: await captureProcessGroup(identity.group),
+          ...(latestAttempt?.workerJob ? { job: latestAttempt.workerJob } : {}),
           reviewId: review.id, attemptId: assignment.attempts?.at(-1)?.id ?? assignmentId
         });
         worker.unref();

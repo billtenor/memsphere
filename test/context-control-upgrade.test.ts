@@ -176,14 +176,14 @@ test("making idle timeout optional upgrades the known definition without rewriti
   assert.deepEqual(await reopened.stores.run.get({}, run.id), before);
 });
 
-for (const entity of ["run", "review"] as const) test(`rewind upgrade preserves ${entity} records and revisions`, async t => {
+for (const [entity, version] of [["run", "before-rewind"], ["review", "before-rewind"], ["run", "before-job"]] as const) test(`rewind upgrade preserves ${entity} ${version} records and revisions`, async t => {
  const f = await businessFixture(t, {}), s = (await openContextControl(f.root,true))!;
  const run = await s.start("prior rewind model");
  const artifact=(await s.report(run.id,{name:"old",content:textContent("before rewind")})).artifact;
  const review={id:"historical-review",artifactId:artifact.id,reviewer:{role:"reviewer",source:"human"},status:"submitted",createdAt:new Date().toISOString(),comments:[{id:"historical-comment",body:"preserve this comment",createdAt:new Date().toISOString()}]};
  await s.stores.review.create({},`${run.id}/${review.id}`,review);
  const before = await s.stores.run.get({},run.id), beforeReview=await s.stores.review.get({},`${run.id}/${review.id}`);
- await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`, await readFile(new URL(`./fixtures/context-control-${entity}-before-rewind.json`,import.meta.url),"utf8"));
+ await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`, await readFile(new URL(`./fixtures/context-control-${entity}-${version}.json`,import.meta.url),"utf8"));
  await assert.rejects(openContextControl(f.root),{code:"MODEL_INCOMPATIBLE"});
  assert.equal((await withModelMaintenance(f.root,()=>upgradeContextControlOutputs(f.root)))?.records,0);
  const reopened=(await openContextControl(f.root))!;
@@ -191,7 +191,7 @@ for (const entity of ["run", "review"] as const) test(`rewind upgrade preserves 
  assert.deepEqual(await reopened.stores.review.get({},`${run.id}/${review.id}`),beforeReview);
 });
 
-for (const fixtureName of ["context-control-review-before-members.json", "context-control-review-before-nodes.json", "context-control-review-master-release.json", "context-control-review-rewind-release.json"]) test(`known Review upgrade from ${fixtureName} preserves historical Comment IDs and revisions`, async t => {
+for (const fixtureName of ["context-control-review-before-job.json", "context-control-review-before-members.json", "context-control-review-before-nodes.json", "context-control-review-master-release.json", "context-control-review-rewind-release.json"]) test(`known Review upgrade from ${fixtureName} preserves historical Comment IDs and revisions`, async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const run = await service.start("historical review"), artifact = (await service.report(run.id, { name: "A", content: textContent("A") })).artifact;
   const id = "review-history", key = `${run.id}/${id}`;

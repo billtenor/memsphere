@@ -179,8 +179,11 @@ async function mutateAttempt(input: AttemptInput, change: (review: Review, attem
   }));
   return agentContext(input);
 }
-export async function claimArtifactReviewAgentAssignment(input: Parameters<typeof legacy.claimArtifactReviewAgentAssignment>[0]) {
-  if (!identity(input.reviewId)) return legacy.claimArtifactReviewAgentAssignment(input);
+export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<typeof legacy.claimArtifactReviewAgentAssignment>[0], "workerPid"> & { workerPid?: number; workerJob?: string }) {
+  if (!identity(input.reviewId)) {
+    if (input.workerPid === undefined) throw failure("INVALID_ARGUMENT", "Legacy worker PID required");
+    return legacy.claimArtifactReviewAgentAssignment({ ...input, workerPid: input.workerPid });
+  }
   const located = await findArtifactReview(input);
   const actorId = located.review.rounds.find(r => r.id === input.roundId)?.assignments.find(a => a.actorId === input.actorId || a.id === input.actorId)?.actorId;
   if (!actorId) throw failure("NOT_FOUND", "Agent Assignment not found");
@@ -194,6 +197,11 @@ export async function claimArtifactReviewAgentAssignment(input: Parameters<typeo
     if (attempt.startedAt || attempt.completion) throw failure("REVIEW_CONFLICT", "Queued Agent attempt is not available");
     attempt.startedAt = stamp(); attempt.workerPid = input.workerPid;
     attempt.workerIdentity = input.workerPid ? await captureProcessIdentity(input.workerPid) : undefined;
+    if (input.workerJob) {
+      if (input.workerPid !== process.pid || process.platform !== "win32" || !attempt.workerIdentity)
+        throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Only the enrolled Windows worker may register its job");
+      attempt.workerJob = input.workerJob;
+    }
     attemptId = attempt.id; review.status = "running"; review.startedAt ??= attempt.startedAt;
   }));
   return attemptId ? agentContext({ ...input, attemptId }) : undefined;
@@ -225,7 +233,7 @@ export async function failArtifactReviewAgentAssignment(input: Parameters<typeof
   const context = await agentContext(input);
   if (context.assignment.status === "submitted") return context;
   return mutateAttempt(input, (_r, a) => {
-    if (input.failure.code === "worker_spawn_failed") { delete a.workerPid; delete a.workerIdentity; }
+    if (input.failure.code === "worker_spawn_failed") { delete a.workerPid; delete a.workerIdentity; delete a.workerJob; }
     a.completion = { kind: "failed", at: stamp(), failure: input.failure, ...(input.stopReason ? { stopReason: input.stopReason } : {}) };
   });
 }

@@ -1232,6 +1232,10 @@
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "job": {
+                    "type": "string",
+                    "pattern": "^Local\\\\Memsphere\\.Reviewer\\.[0-9a-f-]{36}$"
                   }
                 },
                 "required": [

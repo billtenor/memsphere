@@ -39,7 +39,7 @@ test('a mismatched OS start identity never signals a live detached process', {sk
  assert.equal(await alive(child.pid!),false);
 });
 
-for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=false,nativeDispatch=false,completed=false} of [{resistant:false,late:false,failOnce:false,submitted:true,completed:true},{resistant:false,late:false,failOnce:true,nativeDispatch:true},{resistant:false,late:false,failOnce:true,submitted:true},{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:false,orphan:true},{resistant:false,late:false,failOnce:false,launchGate:"before-provider"},{resistant:false,late:false,failOnce:false,launchGate:"after-provider"}])test(`rewind stops the real ACP worker/provider group${completed?" after normal completion and exit":nativeDispatch?" through the native dispatcher":submitted?" after voting but before prompt returns":launchGate?` at ${launchGate}`:resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' with orphaned Windows descendants':''} and preserves an unrelated reviewer`,{timeout:240000,skip:(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
+for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=false,nativeDispatch=false,completed=false,failedBeforeProvider=false,lateDescendant=false} of [{resistant:false,late:false,failOnce:false,submitted:true,completed:true,failedBeforeProvider:true},{resistant:false,late:false,failOnce:false,submitted:true,completed:true,lateDescendant:true},{resistant:false,late:false,failOnce:false,submitted:true,completed:true},{resistant:false,late:false,failOnce:true,nativeDispatch:true},{resistant:false,late:false,failOnce:true,submitted:true},{resistant:false,late:false,failOnce:false},{resistant:true,late:false,failOnce:false},{resistant:false,late:true,failOnce:false},{resistant:false,late:false,failOnce:false,orphan:true},{resistant:false,late:false,failOnce:false,launchGate:"before-provider"},{resistant:false,late:false,failOnce:false,launchGate:"after-provider"}])test(`rewind stops the real ACP worker/provider group${failedBeforeProvider?" after Provider construction failure and successful retry":lateDescendant?" with a descendant born after the saved lifecycle snapshot":completed?" after normal completion and exit":nativeDispatch?" through the native dispatcher":submitted?" after voting but before prompt returns":launchGate?` at ${launchGate}`:resistant?' through persisted cancellation recovery':late?' before late claim':failOnce?' after termination failure':orphan?' with orphaned Windows descendants':''} and preserves an unrelated reviewer`,{timeout:240000,skip:((failedBeforeProvider||lateDescendant)&&process.platform!=='win32')||(resistant&&process.platform==='win32')||(orphan&&process.platform!=='win32')},async t=>{
  const gates=await processGates(t.signal);
  const f=await initializedContextFixture(t);
  t.after(()=>gates.close());
@@ -53,6 +53,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const candidates=[];
  for(const name of ['T','independent'])candidates.push(await service.withGraph(async g=>{const s=product.snapshot.steps.find(s=>s.source?.actionId===name)!;await g.enter(start.run.id,s.id);return g.report(start.run.id,s.id,{text:name});}));
  const processes=[];
+ let failedAttempt:any, failureConsumed=false;
  let dispatch:Promise<number>|undefined,releaseDispatch:(()=>void)|undefined;
  t.after(async()=>{releaseDispatch?.();await dispatch?.catch(()=>undefined);});
  const launch=async(i:number)=>{
@@ -74,15 +75,31 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
    processes[0]={workerPid,ready,...info};
    return;
   }
+  const failProviderBuild=Boolean(failedBeforeProvider&&i===0&&!failureConsumed);
   const candidate=candidates[i],ready=join(f.directory,`ready-${i}.json`),input=join(f.directory,`worker-${i}.json`);
-  await writeFile(input,JSON.stringify({config:join(f.root,'config.json'),review:reviews.graphReviewHandle(start.run.id,candidate.step.id),round:candidate.step.reviewRounds![0].id,assignment:'reviewer',cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url)),workspaceRoot:f.cwd,ready,gates:gates.endpoint,...(completed&&i===0?{completed:true}:{}),...(submitted&&i===0?{submitted:true}:{}),...(launchGate&&i===0?{launchGate}:{}),...(orphan?{release:join(f.directory,`release-orphans-${i}`)}:{}) ,...(late&&i===0?{claimGate:join(f.directory,'release-claim')}:{})}));
+  await writeFile(input,JSON.stringify({config:join(f.root,'config.json'),review:reviews.graphReviewHandle(start.run.id,candidate.step.id),round:candidate.step.reviewRounds![0].id,assignment:'reviewer',cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url)),workspaceRoot:f.cwd,ready,gates:gates.endpoint,...(failProviderBuild?{failProviderBuild}:{}),...(lateDescendant&&i===0?{lateDescendant}:{}),...(completed&&i===0?{completed:true}:{}),...(submitted&&i===0?{submitted:true}:{}),...(launchGate&&i===0?{launchGate}:{}),...(orphan?{release:join(f.directory,`release-orphans-${i}`)}:{}) ,...(late&&i===0?{claimGate:join(f.directory,'release-claim')}:{})}));
   const worker=spawn(process.execPath,[fileURLToPath(new URL('./fixtures/graph-review-worker.mjs',import.meta.url)),input],{detached:true,stdio:['ignore','ignore','pipe'],env:{...process.env,MEMSPHERE_HOME:f.home,...(resistant&&i===0?{REVIEW_TEST_RESISTANT:'yes'}:{})}});
   let errors='';worker.stderr!.on('data',s=>errors+=s);
   f.beforeCleanup(async()=>{
    if(orphan)gates.publish(join(f.directory,`release-orphans-${i}`));
+   if(lateDescendant){gates.publish(`release-late:${ready}`);gates.publish(`snapshot-continue:${ready}`);gates.publish(`spawn-late:${ready}`);}
    await terminateProcessTree(worker.pid!,'SIGKILL',process.platform,true).catch(()=>undefined);
    if(worker.exitCode===null&&worker.signalCode===null)await once(worker,'exit');
   });
+  if(failProviderBuild){
+   const [code]=await once(worker,'exit');
+   assert.equal(code,0,errors);
+   const common={runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,candidate.step.id),roundId:candidate.step.reviewRounds![0].id,actorId:'reviewer'};
+   const failed=await reviews.readArtifactReviewForActor(common);
+   failedAttempt=(await service.snapshot(start.run.id)).reviews.find(r=>r.artifactId===candidate.artifact.id)!.attempts!.at(-1)!;
+   assert.equal(failedAttempt.completion.kind,'failed');
+   assert.ok(failedAttempt.workerJob,'enrollment proof was saved with claim before Provider preparation');
+   assert.equal(failed.assignment.attempts!.length,1);
+   assert.equal(gates.has(`provider-launched:${ready}`),false);
+   await reviews.retryArtifactReviewAgentAssignment(common);
+   failureConsumed=true;
+   return launch(i);
+  }
   const lifetime=new AbortController();
   worker.once('exit',()=>lifetime.abort(new Error(errors||'Fixture worker exited before readiness')));
   const info=await Promise.race([gates.wait(ready),new Promise((_,reject)=>lifetime.signal.addEventListener('abort',()=>reject(lifetime.signal.reason),{once:true}))]);
@@ -97,18 +114,39 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  }
  const old=candidates[0],common={runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(start.run.id,old.step.id),roundId:old.step.reviewRounds![0].id,actorId:'reviewer'};
  const draft=await reviews.readArtifactReviewForActor(common);
- if(!late&&!launchGate)assert.ok(draft.assignment.attempts![0].cliReadyAt);
+ if(!late&&!launchGate)assert.ok(draft.assignment.attempts!.at(-1)!.cliReadyAt);
  const submittedReview = submitted ? (await service.snapshot(start.run.id)).reviews.find(r=>r.artifactId===old.artifact.id)! : undefined;
  if(submitted){assert.equal(draft.assignment.status,'submitted');assert.ok(submittedReview!.attempts!.at(-1)!.completion);}
  if(completed){
   gates.publish(`finish-review:${processes[0].ready}`);
+  if(lateDescendant){
+   await gates.wait(`snapshot-ready:${processes[0].ready}`);
+   gates.publish(`spawn-late:${processes[0].ready}`);
+   const late=await gates.wait(`late-descendant:${processes[0].ready}`);
+   processes[0].latePid=late.latePid;
+   await until(async()=>await alive(processes[0].childPid)?undefined:true);
+   const attempt=(await service.snapshot(start.run.id)).reviews.find(r=>r.artifactId===old.artifact.id)!.attempts!.at(-1)!;
+   assert.equal(attempt.workerMembers?.some(member=>member.pid===late.latePid),false,'late descendant is absent from the saved snapshot');
+   gates.publish(`snapshot-continue:${processes[0].ready}`);
+  }
   const [code]=await processes[0].exited;
   assert.equal(code,0,'Reviewer completes the actual ACP session normally');
   await until(async()=>await alive(processes[0].providerPid)||await alive(processes[0].childPid)?undefined:true);
   const attempt=(await service.snapshot(start.run.id)).reviews.find(r=>r.artifactId===old.artifact.id)!.attempts!.at(-1)!;
   assert.ok(attempt.workerMembers?.some(member=>member.pid===processes[0].childPid),'descendant identity persisted before Provider stop');
  }
- if(orphan){
+ if(lateDescendant){
+  assert.equal(await alive(processes[0].latePid),true,'late descendant survives W/P/C exit');
+  await assert.rejects(service.withGraph(g=>g.rewind(start.run.id,product.step.id,'late descendant still owns the old lifecycle')),{code:'PROCESS_TERMINATION_PENDING'});
+  const saved=await service.snapshot(start.run.id),replacement=saved.run.frames![0].graphFrame.rewinds!.at(-1)!.replacementStepId;
+  assert.ok(saved.run.frames![0].graphFrame.pendingRewind);
+  await assert.rejects(service.withGraph(g=>g.enter(start.run.id,replacement)),{code:'RECOVERY_REQUIRED'});
+  await assert.rejects(service.withGraph(g=>g.report(start.run.id,replacement,{text:'premature'})),{code:'RECOVERY_REQUIRED'});
+  assert.equal(await alive(processes[0].latePid),true);
+  gates.publish(`release-late:${processes[0].ready}`);
+  await until(async()=>await alive(processes[0].latePid)?undefined:true);
+  await service.withGraph(g=>g.advance(start.run.id));
+ }else if(orphan){
   await assert.rejects(service.withGraph(g=>{
    g.stopReviewer=async worker=>{
     process.kill(worker.pid,'SIGKILL');
@@ -205,12 +243,18 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   await service.withGraph(g=>g.enter(start.run.id,replacement));
   assert.equal((await service.snapshot(start.run.id)).steps.find(step=>step.id===replacement)!.status,'running','normal completed Reviewer does not block the replacement');
  }
+ if(failedAttempt)assert.deepEqual(snapshot.reviews.find(r=>r.artifactId===old.artifact.id)!.attempts![0],failedAttempt,'failed historical Attempt remains byte-equivalent');
  if(orphan){
   // A second actual graph rewind starts only after the independent leader has
   // exited. No descendant snapshot was persisted while that leader was alive.
   process.kill(processes[1].workerPid,'SIGKILL');
   await processes[1].exited;
   assert.equal(await alive(processes[1].childPid),true,'unrecorded child survives before rewind');
+  const review=snapshot.reviews.find(r=>r.artifactId===candidates[1].artifact.id)!;
+  const historical=(await service.stores.review.get({},`${start.run.id}/${review.id}`))!;
+  const oldEvidence=structuredClone(historical.value) as typeof review;
+  delete oldEvidence.attempts!.at(-1)!.workerJob;
+  await service.stores.review.update({},`${start.run.id}/${review.id}`,oldEvidence,{expectedRevision:historical.revision});
   await assert.rejects(service.withGraph(g=>g.rewind(start.run.id,candidates[1].step.id,'leader already gone')),{code:'PROCESS_IDENTITY_UNAVAILABLE'});
   const blocked=await service.snapshot(start.run.id);
   const pending=blocked.run.frames![0].graphFrame.pendingRewind!;

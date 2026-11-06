@@ -17,11 +17,11 @@ test("exclusion-based selection preserves every prior default suite", async () =
   }
 });
 
-test("default preserves native coverage while using full's category groups and workers", () => {
+function assertDefaultGroups(files: string[], sources: Record<string, string>) {
   const full = createCiPlan("full", files, sources).include;
   const defaults = createCiPlan("default", files, sources).include;
-  assert.equal(defaults.length, 13);
   for (const row of defaults) {
+    assert.ok(selectTests(files, sources, {}, row.suite).length > 0, "only nonempty categories become jobs");
     const suite = row.suite.replace(/^native-/, "");
     const previous = full.find(candidate => candidate.os === row.os && candidate.suite === suite);
     assert(previous);
@@ -30,11 +30,13 @@ test("default preserves native coverage while using full's category groups and w
     const expected = selectTests(files, sources, {}, suite).filter(file => row.os === "ubuntu-24.04" || !defaultTestExclusions.includes(file));
     assert.deepEqual(selectTests(files, sources, {}, row.suite), expected);
   }
-  for (const os of ["macos-latest", "windows-latest"]) {
+  for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
     const assigned = defaults.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite)).sort();
-    assert.deepEqual(assigned, selectTests(files, sources, {}, "platform-and-upgrades").sort());
+    assert.deepEqual(assigned, (os === "ubuntu-24.04" ? files : files.filter(file => !defaultTestExclusions.includes(file))).slice().sort(), `${os}: every eligible file runs exactly once`);
   }
-});
+}
+
+test("default preserves native coverage while using full's category groups and workers", () => assertDefaultGroups(files, sources));
 
 test("default excludes only fixed paths; all future files run once and full remains exhaustive", async () => {
   const future = {
@@ -50,9 +52,10 @@ test("default excludes only fixed paths; all future files run once and full rema
   assert(exclusions.every((path: string) => typeof path === "string" && !/[?*]/.test(path) && !path.includes("..") && !path.startsWith("/")));
   const allFiles = [...files, ...Object.keys(future)];
   const allSources = { ...sources, ...future };
+  assertDefaultGroups(allFiles, allSources);
   for (const profile of ["default", "full"]) {
     const rows = createCiPlan(profile, allFiles, allSources).include;
-    assert.equal(rows.length, 17, "future browser tests activate the corresponding native UI jobs");
+    for (const os of ["macos-latest", "windows-latest"]) assert.ok(rows.some(row => row.os === os && selectTests(allFiles, allSources, {}, row.suite).includes("model-future-browser.test.ts")), "future browser tests activate native UI jobs");
     for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
       const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
 

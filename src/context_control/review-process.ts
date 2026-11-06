@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { RewindWorker } from "./types.js";
 import { failure } from "./errors.js";
 import { terminateProcessTree } from "../platform-process.js";
+import { inspectWindowsReviewJob } from "./windows-review-job.js";
 
 const exec = promisify(execFile);
 export type ProcessIdentity = { pid: number; started: string; group: number };
@@ -55,10 +56,6 @@ export async function queryWindowsProcesses(pid?: number, query: ProcessQuery = 
   });
 }
 const windowsProcesses = () => queryWindowsProcesses();
-async function windowsMembers(members: ProcessIdentity[]): Promise<ProcessIdentity[]> {
-  const ids = new Set(members.map(p => p.pid));
-  return (await windowsProcesses()).filter(p => ids.has(p.pid)).map(windowsIdentity);
-}
 function windowsGroup(rows: WindowsProcess[], group: number): ProcessIdentity[] {
   const ids = new Set([group]); let more = true;
   while (more) { more = false; for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) { ids.add(row.pid); more = true; } }
@@ -85,29 +82,34 @@ export async function stopRewindWorker(worker: RewindWorker) {
   const rows = process.platform === "win32" ? await windowsProcesses() : undefined;
   const leaderRow = rows?.find(row => row.pid === worker.pid);
   const leader = rows ? leaderRow ? windowsIdentity(leaderRow) : undefined : await captureProcessIdentity(worker.pid);
+  if (worker.job) {
+    if (process.platform !== "win32" || !worker.identity || worker.identity.group !== worker.pid || worker.pid === process.pid) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows Reviewer job identity unavailable");
+    if (leader && !same(worker.identity, leader)) throw failure("PROCESS_IDENTITY_CHANGED", "Reviewer process identity changed; no termination signal sent");
+    const job = await inspectWindowsReviewJob(worker.job, Boolean(leader));
+    if (job.active) throw failure("PROCESS_TERMINATION_PENDING", "Reviewer job still has associated processes; rewind remains pending");
+    if (leader && !job.exists) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Live Reviewer is missing its enrolled job");
+    return;
+  }
+  // A historical snapshot cannot exclude descendants born after it. Only the
+  // enrolled kernel job proves complete Windows membership, including orphans.
+  if (process.platform === "win32") {
+    if (leader && worker.identity && !same(worker.identity, leader)) throw failure("PROCESS_IDENTITY_CHANGED", "Reviewer process identity changed; no termination signal sent");
+    throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer has no kernel job membership evidence; rewind remains pending");
+  }
   if (!worker.identity) {
-    if (!leader && process.platform === "win32") throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer identity and descendant evidence are unavailable; rewind remains pending");
     if (!leader && !(await captureProcessGroup(worker.pid)).length) return;
     throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Cannot safely identify old Reviewer; rewind is saved, retry status after resolving the worker");
   }
-  if (process.platform === "win32" && !leader && !worker.members)
-    throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer leader exited before descendants were recorded; cleanup cannot be proven, rewind remains pending");
-  const memberIds = new Set(worker.members?.map(member => member.pid));
-  const members = rows
-    ? leader ? windowsGroup(rows, worker.identity.group) : rows.filter(row => memberIds.has(row.pid)).map(windowsIdentity)
-    : await captureProcessGroup(worker.identity.group);
+  const members = await captureProcessGroup(worker.identity.group);
   if (!members.length) return;
   if (leader && !same(worker.identity, leader) || !leader && members.some(p => !worker.members?.some(old => same(old, p))))
     throw failure("PROCESS_IDENTITY_CHANGED", "Reviewer process identity changed; no termination signal sent");
   if (worker.identity.group !== worker.pid || worker.pid === process.pid) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Reviewer is not an isolated worker process group");
-  if (!leader && process.platform === "win32") throw failure("PROCESS_TERMINATION_PENDING", "Reviewer leader exited while descendants remain; no unsafe tree signal sent, retry status after resolving those processes");
   await terminateProcessTree(worker.pid, "SIGTERM", process.platform, true).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
   });
   for (let i = 0; i < 40; i++) {
-    const survivors = process.platform === "win32"
-      ? await windowsMembers(members)
-      : await captureProcessGroup(worker.identity.group);
+    const survivors = await captureProcessGroup(worker.identity.group);
     if (!survivors.length) return;
     await delay(25);
   }

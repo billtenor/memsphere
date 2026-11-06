@@ -466,10 +466,11 @@ export class GraphRuntime {
       for (const attempt of review.attempts ?? []) {
         if (!artifact || !plan.affectedStepIds.includes(artifact.stepId) || !attempt.workerPid) continue;
         const identity = attempt.workerIdentity;
+        if (attempt.workerJob) { workers.push({ reviewId: review.id, attemptId: attempt.id, pid: attempt.workerPid, identity, job: attempt.workerJob }); continue; }
         const observed = await captureProcessGroup(identity?.group ?? attempt.workerPid);
         const current = observed.find(member => member.pid === attempt.workerPid);
         const members = identity && current && isDeepStrictEqual(identity, current) ? [...(attempt.workerMembers ?? []), ...observed] : attempt.workerMembers;
-        workers.push({ reviewId: review.id, attemptId: attempt.id, pid: attempt.workerPid, ...(identity ? { identity } : {}), ...(members ? { members } : {}) });
+        workers.push({ reviewId: review.id, attemptId: attempt.id, pid: attempt.workerPid, ...(identity ? { identity } : {}), ...(members ? { members } : {}), ...(attempt.workerJob ? { job: attempt.workerJob } : {}) });
       }
     }
     frame.rewinds = [...(frame.rewinds ?? []), event]; frame.joins = plan.joins;
@@ -511,10 +512,12 @@ export class GraphRuntime {
       if (!artifact || !affected.has(artifact.stepId)) continue;
       for (const attempt of review.attempts ?? []) {
         if (!attempt.workerPid || intent.workers.some(w => w.reviewId === review.id && w.attemptId === attempt.id)) continue;
-        const identity = attempt.workerIdentity, observed = await captureProcessGroup(identity?.group ?? attempt.workerPid);
+        const identity = attempt.workerIdentity;
+        if (attempt.workerJob) { missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,identity,job:attempt.workerJob}); continue; }
+        const observed = await captureProcessGroup(identity?.group ?? attempt.workerPid);
         const current = observed.find(member => member.pid === attempt.workerPid);
         if (process.platform !== "win32" && !current && !observed.length) continue;
-        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:observed}:attempt.workerMembers?{members:attempt.workerMembers}:{})});
+        missing.push({reviewId:review.id,attemptId:attempt.id,pid:attempt.workerPid,...(attempt.workerJob?{job:attempt.workerJob}:{}),...(identity?{identity}:{}),...(identity && current && isDeepStrictEqual(identity,current)?{members:observed}:attempt.workerMembers?{members:attempt.workerMembers}:{})});
       }
     }
     if (missing.length) {
@@ -527,7 +530,7 @@ export class GraphRuntime {
     for (const worker of intent.workers) {
       const review = (await this.records.require<Review>("review", runId, worker.reviewId)).value;
       const attempt = review.attempts?.find(attempt => attempt.id === worker.attemptId);
-      if (!attempt || !isDeepStrictEqual(attempt.workerIdentity, worker.identity)) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
+      if (!attempt || !isDeepStrictEqual(attempt.workerIdentity, worker.identity) || attempt.workerJob !== worker.job) throw failure("REVIEW_CONFLICT", "Cancelled worker identity changed");
       // The worker may save its shutdown snapshot after rewind's initial read.
       // Persist the new evidence before using it; status can then recover even
       // when the leader exited between those two writes.

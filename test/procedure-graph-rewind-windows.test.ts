@@ -7,7 +7,7 @@ import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { terminateProcessTree } from "../src/platform-process.js";
 
-for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan"] as const) test(`Windows native rewind process safety: ${scenario}`, {
+for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late-descendant"] as const) test(`Windows native rewind process safety: ${scenario}`, {
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
   t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM and taskkill /T`);
@@ -32,19 +32,35 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan"] as co
     const members = await captureProcessGroup(worker.pid!);
     const child = members.find(p => p.pid === ready.childPid);
     assert.ok(child, "CIM observes the real child creation identity");
-    return { worker, child, rewind: { pid: worker.pid!, identity, members, reviewId: "review", attemptId: "attempt" } };
+    return { worker, child, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
   };
-  const related = await start(), unrelated = await start();
+  const [related, unrelated] = await Promise.all([start(), start()]);
   if (scenario === "identity") {
     await assert.rejects(stopRewindWorker({ ...related.rewind, identity: { ...related.rewind.identity, started: "recycled PID" } }), { code: "PROCESS_IDENTITY_CHANGED" });
     assert.deepEqual(await captureProcessIdentity(related.worker.pid!), related.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
+  } else if (scenario === "late-descendant") {
+    const exited = once(related.worker, "exit"), message = once(related.worker, "message");
+    related.worker.send("late-orphan");
+    const [late] = await message;
+    await exited;
+    assert.equal(await captureProcessIdentity(related.worker.pid!), undefined);
+    const exitedDeadline = Date.now() + 20000;
+    while (await captureProcessIdentity(related.child.pid)) assert.ok(Date.now() < exitedDeadline, "recorded parent exits");
+    assert.ok(await captureProcessIdentity(late.latePid), "late descendant survives all recorded ancestors");
+    assert.equal(related.rewind.members.some(p => p.pid === late.latePid), false, "late PID is not in the original snapshot");
+    await assert.rejects(stopRewindWorker(related.rewind), {code:"PROCESS_TERMINATION_PENDING"});
+    assert.ok(await captureProcessIdentity(late.latePid), "pending cleanup never mistakes missing old PIDs for complete exit");
+    gates.publish("release");
+    const deadline = Date.now() + 20000;
+    while (await captureProcessIdentity(late.latePid)) assert.ok(Date.now() < deadline, "late descendant exits");
+    await stopRewindWorker(related.rewind);
   } else if (scenario === "orphan" || scenario === "unrecorded-orphan") {
     const exited = once(related.worker, "exit");
     related.worker.send("orphan");
     await exited;
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child, "fixture child survives leader exit");
-    const evidence = scenario === "unrecorded-orphan" ? { ...related.rewind, members: undefined } : related.rewind;
+    const evidence = scenario === "unrecorded-orphan" ? { ...related.rewind, job: undefined, members: undefined } : related.rewind;
     await assert.rejects(stopRewindWorker(evidence), { code: scenario === "unrecorded-orphan" ? "PROCESS_IDENTITY_UNAVAILABLE" : "PROCESS_TERMINATION_PENDING" });
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
     gates.publish("release");
