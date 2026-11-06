@@ -8,7 +8,7 @@ import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWin
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
 import { terminateProcessTree } from "../src/platform-process.js";
 
-for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late-descendant"] as const) test(`Windows native rewind process safety: ${scenario}`, {
+for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late-descendant", "host-loss"] as const) test(`Windows native rewind process safety: ${scenario}`, {
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
   t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM, kernel Job Objects; taskkill /T fixture cleanup`);
@@ -23,7 +23,7 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     await gates.close();
   });
   const start = async () => {
-    const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint)], {
+    const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint), scenario], {
       detached: true, stdio: ["ignore", "ignore", "inherit", "ipc"]
     });
     workers.push(worker);
@@ -33,13 +33,20 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     const members = await captureProcessGroup(worker.pid!);
     const child = members.find(p => p.pid === ready.childPid);
     assert.ok(child, "CIM observes the real child creation identity");
-    return { worker, child, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
+    return { worker, child, hostPid:ready.hostPid as number|undefined, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
   };
   const [related, unrelated] = await Promise.all([start(), start()]);
   if (scenario === "identity") {
     await assert.rejects(stopRewindWorker({ ...related.rewind, identity: { ...related.rewind.identity, started: "recycled PID" } }), { code: "PROCESS_IDENTITY_CHANGED" });
     assert.deepEqual(await captureProcessIdentity(related.worker.pid!), related.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
+  } else if(scenario === "host-loss"){
+    assert.ok(related.hostPid);
+    process.kill(related.hostPid,"SIGKILL"); // Kill only the host, not its tree.
+    const deadline=Date.now()+20000;
+    for(const member of related.rewind.members)while(await captureProcessIdentity(member.pid))assert.ok(Date.now()<deadline,`Job member ${member.pid} exits after host loss`);
+    assert.deepEqual(await captureProcessIdentity(unrelated.worker.pid!),unrelated.rewind.identity);
+    assert.deepEqual(await captureProcessIdentity(unrelated.child.pid),unrelated.child);
   } else if (scenario === "late-descendant") {
     const exited = once(related.worker, "exit"), message = once(related.worker, "message");
     related.worker.send("late-orphan");

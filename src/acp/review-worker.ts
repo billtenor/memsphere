@@ -158,9 +158,16 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
       stopReason: "worker_error"
     });
   } finally {
-    await activity.close();
     await cliRuntime?.cleanup().catch(() => undefined);
-    if (attemptDirectory) await rm(attemptDirectory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    if (attemptDirectory) {
+      try { await rm(attemptDirectory,{recursive:true,force:true}); }
+      catch (error) {
+        // A surviving process can own its cwd on Windows. Keep the original
+        // Review outcome and retain the directory for later recovery/cleanup.
+        activity.recordLifecycle("cleanup_failed",`Attempt directory retained: ${attemptDirectory}; ${(error as NodeJS.ErrnoException).code ?? String(error)}`);
+      }
+    }
+    await activity.close();
   }
 }
 

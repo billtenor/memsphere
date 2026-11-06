@@ -8,7 +8,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
-import { findCommandStates } from "../src/home/command-state-store.js";
+import { findCommandStates, openCommandStates } from "../src/home/command-state-store.js";
 import { textContent } from "../src/context_control/types.js";
 const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
@@ -23,6 +23,13 @@ async function fixture(t: test.TestContext, processBoundary = false) {
   };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   return { ...f, invoke, call };
+}
+
+async function boundExplorationFixture(t:test.TestContext,name:string){
+ const f=await fixture(t),service=(await openContextControl(f.root))!,run=await service.start(name);
+ const id="codex-cli-test-session";
+ await (await openCommandStates(true,f.home))!.create({},id,{id,agentType:"codex",sessionId:"cli-test-session",updatedAt:new Date().toISOString(),commandGroup:"run",groupId:run.id,status:"active",parameters:{project:"test-project"},state:{reads:{}}});
+ return {...f,service,run};
 }
 
 test("native CLI finishes current outputs and lists/restores archived exploration records", { timeout: 60000 }, async t => {
@@ -41,9 +48,12 @@ test("native CLI finishes current outputs and lists/restores archived exploratio
   assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
 });
 
-test("CLI start binds Continue to the current session and rejects unknown commands", {timeout:30000}, async t=>{
+test("CLI start binds Continue to the current session", {timeout:30000}, async t=>{
  const f=await fixture(t),run=await f.call("run","start","--name","binding");
  assert.equal(run.sessionId,"cli-test-session");assert.equal(run.contextId,undefined);
+});
+test("Continue command tree exposes valid operations and rejects unknown help targets",{timeout:30000},async t=>{
+ const f=await boundExplorationFixture(t,"command tree");
  assert.match((await f.invoke("continue","--help")).stdout,/report.*review create/);
  await assert.rejects(f.invoke("continue","missing","--help"),/unknown command/);
 });
@@ -60,8 +70,7 @@ test("CLI artifact export preserves original body",{timeout:30000},async t=>{
  assert.equal(await readFile(out,"utf8"),"快照");
 });
 test("CLI report resolves tag dependencies to the actual source Artifact",{timeout:30000},async t=>{
- const f=await fixture(t),run=await f.call("run","start","--name","dependency");
- const service=(await openContextControl(f.root))!;
+ const f=await boundExplorationFixture(t,"dependency"),{run,service}=f;
  const source=(await service.report(run.id,{name:"source",content:textContent("requirements"),tags:["requirements"]})).artifact;
  await f.call("run","artifact","show","--run",run.id,"--artifact",source.id);
  const result=await f.call("continue","report","--name","dependent","--artifact","方案","--depends-on","tag:requirements");
@@ -89,8 +98,7 @@ test("CLI revision replaces the output while preserving original Artifact bytes"
 
 for (const entry of ["native", "continue"] as const) {
   test(`CLI module ${entry} finish requires authorization and preserves feedback/revision until confirmed`, { timeout: 60000 }, async t => {
-    const f = await fixture(t), run = await f.call("run", "start", "--name", "等待确认");
-    const service = (await openContextControl(f.root))!;
+    const f = await boundExplorationFixture(t,"等待确认"), {run,service}=f;
     const original = (await service.report(run.id, { name: "初版", content: textContent("初版结论") })).artifact;
     const finish = entry === "native" ? ["run", "finish", "--run", run.id] : ["continue", "finish"];
     const before = await service.snapshot(run.id);
@@ -115,8 +123,9 @@ for (const entry of ["native", "continue"] as const) {
       await assert.rejects(f.call(...finish, "--authorization", "确认", option, "unused"));
       await assertOpen();
     }
-    await f.call("continue", "review", "create", "--artifact", original.id, "--reviewer", "human", "--comment", "补充结论边界");
-    const revised = await f.call("continue", "report", "--revised-from", original.id, "--artifact", "修订结论及边界");
+    await service.review(run.id,original.id,"human",["补充结论边界"]);
+    const revisedArtifact=(await service.report(run.id,{content:textContent("修订结论及边界"),revisedFrom:original.id})).artifact;
+    const revised={artifactId:revisedArtifact.id};
     await f.call(...finish, "--artifact", revised.artifactId, "--authorization", "用户确认修订版并明确同意结束");
     const ended = await service.snapshot(run.id);
     assert.equal(ended.run.status, "done"); assert.deepEqual(ended.outputArtifactIds, [revised.artifactId]);

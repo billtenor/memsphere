@@ -1,6 +1,6 @@
 import { fork } from 'node:child_process';
 import { processGate } from './process-gates.mjs';
-import { captureProcessIdentity } from '../../dist/context_control/review-process.js';
+import { captureProcessIdentity, queryWindowsProcesses } from '../../dist/context_control/review-process.js';
 import { startWindowsReviewJob } from '../../dist/context_control/windows-review-job.js';
 if (process.argv[2] === 'child') {
   process.on('disconnect', () => {});
@@ -17,10 +17,16 @@ if (process.argv[2] === 'child') {
   await processGate(process.argv[3], 'wait', 'release');
 } else {
   const job = process.platform === 'win32' ? await startWindowsReviewJob(await captureProcessIdentity(process.pid)) : undefined;
+  let hostPid;
+  if(process.argv[3]==='host-loss'){
+    const children=(await queryWindowsProcesses()).filter(p=>p.parent===process.pid).filter(p=>{try{process.kill(p.pid,0);return true;}catch{return false;}});
+    if(children.length!==1)throw Error('Expected exactly one live keeper host before child creation');
+    hostPid=children[0].pid;
+  }
   const child = fork(new URL(import.meta.url), ['child', process.argv[2]], { detached: true, execArgv: [], stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
   child.on('message', message => {
     if (message.latePid) process.send?.(message, () => process.exit(0));
-    else process.send?.({ childPid: child.pid, job });
+    else process.send?.({ childPid: child.pid, job, hostPid });
   });
   process.on('message', message => { if (message === 'orphan') process.exit(0); if (message === 'late-orphan') child.send('late'); });
 }

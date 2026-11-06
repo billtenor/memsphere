@@ -3,26 +3,30 @@ import test from "node:test";
 import { graphDomainFixture as fixture } from "./helpers/graph-domain.js";
 import type { GraphAction, GraphProcedureMemory } from "../src/memory/ast.js";
 import type { GraphRuntime } from "../src/context_control/graph-runtime.js";
-import type { Step } from "../src/context_control/types.js";
+import type { Step, Snapshot } from "../src/context_control/types.js";
 import { effectiveStep } from "../src/context_control/graph-rewind.js";
 
 const artifact = { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } };
 const action = (id: string, from: string | string[] = "START", when?: string): GraphAction => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from, ...(when ? { when } : {}) }], artifact });
 const procedure = (actions: GraphAction[]): GraphProcedureMemory => ({ tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["rewind-test"], defines: ["Rewind"], mode: "graph", actions });
 async function produce(g: GraphRuntime, run: string, step: string, text = "body") { await g.enter(run, step); return g.report(run, step, { text }); }
-const latest = (steps: Step[], id: string) => steps.filter(s => s.source?.actionId === id).sort((a,b) => a.createdAt.localeCompare(b.createdAt)).at(-1)!;
+const latest = (snapshot: Snapshot, id: string) => {
+ const order=snapshot.run.frames![0].graphFrame.triggers.flatMap(t=>t.stepId?[t.stepId]:[]);
+ const step=[...order].reverse().map(stepId=>snapshot.steps.find(s=>s.id===stepId)).find(s=>s?.source?.actionId===id);
+ assert.ok(step,`No triggered Step for ${id}`);return step;
+};
 
 test("rewind creates a pending product version and retains exact old dependencies while replacing downstream", async t => {
   const f = await fixture(t, true);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: "versions", procedure: procedure([action("product"), action("technical", "product")]) });
     const old = await produce(g, start.run.id, start.steps[0].id, "P1");
-    const technical = latest(old.snapshot.steps, "technical"); await g.enter(start.run.id, technical.id);
+    const technical = latest(old.snapshot, "technical"); await g.enter(start.run.id, technical.id);
     const before = await g.snapshot(start.run.id);
     const preview = await g.rewindPreview(start.run.id, old.step.id);
     assert.deepEqual(await g.snapshot(start.run.id), before); assert.ok(preview.affectedStepIds.includes(technical.id));
     const result = await g.rewind(start.run.id, old.step.id, "P1 is wrong");
-    assert.equal(latest(result.snapshot.steps, "product").status, "pending");
+    assert.equal(latest(result.snapshot, "product").status, "pending");
     await assert.rejects(g.report(start.run.id, technical.id, { text: "old T" }), { code: "STEP_SUPERSEDED" });
     assert.equal(Buffer.from((await g.readArtifact(start.run.id, old.artifact.id)).bytes).toString(), "P1");
     const fresh = await produce(g, start.run.id, result.replacementStepId, "P2");
@@ -37,9 +41,9 @@ test("rewind restores a consumed independent B input and creates C exactly once"
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: "join", procedure: procedure([action("A"), action("B"), action("C", ["A", "B"])]) });
-    const a = await produce(g, start.run.id, latest(start.steps, "A").id);
-    const b = await produce(g, start.run.id, latest(start.steps, "B").id);
-    await produce(g, start.run.id, latest(b.snapshot.steps, "C").id);
+    const a = await produce(g, start.run.id, latest(start, "A").id);
+    const b = await produce(g, start.run.id, latest(start, "B").id);
+    await produce(g, start.run.id, latest(b.snapshot, "C").id);
     const result = await g.rewind(start.run.id, a.step.id, "revise A");
     const a2 = await produce(g, start.run.id, result.replacementStepId);
     const cs = a2.snapshot.steps.filter(s => s.source?.actionId === "C" && effectiveStep(a2.snapshot.run, s.id));
@@ -66,9 +70,9 @@ test("collect with independent stop waits for the replacement member and preserv
   await f.service.withGraph(async g => {
     const gather: GraphAction = { tag: "!action", id: "gather", description: "collect", dependencies: [{ tag: "!dependency", from: "stop" }], collect: ["A", "B"] };
     const start = await g.start({ name: "collect", procedure: procedure([action("A"), action("B"), action("stop"), gather, action("summary", "gather")]) });
-    const a = await produce(g, start.run.id, latest(start.steps, "A").id, "A1");
-    const b = await produce(g, start.run.id, latest(start.steps, "B").id, "B1");
-    const stopped = await produce(g, start.run.id, latest(start.steps, "stop").id);
+    const a = await produce(g, start.run.id, latest(start, "A").id, "A1");
+    const b = await produce(g, start.run.id, latest(start, "B").id, "B1");
+    const stopped = await produce(g, start.run.id, latest(start, "stop").id);
     const result = await g.rewind(start.run.id, a.step.id, "new member");
     for (let i = 0; i < 2; i++) {
       const waiting = await g.advance(start.run.id);
@@ -89,7 +93,7 @@ test("rewind blocks an old formal review and preserves its candidate and comment
     const technical = action("T", "A"); technical.artifact = { ...artifact, review: ["architect"] };
     const start = await g.start({ name: "review", procedure: procedure([action("A"), technical]), controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Architect", permissions: ["artifact.read", "decision.decide"] } } }, reviewConfiguration: { reviews: { "rewind-test#actions[T]": { policy: "artifact_acceptance.unanimous" } }, slots: { "rewind-test::architect": { actorIds: ["human"] } } } });
     const a = await produce(g, start.run.id, start.steps[0].id);
-    const old = await produce(g, start.run.id, latest(a.snapshot.steps, "T").id, "old candidate");
+    const old = await produce(g, start.run.id, latest(a.snapshot, "T").id, "old candidate");
     const round = old.step.reviewRounds![0];
     await g.mutateReview(start.run.id, old.step.id, round.id, "human", async r => { r.comments = [{ id: "draft", body: "Keep this", createdAt: round.createdAt }]; });
     await g.rewind(start.run.id, a.step.id, "bad A");
@@ -112,7 +116,7 @@ test("a saved rewind recovers the same target after materialization interruption
     const expected = (await g.snapshot(start.run.id)).run.frames![0].graphFrame.rewinds![0].replacementStepId;
     const recovered = await g.advance(start.run.id);
     assert.equal(recovered.steps.filter(s => s.id === expected).length, 1);
-    assert.equal(latest(recovered.steps, "A").status, "pending");
+    assert.equal(latest(recovered, "A").status, "pending");
     assert.deepEqual((await g.advance(start.run.id)).steps, recovered.steps);
     await assert.rejects(g.rewind(start.run.id, old.step.id, "duplicate"), { code: "STEP_SUPERSEDED" });
   });
@@ -124,17 +128,17 @@ for (const waiting of [false, true]) test(`rewind uses actual dispatch rank acro
     const a = action('A'); a.dependencies.push({tag:'!dependency',from:'C'});
     const b = action('B'); b.dependencies.push({tag:'!dependency',from:'tick'}); b.dependencies.push({tag:'!dependency',from:'tick2'});
     const start = await g.start({name:'ranks',procedure:procedure([a,b,action('tick'),action('tick2'),action('C',['A','B'])])});
-    const a1 = await produce(g,start.run.id,latest(start.steps,'A').id);
-    const b1 = latest(start.steps,'B');
-    const tick = await produce(g,start.run.id,latest(start.steps,'tick').id);
-    const b2 = await produce(g,start.run.id,latest(tick.snapshot.steps,'B').id);
-    const c1 = await produce(g,start.run.id,latest(b2.snapshot.steps,'C').id);
-    const a2 = await produce(g,start.run.id,latest(c1.snapshot.steps,'A').id);
+    const a1 = await produce(g,start.run.id,latest(start,'A').id);
+    const b1 = latest(start,'B');
+    const tick = await produce(g,start.run.id,latest(start,'tick').id);
+    const b2 = await produce(g,start.run.id,latest(tick.snapshot,'B').id);
+    const c1 = await produce(g,start.run.id,latest(b2.snapshot,'C').id);
+    const a2 = await produce(g,start.run.id,latest(c1.snapshot,'A').id);
     const lateB1 = await produce(g,start.run.id,b1.id);
     let selectedB = lateB1.artifact.id;
     if(waiting) {
-      const tick3 = await produce(g,start.run.id,latest(start.steps,'tick2').id);
-      const b3 = await produce(g,start.run.id,latest(tick3.snapshot.steps,'B').id);
+      const tick3 = await produce(g,start.run.id,latest(start,'tick2').id);
+      const b3 = await produce(g,start.run.id,latest(tick3.snapshot,'B').id);
       selectedB = b3.artifact.id;
     }
     assert.ok(lateB1.snapshot.run.frames![0].graphFrame.processedStepIds.indexOf(b2.step.id) < lateB1.snapshot.run.frames![0].graphFrame.processedStepIds.indexOf(b1.id));
@@ -154,16 +158,16 @@ for (const removed of [false,true]) test(`collect waits for a descendant member$
  await f.service.withGraph(async g=>{
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['B']};
   const start=await g.start({name:'descendants',procedure:procedure([action('A'),action('B','A','artifacts.A = "yes"'),action('stop'),gather,action('summary','gather')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id,'yes');
-  await produce(g,start.run.id,latest(a.snapshot.steps,'B').id);
-  await produce(g,start.run.id,latest(start.steps,'stop').id);
+  const a=await produce(g,start.run.id,latest(start,'A').id,'yes');
+  await produce(g,start.run.id,latest(a.snapshot,'B').id);
+  await produce(g,start.run.id,latest(start,'stop').id);
   const rewind=await g.rewind(start.run.id,a.step.id,'replace root');
   await g.enter(start.run.id,rewind.replacementStepId);
   const rewind2=await g.rewind(start.run.id,rewind.replacementStepId,'replace pending work');
   const fresh=await produce(g,start.run.id,rewind2.replacementStepId,removed?'no':'yes');
   if(!removed){
    assert.equal(fresh.snapshot.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(fresh.snapshot.run,s.id)).length,0);
-   const b=await produce(g,start.run.id,latest(fresh.snapshot.steps,'B').id);
+   const b=await produce(g,start.run.id,latest(fresh.snapshot,'B').id);
    assert.deepEqual(b.snapshot.steps.find(s=>s.source?.actionId==='gather'&&effectiveStep(b.snapshot.run,s.id))!.artifact,{mode:'collect',items:{B:[b.artifact.id]}});
   }else assert.deepEqual(fresh.snapshot.steps.find(s=>s.source?.actionId==='gather'&&effectiveStep(fresh.snapshot.run,s.id))!.artifact,{mode:'collect',items:{B:[]}});
  });
@@ -174,9 +178,9 @@ test('rewind preserves dispatch order when reserved completion numbers reach don
  await f.service.withGraph(async g=>{
   const b=action('B');b.dependencies.push({tag:'!dependency',from:'tick'});
   const start=await g.start({name:'reserved order',procedure:procedure([action('A'),b,action('tick'),action('C',['A','B'])])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const tick=await produce(g,start.run.id,latest(start.steps,'tick').id);
-  const b1=latest(start.steps,'B'),b2=latest(tick.snapshot.steps,'B');
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const tick=await produce(g,start.run.id,latest(start,'tick').id);
+  const b1=latest(start,'B'),b2=latest(tick.snapshot,'B');
   await g.enter(start.run.id,b1.id);await g.enter(start.run.id,b2.id);
   let scanned!:()=>void,resumeScan!:()=>void,held!:()=>void,resumeDone!:()=>void;
   const scan=new Promise<void>(r=>scanned=r),scanGate=new Promise<void>(r=>resumeScan=r),done=new Promise<void>(r=>held=r),doneGate=new Promise<void>(r=>resumeDone=r);
@@ -212,8 +216,8 @@ test('a late report after the rewind CAS remains history and cannot dispatch cur
  const f=await fixture(t);
  await f.service.withGraph(async g=>{
   const start=await g.start({name:'late report',procedure:procedure([action('A'),action('T','A'),action('end','T')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const technical=latest(a.snapshot.steps,'T');await g.enter(start.run.id,technical.id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const technical=latest(a.snapshot,'T');await g.enter(start.run.id,technical.id);
   const update=g.records.update.bind(g.records);let entered!:()=>void,release!:()=>void;
   const held=new Promise<void>(r=>entered=r),gate=new Promise<void>(r=>release=r);let once=true;
   g.records.update=async(...args:any[])=>{if(once&&args[0]==='step'&&args[3].id===technical.id&&args[3].frames?.length){once=false;entered();await gate;}return (update as any)(...args);};
@@ -241,8 +245,8 @@ for (const operation of ["outputs", "finish"] as const) for (const boundary of [
   const f = await fixture(t);
   await f.service.withGraph(async g => {
    const start = await g.start({ name: "output race", procedure: procedure([action("A"), action("B")]) });
-   const a = await produce(g, start.run.id, latest(start.steps, "A").id, "A1");
-   const b = await produce(g, start.run.id, latest(start.steps, "B").id, "B1");
+   const a = await produce(g, start.run.id, latest(start, "A").id, "A1");
+   const b = await produce(g, start.run.id, latest(start, "B").id, "B1");
    const runId = start.run.id;
    let entered!: () => void, release!: () => void;
    const held = new Promise<void>(resolve => entered = resolve);
@@ -295,13 +299,13 @@ test('collect waits for formal acceptance of the replacement root',async t=>{
   const stop=action('stop');stop.dependencies.push({tag:'!dependency',from:'tick'});
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['A']};
   const start=await g.start({name:'reviewed collect',procedure:procedure([a,stop,action('tick'),gather]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Owner',permissions:['artifact.read','decision.decide']}}},reviewConfiguration:{reviews:{'rewind-test#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'rewind-test::owner':{actorIds:['human']}}}});
-  const old=await produce(g,start.run.id,latest(start.steps,'A').id);
+  const old=await produce(g,start.run.id,latest(start,'A').id);
   const round=old.step.reviewRounds![0];await g.submitReview(start.run.id,old.step.id,round.id,'human','approve');await g.submitReview(start.run.id,old.step.id,round.id,'runner','approve');
-  await produce(g,start.run.id,latest(start.steps,'stop').id);
+  await produce(g,start.run.id,latest(start,'stop').id);
   const rewind=await g.rewind(start.run.id,old.step.id,'replace accepted root');
   const candidate=await produce(g,start.run.id,rewind.replacementStepId);
   assert.equal(candidate.step.status,'awaiting_review');
-  const tick=await produce(g,start.run.id,latest(start.steps,'tick').id);await produce(g,start.run.id,latest(tick.snapshot.steps,'stop').id);
+  const tick=await produce(g,start.run.id,latest(start,'tick').id);await produce(g,start.run.id,latest(tick.snapshot,'stop').id);
   const waiting=await g.advance(start.run.id);
   assert.equal(waiting.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(waiting.run,s.id)).length,0);
   const next=candidate.step.reviewRounds![0];await g.submitReview(start.run.id,candidate.step.id,next.id,'human','approve');
@@ -315,9 +319,9 @@ for(const reverse of [false,true])test(`overlapping independent member rewinds w
  await f.service.withGraph(async g=>{
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['A','B']};
   const start=await g.start({name:'overlapping members',procedure:procedure([action('A'),action('B'),action('stop'),gather,action('summary','gather')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const b=await produce(g,start.run.id,latest(start.steps,'B').id);
-  await produce(g,start.run.id,latest(start.steps,'stop').id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const b=await produce(g,start.run.id,latest(start,'B').id);
+  await produce(g,start.run.id,latest(start,'stop').id);
   const a2=await g.rewind(start.run.id,a.step.id,'replace A');
   const b2=await g.rewind(start.run.id,b.step.id,'replace B');
   const first=await produce(g,start.run.id,reverse?b2.replacementStepId:a2.replacementStepId);
@@ -340,8 +344,8 @@ for(const controlFirst of [true,false])test(`rewinding collect control during a 
  await f.service.withGraph(async g=>{
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['A']};
   const start=await g.start({name:'control replacement',procedure:procedure([action('A'),action('stop'),gather,action('summary','gather')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const stop=await produce(g,start.run.id,latest(start.steps,'stop').id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const stop=await produce(g,start.run.id,latest(start,'stop').id);
   const a2=await g.rewind(start.run.id,a.step.id,'replace A');
   const stop2=await g.rewind(start.run.id,stop.step.id,'replace control');
   const first=await produce(g,start.run.id,controlFirst?stop2.replacementStepId:a2.replacementStepId);
@@ -359,15 +363,15 @@ test('collect recovery coalesces historical and newly dispatched controls into i
   const stop=action('stop');stop.dependencies.push({tag:'!dependency',from:'tick'});stop.dependencies.push({tag:'!dependency',from:'tick2'});
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['A']};
   const start=await g.start({name:'latest control',procedure:procedure([action('A'),stop,action('tick'),action('tick2'),gather,action('summary','gather')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const firstStop=await produce(g,start.run.id,latest(start.steps,'stop').id);
-  const tick=await produce(g,start.run.id,latest(start.steps,'tick').id);
-  await produce(g,start.run.id,latest(tick.snapshot.steps,'stop').id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const firstStop=await produce(g,start.run.id,latest(start,'stop').id);
+  const tick=await produce(g,start.run.id,latest(start,'tick').id);
+  await produce(g,start.run.id,latest(tick.snapshot,'stop').id);
   const rewind=await g.rewind(start.run.id,a.step.id,'replace member');
   assert.equal(rewind.snapshot.run.frames![0].graphFrame.deferredCollects!.length,1);
   await g.enter(start.run.id,rewind.replacementStepId);
-  const tick2=await produce(g,start.run.id,latest(start.steps,'tick2').id);
-  const newest=await produce(g,start.run.id,latest(tick2.snapshot.steps,'stop').id);
+  const tick2=await produce(g,start.run.id,latest(start,'tick2').id);
+  const newest=await produce(g,start.run.id,latest(tick2.snapshot,'stop').id);
   assert.equal(newest.snapshot.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(newest.snapshot.run,s.id)).length,0);
   const fresh=await produce(g,start.run.id,rewind.replacementStepId);
   const gathers=fresh.snapshot.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(fresh.snapshot.run,s.id));
@@ -385,7 +389,7 @@ for(const state of ['pending','collect','foreign','terminal','archived'])test(`r
   let target=start.steps[0].id;
   if(state!=='pending'){
    const result=await produce(g,start.run.id,target);
-   if(state==='collect')target=latest(result.snapshot.steps,'gather').id;
+   if(state==='collect')target=latest(result.snapshot,'gather').id;
    if(state==='foreign'){const other=await g.start({name:'other',procedure:procedure([action('A')])});target=other.steps[0].id;}
    if(state==='terminal'||state==='archived'){await g.finish(start.run.id);if(state==='archived')await f.service.archive(start.run.id);}
   }
@@ -412,8 +416,8 @@ test('dry-run with an interrupted saved rewind does not materialize or clear its
  const f=await fixture(t);
  await f.service.withGraph(async g=>{
   const start=await g.start({name:'readonly recovery',procedure:procedure([action('A'),action('B')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const b=latest(start.steps,'B');await g.enter(start.run.id,b.id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const b=latest(start,'B');await g.enter(start.run.id,b.id);
   const create=f.service.stores.step.create.bind(f.service.stores.step);f.service.stores.step.create=async()=>{throw Error('materialization interrupted');};
   await assert.rejects(g.rewind(start.run.id,a.step.id,'new A'),/materialization interrupted/);
   f.service.stores.step.create=create;
@@ -430,20 +434,20 @@ for(const eliminated of [false,true])test(`overlapping member waits handle ${eli
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['A','B']};
   const start=await g.start({name:'reviewed overlap',procedure:procedure([action('A'),action('X'),b,stop,action('tick'),action('tick2'),gather,action('summary','gather')]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Owner',permissions:['artifact.read','decision.decide']}}},reviewConfiguration:{reviews:{'rewind-test#actions[B]':{policy:'artifact_acceptance.unanimous'}},slots:{'rewind-test::owner':{actorIds:['human']}}}});
   const approve=async (candidate:Awaited<ReturnType<typeof produce>>)=>{const round=candidate.step.reviewRounds![0];await g.submitReview(start.run.id,candidate.step.id,round.id,'human','approve');return g.submitReview(start.run.id,candidate.step.id,round.id,'runner','approve');};
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const x=await produce(g,start.run.id,latest(start.steps,'X').id,'yes');await approve(await produce(g,start.run.id,latest(x.snapshot.steps,'B').id));
-  await produce(g,start.run.id,latest(start.steps,'stop').id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const x=await produce(g,start.run.id,latest(start,'X').id,'yes');await approve(await produce(g,start.run.id,latest(x.snapshot,'B').id));
+  await produce(g,start.run.id,latest(start,'stop').id);
   const a2=await g.rewind(start.run.id,a.step.id,'new A');
   const x2=await g.rewind(start.run.id,x.step.id,'new X/B');
   const newA=await produce(g,start.run.id,a2.replacementStepId);
-  const tick=await produce(g,start.run.id,latest(start.steps,'tick').id);
-  await produce(g,start.run.id,latest(tick.snapshot.steps,'stop').id);
+  const tick=await produce(g,start.run.id,latest(start,'tick').id);
+  await produce(g,start.run.id,latest(tick.snapshot,'stop').id);
   const waiting=await g.advance(start.run.id);
   assert.equal(waiting.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(waiting.run,s.id)).length,0);
   const newX=await produce(g,start.run.id,x2.replacementStepId,eliminated?'no':'yes');
   let final=newX.snapshot,expectedB:string[]=[];
-  if(!eliminated){const candidate=await produce(g,start.run.id,latest(newX.snapshot.steps,'B').id);expectedB=[candidate.artifact.id];
-   const tick2=await produce(g,start.run.id,latest(start.steps,'tick2').id);await produce(g,start.run.id,latest(tick2.snapshot.steps,'stop').id);
+  if(!eliminated){const candidate=await produce(g,start.run.id,latest(newX.snapshot,'B').id);expectedB=[candidate.artifact.id];
+   const tick2=await produce(g,start.run.id,latest(start,'tick2').id);await produce(g,start.run.id,latest(tick2.snapshot,'stop').id);
    assert.equal(candidate.snapshot.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(candidate.snapshot.run,s.id)).length,0);final=await approve(candidate);
   }
   const gathers=final.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(final.run,s.id));
@@ -458,10 +462,10 @@ test('collect restores the latest actual control dispatch even when that instanc
   const stop=action('stop');stop.dependencies.push({tag:'!dependency',from:'tick'});
   const gather:GraphAction={tag:'!action',id:'gather',description:'collect',dependencies:[{tag:'!dependency',from:'stop'}],collect:['A']};
   const start=await g.start({name:'control dispatch order',procedure:procedure([action('A'),stop,action('tick'),gather,action('summary','gather')])});
-  const a=await produce(g,start.run.id,latest(start.steps,'A').id);
-  const tick=await produce(g,start.run.id,latest(start.steps,'tick').id);
-  await produce(g,start.run.id,latest(tick.snapshot.steps,'stop').id);
-  const lastControl=await produce(g,start.run.id,latest(start.steps,'stop').id);
+  const a=await produce(g,start.run.id,latest(start,'A').id);
+  const tick=await produce(g,start.run.id,latest(start,'tick').id);
+  await produce(g,start.run.id,latest(tick.snapshot,'stop').id);
+  const lastControl=await produce(g,start.run.id,latest(start,'stop').id);
   const rewind=await g.rewind(start.run.id,a.step.id,'new member');
   const fresh=await produce(g,start.run.id,rewind.replacementStepId);
   const gathers=fresh.snapshot.steps.filter(s=>s.source?.actionId==='gather'&&effectiveStep(fresh.snapshot.run,s.id));
@@ -490,22 +494,22 @@ for (const reverse of [false, true]) test(`collect recovery follows the newly se
   await f.service.withGraph(async g => {
     const b = action('B', 'A', 'artifacts.A = "no"'); b.dependencies.push({ tag: '!dependency', from: 'C' });
     const start = await g.start({ name: 'alternate route', procedure: procedure([action('A'), action('C', 'A', 'artifacts.A = "yes"'), b, action('stop'), collectAction('gather', 'stop', ['B']), action('summary', 'gather')]) });
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id, reverse ? 'yes' : 'no');
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id, reverse ? 'yes' : 'no');
     let old = a1.snapshot;
-    if (reverse) old = (await produce(g, start.run.id, latest(old.steps, 'C').id)).snapshot;
-    await produce(g, start.run.id, latest(old.steps, 'B').id);
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    if (reverse) old = (await produce(g, start.run.id, latest(old, 'C').id)).snapshot;
+    await produce(g, start.run.id, latest(old, 'B').id);
+    await produce(g, start.run.id, latest(start, 'stop').id);
     const rewind = await g.rewind(start.run.id, a1.step.id, 'change route');
     let fresh = (await produce(g, start.run.id, rewind.replacementStepId, reverse ? 'no' : 'yes')).snapshot;
     assert.equal(current(fresh, 'gather').length, 0);
     if (!reverse) {
-      const c = latest(fresh.steps, 'C');
+      const c = latest(fresh, 'C');
       await g.enter(start.run.id, c.id);
       assert.equal(current(await g.advance(start.run.id), 'gather').length, 0);
       fresh = (await produce(g, start.run.id, c.id)).snapshot;
     }
     assert.equal(current(fresh, 'gather').length, 0);
-    const b2 = await produce(g, start.run.id, latest(fresh.steps, 'B').id);
+    const b2 = await produce(g, start.run.id, latest(fresh, 'B').id);
     assert.equal(current(b2.snapshot, 'gather').length, 1);
     assert.deepEqual(current(b2.snapshot, 'gather')[0].artifact, { mode: 'collect', items: { B: [b2.artifact.id] } });
   });
@@ -515,19 +519,19 @@ for (const nonempty of [false, true]) test(`collect member recovery retains ${no
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'control ancestry', procedure: procedure([action('A'), action('C', 'A'), action('X'), collectAction('bridge', 'C', ['X']), action('B', 'bridge'), action('stop'), collectAction('gather', 'stop', ['B']), action('summary', 'gather')]) });
-    if (nonempty) await produce(g, start.run.id, latest(start.steps, 'X').id);
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id);
-    const c1 = await produce(g, start.run.id, latest(a1.snapshot.steps, 'C').id);
-    await produce(g, start.run.id, latest(c1.snapshot.steps, 'B').id);
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    if (nonempty) await produce(g, start.run.id, latest(start, 'X').id);
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id);
+    const c1 = await produce(g, start.run.id, latest(a1.snapshot, 'C').id);
+    await produce(g, start.run.id, latest(c1.snapshot, 'B').id);
+    await produce(g, start.run.id, latest(start, 'stop').id);
     const rewind = await g.rewind(start.run.id, a1.step.id, 'replace ancestor');
     const a2 = await produce(g, start.run.id, rewind.replacementStepId);
     assert.equal(current(a2.snapshot, 'gather').length, 0);
-    const c = latest(a2.snapshot.steps, 'C'); await g.enter(start.run.id, c.id);
+    const c = latest(a2.snapshot, 'C'); await g.enter(start.run.id, c.id);
     assert.equal(current(await g.advance(start.run.id), 'gather').length, 0);
     const c2 = await produce(g, start.run.id, c.id);
     assert.equal(current(c2.snapshot, 'gather').length, 0);
-    const b2 = await produce(g, start.run.id, latest(c2.snapshot.steps, 'B').id);
+    const b2 = await produce(g, start.run.id, latest(c2.snapshot, 'B').id);
     assert.deepEqual(current(b2.snapshot, 'gather')[0].artifact, { mode: 'collect', items: { B: [b2.artifact.id] } });
     assert.equal(current(b2.snapshot, 'gather').length, 1);
   });
@@ -537,10 +541,10 @@ test('nested collect recovery waits for the upstream slot after downstream then 
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'nested recovery', procedure: procedure([action('A'), action('stop1'), collectAction('g1', 'stop1', ['A']), action('B', 'g1'), action('stop2'), collectAction('g2', 'stop2', ['B']), action('summary', 'g2')]) });
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id);
-    const stop1 = await produce(g, start.run.id, latest(start.steps, 'stop1').id);
-    const b1 = await produce(g, start.run.id, latest(stop1.snapshot.steps, 'B').id);
-    await produce(g, start.run.id, latest(start.steps, 'stop2').id);
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id);
+    const stop1 = await produce(g, start.run.id, latest(start, 'stop1').id);
+    const b1 = await produce(g, start.run.id, latest(stop1.snapshot, 'B').id);
+    await produce(g, start.run.id, latest(start, 'stop2').id);
     await g.rewind(start.run.id, b1.step.id, 'replace downstream');
     const rewind = await g.rewind(start.run.id, a1.step.id, 'replace upstream');
     const a2 = await produce(g, start.run.id, rewind.replacementStepId);
@@ -560,9 +564,9 @@ for (const eliminated of [true, false]) test(`control ancestor rewind ${eliminat
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'control condition', procedure: procedure([action('A'), action('X'), action('stop', 'X', 'artifacts.X = "yes"'), collectAction('gather', 'stop', ['A']), action('summary', 'gather')]) });
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id);
-    const x1 = await produce(g, start.run.id, latest(start.steps, 'X').id, 'yes');
-    await produce(g, start.run.id, latest(x1.snapshot.steps, 'stop').id);
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id);
+    const x1 = await produce(g, start.run.id, latest(start, 'X').id, 'yes');
+    await produce(g, start.run.id, latest(x1.snapshot, 'stop').id);
     const aRewind = await g.rewind(start.run.id, a1.step.id, 'new member');
     const xRewind = await g.rewind(start.run.id, x1.step.id, 'new control condition');
     const a2 = await produce(g, start.run.id, aRewind.replacementStepId);
@@ -571,7 +575,7 @@ for (const eliminated of [true, false]) test(`control ancestor rewind ${eliminat
     assert.equal(current(x2.snapshot, 'gather').length, 0);
     let final = x2.snapshot;
     if (!eliminated) {
-      const stop = latest(final.steps, 'stop'); await g.enter(start.run.id, stop.id);
+      const stop = latest(final, 'stop'); await g.enter(start.run.id, stop.id);
       assert.equal(current(await g.advance(start.run.id), 'gather').length, 0);
       final = (await produce(g, start.run.id, stop.id)).snapshot;
       assert.equal(current(final, 'gather').length, 1);
@@ -605,13 +609,13 @@ for (const shape of ['alternate-join', 'collect-ancestor', 'nested-slot']) test(
       await g.submitReview(start.run.id, candidate.step.id, round.id, 'human', 'approve');
       return g.submitReview(start.run.id, candidate.step.id, round.id, 'runner', 'approve');
     };
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id, 'no');
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id, 'no');
     let old = a1.snapshot;
-    if (shape === 'nested-slot') old = (await produce(g, start.run.id, latest(start.steps, 'stop1').id)).snapshot;
-    if (shape === 'collect-ancestor') old = await approve(await produce(g, start.run.id, latest(old.steps, 'C').id));
-    const b1 = await produce(g, start.run.id, latest(old.steps, 'B').id);
+    if (shape === 'nested-slot') old = (await produce(g, start.run.id, latest(start, 'stop1').id)).snapshot;
+    if (shape === 'collect-ancestor') old = await approve(await produce(g, start.run.id, latest(old, 'C').id));
+    const b1 = await produce(g, start.run.id, latest(old, 'B').id);
     if (shape === 'nested-slot') await approve(b1);
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    await produce(g, start.run.id, latest(start, 'stop').id);
     // Two rewinds before the member completes preserve the same collect slot.
     if (shape === 'nested-slot') await g.rewind(start.run.id, b1.step.id, 'new downstream');
     const rewind = await g.rewind(start.run.id, a1.step.id, 'new upstream');
@@ -643,9 +647,9 @@ test('a control eliminated then restored during the member wait reuses one recov
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'control toggles', procedure: procedure([action('A'), action('X'), action('stop', 'X', 'artifacts.X = "yes"'), collectAction('gather', 'stop', ['A']), action('summary', 'gather')]) });
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id);
-    const x1 = await produce(g, start.run.id, latest(start.steps, 'X').id, 'yes');
-    await produce(g, start.run.id, latest(x1.snapshot.steps, 'stop').id);
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id);
+    const x1 = await produce(g, start.run.id, latest(start, 'X').id, 'yes');
+    await produce(g, start.run.id, latest(x1.snapshot, 'stop').id);
     const aRewind = await g.rewind(start.run.id, a1.step.id, 'new member');
     const xRewind = await g.rewind(start.run.id, x1.step.id, 'disable control');
     const no = await produce(g, start.run.id, xRewind.replacementStepId, 'no');
@@ -664,10 +668,10 @@ test('condition elimination of an intermediate collect path releases a legal emp
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'eliminated bridge', procedure: procedure([action('A'), action('C', 'A', 'artifacts.A = "yes"'), action('X'), collectAction('bridge', 'C', ['X']), action('B', 'bridge'), action('stop'), collectAction('gather', 'stop', ['B']), action('summary', 'gather')]) });
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id, 'yes');
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id, 'yes');
     const c1 = await produce(g, start.run.id, current(a1.snapshot, 'C')[0].id);
     await produce(g, start.run.id, current(c1.snapshot, 'B')[0].id);
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    await produce(g, start.run.id, latest(start, 'stop').id);
     const rewind = await g.rewind(start.run.id, a1.step.id, 'remove member path');
     const a2 = await produce(g, start.run.id, rewind.replacementStepId, 'no');
     assert.equal(current(a2.snapshot, 'B').length, 0);
@@ -684,9 +688,9 @@ for (const shape of ['direct', 'intermediate', 'reviewed', 'continuous']) test(`
     if (shape === 'reviewed') b.artifact = { ...artifact, review: ['owner'] };
     const actions = [action('X'), action('A', 'X', 'artifacts.X = "a"'), ...(intermediate ? [action('C', 'X', 'artifacts.X = "b"')] : []), b, action('stop'), collectAction('gather', 'stop', ['A', 'B']), action('summary', 'gather')];
     const start = await g.start({ name: shape, procedure: procedure(actions), ...(shape === 'reviewed' ? { controlPlane: { runner: { permissions: ['artifact.read', 'artifact.submit', 'decision.decide'] }, actors: { human: { kind: 'human' as const, name: 'Owner', permissions: ['artifact.read', 'decision.decide'] } } }, reviewConfiguration: { reviews: { 'rewind-test#actions[B]': { policy: 'artifact_acceptance.unanimous' } }, slots: { 'rewind-test::owner': { actorIds: ['human'] } } } } : {}) });
-    const x1 = await produce(g, start.run.id, latest(start.steps, 'X').id, 'a');
+    const x1 = await produce(g, start.run.id, latest(start, 'X').id, 'a');
     await produce(g, start.run.id, current(x1.snapshot, 'A')[0].id);
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    await produce(g, start.run.id, latest(start, 'stop').id);
     const rewind = await g.rewind(start.run.id, x1.step.id, 'select another member');
     let x2 = await produce(g, start.run.id, rewind.replacementStepId, 'b');
     assert.equal(current(x2.snapshot, 'gather').length, 0);
@@ -730,10 +734,10 @@ for (const eliminated of [true, false]) test(`dual-control collect recovery ${el
   await f.service.withGraph(async g => {
     const gather = collectAction('gather', 'stop', ['A']); gather.dependencies[0].from = ['stop', 'Y'];
     const start = await g.start({ name: 'two controls', procedure: procedure([action('A'), action('X'), action('Y'), action('stop', 'X', 'artifacts.X = "yes"'), gather, action('summary', 'gather')]) });
-    const a1 = await produce(g, start.run.id, latest(start.steps, 'A').id);
-    const x1 = await produce(g, start.run.id, latest(start.steps, 'X').id, 'yes');
+    const a1 = await produce(g, start.run.id, latest(start, 'A').id);
+    const x1 = await produce(g, start.run.id, latest(start, 'X').id, 'yes');
     await produce(g, start.run.id, current(x1.snapshot, 'stop')[0].id);
-    const y1 = await produce(g, start.run.id, latest(start.steps, 'Y').id);
+    const y1 = await produce(g, start.run.id, latest(start, 'Y').id);
     const newA = await g.rewind(start.run.id, a1.step.id, 'member');
     const newX = await g.rewind(start.run.id, x1.step.id, 'control');
     const x2 = await produce(g, start.run.id, newX.replacementStepId, eliminated ? 'no' : 'yes');
@@ -768,13 +772,13 @@ for (const shape of ['initial-empty', 'roundtrip', 'reviewed', 'nested-empty']) 
       await g.submitReview(start.run.id, candidate.step.id, round.id, 'human', 'approve');
       return g.submitReview(start.run.id, candidate.step.id, round.id, 'runner', 'approve');
     };
-    const initial = await produce(g, start.run.id, latest(start.steps, 'X').id, shape === 'initial-empty' ? 'no' : 'yes');
+    const initial = await produce(g, start.run.id, latest(start, 'X').id, shape === 'initial-empty' ? 'no' : 'yes');
     let fresh = initial.snapshot;
     if (shape !== 'initial-empty') {
       if (nested) fresh = (await produce(g, start.run.id, current(fresh, 'C')[0].id)).snapshot;
       fresh = await acceptB(await produce(g, start.run.id, current(fresh, 'B')[0].id));
     }
-    const stop = await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    const stop = await produce(g, start.run.id, latest(start, 'stop').id);
     const oldSummary = await produce(g, start.run.id, current(stop.snapshot, 'summary')[0].id, 'old summary');
     let root = initial.step.id;
     let emptySummary = oldSummary;
@@ -791,7 +795,7 @@ for (const shape of ['initial-empty', 'roundtrip', 'reviewed', 'nested-empty']) 
     assert.ok(rewind.affectedStepIds.includes(empty.id));
     assert.ok(rewind.affectedStepIds.includes(emptySummary.step.id));
     assert.ok(!rewind.affectedStepIds.includes(stop.step.id));
-    assert.ok(!rewind.affectedStepIds.includes(latest(start.steps, 'unrelated').id));
+    assert.ok(!rewind.affectedStepIds.includes(latest(start, 'unrelated').id));
     const yes = await produce(g, start.run.id, rewind.replacementStepId, 'yes');
     assert.equal(current(yes.snapshot, 'gather').length, 0);
     fresh = yes.snapshot;
@@ -829,12 +833,12 @@ test('collect materialization retries exclude members accepted after the collect
       if ((args[2] as any).source?.actionId === 'gather' && (args[2] as any).status === 'done') throw Error('interrupted collect materialization');
       return update(...args);
     };
-    await assert.rejects(produce(g, start.run.id, latest(start.steps, 'stop').id), /interrupted collect materialization/);
+    await assert.rejects(produce(g, start.run.id, latest(start, 'stop').id), /interrupted collect materialization/);
     const frozen = await g.snapshot(start.run.id), trigger = frozen.run.frames![0].graphFrame.triggers.find(t => t.actionId === 'gather')!;
     assert.ok(trigger.collection); assert.ok(trigger.collection.triggerIds.length);
     // B completes durably while the gather write is still blocked. Its report
     // fails only while advancing that saved gather, after accepting B itself.
-    await assert.rejects(produce(g, start.run.id, latest(start.steps, 'B').id, 'late B'), /interrupted collect materialization/);
+    await assert.rejects(produce(g, start.run.id, latest(start, 'B').id, 'late B'), /interrupted collect materialization/);
     const changed = await g.snapshot(start.run.id);
     assert.equal(current(changed, 'B')[0].status, 'done');
     assert.ok(changed.completeIds.length);
@@ -849,8 +853,8 @@ test('completed empty collect provenance survives switching between different de
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'empty member switches', procedure: procedure([action('X'), action('A', 'X', 'artifacts.X = "a"'), action('B', 'X', 'artifacts.X = "b"'), action('stop'), collectAction('gather', 'stop', ['A', 'B']), action('summary', 'gather')]) });
-    let x = await produce(g, start.run.id, latest(start.steps, 'X').id, 'none');
-    let state = (await produce(g, start.run.id, latest(start.steps, 'stop').id)).snapshot;
+    let x = await produce(g, start.run.id, latest(start, 'X').id, 'none');
+    let state = (await produce(g, start.run.id, latest(start, 'stop').id)).snapshot;
     state = (await produce(g, start.run.id, current(state, 'summary')[0].id)).snapshot;
     for (const value of ['a', 'none', 'b']) {
       const old = current(state, 'gather')[0];
@@ -875,8 +879,8 @@ test('rewind rejects legacy collect records without membership evidence instead 
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'missing historical evidence', procedure: procedure([action('X'), action('B', 'X', 'artifacts.X = "yes"'), action('stop'), collectAction('gather', 'stop', ['B'])]) });
-    const x = await produce(g, start.run.id, latest(start.steps, 'X').id, 'no');
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    const x = await produce(g, start.run.id, latest(start, 'X').id, 'no');
+    await produce(g, start.run.id, latest(start, 'stop').id);
     const row = (await f.service.stores.run.get({}, start.run.id))!;
     const value = structuredClone(row.value) as any;
     delete value.frames[0].graphFrame.triggers.find((t: any) => t.actionId === 'gather').collection;
@@ -892,11 +896,11 @@ test('new collect evidence retains reconstructible legacy false-trigger inputs',
   const f = await fixture(t);
   await f.service.withGraph(async g => {
     const start = await g.start({ name: 'legacy false evidence', procedure: procedure([action('X'), action('B', 'X', 'artifacts.X = "yes"'), action('stop'), collectAction('gather', 'stop', ['B'])]) });
-    const x = await produce(g, start.run.id, latest(start.steps, 'X').id, 'no');
+    const x = await produce(g, start.run.id, latest(start, 'X').id, 'no');
     const row = (await f.service.stores.run.get({}, start.run.id))!; const value = structuredClone(row.value) as any;
     delete value.frames[0].graphFrame.triggers.find((t: any) => t.actionId === 'B').arrivals;
     await f.service.stores.run.update({}, start.run.id, value, { expectedRevision: row.revision });
-    await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    await produce(g, start.run.id, latest(start, 'stop').id);
     const rewind = await g.rewind(start.run.id, x.step.id, 'legacy false becomes true');
     const yes = await produce(g, start.run.id, rewind.replacementStepId, 'yes');
     assert.equal(current(yes.snapshot, 'gather').length, 0);
@@ -910,12 +914,12 @@ test('collect provenance excludes later instances of the same condition action',
   await f.service.withGraph(async g => {
     const x = action('X'); x.dependencies.push({ tag: '!dependency', from: 'tick' });
     const start = await g.start({ name: 'bounded provenance', procedure: procedure([x, action('tick'), action('B', 'X', 'artifacts.X = "yes"'), action('stop'), collectAction('gather', 'stop', ['B']), action('summary', 'gather')]) });
-    await produce(g, start.run.id, latest(start.steps, 'X').id, 'no');
-    const stop = await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    await produce(g, start.run.id, latest(start, 'X').id, 'no');
+    const stop = await produce(g, start.run.id, latest(start, 'stop').id);
     const original = current(stop.snapshot, 'gather')[0];
     const summary = await produce(g, start.run.id, current(stop.snapshot, 'summary')[0].id);
-    const tick = await produce(g, start.run.id, latest(start.steps, 'tick').id);
-    const later = latest(tick.snapshot.steps, 'X'); await g.enter(start.run.id, later.id);
+    const tick = await produce(g, start.run.id, latest(start, 'tick').id);
+    const later = latest(tick.snapshot, 'X'); await g.enter(start.run.id, later.id);
     const rewind = await g.rewind(start.run.id, later.id, 'only this later instance');
     assert.ok(!rewind.affectedStepIds.includes(original.id));
     assert.ok(!rewind.affectedStepIds.includes(summary.step.id));
@@ -931,16 +935,16 @@ for (const multiple of [false, true]) test(`empty collect condition provenance s
     const y = action('Y'); y.dependencies.push({ tag: '!dependency', from: 'tickY' });
     const stop = action('stop'); stop.dependencies.push({ tag: '!dependency', from: 'tickStop' });
     const start = await g.start({ name: 'overlapping empty conditions', procedure: procedure([action('X'), y, action('A', 'X', 'artifacts.X = "yes"'), action('B', 'Y', 'artifacts.Y = "yes"'), action('tickY'), action('tickStop'), stop, collectAction('gather', 'stop', ['A', 'B']), action('summary', 'gather')]) });
-    const x1 = await produce(g, start.run.id, latest(start.steps, 'X').id, 'no');
-    let y1 = await produce(g, start.run.id, latest(start.steps, 'Y').id, 'no');
-    let stopped = await produce(g, start.run.id, latest(start.steps, 'stop').id);
+    const x1 = await produce(g, start.run.id, latest(start, 'X').id, 'no');
+    let y1 = await produce(g, start.run.id, latest(start, 'Y').id, 'no');
+    let stopped = await produce(g, start.run.id, latest(start, 'stop').id);
     await produce(g, start.run.id, current(stopped.snapshot, 'summary')[0].id);
     if (multiple) {
-      const tick = await produce(g, start.run.id, latest(start.steps, 'tickY').id);
-      y1 = await produce(g, start.run.id, latest(tick.snapshot.steps, 'Y').id, 'no');
-      const tickStop = await produce(g, start.run.id, latest(start.steps, 'tickStop').id);
-      stopped = await produce(g, start.run.id, latest(tickStop.snapshot.steps, 'stop').id);
-      await produce(g, start.run.id, latest(stopped.snapshot.steps, 'summary').id);
+      const tick = await produce(g, start.run.id, latest(start, 'tickY').id);
+      y1 = await produce(g, start.run.id, latest(tick.snapshot, 'Y').id, 'no');
+      const tickStop = await produce(g, start.run.id, latest(start, 'tickStop').id);
+      stopped = await produce(g, start.run.id, latest(tickStop.snapshot, 'stop').id);
+      await produce(g, start.run.id, latest(stopped.snapshot, 'summary').id);
     }
     const xRewind = await g.rewind(start.run.id, x1.step.id, 'first independent empty condition');
     const yRewind = await g.rewind(start.run.id, y1.step.id, 'second independent empty condition');
@@ -971,15 +975,15 @@ for (const mode of ['eliminated-inner', 'initially-empty', 'reviewed', 'two-leve
       await g.submitReview(start.run.id, candidate.step.id, round.id, 'human', 'approve');
       return g.submitReview(start.run.id, candidate.step.id, round.id, 'runner', 'approve');
     };
-    const x1 = await produce(g, start.run.id, latest(start.steps, 'X').id, mode === 'initially-empty' ? 'no' : 'yes');
+    const x1 = await produce(g, start.run.id, latest(start, 'X').id, mode === 'initially-empty' ? 'no' : 'yes');
     if (mode !== 'initially-empty') await produce(g, start.run.id, current(x1.snapshot, 'C')[0].id);
-    const stop1 = await produce(g, start.run.id, latest(start.steps, 'stop1').id);
+    const stop1 = await produce(g, start.run.id, latest(start, 'stop1').id);
     let state = await accept(await produce(g, start.run.id, current(stop1.snapshot, 'B')[0].id));
     if (layered) {
-      const mid = await produce(g, start.run.id, latest(start.steps, 'stopMid').id);
+      const mid = await produce(g, start.run.id, latest(start, 'stopMid').id);
       state = (await produce(g, start.run.id, current(mid.snapshot, 'D')[0].id)).snapshot;
     }
-    state = (await produce(g, start.run.id, latest(start.steps, 'stop2').id)).snapshot;
+    state = (await produce(g, start.run.id, latest(start, 'stop2').id)).snapshot;
     await produce(g, start.run.id, current(state, 'summary')[0].id);
     const rewind = await g.rewind(start.run.id, x1.step.id, 'empty the inner member path');
     let x2 = await produce(g, start.run.id, rewind.replacementStepId, 'no'); state = x2.snapshot;

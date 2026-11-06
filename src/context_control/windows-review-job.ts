@@ -31,7 +31,8 @@ public static class ReviewerJob {
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
  static void Check(bool ok) { if (!ok) throw new Win32Exception(Marshal.GetLastWin32Error()); }
  static uint Active(IntPtr job) { Accounting a; Check(QueryInformationJobObject(job, 1, out a, (uint)Marshal.SizeOf(typeof(Accounting)), IntPtr.Zero)); return a.Active; }
- public static void Keep(string name, int pid, string started) {
+ public static void Keep(string name, int pid, string started, int hostPid) {
+  using (Process host = Process.GetProcessById(hostPid))
   using (Process worker = Process.GetProcessById(pid)) {
    // CIM_DATETIME records microseconds; GetProcessTimes/.NET also retains the final 100ns digit.
    long actual = worker.StartTime.ToUniversalTime().Ticks;
@@ -42,9 +43,13 @@ public static class ReviewerJob {
     if (error == 183) throw new Exception("Job name already exists");
     Extended limits = new Extended(); limits.Basic.Flags = 0x2000;
     Check(SetInformationJobObject(job, 9, ref limits, (uint)Marshal.SizeOf(typeof(Extended))));
+    if (host.HasExited) throw new Exception("Keeper host exited before enrollment");
     Check(AssignProcessToJobObject(job, worker.Handle));
     Console.WriteLine("{\"ready\":true}"); Console.Out.Flush();
-    while (Active(job) != 0) Thread.Sleep(100);
+    while (Active(job) != 0) {
+     if (host.HasExited) { Check(TerminateJobObject(job, 1)); break; }
+     Thread.Sleep(100);
+    }
    } finally { CloseHandle(job); }
   }
  }
@@ -77,7 +82,8 @@ const validName = (name: string) => /^Global\\Memsphere\.Reviewer\.Tracked\.[0-9
 const keeperHost = `
 const {spawn}=require('node:child_process');
 process.on('disconnect',()=>{});
-const child=spawn('powershell.exe',JSON.parse(process.argv[1]),{windowsHide:true,stdio:['ignore','pipe','pipe']});
+const args=JSON.parse(process.argv[1]).map(arg=>arg.replace('__KEEPER_HOST_PID__',String(process.pid)));
+const child=spawn('powershell.exe',args,{windowsHide:true,stdio:['ignore','pipe','pipe']});
 let output='',errors='';
 child.stdout.on('data',data=>{output+=data;if(output.includes('{"ready":true}')&&process.connected)process.send({ready:true});});
 child.stderr.on('data',data=>{errors=(errors+data).slice(-4000);});
@@ -89,7 +95,7 @@ child.once('close',code=>{if(process.connected)process.send({error:errors||'Job 
 export async function startWindowsReviewJob(identity: ProcessIdentity): Promise<string> {
   const name = `Global\\Memsphere.Reviewer.Tracked.${randomUUID()}`;
   if (!/^\d+$/.test(identity.started)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Invalid Windows worker creation identity");
-  const host = spawn(process.execPath, ["-e", keeperHost, JSON.stringify(encoded(`[ReviewerJob]::Keep('${name}', ${identity.pid}, '${identity.started}')`))], {detached:true,windowsHide:true,stdio:["ignore","ignore","ignore","ipc"]});
+  const host = spawn(process.execPath, ["-e", keeperHost, JSON.stringify(encoded(`[ReviewerJob]::Keep('${name}', ${identity.pid}, '${identity.started}', __KEEPER_HOST_PID__)`))], {detached:true,windowsHide:true,stdio:["ignore","ignore","ignore","ipc"]});
   await new Promise<void>((resolve,reject)=>{
     const timer=setTimeout(()=>fail(new Error("Windows Reviewer job enrollment timed out")),15000);
     const done=()=>{clearTimeout(timer);host.off("error",fail);host.off("exit",exited);host.off("message",message);};
