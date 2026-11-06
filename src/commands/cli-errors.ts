@@ -82,7 +82,7 @@ export function requestedCliOutput(program: Command, args: readonly string[]): "
 }
 
 /** Existing non-list commands keep their text errors; new commands and lists share JSON errors. */
-export async function parseCli(program: Command, argv = process.argv): Promise<void> {
+export async function parseCli(program: Command, argv = process.argv, options: { rethrow?: boolean } = {}): Promise<void> {
   const output = requestedCliOutput(program, argv.slice(2));
   const configure = (command: Command) => {
     command.exitOverride();
@@ -94,6 +94,7 @@ export async function parseCli(program: Command, argv = process.argv): Promise<v
     await program.parseAsync(argv);
   } catch (error) {
     if (error instanceof CommanderError && error.exitCode === 0) return;
+    if (options.rethrow) throw error;
     emitCommandError(error, output);
   }
 }

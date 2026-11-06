@@ -84,5 +84,5 @@ export async function reviewerContinue(nativeRun: Command, tail: string[]) {
     }
     route.action(o => reviewNodeCommand(path.join("-"), o));
   }
-  await (await import("./cli-errors.js")).parseCli(router, [process.execPath, "continue", ...(tail.length ? tail : ["--help"])]);
+  await (await import("./cli-errors.js")).parseCli(router, [process.execPath, "continue", ...(tail.length ? tail : ["--help"])], { rethrow: true });
 }
