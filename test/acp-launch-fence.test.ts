@@ -39,8 +39,20 @@ for (const invalidAt of [1, 2]) test(`ACP launch fence rejects invalidation at c
 for (const mode of ["missing-executable", "provider-exited"] as const) test(`ACP preserves ${mode} diagnostics when lifecycle capture also fails`, { timeout:15000 }, async t => {
   let captured = false;
   let closed:Promise<void>|undefined;
+  // Let the initial write finish before the deliberate Provider failure.
+  const exitAfterRequest = String.raw`
+let request = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", function receive(chunk) {
+  request += chunk;
+  const end = request.indexOf("\n");
+  if (end < 0) return;
+  process.stdin.off("data", receive);
+  JSON.parse(request.slice(0, end));
+  process.stderr.write("provider configuration rejected\n", () => process.exit(7));
+});`;
   await assert.rejects(runAgentReviewAcpSession({
-    launch:{provider:"test",command:mode==="missing-executable"?`missing-provider-${process.pid}`:process.execPath,args:mode==="missing-executable"?[]:["-e","process.stderr.write('provider configuration rejected\\n',()=>process.exit(7))"],cwd:tmpdir(),env:process.env,startupTimeoutMs:5000,idleTimeoutMs:null,maxRuntimeMs:null,promptVersion:"artifact-review-v1"},
+    launch:{provider:"test",command:mode==="missing-executable"?`missing-provider-${process.pid}`:process.execPath,args:mode==="missing-executable"?[]:["-e",exitAfterRequest],cwd:tmpdir(),env:process.env,startupTimeoutMs:5000,idleTimeoutMs:null,maxRuntimeMs:null,promptVersion:"artifact-review-v1"},
     prompt:"review",reminder:"submit",workspaceRoot:tmpdir(),isSubmitted:async()=>false,onSession:async()=>assert.fail("failed provider connected"),
     onBeforeStop:async pid=>{captured=true;if(mode==="missing-executable")assert.equal(typeof pid,process.platform==="win32"?"number":"undefined");throw Error("capture unavailable");}
   },{spawn:launch=>{
