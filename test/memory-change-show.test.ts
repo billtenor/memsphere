@@ -19,17 +19,17 @@ test("Reviewer default part and side are equivalent to explicit summary and afte
 
 test("Reviewer reads correct checkpoint bodies and diffs for create, update, delete and rename", async t => {
   const f = await changeShowFixture(t);
-  const body = (reference: string, side = "after") => f.read(["--part", "memory", "--reference", reference, "--side", side]).content;
-  assert.match(body("concepts/review-evidence"), /Pinned content/);
-  assert.equal(body("concepts/review-evidence", "before"), null);
-  assert.match(body("concepts/existing", "before"), /defines: \[\]/);
-  assert.match(body("concepts/existing"), /Updated existing content/);
-  assert.equal(body("concepts/deleted"), null);
-  assert.match(body("concepts/deleted", "before"), /deleted/);
+  const body = async (reference: string, side = "after") => (await f.readMaterial(["--part", "memory", "--reference", reference, "--side", side])).content;
+  assert.match(await body("concepts/review-evidence"), /Pinned content/);
+  assert.equal(await body("concepts/review-evidence", "before"), null);
+  assert.match(await body("concepts/existing", "before"), /defines: \[\]/);
+  assert.match(await body("concepts/existing"), /Updated existing content/);
+  assert.equal(await body("concepts/deleted"), null);
+  assert.match(await body("concepts/deleted", "before"), /deleted/);
   const renamed = f.read().files.find((file: { operation: string }) => file.operation === "rename");
   assert.ok(renamed);
-  assert.match(body(renamed.reference, "before"), /old-name/);
-  assert.match(body(renamed.reference), /new-name/);
+  assert.match(await body(renamed.reference, "before"), /old-name/);
+  assert.match(await body(renamed.reference), /new-name/);
   const diffs = f.read(["--part", "diff"]).files;
   assert.equal(diffs.length, 4);
   assert.ok(diffs.every((file: { diff: string }) => file.diff.includes("@@")));
@@ -56,7 +56,7 @@ test("Checkpoint evidence stays fixed across unvalidated body, scope and target 
   assert.notEqual(newer.checkpointDigest, f.checkpoint.checkpointDigest);
   assert.match(f.invoke().stderr, /checkpoint mismatch/);
   f.setDigest(newer.checkpointDigest);
-  assert.ok(f.read().files.some((file: { reference: string }) => file.reference === "concepts/later-target"));
+  assert.ok((await f.readMaterial()).files.some((file: { reference: string }) => file.reference === "concepts/later-target"));
 });
 
 test("Checkpoint validation identity changes with a non-target dependency and preserves identical revalidation", async t => {
@@ -77,11 +77,11 @@ test("Checkpoint validation identity changes with a non-target dependency and pr
   assert.notEqual(failed.checkpointDigest, first.checkpointDigest);
   assert.match(f.invoke().stderr, /checkpoint mismatch/);
   f.setDigest(failed.checkpointDigest);
-  const validation = f.read(["--part", "validation"]).validation;
+  const validation = (await f.readMaterial(["--part", "validation"])).validation;
   assert.equal(validation.valid, false); assert.ok(validation.issues.length > 0);
   const repeated = await validateMemoryChange(f.edit.change.id);
   assert.equal(repeated.checkpointDigest, failed.checkpointDigest);
-  assert.deepEqual(f.read(["--part", "validation"]).validation, validation);
+  assert.deepEqual((await f.readMaterial(["--part", "validation"])).validation, validation);
 });
 
 test("Reviewer ChangeSet entrypoint remains read-only and rejects unauthorized selectors and writes", async t => {
@@ -144,6 +144,6 @@ test("Checkpoint commit failure leaves the previous four CLI evidence views inta
   const retried = await validateMemoryChange(f.edit.change.id);
   assert.deepEqual(retried.issues, []); assert.notEqual(retried.checkpointDigest, f.checkpoint.checkpointDigest);
   f.setDigest(retried.checkpointDigest);
-  assert.equal(f.read(["--part", "validation"]).checkpointDigest, retried.checkpointDigest);
-  assert.match(f.read(["--part", "memory", "--reference", "concepts/review-evidence"]).content, /Retry content/);
+  assert.equal((await f.readMaterial(["--part", "validation"])).checkpointDigest, retried.checkpointDigest);
+  assert.match((await f.readMaterial(["--part", "memory", "--reference", "concepts/review-evidence"])).content, /Retry content/);
 });

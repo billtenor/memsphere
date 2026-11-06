@@ -54,17 +54,20 @@ export async function changeShowFixture(t: test.TestContext) {
   const read = (extra: string[] = []) => {
     const r = invoke(extra); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout);
   };
+  const readMaterial = async (extra: string[] = []) => {
+    const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, env, cli);
+    return JSON.parse(receipt.stdout);
+  };
   // Material stability exercises the real command tree without repeatedly
   // starting an OS shell. read/invoke/command retain the Reviewer subprocess
   // boundary for defaults, body/diff output, authorization and failure cases.
   const snapshot = async () => {
     const result = [];
     for (const extra of [[], ["--part", "diff"], ["--part", "memory", "--reference", "concepts/existing"], ["--part", "validation"]]) {
-      const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, env, cli);
-      result.push(JSON.parse(receipt.stdout));
+      result.push(await readMaterial(extra));
     }
     return result;
   };
   const versionRoot = (version = digest) => join(projectRoot, "changes", edit.change.id, "checkpoints", version);
-  return { root, home, projectRoot, edit, candidate, metadata, checkpoint, command, invoke, read, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
+  return { root, home, projectRoot, edit, candidate, metadata, checkpoint, command, invoke, read, readMaterial, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
 }
