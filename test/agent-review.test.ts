@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1302,4 +1302,21 @@ test("Windows queue passes complete multiline messages through direct and npm No
   }
   await writeFile(shim, '@echo unknown %*\r\n');
   await assert.rejects(checkQueueCapability(shim), /QUEUE_BATCH_UNSUPPORTED/);
+});
+
+
+test("Attempt directory cleanup failure retains the original Reviewer failure and a queryable cleanup diagnostic",{skip:process.platform==="win32"||process.getuid?.()===0},async()=>{
+ await withAgentReviewFixture("no-submit",async({configPath,runsRoot,runId})=>{
+  const run=await readRun(runsRoot,runId),review=currentArtifactReview(run)!;
+  const round=review.rounds[0],assignment=round.assignments[0];let directory="";
+  try{
+   await runArtifactReviewAgentWorker({config:configPath,review:review.id,round:round.id,assignment:artifactReviewAssignmentId(assignment),nodeExecutable:process.execPath,cliEntrypoint:fakeCli,providerResolver:resolveFakeProvider,
+    runSession:async input=>{directory=input.workspaceRoot;const blocked=join(directory,"blocked");await mkdir(blocked);await writeFile(join(blocked,"entry"),"held");await chmod(blocked,0o555);throw Error("agent_connection_closed: controlled primary transport failure");}});
+   const failed=currentArtifactReview(await readRun(runsRoot,runId))!.rounds[0].assignments[0];
+   assert.equal(failed.status,"failed");assert.match(failed.attempts![0].failure!.message,/controlled primary transport failure/);
+   assert.ok((await readdir(directory)).includes("blocked"));
+   const activity=await readAgentActivitySnapshot({runsRoot,runId,reviewId:review.id,roundId:round.id,assignmentId:artifactReviewAssignmentId(assignment),attemptId:failed.attempts![0].id});
+   assert.ok(activity.events.some(e=>e.status==="cleanup_failed"&&e.title.includes(directory)));
+  }finally{if(directory)await chmod(join(directory,"blocked"),0o755).catch(()=>undefined);}
+ });
 });

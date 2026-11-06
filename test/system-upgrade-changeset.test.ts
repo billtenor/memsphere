@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { projectCreateCommand } from "../src/commands/project.js";
+import { updateProjectRegistry } from "../src/project/registry.js";
+import { resolveWorkspaceIdentity } from "../src/project/workspace.js";
 import { gitOutput, runGit } from "../src/git.js";
 import { resolveProjectContext } from "../src/project/resolver.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
-import { managedProjectFixture } from "./helpers/project.js";
 import * as changes from "../src/memory/changeset.js";
 import { systemMemoryRemovalDigest } from "../src/reserved/store.js";
 
@@ -18,7 +18,7 @@ const content = baseline.replace("Published", "Upgraded");
 const targets: changes.SystemUpgradeMemoryTarget[] = [{ reference, path, operation: "update", content }];
 
 async function fixture(store: "embedded" | "managed", run: (main: string, linked: string) => Promise<void>) {
-  const root = await mkdtemp(join(tmpdir(), "system-upgrade-changeset-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "system-upgrade-changeset-")));
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT, config: process.env.GIT_CONFIG_GLOBAL };
   const main = join(root, "main"), linked = join(root, "linked");
   try {
@@ -27,27 +27,32 @@ async function fixture(store: "embedded" | "managed", run: (main: string, linked
     await writeFile(config, "[user]\n name = Test\n email = test@example.invalid\n");
     process.env.GIT_CONFIG_GLOBAL = config; process.env.MEMSPHERE_HOME = join(root, "home"); process.env.MEMSPHERE_PROJECT = "test";
     await runGit(["init", "-b", "master"], { cwd: main }); process.chdir(main);
-    if (store === "embedded") {
-      const memory = join(main, ".memsphere/memory");
-      for (const kind of ["concepts", "statements", "schemas", "procedures"]) await mkdir(join(memory, kind), { recursive: true });
-      await writeFile(join(memory, path), baseline);
-      await runGit(["add", "."], { cwd: main }); await runGit(["commit", "-m", "baseline"], { cwd: main });
-      await projectCreateCommand("test", { embedded: memory, bind: true });
-      // Bootstrap installation may update the initial tree; freeze the full baseline.
+    // This subsystem consumes an existing Memory Store, not installed models or
+    // the bundled catalog. Keep only the one Memory under test and real Git.
+    const project = join(root, "home/projects/test");
+    const memory = store === "embedded" ? join(main, ".memsphere/memory") : join(project, "memory");
+    await mkdir(join(project, "changes"), { recursive: true });
+    for (const kind of ["concepts", "statements", "schemas", "procedures"]) await mkdir(join(memory, kind), { recursive: true });
+    await writeFile(join(memory, path), baseline);
+    await writeFile(join(project, "project.json"), JSON.stringify({ format_version: 1, name: "test", created_at: "2026-10-06T00:00:00.000Z" }));
+    if (store === "managed") await runGit(["init", "-b", "master"], { cwd: memory });
+    const repository = store === "embedded" ? main : memory;
+    await runGit(["add", "."], { cwd: repository });
+    await runGit(["commit", "-m", "Memory baseline"], { cwd: repository });
+    const projectConfig = store === "embedded"
+      ? { store: { type: "embedded", repository_path: main, memory_path: ".memsphere/memory" } }
+      : { store: { type: "managed", branch: "master", published_revision: await gitOutput(["rev-parse", "HEAD"], memory) } };
+    await writeFile(join(project, "config.json"), JSON.stringify(projectConfig));
+    if (store === "managed") {
+      await writeFile(join(main, "baseline"), "baseline");
       await runGit(["add", "."], { cwd: main });
-      await runGit(["commit", "--allow-empty", "-m", "installed baseline"], { cwd: main });
-    } else {
-      await managedProjectFixture("test", { bind: true });
-      const context = await resolveProjectContext();
-      await writeFile(join(context.primary.memoryRoot, path), baseline);
-      await runGit(["add", "."], { cwd: context.primary.memoryRoot });
-      await runGit(["commit", "-m", "test concept"], { cwd: context.primary.memoryRoot });
-      const configPath = context.primary.paths.configPath;
-      const cfg = JSON.parse(await readFile(configPath, "utf8"));
-      cfg.store.published_revision = await gitOutput(["rev-parse", "HEAD"], context.primary.memoryRoot);
-      await writeFile(configPath, JSON.stringify(cfg));
-      await writeFile(join(main, "baseline"), "baseline"); await runGit(["add", "."], { cwd: main }); await runGit(["commit", "-m", "baseline"], { cwd: main });
+      await runGit(["commit", "-m", "Workspace baseline"], { cwd: main });
     }
+    const workspace = await resolveWorkspaceIdentity(main);
+    await updateProjectRegistry(process.env.MEMSPHERE_HOME!, registry => {
+      registry.projects.test = { root: project };
+      registry.workspaces[workspace.key] = { primary: "test", mounted: [] };
+    });
     await runGit(["worktree", "add", "-b", "upgrade", linked], { cwd: main });
     await run(main, linked);
   } finally {
@@ -95,7 +100,7 @@ for (const store of ["managed", "embedded"] as const) {
     for (const cwd of [linked, main]) {
       process.chdir(cwd);
       for (const [name, operation] of rejectedOperations(created.change.id, context.home)) {
-        await assert.rejects(operation, undefined, `${cwd}: ${name}`);
+        await assert.rejects(operation, store === "embedded" ? /dedicated system_upgrade|Managed Memory ChangeSets are not available for an Embedded Project/ : /dedicated system_upgrade/, `${cwd}: ${name}`);
         assert.equal(await readFile(file, "utf8"), original, `${name} changed record`);
         assert.equal(await readFile(join(context.primary.memoryRoot, path), "utf8"), originalMemory, `${name} changed Memory`);
       }
@@ -316,14 +321,19 @@ test("Embedded upgrades without retired-entry removal retain their existing base
 
 
 for (const store of ["managed", "embedded"] as const) {
-  test(`${store}: multiple active system upgrades can coexist in one worktree`, async () => fixture(store, async (_main, linked) => {
+  test(`${store}: abandoning one upgrade preserves another candidate and its validation`, async () => fixture(store, async (_main, linked) => {
     process.chdir(linked);
     const context = await resolveProjectContext();
     if (store === "embedded") await writeFile(join(context.primary.memoryRoot, path), content);
     const first = await changes.createSystemUpgradeMemoryChange({ context, targets, sourceDigest: "bundle-v1" });
     const second = await changes.createSystemUpgradeMemoryChange({ context, targets, sourceDigest: "bundle-v1" });
     assert.notEqual(first.change.id, second.change.id);
-    const active = await changes.listMemoryChanges({ project: "test", home: context.home });
-    assert.equal(active.filter(change => change.intent === "system_upgrade" && change.status === "active").length, 2);
+    assert.deepEqual((await changes.validateMemoryChange(first.change.id)).issues, []);
+    assert.deepEqual((await changes.validateMemoryChange(second.change.id)).issues, []);
+    await changes.abandonMemoryChange({ project: "test", home: context.home, changeId: first.change.id });
+    assert.equal((await changes.readMemoryChange({ project: "test", changeId: first.change.id })).status, "abandoned");
+    assert.equal((await changes.readMemoryChange({ project: "test", changeId: second.change.id })).status, "active");
+    assert.deepEqual((await changes.validateMemoryChange(second.change.id)).issues, []);
+    assert.equal(await readFile(join(second.candidateRoot, path), "utf8"), content);
   }));
 }

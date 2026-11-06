@@ -1,187 +1,315 @@
 !procedure
 syntax: memsphere-20261027-stable
+mode: graph
 names:
   - generic-agile-requirement-development
   - 通用敏捷需求开发流程
 defines:
-  - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证、验收、PR 提交、全部适用 CI 通过、human 合入确认及本地开发分支清理。
+  - 通过 human 与 agent 的迭代协作，把软件需求推进到当前迭代实现、验证、验收、PR 提交、全部适用 CI 通过、human 操作合入、agent 核验合入结果及本地开发分支清理。
+  - 通过统一准出核验选择进入点，顺序完成同步 master、CI 跟进、技术验收和产品验收，再核验当前 HEAD 是否可交由 human 合入。
 asserts:
-  - 当前迭代范围变化时，必须先更新需求契约并取得 human 确认。
+  - 各阶段产物须符合已确认的需求范围、实施方案和适用仓库规范；范围或方案变更须有 human 确认依据。
 goals:
   - 确认当前迭代的范围、交付物和验收标准。
   - 按仓库规范完成实现和验证。
-  - 通过提需方验收后，自主提交当前迭代 commit 和 GitHub PR，并跟进和修复直到最新提交的全部适用 CI 通过。
-  - 等待 human 合入并确认结果无问题，清理本轮本地开发分支后结束运行。
-flow:
+  - 完成本地验证并提交 PR，确保当前 HEAD 已同步最新 master、全部适用 CI 通过，并取得对应版本的技术与产品验收。
+  - 等待 human 操作合入，由 agent 核验合入结果；正常则清理本轮本地开发分支并结束运行，有问题或无法判断时再联系 human。
+actions:
   - !action
-    action: 调查需求、相关实现和项目规范，形成当前迭代需求契约。
+    id: requirements
+    description: 调查需求、相关实现和适用规范，形成当前迭代需求契约。
     actor: agent
     asserts:
-      - 读取与需求和验收相关的项目规范；在契约中列出采用项，未找到则按无额外规范继续。
-      - 需求契约必须包含整体目标、当前迭代范围、后续范围、交付物、验收标准、兼容性要求和待确认项。
-    artifact: !artifact
+      - 需求契约须包含整体目标、当前迭代范围、后续范围、交付物、验收标准、兼容性要求和待确认项。
+      - 契约须列明采用的项目规范；无适用项时注明“无”。
+    dependencies:
+      - !dependency
+        from: START
+    artifact:
       name: 当前迭代需求契约
-      format: markdown
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
       review:
         - 产品负责人
-
   - !action
-    action: 基于已确认的需求契约调查代码，形成实施与验证方案。
+    id: implementation_plan
+    description: 基于需求契约调查代码和适用规范，形成实施与验证方案。
     actor: agent
     asserts:
-      - 读取与设计、开发和测试相关的项目规范；在方案中列出采用项，未找到则按无额外规范继续。
-      - 方案必须基于实际代码，说明实现方式、影响范围、开发任务和验证方式；待决问题先与 human 对齐。
-    artifact: !artifact
+      - 方案须基于实际代码，说明实现方式、影响范围、开发任务、验证方式和采用的项目规范。
+      - 影响实施方向的待决问题须有 human 确认结论。
+    dependencies:
+      - !dependency
+        from: requirements
+    artifact:
       name: 实施与验证方案
-      format: markdown
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
       review:
         - 研发工程师
         - 架构师
         - 测试工程师
-
   - !action
-    action: 基于已确认的实施与验证方案产出开发计划或 Task List。
+    id: development_plan
+    description: 基于已确认的实施与验证方案产出开发计划或 Task List。
     actor: agent
-    artifact: !artifact
+    dependencies:
+      - !dependency
+        from: implementation_plan
+    artifact:
       name: 开发计划
-      format: markdown
-
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
   - !action
-    action: 按需求契约、实施与验证方案和开发计划完成开发。
+    id: implement
+    description: 按需求契约、实施方案、开发计划和适用开发规范完成开发。
     actor: agent
     asserts:
-      - 开发前读取适用的开发规范；在摘要中列出采用项，未找到则按无额外规范继续。
-      - 实施必须与需求契约、实施与验证方案和开发计划一致；方案变更必须先完成同等确认。
-      - 实现需求涉及代码、文档、配置或其他交付物时，保持相关内容一致。
-      - 项目使用 Memsphere 且本轮存在 Memory 差异时，完成开发后必须对当前内容执行 memsphere memory change validate [change-id]，功能实现摘要记录 ChangeSet ID、校验状态和 View 入口，普通 Store 校验不能代替。
-      - 摘要必须列出本轮修改文件、关键代码路径和主要 diff、需求映射、行为与兼容性影响、已执行测试结果和未验证项。
-    suggests:
-      - 在满足需求契约和实施与验证方案的前提下，agent 可以自主安排具体实施与验证过程。
-    artifact: !artifact
+      - 实现成果须包含相互一致的代码、测试及必要文档、Skill 和 Memory。
+      - 功能实现摘要须包含修改文件、关键代码路径和主要 diff、需求映射、行为与兼容性影响、采用的开发规范、测试结果和未验证项。
+      - 存在 Memory 差异时，摘要须引用匹配当前内容且通过校验的 ChangeSet，包含 ID、校验状态和 View 入口。
+    dependencies:
+      - !dependency
+        from:
+          - requirements
+          - implementation_plan
+          - development_plan
+    artifact:
       name: 功能实现摘要
-      format: markdown
-
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
   - !action
-    action: 按验证方案执行测试和验收标准检查。
+    id: initial_validation
+    description: 按验证方案和适用测试规范执行本地验证，修复问题并验证修复结果。
     actor: agent
     asserts:
-      - 验证前读取适用的测试规范；未找到则按无额外规范继续。
-      - 必须实际执行首次验证，记录执行内容、结果和未执行项。
-      - 必须区分本轮失败、历史失败和环境阻塞。
-      - 项目使用 Memsphere 且本轮存在 Memory 差异时，验证结束必须在最终内容上重新执行 memsphere memory change validate [change-id]，初始验证报告记录 ChangeSet ID、校验状态和 View 入口。
-    artifact: !artifact
+      - 验证报告须包含实际执行的检查、结果和未执行项；适用本地检查全部通过，未执行项须有不适用依据。
+      - 失败记录须区分本轮问题、历史问题和环境阻塞，并说明处置结果。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from:
+          - implementation_plan
+          - implement
+    artifact:
       name: 初始验证报告
-      format: markdown
-
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
   - !action
-    action: 汇总功能实现摘要、初始验证报告和当前代码改动，提交实现与验证成果；Review 要求修改时，完成修正和受影响验证后重新提交。
+    id: pr
+    description: 按适用 Git 规范检查交付内容，创建 commit 并推送，创建或更新本轮 GitHub PR。
     actor: agent
     asserts:
-      - Review 的验收对象是前序功能实现摘要、初始验证报告和当前工作区代码改动组成的完整实现成果。
-      - Reviewer 必须以已确认的需求契约和实施与验证方案为基准，主动查阅全部前序产物和工作区实际改动，不得只检查本步骤的汇总文本。
-      - 各 Reviewer 必须从各自评审视角主动寻找反例、未覆盖边界和与需求不一致的实现；不得把候选摘要、已有验证报告或其他 Reviewer 结论直接当作实现正确的证明。
-      - Reviewer 的最终摘要必须区分亲自检查的代码与测试、仅引用但未复跑的验证，以及仍然存在的残余风险；发现可行动的非阻塞问题时也应以 risk 或 suggestion 留下意见，不得只记录 blocking。
-      - 只有当前迭代范围已正确实现、验收标准已有充分验证证据且不存在阻塞交付的问题或风险时，才能通过 Review。
-      - 要求修改时，应指出实现、验证或代码改动中的具体问题及预期修正结果。
-      - 修订不得降低验收标准或缩小已确认范围；涉及需求契约变化或新增需求时，必须先取得 human 确认。
-    artifact: !artifact
+      - 提交内容须完整覆盖本轮实现、测试和必要文档，且不包含其他任务的改动。
+      - 提交结果须记录 PR URL、远端、开发分支、目标分支和 head SHA；本地 HEAD 与 PR head 一致，交付内容无未提交改动。
+      - PR 标题和描述须说明交付范围、验证结果及残留问题；同一交付使用同一 PR。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from: initial_validation
+    artifact:
+      name: GitHub PR 提交结果
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: release_gate
+    description: 更新远端引用，核对当前 HEAD 的 master 同步、CI、技术验收与产品验收结果，选择下一入口。
+    actor: agent
+    asserts:
+      - 核验对象须为无未提交交付改动且本地 HEAD 与 PR head 一致的候选；masterSha 表示本次查询的最新远端目标提交。
+      - route 按优先级取值：最新目标提交不是 HEAD 的祖先时为 sync_master；否则当前 HEAD 的全部适用 CI 未通过时为 follow_ci；否则缺少当前 HEAD 的技术验收时为 technical_acceptance；否则缺少当前 HEAD 的产品验收时为 product_acceptance；四项均通过时为 ready。
+      - evidence 须包含四项门禁的结论和依据；CI 结果须属于当前 HEAD，覆盖全部适用检查且成功，不适用项须有依据。
+      - 验收依据须引用同一 Run 中正式接纳的 Artifact、Review 和通过轮次，且候选 head SHA 与当前 HEAD 一致；缺失或无法确认的证据不能计为通过。
+    dependencies:
+      - !dependency
+        from: pr
+      - !dependency
+        from: delivery
+    artifact:
+      name: 准出核验结果
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"object","additionalProperties":false,"required":["route","headSha","masterSha","prUrl","evidence"],"properties":{"route":{"type":"string","enum":["sync_master","follow_ci","technical_acceptance","product_acceptance","ready"]},"headSha":{"type":"string","minLength":1},"masterSha":{"type":"string","minLength":1},"prUrl":{"type":"string","minLength":1},"evidence":{"type":"string","minLength":1}}}'
+      payload:
+        contentType: application/json
+  - !action
+    id: sync_master
+    description: 将最新远端 master 合入开发分支，解决冲突，执行适用本地验证并提交、推送到本轮 PR。
+    actor: agent
+    asserts:
+      - 同步后的 HEAD 须包含最新远端目标提交，集成结果的适用本地检查须全部通过。
+      - 同步记录须包含 PR URL、目标分支及 SHA、同步前后 HEAD、冲突解决摘要和验证结果。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "sync_master"
+    artifact:
+      name: master 同步与集成验证记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: check_ci
+    description: 查询 PR 当前 head 对应的全部适用 CI，判断是否需要继续跟进。
+    actor: agent
+    asserts:
+      - 仅当当前 head 的全部适用 CI 均已成功时，结果为 false；等待中、失败、取消、超时或预期检查缺失时为 true。
+      - 无检查、仅部分成功、skipped 或 neutral 不能作为全部通过的依据；不适用项须有仓库依据。
+    dependencies:
+      - !dependency
+        from: sync_master
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "follow_ci"
+      - !dependency
+        from: follow_ci
+    artifact:
+      name: CI 是否仍需跟进
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"boolean"}'
+      payload:
+        contentType: application/json
+  - !action
+    id: follow_ci
+    description: 跟进未完成的 CI；定位失败原因，修复并执行受影响本地验证，提交、推送到本轮 PR；临时环境故障可有依据地重跑。
+    actor: agent
+    asserts:
+      - 跟进记录须包含 PR URL、head SHA、检查状态及链接、失败原因、修复内容和本地验证结果。
+      - 修复后的交付须保持已确认范围与验收标准，不得以削弱测试或关闭适用检查取得通过结果。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from: check_ci
+        when: artifacts.check_ci = true
+    artifact:
+      name: CI 跟进与修复记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: acceptance
+    description: 按需求契约和实施方案验收当前 PR 的实现与验证成果；修正问题后完成 master 同步、本地验证、PR 更新及 CI 验证，提交技术评审。
+    actor: agent
+    asserts:
+      - 验收对象须覆盖当前候选的完整代码、测试、文档及 Memory 改动；已确认范围正确实现、验收标准有充分证据且无阻塞交付的问题或风险。
+      - 验收材料须固定 PR URL、head SHA、目标分支 SHA 和实际 diff；该 HEAD 须包含最新目标提交，全部适用本地检查和 CI 已通过。
+      - 评审结论须体现各角色的审查依据，区分亲自检查或执行的内容与引用的证据，并记录问题、修正结果及残余风险。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from: check_ci
+        when: artifacts.check_ci = false
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "technical_acceptance"
+    artifact:
       name: 实现与验证验收材料
-      format: markdown
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
       review:
         - 研发工程师
         - 测试工程师
         - 架构师
-
   - !action
-    action: 复核实际改动、验证结果和验收结论，形成交付报告。
+    id: delivery
+    description: 验收当前 PR 的产品行为并形成交付报告；修正问题后完成受影响验证、commit 和推送，提交产品评审。
     actor: agent
     asserts:
-      - 读取适用的交付规范；未找到则按无额外规范继续。
-      - 报告必须包含交付内容、验证结果、验收结论、后续范围和残留问题。
-      - 项目使用 Memsphere 且本轮存在 Memory 差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口，普通 Store 校验不能代替。
-    artifact: !artifact
+      - 交付报告须固定 PR URL 和最终 head SHA，说明交付内容、验收标准的达成情况、验证结果、后续范围及残留问题。
+      - 产品验收结论须以已确认的需求契约和实际产品行为为依据，并覆盖报告固定的候选版本。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from: acceptance
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "product_acceptance"
+    artifact:
       name: 敏捷需求开发交付报告
-      format: markdown
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
       review:
         - 产品负责人
-
   - !action
-    action: 按当前迭代范围检查改动并创建 Git commit。
+    id: ci_final
+    description: 核对准出结果与当前 PR、目标分支及 CI，形成合入交接报告；结果过期时通过 CLI 回溯准出核验。
     actor: agent
     asserts:
-      - 读取适用的 Git 规范；未找到则按无额外规范继续。
-      - 只允许提交当前迭代产生的改动，不得暂存或提交其他工作区内容。
-      - commit 前必须确认应交付的实现、测试和文档改动已完整纳入，并记录 commit SHA。
-      - 项目使用 Memsphere 且本轮存在 Memory 差异时，commit 前必须重新执行 memsphere memory change validate [change-id] 并确认输出匹配当前内容，不得使用普通 Store 校验或过期 checkpoint 代替。
-    artifact: !artifact
-      name: 本轮 Commit 结果
-      format: markdown
-
-  - !action
-    action: 推送本轮 commit，创建 GitHub Pull Request；当前分支已有对应 PR 时更新该 PR。
-    actor: agent
-    asserts:
-      - 创建前核对远端、当前分支和目标分支，遵循适用的仓库交付规范；不得重复创建同一交付的 PR。
-      - PR 标题和描述必须概括本轮交付范围、验证结果和残留问题；记录 PR URL、目标分支和远端 head SHA。
-    artifact: !artifact
-      name: GitHub PR 提交结果
-      format: markdown
-
-  - !while
-    condition: !action
-      action: 查询 PR 最新 head SHA 对应的全部适用 CI，判断是否仍需等待、修复或重新验证。
-      actor: agent
-      asserts:
-        - 每轮重新读取远端 head SHA，并核对检查所属提交；head 变化后必须以新提交为准，不能复用旧提交的通过结果。
-        - 只有最新 head 的全部适用 CI 已执行完毕且成功时才返回 false；排队、运行中、失败、取消、超时、预期检查缺失或尚未触发时均返回 true。
-        - 不得把无检查、只通过部分检查或 skipped、neutral 当作全部通过；仓库明确不适用的检查须记录依据，其余预期检查必须实际执行成功。
-      artifact: !artifact
-        name: CI 是否仍需跟进
-        type: boolean
-    do:
-      - !action
-        action: 根据当前检查状态继续等待，或定位失败原因、完成修复和本地验证，再提交并推送修复，更新 PR 后继续跟进 CI。
-        actor: agent
-        asserts:
-          - 排队或运行中时使用有界等待或合理查询间隔后继续循环；检查未触发、被取消或超时时查明原因并触发适用检查，不得仅因等待而要求 human 提醒继续。
-          - 失败时读取具体检查日志，区分本轮问题、历史问题和环境阻塞；可自行修复时修复后运行受影响验证，环境暂时性故障可有依据地重跑，不得用反复重跑掩盖确定性失败。
-          - 不得通过删除、跳过或弱化测试、关闭检查或降低验收标准使 CI 通过；修复涉及范围或方案变化时仍须完成既有确认。
-          - 修复产生 Memory 差异时，commit 前必须对最终内容执行 memsphere memory change validate [change-id] 并记录 ChangeSet ID、校验状态和 View 入口。
-          - 每次只提交本轮相关修复；推送后重新核对远端 head 和全部适用 CI，不得只重查此前失败的一项。
-        artifact: !artifact
-          name: CI 跟进与修复记录
-          format: markdown
-
-  - !action
-    action: 汇总 PR 和 CI 最终结果，将全部适用 CI 已通过的 PR 交付给 human 审核并由 human 操作合入。
-    actor: agent
-    asserts:
-      - 最终审核和合入由 human 完成；agent 不得自行合入或启用自动合入，交付待审核 PR 后继续等待 human 的合入及结果确认。
-      - 报告必须记录 PR URL、最终远端 head SHA、全部适用检查的名称、成功状态和结果链接，以及修复摘要与残留问题；提交报告前再次确认 head 未变化且检查仍全部通过。
-      - 本轮存在 Memory 差异时，报告必须包含与最终内容匹配且校验通过的 ChangeSet ID、校验状态和 View 入口。
-    artifact: !artifact
+      - 交接报告须引用当前候选的 ready 核验结果、PR URL、head SHA、目标 SHA、四项门禁证据和残留问题。
+      - 交接版本须与准出核验一致，包含最新目标提交且全部适用 CI 成功。
+      - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
+    dependencies:
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "ready"
+    artifact:
       name: PR 与 CI 最终交付报告
-      format: markdown
-
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
   - !action
-    action: 审核并合入 PR，确认合入后结果没有问题。
+    id: human_merge
+    description: 操作合入已通过准出核验的 PR。
     actor: human
     asserts:
-      - 必须取得 human 对本轮 PR 已合入且结果无问题的明确确认；CI 通过、交付 PR、仅通知合入或未回复均不能替代该确认，agent 不得代填。
-      - 确认尚未给出或仍有问题时不得推进本地分支清理；先处理问题并重新取得确认。
-    artifact: !artifact
-      name: Human 合入与结果确认
-      format: markdown
-
+      - 合入记录须包含 PR URL、实际 merged 状态、合入提交和目标分支。
+    dependencies:
+      - !dependency
+        from: ci_final
+    artifact:
+      name: Human 合入记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
   - !action
-    action: 根据 human 的合入确认清理本轮本地开发分支，并汇总流程收尾结果。
+    id: cleanup
+    description: 检查实际合入结果及适用 CI 和集成验证；正常则清理本轮本地分支并收尾，有问题或无法判断时保留现场并联系 human。
     actor: agent
     asserts:
-      - 删除前核对 PR 实际为 merged、合入提交已进入目标分支，并确认本轮开发分支的改动已完整纳入；支持 merge、squash 和 rebase 合入，不得仅凭原 head 的祖先关系判断。
-      - 仅清理本轮本地开发分支；不得删除目标分支、其他任务分支或远端分支。存在未提交内容、未合入改动或其他 worktree 占用时先解决阻碍，不得强制丢弃内容或删除工作树。
-      - 分支在当前工作树检出时，先在干净状态下切换到已合入的目标提交或其他安全位置；已不存在时核对并记录，无需重新创建。
-      - 最终报告必须记录 PR URL、human 确认依据、合入提交、原本地分支名及删除后的核验结果；只有确认本轮本地开发分支已不存在，才能上报最终产物并结束 Run。
-    artifact: !artifact
-      name: 合入确认与本地分支清理结果
-      format: markdown
-      final: true
+      - 核验结果须证明 PR 已合入目标分支、本轮改动完整纳入，且合入结果满足适用验证与验收标准；支持 merge、squash 和 rebase 合入。
+      - 清理范围仅限本轮本地开发分支，不得丢失未提交内容、未合入改动或影响其他 worktree。
+      - 收尾报告须包含 PR URL、合入提交、结果核验结论及证据、原本地分支名和清理结果；准出时合入结果正常且该本地分支已不存在。
+    dependencies:
+      - !dependency
+        from: human_merge
+    artifact:
+      name: 合入结果核验与本地分支清理结果
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown

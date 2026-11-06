@@ -395,6 +395,40 @@
             "at"
           ],
           "additionalProperties": false
+        },
+        "workerIdentity": {
+          "type": "object",
+          "properties": {
+            "pid": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "started": {
+              "type": "string",
+              "minLength": 1
+            },
+            "group": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "required": [
+            "pid",
+            "started",
+            "group"
+          ],
+          "additionalProperties": false
+        },
+        "workerMembers": {
+          "type": "array",
+          "description": "停止Provider前按OS创建身份记录的Worker及后代，用于leader退出后的安全核验。",
+          "items": {
+            "$ref": "#/definitions/ReviewAttempt/properties/workerIdentity"
+          }
+        },
+        "workerJob": {
+          "type": "string",
+          "pattern": "^(Global|Local)\\\\Memsphere\\.Reviewer\\.(Tracked\\.)?[0-9a-f-]{36}$"
         }
       },
       "required": [

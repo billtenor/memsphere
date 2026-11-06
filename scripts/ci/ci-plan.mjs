@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverTestFiles, platformTests, selectTests, testSuites } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -14,10 +14,6 @@ const linux = [
   ["ubuntu-24.04", "browser", 3], ["ubuntu-24.04", "cli", 3],
   ["ubuntu-24.04", "memory-and-projects", 2], ["ubuntu-24.04", "runtime-core", 2]
 ];
-const defaultRows = [...linux,
-  ["macos-latest", "platform-and-upgrades", 4],
-  ["windows-latest", "platform-core", 4], ["windows-latest", "platform-upgrades", 4]
-];
 const fullRows = [...linux,
   ["macos-latest", "model-ui", 3], ["macos-latest", "review-ui", 3],
   ["macos-latest", "cli", 4], ["macos-latest", "memory-and-projects", 3], ["macos-latest", "runtime-core", 3],
@@ -29,14 +25,15 @@ const fullRows = [...linux,
 
 export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
-  for (const file of platformTests) {
-    if (!files.includes(file)) throw new Error(`Platform protection is missing: ${file}`);
-  }
-  return { include: (profile === "full" ? fullRows : defaultRows).map(([os, suite, workers]) => {
+  return { include: fullRows.flatMap(([os, categorySuite, workers]) => {
+    const suite = profile === "default" && os !== "ubuntu-24.04" ? `native-${categorySuite}` : categorySuite;
     const selected = selectTests(files, sources, {}, suite);
-    if (!selected.length) throw new Error(`Empty CI suite: ${suite}`);
+    if (!selected.length) {
+      if (profile === "full") throw new Error(`Empty CI suite: ${suite}`);
+      return [];
+    }
     const browser = selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));
-    return { os, suite, title: testSuites[suite].title, workers, browser };
+    return [{ os, suite, title: testSuites[suite].title, workers, browser }];
   }) };
 }
 

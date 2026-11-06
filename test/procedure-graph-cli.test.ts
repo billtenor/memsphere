@@ -1,3 +1,4 @@
+import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -5,10 +6,12 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { businessFixture } from "./helpers/business-data.js";
 import { serializeMemoryYaml } from "../src/memory/serializer.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
 import { graphNext } from "../src/commands/procedure-graph.js";
+import { requireCommandState } from "../src/home/command-state-store.js";
 import type { GraphRuntime } from "../src/context_control/graph-runtime.js";
 import type { Snapshot } from "../src/context_control/types.js";
 const exec = promisify(execFile);
@@ -31,20 +34,37 @@ test("graph continuation preserves an unrelated auto-enter failure", async () =>
   await assert.rejects(graphNext(runtime, snapshot, "test-project"), error => error === failure);
 });
 
-async function fixture(t: test.TestContext, multiple = false) {
-  const f = await businessFixture(t, {});
+async function fixture(t: test.TestContext, multiple = false, prepared = true, processBoundary = false, embedded = false) {
+  const f = prepared ? await initializedContextFixture(t) : await businessFixture(t, {});
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ store: { type: "embedded", repository_path: f.root, memory_path: "memory" } }));
+  const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
+  if (embedded) config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+  else {
+    // These contracts concern graph commands, not linked-worktree discovery.
+    // Give Managed Memory a real committed baseline rather than paying for
+    // unrelated Embedded worktree enumeration on every Store read.
+    const cwd = join(f.root, "memory");
+    await exec("git", ["init", "-b", "master"], { cwd });
+    await exec("git", ["-c", "user.name=Graph Test", "-c", "user.email=graph@example.invalid", "commit", "--allow-empty", "-m", "Fixture baseline"], { cwd });
+    config.store = { type: "managed", branch: "master", published_revision: (await exec("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() };
+  }
+  await writeFile(join(f.root, "config.json"), JSON.stringify(config));
   const procedure = join(f.directory, "graph.yaml");
   const action = (id: string) => `  - !action\n    id: ${id}\n    description: Produce ${id}\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: ${id} output\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n`;
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
-  const invoke = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" } }).catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+  const invoke = (...args: string[]) => {
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" };
+    const result = processBoundary
+      ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
+      : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
+    return result.catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+  };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   return { ...f, procedure, invoke, call };
 }
 
-for (const language of ["zh-CN", "en"] as const) test(`graph ${language} Step prompts provide executable fixed-material reads for direct and collected inputs`, { timeout: 90000 }, async t => {
+for (const language of ["zh-CN", "en"] as const) test(`graph CLI module ${language} Step prompts provide executable fixed-material reads for direct and collected inputs`, { timeout: 90000 }, async t => {
   const f = await fixture(t);
   await writeFile(join(f.home, "config.json"), JSON.stringify({ language, runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   const artifact = { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } };
@@ -74,7 +94,7 @@ for (const language of ["zh-CN", "en"] as const) test(`graph ${language} Step pr
 });
 
 test("graph CLI auto-enters one Step, binds Continue and leaves show read-only", { timeout: 60000 }, async t => {
-  const f = await fixture(t);
+  const f = await fixture(t, false, false, true, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "CLI graph");
   assert.doesNotMatch(start.prompt, /context-/);
   const snapshot = await f.call("run", "show", "--run", start.runId);
@@ -90,7 +110,7 @@ test("graph CLI auto-enters one Step, binds Continue and leaves show read-only",
   await f.call("run", "finish", "--run", start.runId);
 });
 
-test("multiple pending Steps require explicit enter; repeated enter returns the same Continue binding", { timeout: 60000 }, async t => {
+test("CLI module multiple pending Steps require explicit enter; repeated enter returns the same Continue binding", { timeout: 60000 }, async t => {
   const f = await fixture(t, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "Choose");
   assert.match(start.prompt, /step enter/); assert.doesNotMatch(start.prompt, /Action/);
@@ -105,7 +125,7 @@ test("multiple pending Steps require explicit enter; repeated enter returns the 
 });
 
 test("independent CLI processes enter idempotently and complete different Steps with unique completion sequence", { timeout: 60000 }, async t => {
-  const f = await fixture(t, true);
+  const f = await fixture(t, true, true, true);
   await writeFile(join(f.home, "config.json"), JSON.stringify({}));
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "concurrent");
   const steps = (await f.call("run", "show", "--run", start.runId)).steps;
@@ -129,7 +149,7 @@ test("independent CLI processes enter idempotently and complete different Steps 
   assert.equal(result.run.frames[0].graphFrame.processedStepIds.length, 2);
 });
 
-test("Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
+test("CLI module Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
   const f = await fixture(t);
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
   config.control_plane = { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { reviewer: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] }, advisor: { kind: "human", name: "Advisor", permissions: ["artifact.read", "decision.assess"] } } };
@@ -178,7 +198,7 @@ test("Continue binds Human authorization and advisory resolution to its Step and
 });
 
 
-test("a failed auxiliary Continue store preserves the running Step and offers a native report command", { timeout: 60000 }, async t => {
+test("CLI module failed auxiliary Continue store preserves the running Step and offers a native report command", { timeout: 60000 }, async t => {
   const f = await fixture(t);
   await mkdir(join(f.home, "data"), { recursive: true });
   const invalid = join(f.home, "data", "runner-sessions"); await writeFile(invalid, "not a directory");
@@ -188,4 +208,108 @@ test("a failed auxiliary Continue store preserves the running Step and offers a 
   await rm(invalid);
   const recovered = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", before.steps[0].id);
   assert.match(recovered.stdout, /memsphere continue report/);
+});
+
+test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
+ const f=await fixture(t, false, true, true);
+ const start=await f.call('run','start','--file',f.procedure,'--name','rewind CLI');
+ const completed=await f.call('continue','report','--artifact','old body');
+ const show=await f.call('run','show','--run',start.runId);
+ const target=show.steps[0].id;
+ const {snapshotTree}=await import('./helpers/business-data.js');
+ const before=await snapshotTree(f.root);
+ const preview=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--dry-run');
+ assert.equal(preview.dryRun,true); assert.deepEqual(await snapshotTree(f.root),before);
+ await assert.rejects(f.invoke('run','step','rewind','--run',start.runId,'--step',target,'--reason',' '),/reason is required/);
+ const reason=join(f.directory,'reason.md');await writeFile(reason,'Product needs revision');
+ await assert.rejects(f.invoke('run','step','rewind','--run',start.runId,'--step',target,'--reason','x','--reason-file',reason),/Choose/);
+ const result=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--reason-file',reason);
+ assert.match(result.command,/run step enter/);
+ const next=await f.call('run','show','--run',start.runId);
+ assert.equal(next.steps.find((s:any)=>s.id===result.replacementStepId).status,'pending');
+ assert.equal(next.steps.find((s:any)=>s.id===target).effective,false);
+ await assert.rejects(f.invoke('continue','report','--artifact','late body'),/superseded/);
+ await f.invoke('run','step','enter','--run',start.runId,'--step',result.replacementStepId);
+ const fresh=await f.call('continue','report','--artifact','new body');
+ const final=await f.call('run','show','--run',start.runId);
+ assert.equal(final.artifacts.find((a:any)=>a.id===fresh.artifactId).revisedFrom,completed.artifactId);
+});
+
+for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI module ${path} preserves explicit enter for a pending rewind replacement`, { timeout: 120000 }, async t => {
+  const f = await fixture(t, path !== 'status');
+  const binding = join(f.directory, 'replacement-review.json');
+  if (path === 'branch-review') {
+    const config = JSON.parse(await readFile(join(f.root, 'config.json'), 'utf8'));
+    config.control_plane = { runner: { permissions: ['artifact.read', 'artifact.submit', 'decision.decide'] }, actors: { reviewer: { kind: 'human', name: 'Human', permissions: ['artifact.read', 'decision.decide'] } } };
+    await writeFile(join(f.root, 'config.json'), JSON.stringify(config));
+    await writeFile(f.procedure, (await readFile(f.procedure, 'utf8')).replace('      name: B output', '      review: [approval]\n      name: B output'));
+    await writeFile(binding, JSON.stringify({ reviews: { 'cli-graph#actions[B]': { policy: 'artifact_acceptance.unanimous' } }, slots: { 'cli-graph::approval': { actors: ['reviewer'] } } }));
+  }
+  const start = await f.call('run', 'start', '--file', f.procedure, '--name', 'explicit replacement', ...(path === 'branch-review' ? ['--review-config', binding] : []));
+  const initial = await f.call('run', 'show', '--run', start.runId);
+  const a = initial.steps.find((s: any) => s.source.actionId === 'A');
+  await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', a.id);
+  const originalBinding = await requireCommandState('codex-graph-session', f.home);
+  const rewind = await f.call('run', 'step', 'rewind', '--run', start.runId, '--step', a.id, '--reason', 'revise A');
+  const target = rewind.replacementStepId;
+  let prompt: string;
+  if (path === 'status') {
+    await writeFile(join(f.home, 'config.json'), JSON.stringify({}));
+    prompt = (await f.call('run', 'status', '--run', start.runId)).prompt;
+    await writeFile(join(f.home, 'config.json'), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
+  } else {
+    const b = initial.steps.find((s: any) => s.source.actionId === 'B');
+    await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', b.id);
+    const report = await f.call('continue', 'report', '--artifact', 'B candidate');
+    prompt = report.prompt;
+    if (path === 'branch-review') {
+      assert.equal(report.status, 'awaiting_review');
+      const comments = join(f.directory, 'replacement-comments.json'); await writeFile(comments, '[]');
+      await f.invoke('continue', 'review', 'submit-for-human', '--assignment', 'reviewer', '--vote', 'approve', '--comments-file', comments, '--authorization-note', 'Simulated authorized review in an isolated test fixture');
+      prompt = (await f.invoke('continue', 'review', 'vote', '--vote', 'approve')).stdout;
+    }
+  }
+  assert.ok(prompt.includes(`run step enter --run ${start.runId} --step ${target}`), prompt);
+  const before = await f.call('run', 'show', '--run', start.runId);
+  assert.equal(before.steps.find((s: any) => s.id === target).status, 'pending');
+  if (path === 'status') {
+    assert.deepEqual(await requireCommandState('codex-graph-session', f.home), originalBinding);
+    await assert.rejects(f.invoke('continue', '--help'), error => {
+      const message = String(error); return message.includes(a.id) && message.includes('superseded') && !message.includes(target);
+    });
+    await assert.rejects(f.invoke('continue', 'report', '--artifact', 'obsolete'), /superseded/);
+  } else {
+    const help = (await f.invoke('continue', '--help')).stdout;
+    assert.ok(!help.includes(target), help);
+  }
+  await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', target);
+  assert.ok((await f.invoke('continue', '--help')).stdout.includes(target));
+  const accepted = await f.call('continue', 'report', '--artifact', 'new A');
+  assert.equal(accepted.stepId, target);
+  assert.equal(accepted.status, 'done');
+});
+
+test('rewind JSON argument and superseded errors use the structured stderr contract', { timeout: 60000 }, async t => {
+  const f = await fixture(t, false, true, true);
+  const start = await f.call('run', 'start', '--file', f.procedure, '--name', 'structured rewind errors');
+  const old = (await f.call('run', 'show', '--run', start.runId)).steps[0].id;
+  const rewind = await f.call('run', 'step', 'rewind', '--run', start.runId, '--step', old, '--reason', 'new A');
+  const { snapshotTree } = await import('./helpers/business-data.js');
+  const before = await snapshotTree(f.root);
+  const cases: Array<[string[], string]> = [
+    [['run', 'step', 'rewind', '--step', 'dummy', '--dry-run'], 'INVALID_ARGUMENT'],
+    [['run', 'step', 'rewind', '--run', start.runId, '--step', rewind.replacementStepId], 'INVALID_ARGUMENT'],
+    [['run', 'step', 'rewind', '--run', start.runId, '--step', old, '--dry-run'], 'STEP_SUPERSEDED']
+  ];
+  for (const [args, code] of cases) {
+    await assert.rejects(exec(process.execPath, [cli, '--project', 'test-project', ...args, '--output', 'json'], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: 'graph-session', TRAECLI_THREAD_ID: '' } }), (error: any) => {
+      assert.equal(error.code, 1); assert.equal(error.stdout, '');
+      const result = JSON.parse(error.stderr);
+      assert.equal(result.error.code, code);
+      assert.equal(typeof result.error.message, 'string');
+      assert.equal(error.stderr, `${JSON.stringify(result)}\n`);
+      return true;
+    });
+  }
+  assert.deepEqual(await snapshotTree(f.root), before);
 });

@@ -6,7 +6,7 @@ import { checkModelDefinition } from "../src/project/model-validation.js";
 import { readContextControlModels } from "../src/context_control/model-assets.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { businessFixture } from "./helpers/business-data.js";
-import { withModelMaintenance } from "../src/project/model-operation.js";
+import { commitModelOperation, withModelMaintenance } from "../src/project/model-operation.js";
 import { upgradeContextControlOutputs } from "../src/project/context-control-upgrade.js";
 
 const time = "2026-10-27T00:00:00.000Z";
@@ -117,4 +117,33 @@ for (const conflict of ["different", "duplicate", "schema"] as const) test(`subm
   await writeFile(path, JSON.stringify(before));
   assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
   assert.deepEqual(await (await openContextControl(f.root))!.stores.step.get({}, key), before);
+});
+
+test('collect membership evidence refers only to other triggers in its own Run', async () => {
+  const asset = readContextControlModels().find(a => a.entity === 'run')!;
+  const { runtime } = await checkModelDefinition({}, { modelRef: asset.id, definition: asset.definition });
+  const source = { id: 'source', actionId: 'B', dependencyIndex: 0, inputs: {}, arrivals: { START: { kind: 'start' } } };
+  const collect = { id: 'collect', actionId: 'gather', dependencyIndex: 0, stepId: 's', arrivals: { START: { kind: 'start' } }, collection: { items: { B: [] }, triggerIds: ['source'] } };
+  const record = (trigger: unknown) => ({ ...run(), frames: [{ id: 'f', type: 'graph', graphFrame: { ...graph(), triggers: [source, trigger] } }] });
+  assert.doesNotThrow(() => runtime!.reflect(record(collect)));
+  for (const id of ['collect', 'foreign-trigger']) assert.throws(() => runtime!.reflect(record({ ...collect, collection: { ...collect.collection, triggerIds: [id] } })), /discriminated.*collection/);
+  const { stepId: _id, ...withoutStep } = collect;
+  assert.throws(() => runtime!.reflect(record({ ...withoutStep, inputs: {} })), /discriminated.*collection/);
+});
+
+test("an opened Context Control rejects changed model bytes and refreshes after restoration", async t => {
+  const f = await businessFixture(t, {});
+  const service = (await openContextControl(f.root, true))!;
+  const created = await service.start("Model refresh");
+  const before = await service.snapshot(created.id);
+  const asset = readContextControlModels().find(asset => asset.entity === "review")!;
+  const path = join(f.root, "models/json-schema/draft-07", asset.id);
+  const original = await readFile(path);
+  const changed = Buffer.from(JSON.stringify({ ...asset.definition as object, description: "Changed model contract" }));
+  await withModelMaintenance(f.root, () => commitModelOperation(f.root, "model.update", [{ path, before: original, after: changed }]));
+  await assert.rejects(service.snapshot(created.id), { code: "MODEL_DEFINITION_HASH_MISMATCH" });
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_DEFINITION_HASH_MISMATCH" });
+  await withModelMaintenance(f.root, () => commitModelOperation(f.root, "model.update", [{ path, before: changed, after: original }]));
+  assert.deepEqual(await service.snapshot(created.id), before);
+  assert.deepEqual(await (await openContextControl(f.root))!.snapshot(created.id), before);
 });

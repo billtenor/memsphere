@@ -1,10 +1,13 @@
 #!/usr/bin/env node
+import { fileURLToPath } from "node:url";
+import { processGate } from './process-gates.mjs';
 import crossSpawn from "cross-spawn";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import { access } from "node:fs/promises";
+import { access, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 
 const mode = process.argv[2] || "approve";
@@ -53,6 +56,29 @@ const app = acp
         await sendProgress(client, params.sessionId, index++);
       }
     }
+    if (mode === "rewind-gated") {
+      await processGate(process.env.REVIEW_TEST_GATES,'publish',`provider-launched:${process.env.REVIEW_TEST_READY}`);
+      if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
+      if (process.env.REVIEW_TEST_SETUP_API) {
+        // These cancellation tests target OS/ACP lifecycle, not CLI dispatch.
+        const {mutateBoundReviewNode} = await import('../../dist/acp/review-session.js');
+        await mutateBoundReviewNode({operation:'report',artifact:{applicable:true}});
+      } else {
+        invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
+        invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
+      }
+      const child = spawn(process.execPath,[fileURLToPath(new URL(process.env.REVIEW_TEST_LATE_DESCENDANT ? './rewind-late-child.mjs' : './rewind-provider-child.mjs', import.meta.url))],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
+      await new Promise(resolve=>child.once("message",resolve));
+      if (process.env.REVIEW_TEST_SUBMITTED) await completeReview("approve", client, params.sessionId, true);
+      await processGate(process.env.REVIEW_TEST_GATES,'publish',process.env.REVIEW_TEST_READY,{providerPid:process.pid,childPid:child.pid});
+      if (process.env.REVIEW_TEST_COMPLETE) {
+        await processGate(process.env.REVIEW_TEST_GATES,'wait',`finish-review:${process.env.REVIEW_TEST_READY}`,undefined,signal);
+      } else if (process.env.REVIEW_TEST_RELEASE) {
+        await processGate(process.env.REVIEW_TEST_GATES,'wait',process.env.REVIEW_TEST_RELEASE,undefined,signal);
+      } else if (!signal.aborted) {
+        await new Promise(resolve => signal.addEventListener('abort', resolve, { once: true }));
+      }
+    }
     if (mode === "gated-approve") {
       while (!signal.aborted) {
         try { await access(process.env.REVIEW_TEST_GATE); break; }
@@ -77,7 +103,15 @@ app.connect(acp.ndJsonStream(
   Readable.toWeb(process.stdin)
 ));
 
-async function completeReview(vote, client, sessionId) {
+async function completeReview(vote, client, sessionId, graphAlreadyRead = false) {
+  if (mode === 'rewind-gated' && process.env.REVIEW_TEST_SETUP_API) {
+    assert.equal(vote,'approve');
+    const {boundReviewNodeView,mutateBoundReviewNode,submitBoundReviewNodes} = await import('../../dist/acp/review-session.js');
+    let view=await boundReviewNodeView();
+    while(view.node)view=await mutateBoundReviewNode({operation:'report',artifact:{applicable:true}});
+    await submitBoundReviewNodes({vote:'approve',summary:'Fake ACP review completed'});
+    return;
+  }
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");
@@ -87,12 +121,14 @@ async function completeReview(vote, client, sessionId) {
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
     return invoke(cli, args);
   };
-  await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
-  await invokeReviewCli([
-    "run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"
-  ]);
-  const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
-  if (detail.reviewProgress) {
+  let graph = graphAlreadyRead;
+  if (!graphAlreadyRead) {
+    await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
+    await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
+    const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
+    graph = Boolean(detail.reviewProgress);
+  }
+  if (graph) {
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);

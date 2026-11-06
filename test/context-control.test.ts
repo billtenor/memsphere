@@ -5,12 +5,13 @@ import test from "node:test";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { openContextControl } from "../src/project/context-control.js";
+import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { businessFixture } from "./helpers/business-data.js";
 import { textContent } from "../src/context_control/types.js";
 import { reviewCommentId } from "../src/review-nodes.js";
 
 test("lightweight Review historical comment IDs remain readable without rewriting persisted bytes or revision", async t => {
-  const { root } = await businessFixture(t, {}), service = (await openContextControl(root, true))!;
+  const { root } = await initializedContextFixture(t), service = (await openContextControl(root))!;
   const run = await service.start("Historical Review");
   const artifact = await service.report(run.id, { name: "Candidate", content: textContent("Candidate") });
   const review = await service.review(run.id, artifact.artifact.id, "agent", ["Existing opinion"]);
@@ -26,8 +27,8 @@ test("lightweight Review historical comment IDs remain readable without rewritin
 });
 
 test("Context Control ignores former Project and Run gates for recovery and independent writes", async t => {
-  const { root } = await businessFixture(t, {});
-  const service = (await openContextControl(root, true))!;
+  const { root } = await initializedContextFixture(t);
+  const service = (await openContextControl(root))!;
   const a = await service.start("A"), b = await service.start("B");
   await mkdir(join(root, ".runtime", "context-control"), { recursive: true });
   await withNativeFileLock(join(root, ".runtime", "settings.lock"), async () => {
@@ -73,7 +74,7 @@ test("free exploration persists model-backed create/read/report and immutable re
 });
 
 test("redo reuses the draft target and Step IDs after creation is interrupted", async t => {
-  const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
+  const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!;
   const run = await service.start("恢复"); const store = service.stores.step;
   const create = store.create.bind(store); store.create = async () => { throw Error("injected interruption"); };
   await assert.rejects(service.createArtifact(run.id, { name: "草稿目标" }), /interruption/);
@@ -87,7 +88,7 @@ test("redo reuses the draft target and Step IDs after creation is interrupted", 
 });
 
 test("submitted content survives interruption and the next read recovers its original Step", async t => {
-  const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
+  const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!;
   const run = await service.start("提交恢复"); const target = await service.createArtifact(run.id, { name: "结果" });
   const store = service.stores.step; const update = store.update.bind(store);
   store.update = async () => { throw Error("interrupted step completion"); };
@@ -99,7 +100,7 @@ test("submitted content survives interruption and the next read recovers its ori
 });
 
 test("read accounting failures preserve the body and never rewrite terminal production", async t => {
-  const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
+  const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!;
   const run = await service.start("阅读"); const a = await service.report(run.id, { name: "内容", content: textContent("正文") });
   assert.equal((await service.recordRead(run.id, a.artifact.id, { kind: "artifact", id: a.artifact.id })).length, 1);
   assert.equal(Buffer.from((await service.readArtifact(run.id, a.artifact.id)).bytes).toString(), "正文");
@@ -127,7 +128,7 @@ test("contentRef checks fixed bytes and unrelated completed references are not r
 });
 
 test("concurrent services submit a target once and finish freezes its accepted roots", async t => {
-  const { root } = await businessFixture(t, {}); const first = (await openContextControl(root, true))!; const second = (await openContextControl(root))!;
+  const { root } = await initializedContextFixture(t); const first = (await openContextControl(root))!; const second = (await openContextControl(root))!;
   const run = await first.start("并发"); const target = await first.createArtifact(run.id, { name: "结果" });
   const results = await Promise.allSettled([first.report(run.id, { target: target.id, content: textContent("A") }), second.report(run.id, { target: target.id, content: textContent("B") })]);
   assert.equal(results.filter(r => r.status === "fulfilled").length, 1);
@@ -137,7 +138,7 @@ test("concurrent services submit a target once and finish freezes its accepted r
 
 for (const code of ["REVISION_CONFLICT", "LOCK_TIMEOUT", "EIO"]) {
   test(`Artifact and External content remain readable when Step accounting fails with ${code}`, async t => {
-    const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
+    const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!;
     const run = await service.start("辅助记账故障");
     const artifact = (await service.report(run.id, { name: "来源", content: textContent("产物正文") })).artifact;
     const external = await service.addExternal(run.id, "输入来源", { content: textContent("外部正文") });
@@ -163,7 +164,7 @@ function barrier() {
 }
 for (const terminal of ["finish", "abandon"] as const) for (const reportFirst of [true, false]) {
   test(`report versus ${terminal} allows an admitted report to finish when ${reportFirst ? "report" : terminal} is paused`, async t => {
-    const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!;
+    const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!;
     const second = (await openContextControl(root))!; const run = await service.start("终态竞争");
     const rootArtifact = (await service.report(run.id, { name: "根", content: textContent("根正文") })).artifact;
     const target = await service.createArtifact(run.id, { name: "并发提交" }); const gate = barrier();
@@ -183,7 +184,7 @@ for (const terminal of ["finish", "abandon"] as const) for (const reportFirst of
 }
 for (const readFirst of [true, false]) {
   test(`report versus accounting ${readFirst ? "preserves a prior read" : "allows accounting while submission has not written the Artifact"}`, async t => {
-    const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!; const other = (await openContextControl(root))!;
+    const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!; const other = (await openContextControl(root))!;
     const run = await service.start("读取竞争"); const source = (await service.report(run.id, { name: "来源", content: textContent("来源") })).artifact;
     const target = await service.createArtifact(run.id, { name: "目标" }); const gate = barrier();
     const store = readFirst ? service.stores.step : service.stores.artifact;
@@ -210,7 +211,7 @@ for (const operation of ["create", "report-target", "report-direct"] as const) {
   const boundaries = operation === "create" ? [["artifact", "create"], ["step", "create"]] as const : operation === "report-target" ? [["artifact", "update"], ["step", "update"]] as const : [["artifact", "create"], ["step", "create"], ["step", "update"]] as const;
   for (const [entity, method] of boundaries) for (const after of [false, true]) {
     test(`${operation} interrupted ${after ? "after" : "before"} ${entity}.${method} redoes only durable original identities`, async t => {
-      const { root } = await businessFixture(t, {}); const service = (await openContextControl(root, true))!; const run = await service.start("记录边界恢复");
+      const { root } = await initializedContextFixture(t); const service = (await openContextControl(root))!; const run = await service.start("记录边界恢复");
       const target = operation === "report-target" ? await service.createArtifact(run.id, { name: "目标" }) : undefined;
       const store = service.stores[entity]; const original = store[method].bind(store) as (...args: any[]) => Promise<any>;
       let injected = false;

@@ -502,3 +502,13 @@ Continue uses the calling Agent session. Detect Codex/Traex under Settings → R
 Manage the Home background process with `memsphere daemon start/status/stop/restart`. View retains `view start/status/stop/restart`; stopping View leaves waiting tasks active, and restarting the daemon restores the previous View running/stopped intent. No operating-system boot service is installed.
 
 Dependencies create pending Step instances before production. Enter is idempotent; Continue stays bound to one Step until completion. Formal reviews also support `continue review resolve` and `continue review submit-for-human`, with the native commands’ explicit authorization, options and permission checks. An entry Action prepares business materials; startup accepts no structured business input. Graph runs use model Stores; existing Projects explicitly upgrade with `project models initialize` when prompted. See the [graph syntax and examples](docs/procedure-graph-syntax.md) for model/payload contracts.
+
+Explicit `mode: graph` is recommended for new procedures and is used by the agile development procedure. Omitting mode still parses as flow. The CLI can rewind an upstream Step while retaining historical artifacts and dependencies:
+
+```bash
+memsphere run step rewind --run R --step S --dry-run --output json
+memsphere run step rewind --run R --step S --reason "Revise product plan"
+memsphere run step enter --run R --step <replacementStepId>
+```
+
+Enter the new pending target explicitly. Dependent work is rebuilt, independent branches remain, and superseded Steps reject submissions. Recover saved operations with status on the same Run. Rewind does not undo code or external side effects.

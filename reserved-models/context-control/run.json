@@ -951,6 +951,73 @@
               },
               "inputs": {
                 "$ref": "#/definitions/GraphInputs"
+              },
+              "arrivals": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "artifact",
+                        "collect",
+                        "start"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "stepId": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "collection": {
+                "type": "object",
+                "description": "固定本次collect的成员集合与已观测成员路径触发来源（含false条件和空中间聚合），物化重试复用，历史持续保留。",
+                "properties": {
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    }
+                  },
+                  "triggerIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "uniqueItems": true
+                  }
+                },
+                "required": [
+                  "items",
+                  "triggerIds"
+                ],
+                "additionalProperties": false
               }
             },
             "required": [
@@ -1006,6 +1073,10 @@
                           "minLength": 1
                         }
                       }
+                    },
+                    "stepId": {
+                      "type": "string",
+                      "minLength": 1
                     }
                   },
                   "required": [
@@ -1034,6 +1105,270 @@
         "nextCompletionSequence": {
           "type": "integer",
           "minimum": 1
+        },
+        "rewinds": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "createdAt": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "targetStepId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "replacementStepId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "affectedStepIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              },
+              "affectedTriggerIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "id",
+              "createdAt",
+              "reason",
+              "targetStepId",
+              "replacementStepId",
+              "affectedStepIds",
+              "affectedTriggerIds"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "pendingRewind": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "workers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "reviewId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "attemptId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "pid": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "identity": {
+                    "type": "object",
+                    "properties": {
+                      "pid": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "started": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "group": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "pid",
+                      "started",
+                      "group"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "members": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "pid": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "started": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "group": {
+                          "type": "integer",
+                          "minimum": 1
+                        }
+                      },
+                      "required": [
+                        "pid",
+                        "started",
+                        "group"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "job": {
+                    "type": "string",
+                    "pattern": "^(Global|Local)\\\\Memsphere\\.Reviewer\\.(Tracked\\.)?[0-9a-f-]{36}$"
+                  }
+                },
+                "required": [
+                  "reviewId",
+                  "attemptId",
+                  "pid"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "id",
+            "workers"
+          ],
+          "additionalProperties": false
+        },
+        "deferredCollects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "rewindId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "triggerId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "actionId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "dependencyIndex": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "arrivals": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "artifact",
+                        "collect",
+                        "start"
+                      ]
+                    },
+                    "id": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "stepId": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "required": [
+                    "kind"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "memberStepIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true,
+                "description": "历史 collect 的具体成员来源，用于后续独立回溯的等待合并。"
+              },
+              "waits": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "rootStepId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "waitActionIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "rootStepId",
+                    "waitActionIds"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "memberSourceStepIds": {
+                "type": "array",
+                "description": "各历史空/非空聚合已观测的成员路径与条件来源Step，合并保存以供连续独立回溯延续等待。",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "rewindId",
+              "triggerId",
+              "actionId",
+              "dependencyIndex",
+              "arrivals",
+              "memberStepIds",
+              "waits",
+              "memberSourceStepIds"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
