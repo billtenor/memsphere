@@ -5,6 +5,7 @@ import type { ValueStore, StoredValue } from "../data/api/value-store.js";
 import type { Entity } from "./model-assets.js";
 import type { Artifact, Body, External, NewReviewComment, Ref, ReportInput, Review, Run, Snapshot, Step } from "./types.js";
 import { failure } from "./errors.js";
+import { effectiveStep } from "./graph-rewind.js";
 import { GraphRuntime, isGraphRun } from "./graph-runtime.js";
 export { failure } from "./errors.js";
 
@@ -128,6 +129,7 @@ export class ContextControl {
   }
   private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.require<Run>("run", runId, runId)).value;
+    if (isGraphRun(run)) return this.withGraph(graph => graph.snapshot(runId));
     const [steps, artifacts, externals, reviews] = await Promise.all([
       this.list<Step>("step", runId), this.list<Artifact>("artifact", runId), this.list<External>("external", runId), this.list<Review>("review", runId)
     ]);
@@ -210,9 +212,12 @@ export class ContextControl {
     if (!add.length && !remove.length) throw failure("INVALID_ARGUMENT", "Provide --add or --remove");
     if (add.some(id => remove.includes(id))) throw failure("INVALID_ARGUMENT", "An Artifact cannot be both added and removed");
     return this.writeRecord(runId, async () => {
-      for (const id of add) await this.complete(runId, nonblank(id, "artifact id"));
+      const added = [];
+      for (const id of add) added.push(await this.complete(runId, nonblank(id, "artifact id")));
       for (const id of remove) await this.require<Artifact>("artifact", runId, nonblank(id, "artifact id"));
       const row = await this.running(runId);
+      // Validate every source against the revision guarded by the output write's CAS.
+      if (isGraphRun(row.value) && added.some(a => !effectiveStep(row.value, a.stepId))) throw failure("STEP_SUPERSEDED", "Cannot add a superseded Artifact to current outputs");
       const previous = row.value.outputOverrides;
       const overrides = {
         addedArtifactIds: [...new Set([...(previous?.addedArtifactIds ?? []).filter(id => !remove.includes(id)), ...add])],
@@ -332,7 +337,7 @@ export class ContextControl {
     if (isGraphRun(row.value)) return this.withGraph(async graph => {
       if (artifactIds) {
         const snapshot = await graph.advance(runId);
-        if (snapshot.steps.some(s => s.status !== "done") || snapshot.run.frames![0].graphFrame.joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
+        if (snapshot.run.frames![0].graphFrame.deferredCollects?.length || snapshot.steps.some(s => effectiveStep(snapshot.run, s.id) && s.status !== "done") || snapshot.run.frames![0].graphFrame.joins.some(j => Object.keys(j.arrivals).length)) throw failure("GRAPH_INCOMPLETE", "Graph has unfinished work or a partial join");
         await this.updateOutputs(runId, artifactIds, snapshot.outputArtifactIds.filter(id => !artifactIds.includes(id)));
       }
       return graph.finish(runId);

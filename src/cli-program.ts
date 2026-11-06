@@ -1,0 +1,702 @@
+import { registerReviewNodeCommands, reviewNodeCommand } from "./commands/review-nodes.js";
+import { registerDaemonCommands, registerWaitTaskCommands } from "./daemon/commands.js";
+import { registerContinueCommand } from "./commands/continue.js";
+import { registerExplorationCommands } from "./commands/context-control.js";
+import { projectUpgradeCommand } from "./commands/project-upgrade.js";
+import { createRequire } from "node:module";
+import { Command, Option } from "commander";
+import { registerAppCommands } from "./commands/app.js";
+import { parseCli } from "./commands/cli-errors.js";
+import { registerModelCommands } from "./commands/model.js";
+import { registerDataCommands } from "./commands/data.js";
+import {
+  archiveListCommand,
+  archiveRestoreRunCommand,
+  archiveRunCommand
+} from "./commands/archive.js";
+import {
+  memoryChangeResumeCommand,
+  memoryChangeClaimCommand,
+  memoryChangeCompleteCommand,
+  memoryChangeFinishCommand,
+  memoryChangeValidateCommand,
+  memoryDeleteCommand,
+  memoryEditCommand,
+  memoryListCommand,
+  memoryPublishCommand,
+  memoryPushCommand,
+  memoryRecoverCommand,
+  memoryReadCommand,
+  memoryRenameCommand,
+  memorySyncCommand,
+  memorySyncPublishCommand
+} from "./commands/memory.js";
+import {
+  projectBindCommand,
+  projectCloneCommand,
+  projectCreateCommand,
+  projectListCommand,
+  projectMountCommand,
+  projectModelsInitializeCommand,
+  projectPruneCommand,
+  projectRepairCommand,
+  projectRegisterCommand,
+  projectShowCommand,
+  projectUnbindCommand,
+  projectUnmountCommand
+} from "./commands/project.js";
+import {
+  migrateArtifactContractV2Command,
+  migrateMemorySyntaxCommand,
+  migrateSchemaContractV2Command
+} from "./commands/migrate.js";
+import { memoryKinds } from "./memory/kinds.js";
+import {
+  runAbandonCommand,
+  runEnterSchemaCommand,
+  runArtifactContractShowCommand,
+  runArtifactShowCommand,
+  runArtifactExportCommand,
+  runBindingShowCommand,
+  runBindingUpdateCommand,
+  runRepeatCommand,
+  runReportCommand,
+  runReviewCommentCommand,
+  runReviewResolveCommand,
+  runReviewRetryCommand,
+  runReviewAssignmentShowCommand,
+  runReviewSubmitCommand,
+  runReviewSubmitForHumanCommand,
+  runReviewVoteCommand,
+  runReviewWaitCommand,
+  runSchemaShowCommand,
+  runShowCommand,
+  runSkipCommand,
+  runStartCommand,
+  runStepShowCommand,
+  runStatusCommand,
+  runTryRunCommand
+} from "./commands/run.js";
+import { skillInitCommand, skillUpgradeCommand } from "./commands/skill.js";
+import { validateCommand } from "./commands/validate.js";
+import { runArtifactReviewAgentWorker } from "./acp/review-worker.js";
+import {
+  viewRestartCommand,
+  viewServeCommand,
+  viewStartCommand,
+  viewStatusCommand,
+  viewStopCommand
+} from "./commands/view.js";
+
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json") as { version: string };
+export async function runCli(argv = process.argv): Promise<void> {
+const program = new Command();
+
+program
+  .name("memsphere")
+  .description("Manage local YAML-backed memory entities for AI runtimes.")
+  .version(version)
+  .option("--project <name>", "use one Project for this command without changing Workspace binding");
+
+program.hook("preAction", () => {
+  const selected = program.opts<{ project?: string }>().project;
+  if (selected) process.env.MEMSPHERE_PROJECT = selected;
+});
+
+registerDaemonCommands(program);
+registerModelCommands(program);
+registerDataCommands(program);
+
+program
+  .command("debug-thread-id")
+  .description("Print the Codex thread ID inherited from the calling environment.")
+  .action(() => {
+    const threadId = process.env.CODEX_THREAD_ID?.trim();
+    if (!threadId) {
+      console.error("CODEX_THREAD_ID is not set; no Codex thread is associated with this process.");
+      process.exitCode = 1;
+      return;
+    }
+    console.log(threadId);
+  });
+
+const project = program
+  .command("project")
+  .description("Manage persistent Memsphere Projects and Workspace bindings.");
+
+registerAppCommands(program);
+
+project.command("models").description("Manage model registrations.")
+  .command("initialize").description("Explicitly install system models, initialize registrations, and recover interrupted model operations.")
+  .argument("[name]", "Project name; defaults to the current Primary")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectModelsInitializeCommand);
+
+project.command("create")
+  .argument("<name>", "globally unique Project name")
+  .option("--embedded <memory-path>", "use Memory inside the current Git repository")
+  .option("--bind", "bind the current Workspace after creation")
+  .action(projectCreateCommand);
+
+project.command("clone")
+  .argument("<repository>", "Git URL or local repository")
+  .requiredOption("--name <name>", "globally unique Project name")
+  .option("--branch <branch>", "controlled local branch")
+  .option("--upstream <remote-branch>", "organization upstream, for example origin/master")
+  .option("--bind", "bind the current Workspace after cloning")
+  .action(projectCloneCommand);
+
+project.command("register")
+  .argument("<project-root>", "existing complete Project Root")
+  .option("--bind", "bind the current Workspace after registration")
+  .action(projectRegisterCommand);
+
+project.command("list")
+  .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
+  .option("--cursor <token>", "continue with the previous page's nextCursor")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectListCommand);
+
+project.command("show")
+  .argument("[name]", "Project name; defaults to the current Primary")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectShowCommand);
+
+project.command("upgrade")
+  .description("Upgrade System Memory and system models/registrations for one Project.")
+  .argument("[name]", "Project name; defaults to --project or the current Primary")
+  .option("--change <id>", "retry the dedicated system upgrade ChangeSet in its worktree")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(projectUpgradeCommand);
+
+project.command("repair")
+  .description("Restore or update bundled System Memory in a Managed or Embedded Project.")
+  .argument("[name]", "Project name; defaults to --project or the current Primary")
+  .addHelpText("after", `
+Safety and behavior:
+  Repairs only bundled System Memory in the selected Project; user Memory is not
+  modified, and Mounted Projects remain read-only catalog sources.
+  Deprecated bundled entries are deleted only when a manifest tombstone matches
+  their historical path, canonical identity, and (for v5) issued content digest.
+  Managed repair validates and publishes through a controlled ChangeSet. Embedded
+  repair validates the complete candidate, then writes only the System Memory diff
+  to the current Git worktree without committing or pushing it. Dirty repair targets
+  are never overwritten. If there are no differences, nothing is written.
+
+Project selection:
+  Explicit [name], then global --project, then the current Primary Project.
+`)
+  .action(projectRepairCommand);
+
+project.command("bind")
+  .argument("<name>", "Project name")
+  .action(projectBindCommand);
+
+project.command("unbind").action(projectUnbindCommand);
+project.command("mount").argument("<name>", "read-only Project name").action(projectMountCommand);
+project.command("unmount").argument("<name>", "mounted Project name").action(projectUnmountCommand);
+project.command("prune").description("Remove missing registrations and their bindings.").action(projectPruneCommand);
+
+program
+  .command("validate")
+  .description("Validate the current Project Store or one stateless Memory root.")
+  .option("--memory-root <path>", "validate one Memory root without Home, Registry or Binding")
+  .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .addHelpText("after", `
+This command validates Store/config health and Memory entities. It never creates
+or updates a ChangeSet. To capture and validate unpublished Memory changes in a
+bound Project, run:
+  memsphere memory change validate [change-id]
+
+The stateless --memory-root mode has no Project or ChangeSet context.
+`)
+  .action(validateCommand);
+
+const memory = program
+  .command("memory")
+  .description("Discover and read memory entities.");
+
+memory
+  .command("list")
+  .description("List memory entities or the direct child nodes of one memory.")
+  .argument("[reference]", "canonical logical reference, or bare canonical name or alias")
+  .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
+  .option("--query <text>", "match a top-level canonical name or alias")
+  .option("--node <node-ref>", "list direct children of a memory node")
+  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
+  .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
+  .option("--cursor <token>", "continue with the previous page's nextCursor")
+  .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
+  .action((reference, options) => memoryListCommand(reference, options));
+
+memory
+  .command("read")
+  .description("Read one memory entity by canonical logical reference, or bare canonical name or alias.")
+  .argument("<reference>", "canonical logical reference, or bare canonical name or alias")
+  .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
+  .option("--node <node-ref>", "read one memory node with its required context")
+  .option("--effective", "include the resolved effective rules for the selected memory or node")
+  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
+  .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
+  .action((reference, options) => memoryReadCommand(reference, options));
+
+memory.command("edit")
+  .description("Create or edit Memory in the current Embedded worktree or a Managed ChangeSet.")
+  .argument("<references...>", "existing selectors, or new canonical <kind>/<name> references to create Memory")
+  .option("--change <id>", "append targets to an existing ChangeSet")
+  .action(memoryEditCommand);
+
+memory.command("delete")
+  .description("Delete existing Memory through a Managed ChangeSet.")
+  .argument("<references...>", "existing Memory references")
+  .option("--change <id>", "append targets to an existing ChangeSet")
+  .action(memoryDeleteCommand);
+
+memory.command("rename")
+  .description("Rename a Memory canonical name through a Managed ChangeSet; retain its file path.")
+  .argument("<reference>", "existing Memory reference")
+  .argument("<new-name>", "new lowercase ASCII kebab-case canonical name")
+  .option("--change <id>", "append target to an existing ChangeSet")
+  .action(memoryRenameCommand);
+
+memory.command("publish")
+  .requiredOption("--change <id>", "ChangeSet id")
+  .option("--message <text>", "Git commit message")
+  .action(memoryPublishCommand);
+
+memory.command("recover")
+  .argument("<reference>", "frozen Memory reference")
+  .option("--restore", "discard the external modification")
+  .option("--create-change", "save the external modification as a ChangeSet candidate, then restore")
+  .action(memoryRecoverCommand);
+
+memory.command("push").description("Push the controlled Managed Memory branch without force.").action(memoryPushCommand);
+const memorySync = memory.command("sync").description("Merge the configured organization upstream.").action(memorySyncCommand);
+memorySync.command("publish")
+  .requiredOption("--change <id>", "Sync ChangeSet id")
+  .option("--message <text>", "merge commit message")
+  .action(memorySyncPublishCommand);
+
+const memoryChange = memory.command("change").description("Manage Memory ChangeSet candidates.");
+memoryChange.command("resume")
+  .argument("<change-id>", "ChangeSet id")
+  .action(memoryChangeResumeCommand);
+
+memoryChange.command("claim")
+  .description("Claim a ChangeSet for processing in the current Workspace.")
+  .argument("<change-id>", "ChangeSet id")
+  .option("--force", "replace another Workspace claim")
+  .action(memoryChangeClaimCommand);
+
+memoryChange.command("finish")
+  .description("Complete every processing Comment in one batch and release the current claim.")
+  .argument("<change-id>", "ChangeSet id")
+  .option("--comment <ids...>", "all processing Comment ids; partial completion is rejected")
+  .addOption(new Option("--reason <reason>", "one completion reason for this entire batch").choices(["fixed", "rejected"]))
+  .action(memoryChangeFinishCommand);
+
+memoryChange.command("complete")
+  .description("Complete an active ChangeSet that has no actual Memory differences or unfinished Comments.")
+  .argument("<change-id>", "ChangeSet id")
+  .action(memoryChangeCompleteCommand);
+
+memoryChange.command("validate")
+  .description("Capture and validate the current Managed or Embedded Working Change.")
+  .argument("[change-id]", "ChangeSet id; inferred when the current Working Change is unambiguous")
+  .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .action(memoryChangeValidateCommand);
+
+const view = program
+  .command("view")
+  .description("Manage the local memory browser and review UI.");
+
+view
+  .command("start")
+  .description("Start the View service in the background.")
+  .action(viewStartCommand);
+
+view
+  .command("stop")
+  .description("Stop the managed View service.")
+  .action(viewStopCommand);
+
+view
+  .command("restart")
+  .description("Restart the managed View service.")
+  .action(viewRestartCommand);
+
+view
+  .command("status")
+  .description("Show the managed View service status.")
+  .action(viewStatusCommand);
+
+view
+  .command("serve", { hidden: true })
+  .description("Run the internal View HTTP server.")
+  .option("--config <path>", "config file path")
+  .option("--state <path>", "service state file path")
+  .action(viewServeCommand);
+
+const skill = program
+  .command("skill")
+  .description("Manage memsphere Agent skills.");
+
+skill
+  .command("init")
+  .description("Install memsphere Agent skills.")
+  .option("--global", "install into ~/.agents/skills")
+  .option("--directory <path>", "skills directory")
+  .option("--force", "overwrite the existing skill")
+  .action(skillInitCommand);
+
+skill.command("upgrade")
+  .description("Update the selected memsphere Skill installation (equivalent to init --force).")
+  .option("--global", "install into ~/.agents/skills")
+  .option("--directory <path>", "skills directory")
+  .action(skillUpgradeCommand);
+
+const run = program
+  .command("run")
+  .description("Run a Procedure or free exploration task; inspect and manage its results.");
+
+run
+  .command("start")
+  .description("Start a Procedure Run with a name/file, or free exploration without either.")
+  .argument("[procedure-name]", "Procedure primary name or alias; omit for free exploration")
+  .requiredOption("--name <name>", "name for this run")
+  .option("--file <path>", "Procedure YAML file instead of a procedure name")
+  .option("--change <id>", "Procedure only: validated candidate Memory in an active ChangeSet")
+  .option("--review-config <path>", "Procedure only: bind formal Review Slots")
+  .action((procedureName, options) => runStartCommand(procedureName, options));
+
+run
+  .command("report")
+  .description("Report a Procedure step Artifact or a complete free exploration Artifact.")
+  .requiredOption("--run <id>", "run id")
+  .option("--step <id>", "graph Step instance id")
+  .option("--artifact <value>", "artifact value")
+  .option("--artifact-file <path>", "read artifact value from file")
+  .option("--write-options <json>", "inline JSON write options for a model Artifact (data_id)")
+  .option("--revision-summary <text>", "revision summary")
+  .option("--revision-summary-file <path>", "read the revision summary from file")
+  .action(runReportCommand);
+
+run
+  .command("abandon")
+  .description("Abandon a running Run after an explicit Human decision; this does not archive it.")
+  .requiredOption("--run <id>", "run id")
+  .option("--reason <text>", "optional Human-provided reason")
+  .option("--reason-file <path>", "read the optional reason from a file")
+  .option("--actor <id>", "Human Actor id from the frozen Run snapshot")
+  .action(runAbandonCommand);
+
+run
+  .command("show")
+  .description("Show a Procedure outline or free exploration Artifact graph summary.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runShowCommand);
+
+const runBinding = run
+  .command("binding")
+  .description("Inspect or update future Review Slot bindings for a running Run.");
+
+runBinding
+  .command("show")
+  .description("Show frozen Actors, current-round bindings, next-round bindings, affected scopes, and history.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runBindingShowCommand);
+
+runBinding
+  .command("update")
+  .description("Replace one Slot binding for the next round of an active Review or for future Reviews.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--slot <procedure::slot>", "fully qualified Review Slot key")
+  .option("--actor <id>", "bind a frozen Actor; repeat for multiple Actors", (value, previous: string[]) => [...previous, value], [])
+  .option("--skip", "explicitly skip this Slot for future Reviews")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runBindingUpdateCommand);
+
+run
+  .command("try-run")
+  .description("Generate Agent Review launch and Prompt evidence without starting ACP Agents.")
+  .requiredOption("--run <id>", "run id")
+  .action(runTryRunCommand);
+
+const runStep = run
+  .command("step")
+  .description("Inspect one Run step.");
+
+runStep.command("enter")
+  .description("Enter a graph Step instance and return its execution prompt.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--step <id>", "Step instance id")
+  .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("enter", options)) throw new Error("enter requires a graph Run"); });
+
+runStep.command("rewind")
+  .description("Rewind a current graph Step, retaining history and rebuilding affected dependencies.")
+  .requiredOption("--run <id>", "Run id")
+  .requiredOption("--step <id>", "current production Step id")
+  .option("--dry-run", "preview affected Steps without writes")
+  .option("--reason <text>", "reason for rewind")
+  .option("--reason-file <path>", "read rewind reason from a file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("rewind", options)) throw new Error("rewind requires a graph Run"); });
+
+runStep
+  .command("show")
+  .description("Show the detailed contract and instructions for one Run step.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--step <ref>", "step ref from run show")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runStepShowCommand);
+
+const runArtifact = run
+  .command("artifact")
+  .description("Inspect a Procedure or free exploration Artifact.");
+
+runArtifact
+  .command("show")
+  .description("Show an Artifact; use --step for Procedure or --artifact for free exploration.")
+  .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
+  .option("--run <id>", "run id")
+  .option("--step <ref>", "step ref from run show")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runArtifactShowCommand);
+
+const runArtifactContract = runArtifact
+  .command("contract")
+  .description("Inspect the frozen contract for an Artifact.");
+
+runArtifact
+  .command("export")
+  .description("Save a file Artifact to a local working copy.")
+  .requiredOption("--run <id>", "run id")
+  .requiredOption("--step <ref>", "step ref from run show")
+  .requiredOption("--file <path>", "local destination")
+  .option("--force", "overwrite the local destination")
+  .action(runArtifactExportCommand);
+
+runArtifactContract
+  .command("show")
+  .description("Show the complete frozen Action and Artifact contract.")
+  .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
+  .option("--run <id>", "run id")
+  .option("--step <ref>", "step ref from run show")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runArtifactContractShowCommand);
+
+const runSchema = run
+  .command("schema")
+  .description("Inspect the active Schema writing context and managed draft.");
+
+runSchema
+  .command("show")
+  .description("Show Schema progress, production constraints, and the managed draft path.")
+  .requiredOption("--run <id>", "run id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runSchemaShowCommand);
+
+const runReview = run
+  .command("review")
+  .description("Manage formal Procedure Review or light free exploration feedback.");
+
+const reviewWait = runReview
+  .command("wait")
+  .description("Wait until assigned reviews are submitted or the current round is decided.")
+  .option("--review <id>", "artifact review id")
+  .action(runReviewWaitCommand);
+registerWaitTaskCommands(reviewWait);
+
+runReview
+  .command("vote")
+  .description("Cast the Runner decision vote for the current Artifact Review round.")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "artifact review round id")
+  .addOption(new Option("--vote <vote>", "Runner vote").choices(["approve", "request_changes"]).makeOptionMandatory())
+  .option("--comment <text>", "Runner decision comment")
+  .option("--comment-file <path>", "read the Runner decision comment from a file")
+  .action(runReviewVoteCommand);
+
+runReview
+  .command("retry")
+  .description("Retry one failed Agent Assignment in the current Review round.")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--assignment <identity-or-assignment-id>", "agent identity or assignment id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewRetryCommand);
+
+runReview
+  .command("submit-for-human")
+  .description("Submit one Human Assignment after explicit Human authorization.")
+  .requiredOption("--run <id>", "target run id")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "current artifact review round id")
+  .requiredOption("--assignment <identity-or-assignment-id>", "human identity or assignment id")
+  .addOption(new Option("--vote <vote>", "Human review vote").choices(["approve", "request_changes", "abstain"]).makeOptionMandatory())
+  .requiredOption("--comments-file <path>", "strict JSON array of review comments")
+  .option("--summary <text>", "overall review summary")
+  .option("--summary-file <path>", "read overall review summary from a file")
+  .option("--authorization-note <text>", "Human authorization audit note")
+  .option("--authorization-note-file <path>", "read the Human authorization audit note from a file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewSubmitForHumanCommand);
+
+runReview
+  .command("resolve")
+  .description("Record the Runner disposition for an advisory comment.")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "artifact review round id")
+  .requiredOption("--comment <id>", "advisory comment id")
+  .addOption(new Option("--disposition <value>", "Runner disposition").choices([
+    "accepted-fixed",
+    "accepted-followup",
+    "rejected-out-of-scope",
+    "rejected-not-blocking",
+    "rejected-invalid"
+  ]).makeOptionMandatory())
+  .option("--note <text>", "disposition note")
+  .option("--note-file <path>", "read disposition note from file")
+  .option("--validation-summary <text>", "validation performed for accepted-fixed")
+  .option("--validation-summary-file <path>", "read validation summary from file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewResolveCommand);
+
+const runReviewAssignment = runReview
+  .command("assignment")
+  .description("Inspect the Agent Assignment bound to the active ACP Session.");
+
+runReviewAssignment
+  .command("show")
+  .description("Show this Agent's Assignment status, role, permissions, and own draft.")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewAssignmentShowCommand);
+
+runReview
+  .command("comment")
+  .description("Add a structured comment to this Agent Assignment.")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .option("--body <text>", "single-line Markdown comment body")
+  .option("--body-file <path>", "read a multiline Markdown comment body from a file")
+  .option("--body-stdin", "read a multiline Markdown comment body from standard input")
+  .addOption(new Option("--severity <severity>", "comment severity").choices(["blocking", "risk", "suggestion"]).makeOptionMandatory())
+  .option("--target <target>", "comment anchor target")
+  .option("--location <location>", "comment anchor location")
+  .option("--source-hash <hash>", "comment anchor source hash")
+  .option("--submission-id <id>", "comment anchor submission id")
+  .option("--context <text>", "comment anchor context excerpt")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(runReviewCommentCommand);
+
+runReview
+  .command("submit")
+  .description("Submit the Vote and complete this Agent Assignment.")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .addOption(new Option("--vote <vote>", "review vote").choices(["approve", "request_changes", "abstain"]).makeOptionMandatory())
+  .option("--summary <text>", "overall review summary")
+  .option("--summary-file <path>", "read overall review summary from file")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(o => o.artifact !== undefined || o.artifactFile !== undefined ? reviewNodeCommand("submit", o) : runReviewSubmitCommand(o));
+
+runReview
+  .command("agent-worker", { hidden: true })
+  .description("Run one internal ACP Agent Review worker.")
+  .requiredOption("--config <path>", "config file path")
+  .requiredOption("--review <id>", "artifact review id")
+  .requiredOption("--round <id>", "artifact review round id")
+  .requiredOption("--assignment <id>", "artifact review assignment id")
+  .requiredOption("--node-executable <path>", "Node executable path")
+  .requiredOption("--cli-entrypoint <path>", "CLI entrypoint path")
+  .option("--workspace-root <path>", "Original caller working directory")
+  .action(runArtifactReviewAgentWorker);
+
+run
+  .command("enter-schema")
+  .description("Enter a schema artifact writing flow.")
+  .argument("[schema-name]", "schema primary name or alias; omit for the current inline schema")
+  .requiredOption("--run <id>", "run id")
+  .action(runEnterSchemaCommand);
+
+run
+  .command("repeat")
+  .description("Choose a repeat count for the current Schema Repeat step.")
+  .argument("<count>", "non-negative repeat count within the Schema limit")
+  .requiredOption("--run <id>", "run id")
+  .action(runRepeatCommand);
+
+run
+  .command("skip")
+  .description("Skip the current optional Schema field step.")
+  .requiredOption("--run <id>", "run id")
+  .action(runSkipCommand);
+
+run
+  .command("status")
+  .description("Show either Run mode's status or list recent Runs.")
+  .option("--run <id>", "run id")
+  .action(runStatusCommand);
+
+registerExplorationCommands(run);
+registerReviewNodeCommands(run);
+registerContinueCommand(program, run);
+
+const migrate = program
+  .command("migrate")
+  .description("Migrate persisted memsphere data between contract versions.");
+
+migrate
+  .command("syntax")
+  .description("Migrate Memory YAML to a registered syntax version.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--to <syntax>", "target syntax; defaults to the current stable syntax")
+  .action(migrateMemorySyntaxCommand);
+
+migrate
+  .command("artifact-contract-v2")
+  .description("Migrate Memory Artifact contracts to type, format, and schema v2.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .action(migrateArtifactContractV2Command);
+
+migrate
+  .command("schema-contract-v2")
+  .description("Migrate Schema contracts to inferred types and inherited formats v2.")
+  .option("--check", "scan and print a read-only migration manifest")
+  .option("--write", "stage, validate, back up, and apply the migration")
+  .action(migrateSchemaContractV2Command);
+
+const archive = program
+  .command("archive")
+  .description("Archive completed items and restore supported kinds.");
+
+archive
+  .command("list")
+  .description("List archived items.")
+  .argument("[kind]", "optional: runs or changes")
+  .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
+  .option("--cursor <token>", "continue with the previous page's nextCursor")
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
+  .action(archiveListCommand);
+
+archive
+  .command("run")
+  .description("Archive a done or abandoned run.")
+  .argument("<id>", "run id")
+  .action(archiveRunCommand);
+
+const restore = archive
+  .command("restore")
+  .description("Restore an archived run.");
+
+restore
+  .command("run")
+  .description("Restore an archived run.")
+  .argument("<id>", "run id")
+  .action(archiveRestoreRunCommand);
+
+await parseCli(program, argv);
+}

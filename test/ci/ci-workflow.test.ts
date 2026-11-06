@@ -3,51 +3,71 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
 import { ciProfile, createCiPlan } from "../../scripts/ci/ci-plan.mjs";
-import { discoverTestFiles, packagePlatformTests, platformTests, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
+import { defaultTestExclusions, discoverTestFiles, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = await discoverTestFiles("test");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(`test/${file}`, "utf8")])));
 
-test("PR runs every retained test on Linux and every declared native risk on macOS and Windows", () => {
-  const rows = createCiPlan("default", files, sources).include;
-  assert.equal(rows.length + 1, 8, "eight complete test/package builds");
-  for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
-    const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite));
-    if (os === "windows-latest") assigned.push(...packagePlatformTests);
-    assert.equal(new Set(assigned).size, assigned.length, `${os}: no duplicate files`);
-    if (os === "ubuntu-24.04") assert.deepEqual([...assigned].sort(), [...files].sort());
-    else {
-      for (const file of [...platformTests, ...files.filter(file => file.startsWith("project-upgrade"))]) {
-        assert(assigned.includes(file), `${os}: required native protection ${file}`);
-      }
-    }
+test("exclusion-based selection preserves every prior default suite", async () => {
+  const baseline = JSON.parse(await readFile("test/ci/fixtures/selection-before-exclusions.json", "utf8"));
+  const existing = baseline.files.filter((file: string) => files.includes(file));
+  for (const [suite, selected] of Object.entries(baseline.suites)) {
+    assert.deepEqual(selectTests(existing, sources, {}, suite).sort(), (selected as string[]).filter(file => files.includes(file)), suite);
   }
-  const packaged = workflow.jobs["windows-package-smoke"].steps.find(step => step.name === "Native platform contracts");
-  assert.equal(packaged.if, "needs.plan.outputs.profile == 'default'");
-  assert.match(packaged.run, /node scripts\/ci\/run-tests\.mjs --suite=package-platform --test-concurrency=2/);
-  assert(platformTests.includes("project-command.test.ts"), "repair CAS, literal Git paths, symlink rejection and rollback remain platform checks");
-  assert(platformTests.includes("project-resolver.test.ts"));
-  assert(platformTests.includes("run-memory-backfill.test.ts"));
-  assert.throws(() => createCiPlan("default", files.filter(file => file !== "project-resolver.test.ts"), sources), /protection is missing/);
 });
 
-test("Full CI retains complete exactly-once coverage on all platforms, including future files", () => {
-  const future = "unmeasured-new-feature.test.ts";
-  const allFiles = [...files, future];
-  const allSources = { ...sources, [future]: "" };
-  const rows = createCiPlan("full", allFiles, allSources).include;
-  assert.equal(rows.length, 17);
-  for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
-    const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
-    assert.deepEqual([...assigned].sort(), [...allFiles].sort(), `${os}: no missing or duplicate files`);
+function assertDefaultGroups(files: string[], sources: Record<string, string>) {
+  const full = createCiPlan("full", files, sources).include;
+  const defaults = createCiPlan("default", files, sources).include;
+  for (const row of defaults) {
+    assert.ok(selectTests(files, sources, {}, row.suite).length > 0, "only nonempty categories become jobs");
+    const suite = row.suite.replace(/^native-/, "");
+    const previous = full.find(candidate => candidate.os === row.os && candidate.suite === suite);
+    assert(previous);
+    assert.equal(row.workers, previous.workers);
+    assert.equal(row.title, previous.title);
+    const expected = selectTests(files, sources, {}, suite).filter(file => row.os === "ubuntu-24.04" || !defaultTestExclusions.includes(file));
+    assert.deepEqual(selectTests(files, sources, {}, row.suite), expected);
   }
+  for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
+    const assigned = defaults.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite)).sort();
+    assert.deepEqual(assigned, (os === "ubuntu-24.04" ? files : files.filter(file => !defaultTestExclusions.includes(file))).slice().sort(), `${os}: every eligible file runs exactly once`);
+  }
+}
+
+test("default preserves native coverage while using full's category groups and workers", () => assertDefaultGroups(files, sources));
+
+test("default excludes only fixed paths; all future files run once and full remains exhaustive", async () => {
+  const future = {
+    "nested/unmeasured-new-feature.test.ts": "",
+    "nested/daemon-integration.test.ts": "",
+    "project-upgrade-future.test.ts": "",
+    "model-future-browser.test.ts": "helpers/browser",
+    "review-future-browser.test.ts": "helpers/browser",
+    "future-cli.test.ts": ""
+  };
+  const exclusions = defaultTestExclusions;
+  assert.equal(new Set(exclusions).size, exclusions.length);
+  assert(exclusions.every((path: string) => typeof path === "string" && !/[?*]/.test(path) && !path.includes("..") && !path.startsWith("/")));
+  const allFiles = [...files, ...Object.keys(future)];
+  const allSources = { ...sources, ...future };
+  assertDefaultGroups(allFiles, allSources);
   for (const profile of ["default", "full"]) {
-    for (const row of createCiPlan(profile, files, sources).include) {
+    const rows = createCiPlan(profile, allFiles, allSources).include;
+    for (const os of ["macos-latest", "windows-latest"]) assert.ok(rows.some(row => row.os === os && selectTests(allFiles, allSources, {}, row.suite).includes("model-future-browser.test.ts")), "future browser tests activate native UI jobs");
+    for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
+      const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
+
+      const expected = profile === "default" && os !== "ubuntu-24.04" ? allFiles.filter(file => !exclusions.includes(file)) : allFiles;
+      assert.deepEqual([...assigned].sort(), [...expected].sort(), `${profile}/${os}: no missing or duplicate files`);
+      for (const file of Object.keys(future)) assert(assigned.includes(file), file);
+    }
+    for (const row of rows) {
       assert.equal(row.title, testSuites[row.suite].title);
       assert(row.workers > 0);
-      const selected = selectTests(files, sources, {}, row.suite);
-      assert.equal(row.browser, selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])));
+      const selected = selectTests(allFiles, allSources, {}, row.suite);
+      assert.equal(row.browser, selected.some(file => allSources[file].includes("helpers/browser") || /from ["']playwright["']/.test(allSources[file])));
     }
   }
 });

@@ -73,8 +73,7 @@ export function openBusinessStore(context: Context, root: string, id: string, op
 }
 async function openBusinessStoreOnce(context: Context, root: string, id: string, options: { write?: boolean; runtime?: ModelRuntime }) {
   const state = await getBusinessBinding(root, id);
-  const host = await createProjectModelHost(context, { root, ...state.project });
-  const runtime = options.runtime ?? await host.runtime(state.binding.model);
+  const runtime = options.runtime ?? await (await createProjectModelHost(context, { root, ...state.project })).runtime(state.binding.model);
   if (state.binding.kind === "value") {
     try { assertJsonDescriptor(runtime.descriptor.root); }
     catch (cause) { throw serviceError("STORE_INCOMPATIBLE", "filesystem JSON ValueStore requires a JSON-compatible model", { cause: String(cause) }); }

@@ -13,6 +13,8 @@ function program() {
         .addOption(new Option("--output <format>").choices(["text", "json"]));
     }
   }
+  const steps = root.commands.find(c => c.name() === "run")!.command("step");
+  for (const name of ["rewind", "show"]) steps.command(name).option("--run <id>").option("--step <id>").option("--reason <text>").option("--dry-run").option("--output <format>");
   return root;
 }
 
@@ -22,7 +24,9 @@ test("JSON errors are selected even when an earlier argument stops Commander par
     ["memory", "list", "--bad", "--output", "json"],
     ["archive", "list", "unknown-kind", "--output=json"],
     ["project", "list", "--limit", "invalid", "--output", "json"],
-    ["--project", "example", "model", "create", "--output=json"]
+    ["--project", "example", "model", "create", "--output=json"],
+    ["run", "step", "rewind", "--step", "dummy", "--dry-run", "--output", "json"],
+    ["--project", "example", "run", "step", "rewind", "--run", "R", "--output=json"]
   ]) assert.equal(requestedCliOutput(cli, args), "json");
 });
 
@@ -32,7 +36,10 @@ test("output-looking values and arguments after -- do not select the JSON error 
     ["data", "create", "--value", "--output=json"],
     ["memory", "list", "--", "--output", "json"],
     ["run", "read", "--output", "json"],
-    ["memory", "read", "example", "--output", "json"]
+    ["memory", "read", "example", "--output", "json"],
+    ["run", "step", "show", "--output", "json"],
+    ["run", "step", "rewind", "--reason", "--output=json"],
+    ["run", "step", "rewind", "--", "--output", "json"]
   ]) assert.equal(requestedCliOutput(cli, args), "text");
 });
 

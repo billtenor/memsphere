@@ -111,6 +111,7 @@ export type ArtifactReviewAgentAttempt = {
   startedAt?: string;
   completedAt?: string;
   workerPid?: number;
+  workerJob?: string;
   cliReadyAt?: string;
   promptVersion?: string;
   sessionId?: string;

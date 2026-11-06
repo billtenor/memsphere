@@ -11,8 +11,8 @@ import test, { type TestContext } from "node:test";
 import { archiveRun, restoreRun } from "../src/archive/store.js";
 import { buildRunCurrentStepPromptModel } from "../src/prompts/run.js";
 import { renderPrompt } from "../src/prompts/index.js";
-import { businessFixture, publishFixtureDefinition } from "./helpers/business-data.js";
-import { initializeProjectModelRegistrations } from "../src/project/model-registration.js";
+import { objectSchema, publishFixtureDefinition } from "./helpers/business-data.js";
+import { initializedModelFixture } from "./helpers/initialized-context.js";
 import { readData, listData, upsertData } from "../src/project/data-service.js";
 import { FilesystemJsonValueStoreFactory } from "../src/data/extensions/filesystem-json-valuestore/index.js";
 import { abandonRun, startRun, enterSchema, reportRun, readRun, currentStep, currentArtifactReview, submitArtifactReviewHumanAssignmentForRunner, submitArtifactReviewRunnerVote } from "../src/run/store.js";
@@ -32,8 +32,7 @@ const action = (review = false, type = "object", format = "json") => `  - !actio
       store: records
 ${review ? '      review: [owner]\n' : ''}`;
 async function fixture(t: TestContext, flow = action(), schemas?: Record<string, unknown>) {
-  const f = await businessFixture(t, schemas); await f.createStore();
-  await initializeProjectModelRegistrations({}, { root: f.root });
+  const f = await initializedModelFixture(t, schemas ?? { "record.json": objectSchema }); await f.createStore();
   const memoryRoot = join(f.root, "memory"); const runsRoot = join(f.root, "runs");
   await fs.mkdir(join(memoryRoot, "procedures"), { recursive: true });
   const save = (name: string, body: string) => fs.writeFile(join(memoryRoot, "procedures", `${name}.yaml`), `!procedure\nsyntax: memsphere-20260721-stable\nname: ${name}\nflow:\n${body}`);
