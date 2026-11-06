@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { buildAgentReviewContract } from "../src/acp/review-contract.js";
+import { readMemoryFile } from "../src/memory/store.js";
+import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { fileURLToPath } from "node:url";
 import crossSpawn from "cross-spawn";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
@@ -14,6 +18,10 @@ for (const graph of [true, false]) for (const locale of ["en", "zh-CN"] as const
     const f = await reviewNodeFixture(t, graph);
     const context = await reviews.readArtifactReviewForActor(f.input);
     const prompt = await buildArtifactReviewerPrompt({ context, locale, promptVersion: "artifact-review-v3" });
+    assert.match(prompt, /memsphere memory change show/);
+    assert.match(prompt, /--checkpoint/);
+    assert.match(prompt, locale === "en" ? /no --run is added automatically/ : /不会自动添加 --run/);
+    assert.match(prompt, locale === "en" ? /Formal review rules and contracts always use the frozen version/ : /正式评审规则与契约始终采用冻结版本/);
     const reminder = buildArtifactReviewerReminder(locale, "artifact-review-v3");
     for (const permission of context.assignment.permissions) {
       assert.ok(prompt.includes(permission), `initial prompt shows ${permission}`);
@@ -53,4 +61,30 @@ test("restricted material CLI preserves both legitimate input Artifact IDs for e
   assert.ok(prompt.includes(f.result.materials.inputA));
   assert.ok(prompt.includes(f.result.materials.inputB));
   assert.equal(prompt.includes(f.result.materials.unrelated), false);
+});
+
+for (const graph of [true, false]) test(`${graph ? "graph" : "flow"} formal rules remain frozen after current Project Statement changes`, async t => {
+  const f = await reviewNodeFixture(t, graph, false, { statementRule: true });
+  const before = await reviews.readArtifactReviewForActor(f.input);
+  const contract = buildAgentReviewContract(before);
+  assert.match(JSON.stringify(contract), /Frozen dependency rule/);
+  await writeFile(f.ruleFile, withCurrentMemorySyntax("!statement\nnames: [checkpoint-rules]\nasserts: [Current Project rule changed.]\n"));
+  assert.match(JSON.stringify((await readMemoryFile("statements", f.ruleFile)).entity), /Current Project rule changed/);
+  const after = await reviews.readArtifactReviewForActor(f.input);
+  assert.deepEqual(buildAgentReviewContract(after), contract);
+  assert.deepEqual(after.assignment.nodeTree, before.assignment.nodeTree);
+  assert.doesNotMatch(JSON.stringify(after.assignment.nodeTree), /Current Project rule changed/);
+});
+
+test("All supported legacy reviewer prompts describe explicit Run reads and equivalent parameter defaults", async t => {
+  const f = await reviewNodeFixture(t, false);
+  const context = await reviews.readArtifactReviewForActor(f.input);
+  context.assignment.nodeTree = undefined;
+  for (const promptVersion of ["artifact-review-v1", "artifact-review-v2"]) for (const locale of ["en", "zh-CN"] as const) {
+    const prompt = await buildArtifactReviewerPrompt({ context, locale, promptVersion });
+    assert.match(prompt, /--part summary/); assert.match(prompt, /--side after/);
+    assert.match(prompt, /memory change show/);
+    assert.match(prompt, locale === "en" ? /no --run is added automatically/ : /不会自动添加 --run/);
+    assert.doesNotMatch(prompt, /automatically bind their frozen|会自动绑定其冻结/);
+  }
 });

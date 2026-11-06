@@ -36,6 +36,11 @@ Managed Memory 通过受控 ChangeSet 修改。Embedded CLI 使用当前 Git wor
 
 规则引用需要展开时用 `memory read <reference> --effective`。访问细则读取 `memsphere-memory-access-rules`。
 
+Reviewer Session 中，`memory list/read` 默认仍读当前 Project，不自动添加 `--run`；查阅绑定 Run 的实际冻结集合时显式指定 `--run <run-id>`，缺失引用不回退。当前 Memory 是辅助证据，正式评审规则与契约始终使用冻结版本。
+
+ChangeSet 材料用 `memory change show <change-id> --checkpoint <digest>` 读取，默认 `--part summary`；其他选项为 `--part diff|validation`，或 `--part memory --reference <reference> --side before|after`。`--reference` 只筛选，不改变 part。省略 `--part` 与显式 `summary` 等价，正文省略 `--side` 与显式 `after` 等价；不存在的一侧为 null。输出为 JSON。digest 绑定范围、基线及校验结果，候选未校验修改不污染旧版本；过期、损坏、缺少冻结描述时明确失败，调用方需重新校验并更新材料引用。
+
+
 ## 执行任务
 
 ### 选择执行入口
@@ -161,7 +166,7 @@ defines:
 
 Managed 删除/改名使用 `memory delete <references...>`、`memory rename <reference> <new-canonical-name>`，需要时用 `--change <id>` 追加同一候选；改 canonical 不自动移动物理文件。当前这两个命令不支持 Embedded：在其有效 worktree 中审阅并删除文件或修改 YAML 的 names，必要的文件移动走正常 Git 操作，然后统一变更级校验与集成。Mounted 不可写。
 
-本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [change-id]`，记录 ChangeSet ID、校验状态和 View 入口；后续再改则重新校验。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet，稀疏 candidate/checkpoint 不是完整 Memory Root，不能拿它调用 `validate --memory-root`。
+本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [change-id]`，记录 ChangeSet ID、checkpoint digest、校验状态和 View 入口；后续再改则重新校验。校验回执提供实际 reviewCommand，评审材料列出它及相关逻辑引用，按需使用 part 读取证据；无需将 Memory 全文复制进 Artifact 或访问内部存储文件。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet，稀疏 candidate/checkpoint 不是完整 Memory Root，不能拿它调用 `validate --memory-root`。
 
 Managed 通过校验后 `memory publish --change <id>` 发布并完成 ChangeSet；远端推送和上游同步按需用 `memory push`、`memory sync` 及对应 publish，冲突按回执处理，不强推。Embedded 普通变更走所在仓库的 commit/PR/集成流程；commit、push、PR 不等于 completed，进入 master 后才完成。专用系统升级按“升级与维护”执行。
 

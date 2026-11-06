@@ -7,7 +7,7 @@ names:
 defines:
   - 规定 Agent 如何通过 memsphere CLI 发现和读取当前 Workspace 可见 Project 中的 Memory。
 asserts:
-  - graph Run 的 Memory 阅读使用 memory list/read --run，直接读取本 Run 已冻结的根流程及传递依赖；不得混入当前 Project 或后来修改的 App 内容。此入口支持常规启动、文件启动及 ChangeSet 启动的 graph Run。
+  - 需要查阅 graph Run 冻结的 Memory 时，显式使用 memory list/read --run，读取本 Run 已冻结的根流程及传递依赖；此入口支持常规启动、文件启动及 ChangeSet 启动。未冻结的引用明确失败，不能用当前 Project 或后来的 App 内容补足或替代冻结规则。
   - 所有 memory list（包括直接子 Node 列表）使用 items 和可选 nextCursor；默认每页 100 条、最多 1000，先筛选再分页。需要完整结果时必须以相同 Project、Run 和筛选条件持续传入返回的 cursor，直到没有 nextCursor，不得把第一页当作完整目录；可调整 limit 或输出格式，分页不承诺并发修改期间的快照。
   - 当用户已经给出可唯一解析的 bare 规范名称、bare 别名或 canonical 逻辑引用时，Agent 可以直接使用 memsphere memory read；目标尚未唯一确定时，必须先使用 memsphere memory list 发现候选。
   - 显式逻辑引用固定使用 `<kind>/<canonical-name>`；canonical name 必须是 1–120 字符的小写 ASCII kebab-case，不接受 alias。别名只能作为不带 kind 的 selector，并在同一解析范围内无冲突时定位到当前 canonical reference。
@@ -28,8 +28,14 @@ asserts:
   - Embedded Project 配置中的 repository_path 是主工作树绝对路径，memory_path 是仓库相对路径；View 展示该主工作树中的规范 Memory，CLI 命令在同一 Git common-dir 的 linked worktree 中执行时读取当前 worktree 的有效 Memory。
   - Embedded CLI 解析必须拒绝其他仓库和非 Git 工作区；当前 worktree 不存在 memory_path 时必须直接报错，不得静默读取主工作树。Agent 编辑时必须使用 memsphere memory edit 返回的当前 worktree 路径，并通过正常 Git 提交合入。普通 Embedded ChangeSet 不得 publish；仅 intent 为 market_import 或 app_install 的隔离候选可复用 publish 将已校验内容应用到当前 worktree，且不得 commit、push 或把 ChangeSet 标记为 completed。
   - 记忆市场是 npm 包内的官方精选 Memory 展示区，不是运行时 Memory 来源。市场 Memory 只有经用户点击导入、形成 ChangeSet 并完成 Project 写入后才生效；active 的导入 ChangeSet 只形成可跳转的“导入中”流程状态。之后它是普通用户 Memory，与包内内容独立演进。两者仅以当前 kind/canonical-name 关联，原始文件字节决定“一致”或“有差异”，不记录来源或版本，也不自动更新。
-  - 使用验证成功的 active ChangeSet 启动 Run 时，Run 必须冻结该 checkpoint 的四类完整候选 Memory 快照，而不只冻结可执行 Procedure 和外部 Schema；Agent 在执行该 Run 时必须使用 memsphere memory list/read --run <run-id> 发现和读取该快照中的 Concept、Statement、Schema 与 Procedure，后续 ChangeSet 校验或工作树变化不得改变既有 Run 的读取结果。
-  - ChangeSet Run 的 Agent Reviewer 使用受限 memsphere-review memory list/read 时，Session 必须自动绑定当前 Run 的冻结 Memory 快照；不得允许 Reviewer 显式改读其他 Run。普通 Run 没有冻结 ChangeSet 快照时保持读取当前项目 Memory，历史 ChangeSet Run 缺少快照时不得伪装成已冻结。
+  - 使用验证成功的 active ChangeSet 启动 Run 时，Run 冻结所选 checkpoint 的 Memory；flow 使用完整候选快照，graph 使用根流程及传递依赖。查阅该 Run 的冻结内容时显式指定 memory list/read --run <run-id>，其实际冻结范围以返回目录为准；后续 ChangeSet 校验或工作树变化不得改变既有 Run 的读取结果。
+  - Reviewer Session 的 memory list/read 默认读取当前 Project，不自动添加 --run；调用方需要冻结快照时显式指定绑定 Run。Session 继续限定 Project 和可读 Run，拒绝其他 Run、冲突参数和不存在的冻结内容；当前 Project Memory 只作辅助证据，正式评审契约及规则始终采用评审创建时的冻结版本。
+  - ChangeSet 评审通过 memory change show <change-id> --checkpoint <digest> 取得固定版本材料；part 支持 summary、diff、memory、validation，reference 按精确逻辑引用筛选，memory 必须指定 reference 并可选 before/after。正文不存在的一侧返回 null，校验失败的版本仍如实提供诊断。
+  - memory change show 省略 --part 与显式 --part summary 的读取对象、内容和结构相同；正文读取时省略 --side 与显式 --side after 相同。显式参数保留，reference 只筛选 Memory，不自动把 summary 改为正文。
+  - checkpoint digest 绑定校验时的材料范围、基线、内容和校验结果；未重新校验的候选正文、scope 或 target 修改不改变该版本。校验背景、范围或结果变化须产生新标识，无变化复验保留原记录；当前版本被替换后旧标识明确失效，不承诺历史版本永久保留。
+  - 固定版本读取必须使用该 checkpoint 的冻结材料描述，不得混入当前候选元数据，也不执行 reconcile、validate、claim 或 publish。版本失配、目录或描述缺失、未知版本及内容校验失败时明确拒绝；旧 checkpoint 缺少可证明范围的描述时提示显式重新校验，不自动迁移或写回。Reviewer 只开放 show 等受控只读入口，不开放 ChangeSet 写操作。
+  - 同 ChangeSet 的 checkpoint 引用提交与旧版本清理须协调，冲突可明确拒绝；引用持久化未成功时保留旧引用和完整材料。同一版本复用已落盘的描述和时间，不能在同一 ID/digest 下覆盖校验证据。
+  - 评审材料应列明 ChangeSet ID、checkpoint digest、相关逻辑引用及 summary/diff/memory/validation 读取命令，使 Reviewer 能通过受控入口核查；不依赖底层存储路径，不要求将全部 Memory 正文复制进 Artifact。
   - Run Memory 快照文件由 memorySnapshot.files 的 DataId 清单发现，经对应 DataStore 读取；文件名仍是存储细节，逻辑引用按 Memory 声明解析，不用 Store.list 或目录扫描代替业务清单。
   - .gitkeep 是 Git 空目录占位，不是 Memory 内容；新 Run 快照和旧清单补齐排除它，不删除来源 Project 文件。归档或恢复完成切换后，可以丢弃旧端 Memory 目录内的普通占位文件；不据此过滤或删除其他未知内容。
   - 旧 Run 有 Memory 快照但缺少 files 时，依赖快照的读取、完整归档和恢复须先手动执行独立 scripts/backfill-run-memory-manifest.mjs；默认只检查，显式 --write 只补缺失字段。核心不自动补齐，已有清单不覆盖，不依赖快照的 Artifact 读取不受影响。

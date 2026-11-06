@@ -229,6 +229,21 @@ memsphere memory change validate <change-id>
 memsphere memory publish --change <change-id>
 ~~~
 
+For ChangeSet review, record its ID, the checkpoint digest returned by validation, and relevant logical Memory references in the review materials. Read evidence through these read-only commands:
+
+~~~bash
+memsphere memory change show <change-id> --checkpoint <digest> --part summary
+memsphere memory change show <change-id> --checkpoint <digest> --part diff
+memsphere memory change show <change-id> --checkpoint <digest> --part validation
+memsphere memory change show <change-id> --checkpoint <digest> --part memory --reference concepts/example --side after
+~~~
+
+Omitting `--part` is equivalent to explicitly passing `--part summary`. For Memory content, omitting `--side` is equivalent to `--side after`. Explicit options remain supported; `--reference` only filters and does not select content. Each checkpoint pins its scope, baseline, content and validation result. Unvalidated candidate edits do not change it. Identical revalidation retains the record; changes to scope, baseline or diagnostics produce a new digest. Older checkpoints without a frozen material description require explicit revalidation.
+
+Output is JSON. Use `--side before` for the original Memory; an absent side returns `null`. Stale digests, missing checkpoints and failed integrity checks are rejected. Update review references after revalidation. Reviewers can use this read-only entrypoint without internal storage paths or copying full Memory into an Artifact; ChangeSet writes remain unavailable.
+
+In Reviewer Sessions, `memory list/read` still reads current Project Memory by default, without adding `--run`. Explicitly pass `--run <run-id>` for the bound Run snapshot. Formal review rules and contracts always use the frozen version.
+
 #### 6.4.2 Embedded Project
 
 To keep Memory and code in the same Git repository, create and bind an Embedded Project:

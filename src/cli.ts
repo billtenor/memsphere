@@ -5,6 +5,7 @@ import { registerContinueCommand } from "./commands/continue.js";
 import { registerExplorationCommands } from "./commands/context-control.js";
 import { projectUpgradeCommand } from "./commands/project-upgrade.js";
 import { createRequire } from "node:module";
+import { memoryChangeShowCommand } from "./commands/memory-change-show.js";
 import { Command, Option } from "commander";
 import { registerAppCommands } from "./commands/app.js";
 import { parseCli } from "./commands/cli-errors.js";
@@ -224,7 +225,7 @@ memory
   .addOption(new Option("--kind <kind>", "filter or narrow resolution by memory kind").choices([...memoryKinds]))
   .option("--query <text>", "match a top-level canonical name or alias")
   .option("--node <node-ref>", "list direct children of a memory node")
-  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
+  .option("--run <run-id>", "read from a Run's frozen Memory snapshot")
   .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
   .option("--cursor <token>", "continue with the previous page's nextCursor")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
@@ -237,7 +238,7 @@ memory
   .addOption(new Option("--kind <kind>", "narrow name resolution by memory kind").choices([...memoryKinds]))
   .option("--node <node-ref>", "read one memory node with its required context")
   .option("--effective", "include the resolved effective rules for the selected memory or node")
-  .option("--run <run-id>", "read from a Run's frozen ChangeSet Memory snapshot")
+  .option("--run <run-id>", "read from a Run's frozen Memory snapshot")
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
   .action((reference, options) => memoryReadCommand(reference, options));
 
@@ -279,6 +280,15 @@ memorySync.command("publish")
   .action(memorySyncPublishCommand);
 
 const memoryChange = memory.command("change").description("Manage Memory ChangeSet candidates.");
+memoryChange.command("show")
+  .description("Read a pinned ChangeSet checkpoint without changing its state (JSON).")
+  .argument("<change-id>", "ChangeSet id")
+  .requiredOption("--checkpoint <digest>", "expected checkpoint digest; mismatch is rejected")
+  .addOption(new Option("--part <part>", "material to read").choices(["summary", "diff", "memory", "validation"]).default("summary"))
+  .option("--reference <reference>", "exact logical reference from the change list; required for memory")
+  .addOption(new Option("--side <side>", "Memory version to read").choices(["before", "after"]).default("after"))
+  .action(memoryChangeShowCommand);
+
 memoryChange.command("resume")
   .argument("<change-id>", "ChangeSet id")
   .action(memoryChangeResumeCommand);
