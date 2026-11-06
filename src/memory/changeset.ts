@@ -1,3 +1,4 @@
+import { checkpointRecordToken, publishCheckpoint, withCheckpointRecordLock } from "./checkpoint-publication.js";
 import { createHash, randomBytes } from "node:crypto";
 import { withMemoryWriteAccess } from "./write-access.js";
 import { withConfigFileLock } from "../config-file-lock.js";
@@ -181,6 +182,23 @@ export const memoryChangeSetSchema = z.object({
     });
   }
 });
+
+const checkpointDescriptionSchema = z.object({
+  format_version: z.literal(1),
+  content_digest: z.string().regex(/^[a-f0-9]{64}$/),
+  material: z.object({
+    id: z.string().min(1), project: z.string().min(1),
+    store_type: z.enum(["managed", "embedded"]),
+    status: z.enum(["active", "completed", "abandoned"]),
+    base_revision: z.string().min(1),
+    source_worktree: sourceWorktreeSchema.optional(),
+    targets: z.array(changeTargetSchema), scope: z.array(changeScopeSchema),
+    app_ownership: appOwnershipSchema.optional(),
+    validation: changeCheckpointSchema.omit({ digest: true })
+  }).strict()
+}).strict();
+type CheckpointDescription = z.infer<typeof checkpointDescriptionSchema>;
+const changeReadTokens = new WeakMap<object, string>();
 
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
 export type MemoryChangeOperation = z.infer<typeof changeTargetSchema>["operation"];
@@ -390,6 +408,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
   project: string;
   memoryScope?: "workspace" | "canonical";
   changeId: string;
+  checkpointDigest?: string;
   use: (snapshot: MemoryChangeDetailSnapshot) => Promise<T>;
 }): Promise<T> {
   return (async () => {
@@ -398,7 +417,17 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
       project: input.project,
       memoryScope: input.memoryScope
     });
-    const change = await readReconciledChange(context.primary, input.changeId);
+    const current = input.checkpointDigest === undefined
+      ? await readReconciledChange(context.primary, input.changeId)
+      : await readChange(context.primary, input.changeId);
+    const verifyCheckpoint = async () => {
+      const latest = await readChange(context.primary, input.changeId);
+      if (!latest.checkpoint || latest.checkpoint.digest !== input.checkpointDigest) {
+        throw new Error(`ChangeSet checkpoint mismatch: ${latest.id}; validate again and update the review reference`);
+      }
+      return readCheckpointChange(context.primary, latest, true);
+    };
+    const change = input.checkpointDigest === undefined ? current : await verifyCheckpoint();
     const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));
     const previewRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-preview-"));
     const scopeRevisionRoots: string[] = [];
@@ -477,6 +506,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         const changed = Number(right.operation !== "unchanged") - Number(left.operation !== "unchanged");
         return changed || left.label.localeCompare(right.label);
       });
+      if (input.checkpointDigest !== undefined) await verifyCheckpoint();
       return await input.use({ change, memoryRoot: previewRoot, baseMemoryRoot: baseRoot, files });
     } finally {
       await rm(baseRoot, { recursive: true, force: true });
@@ -497,17 +527,12 @@ async function prepareMemoryChangePreview(input: {
     project: input.project,
     memoryScope: input.memoryScope
   });
-  const change = await readReconciledChange(context.primary, input.changeId);
-  if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
-  if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
-  const candidateRoot = checkpointMemoryRoot(context.primary, change.id, change.checkpoint.digest);
-  if (!await exists(candidateRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
-  if (await checkpointDigest(change.targets, candidateRoot, change.app_ownership) !== change.checkpoint.digest) {
-    throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
-  }
+  const current = await readReconciledChange(context.primary, input.changeId);
+  const change = await readCheckpointChange(context.primary, current);
+  const candidateRoot = checkpointMemoryRoot(context.primary, change.id, change.checkpoint!.digest);
   const changeKey = `${context.primary.memoryRoot}\0${change.id}`;
   return {
-    cacheKey: `${changeKey}\0${change.checkpoint.digest}`,
+    cacheKey: `${changeKey}\0${change.checkpoint!.digest}`,
     changeKey,
     change,
     project: context.primary,
@@ -923,7 +948,7 @@ export async function createMarketMemoryChange(input: {
       delete change.checkpoint;
       delete change.candidate_revision;
       change.updated_at = new Date().toISOString();
-      await writeChange(project, change);
+      await writeChange(project, change, true);
       return change;
     } catch (error) {
       await rm(join(project.paths.changesRoot, change.id), { recursive: true, force: true }).catch(() => undefined);
@@ -1255,56 +1280,63 @@ export async function validateMemoryChange(
   {
     const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
     if (context.primary.config.store.type === "managed") {
-      await assertManagedHealthy(context.primary);
-      const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
-      const change = await readReconciledChange(context.primary, resolvedId);
-      if (change.intent === "system_upgrade") {
-        if (!changeId) throw new Error(`Use memsphere memory change validate ${change.id} for this system_upgrade candidate`);
-        return validateSystemUpgradeLocked(context, change);
-      }
-      assertDraftOwner(change, context.primary.name, workspace.key);
-      if (change.store_type !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
-      const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
-      if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
-      const effectiveChange = change.origin === "view"
-        ? await resolveViewManagedTargets(change, candidateRoot, context.primary.memoryRoot)
-        : await resolveEffectiveSyncTargets(change, candidateRoot);
-      await assertChangeTargetsCurrent(context.primary, effectiveChange);
-      const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, effectiveChange.targets);
-      try {
-        const issues = await validateEffectiveMemoryChange(
-          context.primary,
-          effectiveChange,
-          checkpointCandidate,
-          candidateRoot
-        );
-        if ((change.intent === "market_import" || change.intent === "app_install")) {
-          const centralCandidateRoot = marketCandidateRoot(context.primary, change.id);
-          await rm(centralCandidateRoot, { recursive: true, force: true });
-          await mkdir(dirname(centralCandidateRoot), { recursive: true });
-          await cp(candidateRoot, centralCandidateRoot, { recursive: true });
+      return withMemoryWriteAccess(context.primary.memoryRoot, async () => {
+        // Read the configuration after admission: a publication may have finished
+        // between resolving the Project and acquiring its physical write claim.
+        const context = await resolveProjectContext({ home: initialContext.home, project: initialContext.primary.name, cwd: workspace.path });
+        assertManaged(context.primary);
+        await assertManagedHealthy(context.primary);
+        const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
+        const change = await readReconciledChange(context.primary, resolvedId);
+        if (change.intent === "system_upgrade") {
+          if (!changeId) throw new Error(`Use memsphere memory change validate ${change.id} for this system_upgrade candidate`);
+          return validateSystemUpgradeLocked(context, change);
         }
-        effectiveChange.store_type = "managed";
-        const checkpointRoot = await persistValidatedCheckpoint(
-          context.primary,
-          effectiveChange,
-          checkpointCandidate,
-          context.primary.config.store.published_revision,
-          issues,
-          context.primary.memoryRoot,
-          candidateRoot
-        );
-        return validationResult(
-          effectiveChange,
-          context.primary.memoryRoot,
-          candidateRoot,
-          checkpointRoot,
-          context.primary.config.store.published_revision,
-          issues
-        );
-      } finally {
-        await rm(resolve(checkpointCandidate, ".."), { recursive: true, force: true });
-      }
+        assertDraftOwner(change, context.primary.name, workspace.key);
+        if (change.store_type !== "managed") throw new Error(`ChangeSet ${change.id} is not a Managed ChangeSet`);
+        const candidateRoot = workspaceCandidateRoot(workspace.path, resolvedId);
+        if (!await exists(candidateRoot)) throw new Error(`ChangeSet candidate is missing: ${candidateRoot}`);
+        const effectiveChange = change.origin === "view"
+          ? await resolveViewManagedTargets(change, candidateRoot, context.primary.memoryRoot)
+          : await resolveEffectiveSyncTargets(change, candidateRoot);
+        await assertChangeTargetsCurrent(context.primary, effectiveChange);
+        const checkpointCandidate = await snapshotSparseCandidate(candidateRoot, effectiveChange.targets);
+        try {
+          const issues = await validateEffectiveMemoryChange(
+            context.primary,
+            effectiveChange,
+            checkpointCandidate,
+            candidateRoot
+          );
+          if ((change.intent === "market_import" || change.intent === "app_install")) {
+            const centralCandidateRoot = marketCandidateRoot(context.primary, change.id);
+            await rm(centralCandidateRoot, { recursive: true, force: true });
+            await mkdir(dirname(centralCandidateRoot), { recursive: true });
+            await cp(candidateRoot, centralCandidateRoot, { recursive: true });
+          }
+          effectiveChange.store_type = "managed";
+          const checkpointRoot = await persistValidatedCheckpoint(
+            context.primary,
+            effectiveChange,
+            checkpointCandidate,
+            context.primary.config.store.published_revision,
+            issues,
+            context.primary.memoryRoot,
+            candidateRoot,
+            changeReadTokens.get(change) ?? null
+          );
+          return validationResult(
+            effectiveChange,
+            context.primary.memoryRoot,
+            candidateRoot,
+            checkpointRoot,
+            context.primary.config.store.published_revision,
+            issues
+          );
+        } finally {
+          await rm(resolve(checkpointCandidate, ".."), { recursive: true, force: true });
+        }
+      });
     }
 
     if (changeId) {
@@ -1369,7 +1401,9 @@ export async function validateMemoryChange(
         captured.candidateRoot,
         captured.change.base_revision,
         issues,
-        captured.memoryRoot
+        captured.memoryRoot,
+        captured.candidateRoot,
+        captured.expectedToken
       );
       return validationResult(
         captured.change,
@@ -1480,65 +1514,104 @@ async function persistValidatedCheckpoint(
   baseRevision: string,
   issues: ValidationIssue[],
   effectiveMemoryRoot: string,
-  issueCandidateRoot = candidateRoot
+  issueCandidateRoot = candidateRoot,
+  expectedToken: string | null = changeReadTokens.get(change) ?? null
 ): Promise<string> {
   change.app_ownership = { ...await captureAppOwnership(project, change.app_install?.operationId), ...(change.intent === "app_install" ? change.app_ownership : {}) };
   if (!Object.keys(change.app_ownership).length) delete change.app_ownership;
-  const digest = await checkpointDigest(change.targets, candidateRoot, change.app_ownership);
-  const checkpointChanged = change.checkpoint?.digest !== digest;
-  const checkpoints = checkpointsRoot(project, change.id);
-  const revisionRoot = join(checkpoints, digest);
-  const finalMemoryRoot = join(revisionRoot, "memory");
-  if (!await exists(finalMemoryRoot)) {
-    await mkdir(checkpoints, { recursive: true });
-    const temporary = join(checkpoints, `.writing-${digest}-${process.pid}-${randomBytes(4).toString("hex")}`);
-    await rm(temporary, { recursive: true, force: true });
-    await mkdir(temporary, { recursive: true });
-    await cp(candidateRoot, join(temporary, "memory"), { recursive: true });
-    try {
-      await rename(temporary, revisionRoot);
-    } catch (error) {
-      if (!await exists(finalMemoryRoot)) throw error;
-      await rm(temporary, { recursive: true, force: true });
+  const validation = {
+    base_revision: baseRevision, created_at: new Date().toISOString(), valid: issues.length === 0,
+    issues: issues.map(issue => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
+  };
+  let source = change.source_worktree;
+  if (change.checkpoint && source) {
+    const previousDirectory = dirname(checkpointMemoryRoot(project, change.id, change.checkpoint.digest));
+    if (await exists(join(previousDirectory, "checkpoint.json"))) {
+      const previous = await readCheckpointDescription(project, change.id, change.checkpoint.digest, previousDirectory);
+      const earlier = previous.material.source_worktree;
+      // A different linked worktree can validate the same immutable Git source.
+      if (earlier?.repository_root === source.repository_root && earlier.memory_path === source.memory_path) source = earlier;
     }
   }
-  change.checkpoint = {
-    digest,
-    base_revision: baseRevision,
-    created_at: new Date().toISOString(),
-    valid: issues.length === 0,
-    issues: issues.map((issue) => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
-  };
-  if (checkpointChanged && change.store_type === "embedded") delete change.candidate_revision;
-  change.updated_at = new Date().toISOString();
-  if (change.store_type === "managed") {
-    await atomicReplaceDirectoryWithCommit(
-      candidateRoot,
-      recoveryRoot(project, change.id),
-      async () => writeChangeConfirmingCommit(project, change)
-    );
-  } else {
-    await writeChange(project, change);
-  }
-  for (const entry of await readdir(checkpoints, { withFileTypes: true })) {
-    if (entry.name === digest || !entry.isDirectory()) continue;
-    await rm(join(checkpoints, entry.name), { recursive: true, force: true });
-  }
-  return finalMemoryRoot;
+  const description = checkpointDescriptionSchema.parse({
+    format_version: 1,
+    content_digest: await checkpointDigest(change.targets, candidateRoot, change.app_ownership),
+    material: { id: change.id, project: change.project, store_type: change.store_type, status: change.status,
+      base_revision: change.base_revision, source_worktree: source,
+      targets: change.targets, scope: change.scope, app_ownership: change.app_ownership, validation }
+  });
+  const digest = checkpointVersionDigest(description);
+  const root = checkpointsRoot(project, change.id);
+  const result = await publishCheckpoint({
+    runtimeRoot: project.paths.runtimeRoot, changeId: change.id, checkpointsRoot: root,
+    digest, candidateRoot, description, expectedToken,
+    readCurrent: async () => {
+      const current = await readChange(project, change.id).catch(error => {
+        if (isCode(error, "ENOENT")) return undefined;
+        throw error;
+      });
+      return { token: current ? checkpointRecordToken(current) : null, digest: current?.checkpoint?.digest };
+    },
+    verify: directory => readCheckpointDescription(project, change.id, digest, directory),
+    commit: async stored => {
+      const changed = change.checkpoint?.digest !== digest;
+      change.checkpoint = { digest, ...stored.material.validation };
+      if (changed && change.store_type === "embedded") delete change.candidate_revision;
+      change.updated_at = new Date().toISOString();
+      const commit = async () => {
+        try { await writeChangeUnlocked(project, change); }
+        catch (error) {
+          const saved = await readChange(project, change.id).catch(() => undefined);
+          if (!saved || JSON.stringify(saved) !== JSON.stringify(memoryChangeSetSchema.parse(change))) throw error;
+        }
+      };
+      if (change.store_type === "managed") {
+        await atomicReplaceDirectoryWithCommit(candidateRoot, recoveryRoot(project, change.id), commit);
+      } else await commit();
+    }
+  });
+  change.checkpoint = { digest, ...result.description.material.validation };
+  return join(root, digest, "memory");
 }
 
-async function writeChangeConfirmingCommit(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
-  try {
-    await writeChange(project, change);
-  } catch (error) {
-    try {
-      const persisted = await readChange(project, change.id);
-      if (JSON.stringify(persisted) === JSON.stringify(change)) return;
-    } catch {
-      // Preserve the original write failure when the persisted state cannot confirm the commit.
-    }
-    throw error;
+function checkpointVersionDigest(description: CheckpointDescription): string {
+  const identity = structuredClone(description);
+  // Repeated validation of identical evidence retains the first published time.
+  identity.material.validation.created_at = "";
+  return createHash("sha256").update("memsphere-checkpoint-v1\0").update(JSON.stringify(identity)).digest("hex");
+}
+
+async function readCheckpointDescription(project: ResolvedProject, changeId: string, digest: string, directory: string): Promise<CheckpointDescription> {
+  const description = checkpointDescriptionSchema.parse(JSON.parse(await readFile(join(directory, "checkpoint.json"), "utf8")));
+  if (description.material.id !== changeId || description.material.project !== project.name
+    || description.material.store_type !== project.config.store.type || checkpointVersionDigest(description) !== digest
+    || await checkpointDigest(description.material.targets, join(directory, "memory"), description.material.app_ownership) !== description.content_digest) {
+    throw new Error(`ChangeSet checkpoint digest does not match: ${changeId}`);
   }
+  if (!await exists(join(directory, "memory"))) throw new Error(`ChangeSet checkpoint is missing: ${changeId}`);
+  return description;
+}
+
+async function readCheckpointChange(project: ResolvedProject, change: MemoryChangeSet, required = false): Promise<MemoryChangeSet> {
+  if (change.project !== project.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
+  if (!change.checkpoint) throw new Error(`ChangeSet ${change.id} has no validated checkpoint`);
+  const directory = dirname(checkpointMemoryRoot(project, change.id, change.checkpoint.digest));
+  if (!await exists(join(directory, "memory"))) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
+  if (!await exists(join(directory, "checkpoint.json"))) {
+    if (required) throw new Error(`ChangeSet ${change.id} has no frozen checkpoint description; run memory change validate again`);
+    if (await checkpointDigest(change.targets, join(directory, "memory"), change.app_ownership) !== change.checkpoint.digest) {
+      throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
+    }
+    return change;
+  }
+  const { material } = await readCheckpointDescription(project, change.id, change.checkpoint.digest, directory);
+  if (JSON.stringify(change.checkpoint) !== JSON.stringify({ digest: change.checkpoint.digest, ...material.validation })) {
+    throw new Error(`ChangeSet checkpoint record does not match its frozen description: ${change.id}`);
+  }
+  const { validation, ...frozen } = material;
+  return { ...change, ...frozen, status: required ? frozen.status : change.status,
+    source_worktree: frozen.source_worktree, app_ownership: frozen.app_ownership,
+    checkpoint: { digest: change.checkpoint.digest, ...validation } };
 }
 
 async function checkpointDigest(targets: MemoryChangeSet["targets"], candidateRoot: string, ownership?: AppOwnership): Promise<string> {
@@ -1599,6 +1672,7 @@ type EmbeddedCapture = {
   candidateRoot: string;
   memoryRoot: string;
   completedChangeIds: string[];
+  expectedToken: string | null;
 };
 
 async function captureEmbeddedWorkingChange(
@@ -1657,8 +1731,18 @@ async function captureEmbeddedWorkingChange(
       ));
       if (matches.length > 1) {
         const digest = await checkpointDigest(captured.targets, captured.candidateRoot, await captureAppOwnership(project));
-        const exact = matches.filter((candidate) => candidate.checkpoint?.digest === digest)
-          .sort((left, right) => left.created_at.localeCompare(right.created_at));
+        const exact: MemoryChangeSet[] = [];
+        for (const candidate of matches) {
+          if (!candidate.checkpoint) continue;
+          try {
+            const frozen = await readCheckpointChange(project, candidate);
+            const content = await checkpointDigest(frozen.targets, checkpointMemoryRoot(project, candidate.id, candidate.checkpoint.digest), frozen.app_ownership);
+            if (content === digest) exact.push(candidate);
+          } catch {
+            // An unavailable/corrupt version is divergent, never an auto-removable duplicate.
+          }
+        }
+        exact.sort((left, right) => left.created_at.localeCompare(right.created_at));
         if (exact.length !== matches.length) {
           throw new Error(`multiple divergent Embedded ChangeSets were found for the current repository and Git base: ${matches.map((item) => item.id).sort().join(", ")}`);
         }
@@ -1675,17 +1759,19 @@ async function captureEmbeddedWorkingChange(
       } else {
         change = matches[0] ?? newChange(project, workspace.key);
       }
+      const expectedToken = changeReadTokens.get(change) ?? null;
       change.store_type = "embedded";
       change.base_revision = baseRevision;
       change.source_worktree = source;
       change.targets = captured.targets;
-      return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds };
+      return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds, expectedToken };
     }
+    const expectedToken = changeReadTokens.get(change) ?? null;
     change.store_type = "embedded";
     change.base_revision = baseRevision;
     change.source_worktree = source;
     change.targets = captured.targets;
-    return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds: [] };
+    return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds: [], expectedToken };
   } catch (error) {
     await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
     throw error;
@@ -2736,8 +2822,9 @@ async function applyEmbeddedMarketChange(
   if (head !== change.base_revision) throw new Error(`Embedded market ChangeSet ${change.id} belongs to another Git base revision`);
   const checkpointRoot = checkpointMemoryRoot(project, change.id, change.checkpoint.digest);
   if (!await exists(checkpointRoot)) throw new Error(`ChangeSet checkpoint is missing: ${change.id}`);
-  if (await checkpointDigest(change.targets, checkpointRoot, change.app_ownership) !== change.checkpoint.digest) {
-    throw new Error(`ChangeSet checkpoint digest does not match: ${change.id}`);
+  const frozen = await readCheckpointChange(project, change);
+  if (JSON.stringify(frozen.targets) !== JSON.stringify(change.targets) || JSON.stringify(frozen.app_ownership) !== JSON.stringify(change.app_ownership)) {
+    throw new Error(`ChangeSet ${change.id} has unvalidated candidate metadata; validate again`);
   }
   const pendingTargets = await pendingEmbeddedMarketTargets(project, change, checkpointRoot);
   const repositoryPaths = pendingTargets.map((target) => embeddedRepositoryPath(embeddedStore.memory_path, target.path));
@@ -2811,6 +2898,20 @@ async function pendingEmbeddedMarketTargets(
 }
 
 async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {
+  const expected = changeReadTokens.get(change) ?? checkpointRecordToken(change);
+  return withCheckpointRecordLock(project.paths.runtimeRoot, change.id, async () => {
+    const current = await readChange(project, change.id);
+    if (checkpointRecordToken(current) !== expected) {
+      throw Object.assign(new Error(`ChangeSet ${change.id} changed before publication; retry the operation`), { code: "CHECKPOINT_CONFLICT" });
+    }
+    // Keep the same lock through Git/config commit and every rollback. No
+    // checkpoint, scope or Comment writer can commit between these boundaries.
+    return publishWithRecordLock(project, current, candidateRoot, message);
+  });
+}
+
+/** Caller holds both the physical Memory write claim and this record's lock. */
+async function publishWithRecordLock(project: ResolvedProject, change: MemoryChangeSet, candidateRoot: string, message?: string): Promise<MemoryChangeSet> {
   await assertManagedHealthy(project);
   assertManaged(project);
   const publishedRevision = project.config.store.published_revision;
@@ -2837,19 +2938,29 @@ async function publishLocked(project: ResolvedProject, change: MemoryChangeSet, 
       published_revision: revision,
       updated_at: new Date().toISOString()
     });
-    await writeChange(project, published);
+    await writeChangeUnlocked(project, published);
     return published;
   } catch (error) {
     const rollbackErrors: unknown[] = [];
     await runGit(["reset", "--hard", publishedRevision], { cwd: project.memoryRoot }).catch((rollbackError) => rollbackErrors.push(rollbackError));
     await runGit(["clean", "-fd"], { cwd: project.memoryRoot }).catch((rollbackError) => rollbackErrors.push(rollbackError));
     await restoreJsonIfChanged(project.paths.configPath, project.config).catch((rollbackError) => rollbackErrors.push(rollbackError));
-    await restoreJsonIfChanged(changePath(project, change.id), change).catch((rollbackError) => rollbackErrors.push(rollbackError));
+    await restoreChangeRecordUnlocked(project, change).catch((rollbackError) => rollbackErrors.push(rollbackError));
     if (rollbackErrors.length > 0) {
       throw new AggregateError([error, ...rollbackErrors], "Memory publish failed and rollback was incomplete");
     }
     throw error;
   }
+}
+
+/** Only used while publication still owns the record lock and its snapshot. */
+async function restoreChangeRecordUnlocked(project: ResolvedProject, original: MemoryChangeSet): Promise<void> {
+  const current = await readChange(project, original.id).catch(error => {
+    if (isCode(error, "ENOENT")) return undefined;
+    throw error;
+  });
+  if (current && checkpointRecordToken(current) === checkpointRecordToken(original)) return;
+  await writeChangeUnlocked(project, original);
 }
 
 async function resolveEffectiveSyncTargets(change: MemoryChangeSet, candidateRoot: string): Promise<MemoryChangeSet> {
@@ -3141,6 +3252,7 @@ async function readChange(project: ResolvedProject, id: string): Promise<MemoryC
       `store_type is ${change.store_type}, but Project ${project.name} uses ${project.config.store.type}`
     );
   }
+  changeReadTokens.set(change, checkpointRecordToken(change));
   return change;
 }
 
@@ -3161,8 +3273,28 @@ async function readReconciledChange(project: ResolvedProject, id: string): Promi
   return reconciled;
 }
 
-async function writeChange(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
-  await atomicWriteJson(changePath(project, change.id), memoryChangeSetSchema.parse(change));
+async function writeChangeUnlocked(project: ResolvedProject, change: MemoryChangeSet): Promise<void> {
+  const parsed = memoryChangeSetSchema.parse(change);
+  await atomicWriteJson(changePath(project, change.id), parsed);
+  changeReadTokens.set(change, checkpointRecordToken(parsed));
+}
+
+async function writeChange(project: ResolvedProject, change: MemoryChangeSet, invalidateCheckpoint = false): Promise<void> {
+  await withCheckpointRecordLock(project.paths.runtimeRoot, change.id, async () => {
+    const current = await readChange(project, change.id).catch(error => {
+      if (isCode(error, "ENOENT")) return undefined;
+      throw error;
+    });
+    if (current && !invalidateCheckpoint) {
+      if (change.checkpoint?.digest !== current.checkpoint?.digest) {
+        if (current.candidate_revision) change.candidate_revision = current.candidate_revision;
+        else delete change.candidate_revision;
+      }
+      if (current.checkpoint) change.checkpoint = current.checkpoint;
+      else delete change.checkpoint;
+    }
+    await writeChangeUnlocked(project, change);
+  });
 }
 
 function assertDraftOwner(change: MemoryChangeSet, project: string, workspaceKey: string): void {

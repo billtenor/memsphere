@@ -229,6 +229,21 @@ memsphere memory change validate <change-id>
 memsphere memory publish --change <change-id>
 ```
 
+评审 ChangeSet 时，在材料中保留 ChangeSet ID、校验返回的 checkpoint digest 和相关 Memory 逻辑引用，通过只读命令获取证据：
+
+```bash
+memsphere memory change show <change-id> --checkpoint <digest> --part summary
+memsphere memory change show <change-id> --checkpoint <digest> --part diff
+memsphere memory change show <change-id> --checkpoint <digest> --part validation
+memsphere memory change show <change-id> --checkpoint <digest> --part memory --reference concepts/example --side after
+```
+
+`--part` 省略时默认为 `summary`，与显式 `--part summary` 完全等价；正文的 `--side` 省略时默认为 `after`，与显式 `--side after` 等价。`--reference` 只筛选，不自动切换为正文。checkpoint 同时固定范围、基线和校验结果；未重新校验的候选编辑不改变此版本。无变化复验保留原记录，范围、基线或诊断变化产生新 digest；缺少冻结材料描述的旧 checkpoint 需显式重新校验。
+
+这些命令返回 JSON；`--side before` 读取修改前正文，不存在的一侧返回 `null`。digest 与当前 checkpoint 不符、checkpoint 缺失或内容校验失败时拒绝读取；重新校验后须更新评审引用。无需访问底层存储文件或把 Memory 全文复制进 Artifact。Reviewer 仅开放这一只读入口，不开放 ChangeSet 写操作。
+
+Reviewer 中 `memory list/read` 默认仍读取当前 Project Memory，不自动添加 `--run`。需要 Run 冻结快照时显式传入 `--run <run-id>`，Session 只允许绑定的快照；正式评审规则和契约始终采用冻结版本。
+
 #### 6.4.2 Embedded Project
 
 如果希望 Memory 与代码保存在同一个 Git 仓库中，创建并绑定一个 Embedded Project：

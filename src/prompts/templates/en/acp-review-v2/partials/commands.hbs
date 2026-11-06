@@ -11,7 +11,7 @@
   memsphere run step show --step "<step-ref>" --output json
 - Read a prior Artifact from the outline when it is relevant:
   memsphere run artifact show --step "<step-ref>" --output json
-- Discover and read project Memory; ChangeSet Run sessions automatically bind their frozen Memory snapshot:
+- Discover and read project Memory (current Project by default):
   memsphere memory list --output json
   memsphere memory read <reference> --output json
 - Memory list returns items and an optional nextCursor; the default page contains up to 100 entries. For a complete list, continue with memsphere memory list --cursor <nextCursor> --output json using the same filters until nextCursor is absent.
@@ -24,3 +24,8 @@
   - Do not encode line breaks as literal `\n` sequences.
 - Submit the final vote and summary:
   memsphere run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json
+
+Memory reads use the current Project by default; no --run is added automatically. To inspect this Run's frozen snapshot, explicitly use `memsphere memory list --run <run-id> --output json` or `memsphere memory read <reference> --run <run-id> --output json` (when a snapshot is available). Formal review rules and contracts always use the frozen version; current Project Memory is supporting evidence.
+Read ChangeSet evidence through `memsphere memory change show <change-id> --checkpoint <digest> --part summary|diff|validation`. For Memory source use `--part memory --reference <reference> --side before|after`; a missing side is null. A stale digest is rejected. Review materials must identify the ChangeSet ID, checkpoint digest, relevant references and these commands, rather than copy full Memory text into an Artifact or depend on internal storage paths. This entrypoint is read-only; validate/edit/publish/claim remain unavailable to reviewers.
+
+Omitting --part is equivalent to --part summary. For --part memory, omitting --side is equivalent to --side after. All explicit options remain available; --reference only filters. Checkpoints pin scope, baseline and validation as well as content. Unvalidated candidate edits cannot change these materials. An old checkpoint without a frozen material description requires explicit revalidation by the Runner; reviewers cannot validate it.

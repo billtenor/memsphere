@@ -10,3 +10,8 @@ memsphere continue list
 memsphere continue show
 memsphere continue show --node N
 memsphere continue show --all
+
+Memory 默认读取当前 Project，不会自动添加 --run。需要 Run 冻结快照时，显式使用 `memsphere memory list --run <run-id> --output json` 或 `memsphere memory read <reference> --run <run-id> --output json`（须有可用快照）。正式评审规则与契约始终采用冻结版本，当前 Project Memory 仅作为辅助证据。
+ChangeSet 证据通过 `memsphere memory change show <change-id> --checkpoint <digest> --part summary|diff|validation` 读取；Memory 正文使用 `--part memory --reference <reference> --side before|after`，不存在的一侧返回 null。digest 过期时拒绝读取。评审材料应注明 ChangeSet ID、checkpoint digest、相关逻辑引用及这些读取命令，不应将 Memory 全文复制进 Artifact 或依赖内部存储路径。此入口只读，Reviewer 仍不得 validate/edit/publish/claim。
+
+省略 --part 与显式 --part summary 等价；正文读取省略 --side 与显式 --side after 等价。显式选项均保留，--reference 只筛选。checkpoint 同时固定范围、基线、正文和校验结果，未校验的候选编辑不改变这些材料。旧 checkpoint 缺少冻结材料描述时须由 Runner 显式重新校验，Reviewer 不得执行 validate。
