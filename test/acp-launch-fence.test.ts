@@ -40,7 +40,7 @@ for (const mode of ["missing-executable", "provider-exited"] as const) test(`ACP
   let captured = false;
   let closed:Promise<void>|undefined;
   await assert.rejects(runAgentReviewAcpSession({
-    launch:{provider:"test",command:mode==="missing-executable"?`missing-provider-${process.pid}`:process.execPath,args:mode==="missing-executable"?[]:["-e","process.exit(7)"],cwd:tmpdir(),env:process.env,startupTimeoutMs:5000,idleTimeoutMs:null,maxRuntimeMs:null,promptVersion:"artifact-review-v1"},
+    launch:{provider:"test",command:mode==="missing-executable"?`missing-provider-${process.pid}`:process.execPath,args:mode==="missing-executable"?[]:["-e","process.stderr.write('provider configuration rejected\\n',()=>process.exit(7))"],cwd:tmpdir(),env:process.env,startupTimeoutMs:5000,idleTimeoutMs:null,maxRuntimeMs:null,promptVersion:"artifact-review-v1"},
     prompt:"review",reminder:"submit",workspaceRoot:tmpdir(),isSubmitted:async()=>false,onSession:async()=>assert.fail("failed provider connected"),
     onBeforeStop:async pid=>{captured=true;if(mode==="missing-executable")assert.equal(typeof pid,process.platform==="win32"?"number":"undefined");throw Error("capture unavailable");}
   },{spawn:launch=>{
@@ -51,6 +51,11 @@ for (const mode of ["missing-executable", "provider-exited"] as const) test(`ACP
     assert.match(error.message,mode==="missing-executable"?/agent_process_spawn:/ : /agent_process_exit:|agent_connection_closed:/);
     assert.match(error.message,/capture unavailable/);
     assert.equal(error.errors.length,2);
+    if(mode==="provider-exited") {
+      assert.match(error.message,/provider configuration rejected/);
+      assert.match(error.errors[0].message,/provider configuration rejected/);
+      assert.equal(error.cause,error.errors[0]);
+    }
     return true;
   });
   await closed; // All OS/wrapper events must still belong to this test/session.

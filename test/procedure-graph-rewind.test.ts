@@ -104,6 +104,39 @@ test("rewind blocks an old formal review and preserves its candidate and comment
   });
 });
 
+test("a vote saved before rewind loses the return race while its historical vote is retained", async t => {
+  const f = await fixture(t);
+  await f.service.withGraph(async g => {
+    const technical = action("T", "A"); technical.artifact = { ...artifact, review: ["architect"] };
+    const start = await g.start({ name: "vote return race", procedure: procedure([action("A"), technical, action("delivery", "T")]), controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Architect", permissions: ["artifact.read", "decision.decide"] } } }, reviewConfiguration: { reviews: { "rewind-test#actions[T]": { policy: "artifact_acceptance.unanimous" } }, slots: { "rewind-test::architect": { actorIds: ["human"] } } } });
+    const a = await produce(g, start.run.id, start.steps[0].id);
+    const old = await produce(g, start.run.id, latest(a.snapshot, "T").id, "old candidate");
+    const round = old.step.reviewRounds![0];
+    // Pause only the vote's settle, after its save and effective-Step check.
+    const runtime = g as unknown as { settle: (run: string, step: string) => Promise<void> };
+    const settle = runtime.settle.bind(g);
+    let reached!: () => void, release!: () => void;
+    const paused = new Promise<void>(resolve => { reached = resolve; });
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    runtime.settle = async (run, step) => {
+      runtime.settle = settle;
+      reached(); await gate; return settle(run, step);
+    };
+    const vote = g.submitReview(start.run.id, old.step.id, round.id, "human", "approve");
+    const rejected = assert.rejects(vote, { code: "STEP_SUPERSEDED" });
+    try {
+      await paused;
+      const rewound = await g.rewind(start.run.id, a.step.id, "revise product");
+      release(); await rejected;
+      const snapshot = await g.snapshot(start.run.id);
+      assert.equal(snapshot.reviews.find(r => r.roundId === round.id && r.reviewer.actorId === "human")!.vote!.value, "approve");
+      assert.equal(snapshot.steps.find(s => s.id === rewound.replacementStepId)!.status, "pending");
+      assert.equal(snapshot.steps.some(s => s.source?.actionId === "delivery"), false);
+      assert.equal(effectiveStep(snapshot.run, old.step.id), false);
+    } finally { runtime.settle = settle; release(); await rejected; }
+  });
+});
+
 test("a saved rewind recovers the same target after materialization interruption", async t => {
   const f = await fixture(t, true);
   await f.service.withGraph(async g => {

@@ -735,7 +735,13 @@ export class GraphRuntime {
     if (attempt && !attempt.completion) attempt.completion = { kind: "completed", at: value.endedAt! };
     requireEffectiveStep((await this.run(runId)).value, stepId);
     if (old) await this.records.update("review", runId, old, value); else await this.records.create("review", runId, value);
-    try { requireEffectiveStep((await this.run(runId)).value, stepId); await this.settle(runId, stepId); return await this.advance(runId); }
+    try {
+      requireEffectiveStep((await this.run(runId)).value, stepId);
+      await this.settle(runId, stepId);
+      const snapshot = await this.advance(runId);
+      requireEffectiveStep(snapshot.run, stepId);
+      return snapshot;
+    }
     catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, reviewId: id, roundId, recoveryCommand: `memsphere run status --run ${runId}`, message: "Review saved; recover status before repeating the vote" } }); }
   }
   ready(snapshot: Snapshot) { const order = this.creationOrder(snapshot.run, snapshot.steps); return snapshot.steps.filter(s => effectiveStep(snapshot.run, s.id) && (s.status === "pending" || s.status === "running") && this.action(snapshot.run, s).artifact).sort((a, b) => order.get(a.id)! - order.get(b.id)!); }

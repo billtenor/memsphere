@@ -195,22 +195,26 @@ export async function runAgentReviewAcpSession(input: {
     await drainAgentStderr(process.stderr);
     await settle();
     const transportError = spawnFailure ?? transportAtFailure;
+    // Keep the complete diagnostic error if lifecycle capture also fails.
     if (timeoutError) {
-      throw new Error(withAgentStderr(timeoutError.message, stderr), { cause: error });
+      failureInFlight = new Error(withAgentStderr(timeoutError.message, stderr), { cause: error });
+    } else if (transportError) {
+      failureInFlight = new Error(withAgentStderr(transportError.message, stderr), { cause: error });
+    } else if (error instanceof Error && error.message.startsWith("agent_process_spawn:")) {
+      failureInFlight = error;
+    } else if (exitCode !== null && exitCode !== 0) {
+      failureInFlight = new Error(withAgentStderr(`agent_process_exit: exited ${exitCode}`, stderr), { cause: error });
+    } else {
+      const message = error instanceof Error ? error.message : String(error);
+      failureInFlight = new Error(withAgentStderr(message, stderr), { cause: error });
     }
-    if (transportError) throw new Error(withAgentStderr(transportError.message, stderr), { cause: error });
-    if (error instanceof Error && error.message.startsWith("agent_process_spawn:")) throw error;
-    if (exitCode !== null && exitCode !== 0) {
-      throw new Error(withAgentStderr(`agent_process_exit: exited ${exitCode}`, stderr), { cause: error });
-    }
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(withAgentStderr(message, stderr), { cause: error });
+    throw failureInFlight;
   } finally {
     startupTimeout.dispose();idleTimeout?.dispose();maxRuntimeTimeout?.dispose();
     try { await beforeStop(); }
     catch (cleanupError) {
       if (!failureInFlight) throw cleanupError;
-      const primary = spawnFailure ?? failureInFlight;
+      const primary = failureInFlight;
       const message = primary instanceof Error ? primary.message : String(primary);
       throw new AggregateError([primary,cleanupError],`${message}\nReviewer lifecycle capture failed: ${cleanupError instanceof Error ? cleanupError.message : String(cleanupError)}`,{cause:primary});
     } finally {
