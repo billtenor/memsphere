@@ -67,8 +67,9 @@ public static class ReviewerJob {
  }
 }
 `;
-const script = (body: string) => `$ErrorActionPreference='Stop'; try { Add-Type -TypeDefinition @'\n${native}\n'@; ${body} } catch { [Console]::Error.WriteLine($_.ToString()); exit 2 }`;
-const encoded = (body: string) => ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script(body), "utf16le").toString("base64")];
+// Keep PowerShell's command a single line even though the native source is multiline.
+// stdin is closed for the detached worker; no interactive/here-string parsing is used.
+const encoded = (body: string) => ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference='Stop'; try { Add-Type -TypeDefinition ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(native).toString("base64")}'))); ${body} } catch { [Console]::Error.WriteLine($_.ToString()); exit 2 }`];
 const validName = (name: string) => /^Global\\Memsphere\.Reviewer\.[0-9a-f-]{36}$/.test(name);
 
 /** Enroll before claim and before ANY provider preparation can spawn children. */
@@ -76,7 +77,7 @@ export async function startWindowsReviewJob(identity: ProcessIdentity): Promise<
   const name = `Global\\Memsphere.Reviewer.${randomUUID()}`;
   if (!/^\d+$/.test(identity.started)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Invalid Windows worker creation identity");
   const child = spawn("powershell.exe", encoded(`[ReviewerJob]::Keep('${name}', ${identity.pid}, '${identity.started}')`), {
-    detached: true, windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
+    windowsHide: true, stdio: ["ignore", "pipe", "pipe"]
   });
   await new Promise<void>((resolve, reject) => {
     let output = "", errors = "";
