@@ -1,5 +1,5 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, realpath, open, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
@@ -400,9 +400,21 @@ async function readWorkspaceTextFile(
 ): Promise<acp.ReadTextFileResponse> {
   const path = resolve(request.path);
   if (!isAbsolute(request.path) || !isWithin(workspaceRoot, path)) {
-    throw new Error(`agent_fs_denied: path is outside the workspace: ${request.path}`);
+    throw new acp.RequestError(-32000, `agent_fs_denied: path is outside the workspace: ${request.path}`, { code: "REVIEW_RESOURCE_DENIED" });
   }
-  const content = await readFile(path, "utf8");
+  const root = await realpath(workspaceRoot), target = await realpath(path);
+  if (!isWithin(root, target)) throw new acp.RequestError(-32000, `agent_fs_denied: path is outside the workspace: ${request.path}`, { code: "REVIEW_RESOURCE_DENIED" });
+  const handle = await open(target, "r");
+  let content: string;
+  try {
+    const identity = await handle.stat();
+    if (!identity.isFile()) throw new acp.RequestError(-32000, "agent_fs_denied: target is not a regular file", { code: "REVIEW_RESOURCE_DENIED" });
+    const verify = async () => {
+      const current = await realpath(path), info = await stat(current);
+      if (current !== target || !isWithin(root, current) || info.dev !== identity.dev || info.ino !== identity.ino) throw new acp.RequestError(-32000, "agent_fs_denied: file identity changed", { code: "REVIEW_RESOURCE_DENIED" });
+    };
+    await verify(); content = await handle.readFile("utf8"); await verify();
+  } finally { await handle.close(); }
   const lines = content.split("\n");
   const start = Math.max(0, (request.line ?? 1) - 1);
   const end = request.limit === undefined || request.limit === null ? undefined : start + Math.max(0, request.limit);

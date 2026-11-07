@@ -1,5 +1,5 @@
 import { runnerAgentsSchema } from "./runner/identity.js";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import {
@@ -59,6 +59,7 @@ export type MemsphereConfig = {
 
 export async function readConfig(configPath?: string): Promise<MemsphereConfig> {
   if (configPath) return readConfigAt(resolve(configPath));
+  if (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID && process.env.MEMSPHERE_CONFIG_PATH) return readConfigAt(resolve(process.env.MEMSPHERE_CONFIG_PATH));
   return readProjectExecutionConfig();
 }
 
@@ -174,7 +175,9 @@ async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConf
 async function resolveContextByRoot(home: string, root: string) {
   const manifest = JSON.parse(await readFile(join(root, "project.json"), "utf8")) as { name?: unknown };
   if (typeof manifest.name !== "string") throw new Error(`invalid Project manifest: ${join(root, "project.json")}`);
-  return resolveProjectContext({ home, project: manifest.name, memoryScope: "canonical" });
+  const context = await resolveProjectContext({ home, project: manifest.name, memoryScope: process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID ? "workspace" : "canonical" });
+  if (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID && await realpath(context.primary.paths.root) !== await realpath(root)) throw Object.assign(new Error("Project registry/config root mismatch"), { code: "REVIEW_SESSION_INVALID" });
+  return context;
 }
 
 async function storeRevision(memoryRoot: string, type: "managed" | "embedded"): Promise<string | undefined> {

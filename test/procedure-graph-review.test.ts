@@ -1,3 +1,5 @@
+import { runGit } from "../src/git.js";
+import { readFile, writeFile } from "node:fs/promises";
 import { currentReviewNode } from "../src/review-nodes.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -180,4 +182,27 @@ for (const vote of ["approve", "request_changes"] as const) test(`Agent processi
     assert.equal(next.step.reviewRounds!.length, 2);
     await assert.rejects(reviews.submitArtifactReviewAssignment({ ...human, expectedRevision: context.round.revision }), /no longer current/);
   }
+});
+
+
+test("View-style worker launch outside an Embedded repository uses its verified canonical source", { timeout: 60000 }, async t => {
+  const f = await fixture(t, true, false, false, true);
+  await runGit(["init", "-b", "master"], { cwd: f.root });
+  await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Embedded fixture"], { cwd: f.root });
+  const configPath = join(f.root, "config.json"), config = JSON.parse(await readFile(configPath, "utf8"));
+  config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+  await writeFile(configPath, JSON.stringify(config));
+  const oldHome = process.env.MEMSPHERE_HOME; process.env.MEMSPHERE_HOME = f.home;
+  let source: string | undefined;
+  try {
+    const initial = await reviews.readArtifactReviewForActor(f.input);
+    await runArtifactReviewAgentWorker({ config: configPath, review: f.input.reviewId, round: f.input.roundId, assignment: initial.assignment.id!, workspaceRoot: f.cwd, nodeExecutable: process.execPath, cliEntrypoint: fileURLToPath(new URL("../dist/cli.js", import.meta.url)), providerResolver: () => ({ id: "traex", buildLaunch: ({ actor, workspaceRoot, sessionEnv }) => {
+      source = sessionEnv.MEMSPHERE_REVIEW_SOURCE_WORKSPACE;
+      return { provider: "fake-test-provider", command: actor.agent.command, args: actor.agent.args, cwd: workspaceRoot, env: { ...process.env, ...sessionEnv }, startupTimeoutMs: 10000, idleTimeoutMs: 10000, maxRuntimeMs: null, promptVersion: "artifact-review-v3" };
+    } }) });
+    assert.equal(source, f.root);
+    const completed = await reviews.readArtifactReviewForActor(f.input);
+    assert.equal(completed.assignment.status, "submitted", JSON.stringify(completed.assignment.attempts));
+    assert.equal(completed.assignment.submitted?.vote, "approve");
+  } finally { if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome; }
 });

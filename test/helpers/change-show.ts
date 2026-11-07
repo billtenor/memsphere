@@ -1,3 +1,4 @@
+import { reviewerSessionEnvironment } from "./reviewer-session.js";
 import assert from "node:assert/strict";
 import type test from "node:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -57,7 +58,7 @@ export async function changeShowFixture(t: test.TestContext) {
   const checkpoint = await validateMemoryChange(edit.change.id);
   assert.deepEqual(checkpoint.issues, []);
   const metadata = join(projectRoot, "changes", edit.change.id, "change.json");
-  const env = { ...process.env, MEMSPHERE_CONFIG_PATH: join(projectRoot, "config.json") };
+  const env = { ...process.env, ...await reviewerSessionEnvironment(projectRoot, home, workspace) };
   const command = (args: string[]) => crossSpawn.sync(runtime.launcherPath, args, { cwd: workspace, env, encoding: "utf8", timeout: 20_000 });
   let digest = checkpoint.checkpointDigest;
   const invoke = (extra: string[] = []) => command(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra]);
@@ -79,5 +80,5 @@ export async function changeShowFixture(t: test.TestContext) {
     return result;
   };
   const versionRoot = (version = digest) => join(projectRoot, "changes", edit.change.id, "checkpoints", version);
-  return { root, home, projectRoot, edit, candidate, metadata, checkpoint, command, invoke, read, readMaterial, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
+  return { root, home, projectRoot, env, edit, candidate, metadata, checkpoint, command, invoke, read, readMaterial, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
 }

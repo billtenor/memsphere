@@ -24,10 +24,9 @@ async function identities(pids: number[], query = queryWindowsProcesses): Promis
     return new Map(result.filter((row): row is readonly [number, ProcessIdentity] => row[1] !== undefined));
   }
   // One fresh CIM snapshot per observation, never a cached exit decision.
-  const selected = new Set(pids.filter(pid => {
-    try { process.kill(pid, 0); return true; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
-  }));
+  // Windows may reject a zero-signal probe while a Job member is exiting.
+  // Only the fresh CIM result and creation identity establish original liveness.
+  const selected = new Set(pids);
   if (!selected.size) return new Map();
   return new Map((await query()).filter(row => selected.has(row.pid)).map(row => {
     if (!row.started) throw Error(`Process ${row.pid} has no creation identity`);

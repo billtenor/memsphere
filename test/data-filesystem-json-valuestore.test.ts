@@ -224,6 +224,26 @@ test("filesystem JSON ValueStore rejects unsupported JSON values and descriptors
   });
 });
 
+test("filesystem JSON ValueStore validates unknown nested numbers on detached reads without normalizing records", async () => {
+  await withStore(async (_store, directory) => {
+    const runtime = createPlainRuntime({ id: "loose-json.json", root: { kind: "object", fields: [], field: () => undefined } });
+    const store = await new FilesystemJsonValueStoreFactory().createStore({}, STORE_ID, runtime, new Config({ directory }));
+    const path = join(directory, "edited.json");
+    for (const literal of ["-0", "-0.0", "1e999", "9007199254740993", "-9007199254740993"]) {
+      const source = `{"id":"edited","revision":1,"createdAt":1,"updatedAt":1,"value":{"unknown":[{"number":${literal}}]}}`;
+      await writeFile(path, source);
+      await assert.rejects(store.get({}, "edited"), /JSON/);
+      assert.equal(await readFile(path, "utf8"), source);
+    }
+    const value = JSON.parse('{"unknown":[0.125],"toJSON":"data","__proto__":{"kept":true}}');
+    await writeFile(path, JSON.stringify({ id: "edited", revision: 1, createdAt: 1, updatedAt: 1, value }));
+    const first = (await store.get({}, "edited"))!;
+    assert.deepEqual(first.value, value);
+    (first.value as { unknown: number[] }).unknown.push(2);
+    assert.deepEqual((await store.get({}, "edited"))!.value, value);
+  });
+});
+
 test("filesystem JSON ValueStore rejects a runtime-incompatible round trip before publication", async () => {
   await withStore(async (_store, directory) => {
     const runtime = createPlainRuntime({ id: "null-prototype-only.json", root: { kind: "object", fields: [], field: () => undefined } }, {

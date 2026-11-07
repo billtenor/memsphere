@@ -166,16 +166,22 @@ export async function graphCommand(operation: string, input: object): Promise<bo
     const stepId = needed(options.step, "--step");
     await assertSessionTarget(project, run.id, stepId);
     if ([options.artifact, options.artifactFile, options.file].filter(v => v !== undefined).length !== 1) throw failure("INVALID_ARGUMENT", "Choose one of --artifact, --artifact-file, --file");
-    if (options.writeOptions || options.dependsOn?.length || options.revisedFrom || options.tag?.length || options.name) throw failure("INVALID_ARGUMENT", "Graph contract and input dependencies are fixed by the Step");
+    if (options.writeOptions || options.revisedFrom || options.tag?.length || options.name) throw failure("INVALID_ARGUMENT", "Graph contract and mandatory inputs are fixed by the Step");
     if (options.revisionSummary !== undefined && options.revisionSummaryFile !== undefined) throw failure("INVALID_ARGUMENT", "Choose one revision summary source");
     await assertReportExecutionCapability();
     const value = options.file ? JSON.parse(await readFile(options.file, "utf8")) : undefined;
-    if (value && (typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !["content", "contentRef"].includes(k)))) throw failure("INVALID_ARGUMENT", "Graph report file accepts content or contentRef only");
-    const result = await g.report(run.id, stepId, { ...(value ?? { text: typeof options.artifact === "string" ? options.artifact : await readFile(options.artifactFile!, "utf8") }), ...((options.revisionSummary !== undefined || options.revisionSummaryFile) ? { revisionSummary: options.revisionSummary ?? await readFile(options.revisionSummaryFile!, "utf8") } : {}) });
+    if (options.file && (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !["content", "contentRef", "dependencies"].includes(k)))) throw failure("INVALID_ARGUMENT", "Graph report file accepts content/contentRef and dependencies");
+    if (value?.dependencies !== undefined && options.dependsOn?.length) throw failure("INVALID_ARGUMENT", "Use dependencies or --depends-on, not both");
+    const dependencies = options.dependsOn?.map(selector => {
+      const match = /^(artifact|external):(.+)$/.exec(selector);
+      if (!match) throw failure("INVALID_ARGUMENT", "Graph dependencies require fixed artifact:ID or external:ID");
+      return { kind: match[1] as "artifact" | "external", id: match[2]! };
+    });
+    const result = await g.report(run.id, stepId, { ...(value ?? { text: typeof options.artifact === "string" ? options.artifact : await readFile(options.artifactFile!, "utf8") }), ...(dependencies ? { dependencies } : {}), ...((options.revisionSummary !== undefined || options.revisionSummaryFile) ? { revisionSummary: options.revisionSummary ?? await readFile(options.revisionSummaryFile!, "utf8") } : {}) });
     let prompt: string;
     if (result.step.status === "done") { await closeStep(project, run.id, stepId); prompt = await graphNext(g, result.snapshot, project); }
     else prompt = await stepPrompt(g, result.snapshot, result.step, project);
-    emitCommandResult({ runId: run.id, stepId, artifactId: result.artifact.id, status: result.step.status, prompt }, options.output ?? "text");
+    emitCommandResult({ runId: run.id, stepId, artifactId: result.artifact.id, dependencies: result.artifact.dependencies, mandatoryInputs: result.step.inputs, status: result.step.status, prompt }, options.output ?? "text");
     return true;
   });
 }

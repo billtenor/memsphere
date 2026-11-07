@@ -2,6 +2,8 @@ import { delimiter, join, resolve } from "node:path";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
+import { resolveMemsphereHome } from "../home.js";
+import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import {
   assertArtifactReviewAgentAttemptRunning,
   claimArtifactReviewAgentAssignment,
@@ -71,6 +73,8 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     attemptId: claimed.attempt.id
   };
   const callerDirectory = resolve(options.workspaceRoot ?? process.cwd());
+  let sourceWorkspace = callerDirectory;
+
   let workspaceRoot = callerDirectory;
   let attemptDirectory: string | undefined;
   const activity = new AgentActivityRecorder({
@@ -87,6 +91,13 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
     if (enrollmentFailure) throw enrollmentFailure;
+    if (config.project?.store?.type === "embedded") {
+      const canonical = await resolveWorkspaceIdentity(config.memoryRoot);
+      const caller = await resolveWorkspaceIdentity(callerDirectory);
+      // View/server launches can have a cwd in a different repository. Keep an
+      // actual source worktree when present; otherwise use this verified Project.
+      if (caller.kind !== "git" || caller.key !== canonical.key) sourceWorkspace = canonical.path;
+    }
     const temporaryRoot = join(callerDirectory, "tmp");
     await mkdir(temporaryRoot, { recursive: true });
     attemptDirectory = await mkdtemp(join(temporaryRoot, "memsphere-review-"));
@@ -105,6 +116,10 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         TMP: workspaceRoot,
         TEMP: workspaceRoot,
         MEMSPHERE_CLI: cliRuntime.launcherPath,
+        MEMSPHERE_HOME: resolveMemsphereHome(),
+        MEMSPHERE_REVIEW_SOURCE_WORKSPACE: sourceWorkspace,
+        MEMSPHERE_REVIEW_HANDLE: reviewId,
+        MEMSPHERE_REVIEW_ROUND_ID: roundId,
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
         ...((claimed.run.memorySnapshot || claimed.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: claimed.run.id } : {}),
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: artifactReviewAssignmentId(claimed.assignment),

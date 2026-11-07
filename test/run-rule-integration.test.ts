@@ -11,8 +11,11 @@ import {
   currentStep,
   enterSchema,
   readRun,
+  reportRun,
+  readArtifactReviewForActor,
   startRun
 } from "../src/run/store.js";
+import { reviewConfiguration } from "./helpers/review.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
 test("Run freezes Statement projections and renders source and section groups", async () => {
@@ -77,6 +80,7 @@ flow:
         target: statements/shared-rules
     artifact: !artifact
       name: report
+      review: [reviewer]
       type: object
       format:
         name: markdown
@@ -89,7 +93,12 @@ flow:
       memoryRoot,
       runsRoot,
       name: "Rule integration",
-      procedureName: "delivery"
+      procedureName: "delivery",
+      controlPlane: {
+        runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+        actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }
+      },
+      reviewConfiguration: reviewConfiguration({ procedure: "delivery", slots: { reviewer: ["human"] } })
     });
     assert.equal(started.assertTree?.entries[0]?.kind, "reference");
     assert.deepEqual(started.asserts, ["Keep the root requirement.", "Do not expose credentials."]);
@@ -110,12 +119,10 @@ flow:
       "statements/shared-rules"
     );
 
-    const reviewContract = buildAgentReviewContract({
-      run: started,
-      review: { stepId: "flow[1]", artifactName: "report" },
-      round: {},
-      assignment: {}
-    } as never);
+    const pending = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Summary\n\nFrozen report." } });
+    const review = pending.artifactReviews![0];
+    const context = await readArtifactReviewForActor({ runsRoot, reviewId: review.id, roundId: review.currentRoundId, actorId: "human" });
+    const reviewContract = buildAgentReviewContract(context);
     assert.equal((reviewContract.procedure.asserts[0] as { reference: string }).reference, "statements/shared-rules");
     assert.equal((reviewContract.action.asserts[1] as { reference: string }).reference, "statements/shared-rules");
     assert.equal((reviewContract.action.suggests[0] as { reference: string }).reference, "statements/shared-rules");

@@ -38,6 +38,10 @@ Managed Memory 通过受控 ChangeSet 修改。Embedded CLI 使用当前 Git wor
 
 Reviewer Session 中，`memory list/read` 默认仍读当前 Project，不自动添加 `--run`；查阅绑定 Run 的实际冻结集合时显式指定 `--run <run-id>`，缺失引用不回退。当前 Memory 是辅助证据，正式评审规则与契约始终使用冻结版本。
 
+受限 Reviewer 的 `run review assignment show` 返回实际绑定协议及读取入口。旧 Session 缺少协议提示时，帮助会列出两套协议并说明边界；固定 Artifact/External/确认读取要求 graph，历史 flow 用 assignment/step 读取固定候选及上下文，保留完整 Artifact 元信息与候选原轮次的修订说明。历史 flow 的 contract 查询只支持绑定候选，在步骤通过或 Run 完成后仍按冻结契约读取；上下文契约或旧调用祖先规则无法确定时明确失败。
+
+Reviewer 内执行所有读取与审查命令时，显式使用本 Attempt 注入的 Session launcher：Bash 为 `"$MEMSPHERE_CLI"`，PowerShell 为 `& $env:MEMSPHERE_CLI`，CMD 为 `"%MEMSPHERE_CLI%"`。返回的命令及材料中的普通 `memsphere` 示例均采用此入口；PATH 或同名工具可能指向其他版本。变量缺失时报告入口不可用，不回退全局安装。
+
 ChangeSet 材料用 `memory change show <change-id> --checkpoint <digest>` 读取，默认 `--part summary`；其他选项为 `--part diff|validation`，或 `--part memory --reference <reference> --side before|after`。`--reference` 只筛选，不改变 part。省略 `--part` 与显式 `summary` 等价，正文省略 `--side` 与显式 `after` 等价；不存在的一侧为 null。输出为 JSON。digest 绑定范围、基线及校验结果，候选未校验修改不污染旧版本；过期、损坏、缺少冻结描述时明确失败，调用方需重新校验并更新材料引用。
 
 
@@ -106,6 +110,10 @@ collect Action 由命令自动完成，Agent 不执行 enter/report；结果是�
 `run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store，但自由探索仍在 report 完整成果时才创建 Step。
 
 
+graph 可用 `run external add --run R --source S --content C` 登记原始依据，或用 `--change C --checkpoint D` 捕获同一固定 ChangeSet 的完整证据；两种来源互斥。External 由当前 Step 生产的 Artifact.dependencies 引用，不由 Step 直接引用。上报时用 `--depends-on artifact:A|external:E` 或结构化 `--file` 的 dependencies（互斥），补充 Artifact 须是本实例固定数据/控制来源中已接纳且当前有效的具体版本。强制输入不变；修订省略继承前身补充依赖，空数组清空，非空完整替换。不要为传递验收依据增加调度边或默认读取同 Action 最新产物。
+
+Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。当前候选和授权上游的 contract show 都须读取完整冻结契约。graph 支持固定 Artifact/External/确认；历史 flow 按 assignment/step 读取固定候选和上下文，遵循提示中的协议适用性。本人读取不依赖其他轮次记录或同轮他人的草稿锚点。导出写入前后核对文件身份，失败明确标示副本可能不完整并保留，不以路径检查后自动删除目标，避免误删并发替换文件。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
+
 #### graph：CLI 回溯
 
 发现上游方案有问题时，先查询具体 Step ID，再只读预览影响范围：
@@ -133,16 +141,16 @@ memsphere run report --run <id> --artifact-file <local-copy>
 
 #### 推进正式 Review
 
-Agent Reviewer 收到节点提示时，系统已冻结材料并建树，按当前节点及角色职责检查；命令保持 memsphere 名称。使用原生 run review 命令（Session 自动绑定 --assignment）或可选 continue，不需要单独 enter；show 为辅助只读，不要求反复调用。无节点树的历史 Session 保留原交互，Human 直接提交结论。
+Agent Reviewer 收到节点提示时，系统已冻结材料并建树，按当前节点及角色职责检查；所有操作显式调用本次注入的 Session launcher；下例使用 Bash 的 `"$MEMSPHERE_CLI"`，不依赖裸命令或同名工具解析。使用原生 run review 命令（Session 自动绑定 --assignment）或可选 continue，不需要单独 enter；show 为辅助只读，不要求反复调用。无节点树的历史 Session 保留原交互，Human 直接提交结论。
 
-- `memsphere continue report --artifact '{"applicable":true}'` 确认当前节点并自动显示下一节点。省略 comments 保留已存内容；显式 comments 数组完整替换节点，适用节点 `[]` 确认全部满足。仅对不满足/无法判定规则提交 `{rulePath,result,body,severity,anchor?}`，result 为 not_satisfied/undetermined。不适用用 applicable=false 及没有 rulePath/result 的原因 Comment，仍进入子节点。
-- `continue comment add [--node N] --artifact '<JSON>'` 添加意见；省略节点作用于当前节点，最终复核时需 --node。`comment update --comment C --artifact '<JSON>'` 修改 body/severity，`comment delete --comment C` 删除意见。`continue update --node N --artifact '<JSON>'` 完整替换指定节点的 applicable/comments。这些编辑命令随时保存但不推进，删除规则意见不清除异常判断。
+- `"$MEMSPHERE_CLI" continue report --artifact '{"applicable":true}'` 确认当前节点并自动显示下一节点。省略 comments 保留已存内容；显式 comments 数组完整替换节点，适用节点 `[]` 确认全部满足。仅对不满足/无法判定规则提交 `{rulePath,result,body,severity,anchor?}`，result 为 not_satisfied/undetermined。不适用用 applicable=false 及没有 rulePath/result 的原因 Comment，仍进入子节点。
+- `"$MEMSPHERE_CLI" continue comment add [--node N] --artifact '<JSON>'` 添加意见；省略节点作用于当前节点，最终复核时需 --node。`"$MEMSPHERE_CLI" continue comment update --comment C --artifact '<JSON>'` 修改 body/severity，`"$MEMSPHERE_CLI" continue comment delete --comment C` 删除意见。`"$MEMSPHERE_CLI" continue update --node N --artifact '<JSON>'` 完整替换指定节点的 applicable/comments。这些编辑命令随时保存但不推进，删除规则意见不清除异常判断。
 - 全部规则之后必须完成开放审查，包括空树和全部节点不适用；结合角色经验检查规则外问题，不强迫制造意见。开放意见只需 body/severity/anchor?，无 rulePath/result；以 applicable=true 报告，空 comments 表示无新增问题。不能按不适用跳过。
-- `continue list` 查看整体树，`continue show` 回读当前提示或最终概览，`show --node N` 展开节点，`show --all` 查看全部已存判断。最终复核可增删改，再用 `continue submit --artifact '{"vote":"approve","summary":"结论"}'` 一次提交独立投票、说明和现有 comments，不重复写意见集合。
-- 内容命令统一二选一 --artifact '<JSON>' 或 --artifact-file F；严重性在 JSON 内。原生对应入口为 `memsphere run review report/update/list/show/comment add|update|delete/submit --assignment A`。节点 report 不带 --node，update 必带 --node；读取和编辑不推进，只有 report 和 submit 推进。
+- `"$MEMSPHERE_CLI" continue list` 查看整体树，`"$MEMSPHERE_CLI" continue show` 回读当前提示或最终概览，`"$MEMSPHERE_CLI" continue show --node N` 展开节点，`"$MEMSPHERE_CLI" continue show --all` 查看全部已存判断。最终复核可增删改，再用 `"$MEMSPHERE_CLI" continue submit --artifact '{"vote":"approve","summary":"结论"}'` 一次提交独立投票、说明和现有 comments，不重复写意见集合。
+- 内容命令统一二选一 --artifact '<JSON>' 或 --artifact-file F；严重性在 JSON 内。原生对应入口为 `"$MEMSPHERE_CLI" run review report/update/list/show/comment add|update|delete/submit --assignment A`。节点 report 不带 --node，update 必带 --node；读取和编辑不推进，只有 report 和 submit 推进。
 
 
-- report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须用受限同名 `memsphere` 会话命令提交意见和 Vote；普通文本回复不是正式投票。
+- report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须通过本 Attempt 注入的 Session launcher 提交意见和 Vote；普通文本回复不是正式投票。
 - `review wait` 先判断当前结果是否可返回；可返回时直接输出完整结果，否则按当前 Runner 配置选择异步或同步，不使用 `--sync`。异步开启后，只复用 queued/running 活动任务；历史终态记录保留，新的必要等待创建新任务。登记成功后可以结束当前回合直到 queue 通知唤醒。通知格式固定为 `[Memsphere 自动消息]`、`请执行命令以继续：`、显式定位 Project/Review 的 wait 命令三行，不携带结果，也不是 Human 指令、授权或投票；执行该命令读取当前正式结果并继续同一个 Run，旧通知不得覆盖当前会话绑定。任务状态用原生 `run review wait status --review R` 查询，failed 可用 `retry --review R --round ROUND` 显式重试发送，可能重复投递；通知发送失败不再自动发送第二条。身份模式 wait/status 不进入后继 Step，按工具响应的原生 enter 命令继续。同步 `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
 - Agent Assignment 首次失败时，Runner 用 `run review retry --review <id> --assignment <id>` 重试一次并继续 wait；再次失败时报告 Provider/Attempt/错误，取得 Human 对继续重试的授权后再执行。调试启动可按需使用 `debug.agent_review` 与 `run try-run`，后者只生成启动材料，不执行 Reviewer 或认领 Assignment。
 - 同步和异步 `review wait` 只等待 Agent：全部 Agent 提交或任一 Agent 失败即返回/通知；没有 Agent 时立即返回，Human 草稿和投票不影响等待。Agent 等待就绪不表示整体评审通过；Human 的最终验收门禁单独保留。
