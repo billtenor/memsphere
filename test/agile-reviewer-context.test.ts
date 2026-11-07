@@ -66,8 +66,7 @@ for (const source of [
   '.memsphere/memory/procedures/memsphere-agile-requirement-development.yaml',
   'reserved-memory/official-memory/procedures/generic-agile-requirement-development.yaml'])
   test(`${source}: formal technical/product Sessions pin actual workflow inputs through loops and rewind`, {
-    // Each workflow has six bounded phases; the aggregate spans many Reviews.
-    timeout: 540000
+    timeout: 180000
   }, async (t) => {
     const f = await initializedContextFixture(t);
     const service = (await openContextControl(f.root))!;

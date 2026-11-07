@@ -104,7 +104,7 @@ test("CI separates full and default cancellation, trigger and result policies", 
   assert.equal(security.jobs.gitleaks["timeout-minutes"], 5);
   assert.equal(security.jobs.gitleaks.steps.some(step => step.run?.includes("ci-budget")), false);
   assert.equal(workflow.jobs["full-result"]["timeout-minutes"], 5);
-  assert.equal(workflow.jobs.test["timeout-minutes"], 20);
+  assert.equal(workflow.jobs.test["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
   assert.equal(workflow.jobs["windows-package-smoke"]["timeout-minutes"], "${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}");
   const steps = workflow.jobs.test.steps;
   const browserInstall = steps.find(step => step.name === "Install Playwright Chromium");
