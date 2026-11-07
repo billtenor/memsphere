@@ -119,7 +119,7 @@ export async function findArtifactReview(input: Parameters<typeof legacy.findArt
   if (!review) throw failure("NOT_FOUND", `Graph Step has no Review: ${id.stepId}`);
   return { run, review };
 }
-export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0]) {
+export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0] & { service?: ContextControl }) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForActor(input);
   return legacy.artifactReviewForActor({ ...await findArtifactReview({ ...input, viewRoundId: input.roundId, viewActorId: input.actorId }), roundId: input.roundId, actorId: input.actorId });
 }
@@ -217,7 +217,7 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
   }));
   return attemptId ? agentContext({ ...input, attemptId }) : undefined;
 }
-export async function markArtifactReviewAgentCliReady(input: Parameters<typeof legacy.markArtifactReviewAgentCliReady>[0]) {
+export async function markArtifactReviewAgentCliReady(input: Parameters<typeof legacy.markArtifactReviewAgentCliReady>[0] & { service?: ContextControl }) {
   if (!identity(input.reviewId)) return legacy.markArtifactReviewAgentCliReady(input);
   return mutateAttempt(input, (_r, a) => { a.cliReadyAt ??= stamp(); a.session = { ...a.session, ...(input.protocolVersion !== undefined ? { protocolVersion: input.protocolVersion } : {}), ...(input.sessionId ? { id: input.sessionId } : {}), ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
 }

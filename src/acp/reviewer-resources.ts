@@ -6,7 +6,6 @@ import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
 import { open, realpath, lstat } from "node:fs/promises";
 import { readConfig } from "../config.js";
-import { openContextControl } from "../project/context-control.js";
 import { boundAgentReviewSession, boundReviewNodeContext, expandReviewArtifact } from "./review-session.js";
 import { inReviewerSession } from "./reviewer-commands.js";
 import { failure } from "../context_control/errors.js";
@@ -17,7 +16,7 @@ const denied = (id: string) => failure("REVIEW_RESOURCE_DENIED", `Object is outs
 export async function reviewerResources() {
   const binding = await boundAgentReviewSession();
   const config = await readConfig(process.env.MEMSPHERE_CONFIG_PATH);
-  const service = await openContextControl(dirname(config.runsRoot));
+  const service = binding.service;
   const runId = process.env.MEMSPHERE_REVIEW_RUN_ID!;
   const run = service && await service.findRun(runId);
   if (!service || !run?.frames?.some(f => f.type === "graph")) return undefined;

@@ -28,6 +28,9 @@ import { effectiveStep } from "../context_control/graph-rewind.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
 
 type BoundAgentReviewSession = {
+  // Reuse only the open Store handle within this binding operation. Each
+  // repository call still reads current records and checks the model stamp.
+  service: Awaited<ReturnType<typeof openContextControl>>;
   runsRoot: string;
   reviewId: string;
   roundId: string;
@@ -124,7 +127,7 @@ export async function boundAgentReviewSession(write = false): Promise<BoundAgent
       if (!review.roundId || !review.reviewer.actorId) throw new Error("review_assignment_not_bound");
       const artifact = (await g.records.require<import("../context_control/types.js").Artifact>("artifact", runId, review.artifactId)).value;
       if (!effectiveStep(modelRun, artifact.stepId)) throw new Error("review_attempt_not_current");
-      return readArtifactReviewForActor({ runsRoot: config.runsRoot, reviewId: graphReviewHandle(runId, artifact.stepId), roundId: review.roundId, actorId: review.reviewer.actorId });
+      return readArtifactReviewForActor({ service, runsRoot: config.runsRoot, reviewId: graphReviewHandle(runId, artifact.stepId), roundId: review.roundId, actorId: review.reviewer.actorId });
     });
   }
   const run = directed?.run ?? await readRun(config.runsRoot, runId);
@@ -142,6 +145,7 @@ export async function boundAgentReviewSession(write = false): Promise<BoundAgent
     if (assignment.attempts?.at(-1)?.id !== attempt.id || !["running", "submitted"].includes(attempt.status) || !["running", "submitted"].includes(assignment.status)) throw new Error("review_attempt_not_current");
     if (write && (assignment.attempts?.at(-1)?.id !== attempt?.id || assignment.status !== "running")) throw new Error("review_attempt_not_current");
     if (write) await markArtifactReviewAgentCliReady({
+      service,
       runsRoot: config.runsRoot,
       reviewId: review.id,
       roundId: round.id,
@@ -149,6 +153,7 @@ export async function boundAgentReviewSession(write = false): Promise<BoundAgent
       attemptId: attempt.id
     });
     return {
+      service,
       runsRoot: config.runsRoot,
       reviewId: review.id,
       roundId: round.id,
