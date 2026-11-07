@@ -90,8 +90,7 @@ test('global Project positions work and explicit conflicting identities are reje
     ["--project", "other", "run", "artifact", "show"],
     ["run", "artifact", "show", "--project=other", "--project=test-project"],
     ["run", "artifact", "show", "--run", "other"],
-    ["run", "artifact", "show", "--assignment", "other"],
-    ["run", "report", "--run", runId, "--step", c.step.id, "--artifact", "attack"]
+    ["run", "artifact", "show", "--assignment", "other"]
   ]) { const r = await cli([...args, "--output", "json"]); assert.notEqual(r.status, 0); assert.equal(r.stdout, ""); assert.match(r.stderr, /REVIEW_IDENTITY_CONFLICT|REVIEW_SESSION_DENIED/); }
 
 });
@@ -163,7 +162,6 @@ test('exports reject outside parents, directory symlinks and existing targets', 
   await writeFile(join(attempt,"full.txt"),"existing");
   await symlink(f.cwd, join(attempt, "escape"), "dir");
   for (const out of ["../escape.txt", "escape/escape.txt", "full.txt"]) { const r = await cli(["run", "external", "show", "--external", e.id, "--out", out, "--output", "json"]); assert.notEqual(r.status, 0); assert.equal(r.stdout, ""); }
-  const badCwd = await cli(["run", "artifact", "show", "--output", "json"], {}, f.cwd); assert.notEqual(badCwd.status, 0); assert.equal(badCwd.stdout, "");
 
 });
 
@@ -303,4 +301,30 @@ test('peer draft anchors never load their damaged content during personal reads'
     const r=await f.cli([...args,'--output','json']);assert.equal(r.status,0,r.stderr);assert.doesNotMatch(r.stdout,/Peer private draft/);
   }
   const denied=await f.cli(['run','external','show','--external',f.eRef.id,'--out','damaged.txt','--output','json']);assert.notEqual(denied.status,0);assert.equal(denied.stdout,'');await assert.rejects(readFile(join(f.attempt,'damaged.txt')),{code:'ENOENT'});
+});
+
+test('personal node report and comment edits survive a missing unrelated old candidate',async t=>{
+ const f=await evidenceFixture(t),revised=await reviseEvidence(f),input={...f.input,roundId:revised.next.step.reviewRounds!.at(-1)!.id};
+ const context=await reviews.readArtifactReviewForActor(input),firstNode=currentReviewNode(context.assignment)!.nodeId;
+ const nodes=(n:any):any[]=>[n,...n.children.flatMap(nodes)],openNode=nodes(context.assignment.nodeTree!.root).find(n=>n.kind==='open_review').nodeId;
+ await f.service.withGraph(g=>g.records.stores.artifact.delete({},g.records.key('artifact',f.runId,f.c.artifact.id)));
+ const cli=async(args:string[])=>{const r=await f.cli([...args,'--output','json'],revised.changes);assert.equal(r.status,0,r.stderr);return r;};
+ await cli(['continue','report','--artifact','{"applicable":true}']);
+ await cli(['continue','update','--node',firstNode,'--artifact','{"applicable":true,"comments":[]}']);
+ await cli(['continue','comment','add','--node',openNode,'--artifact',JSON.stringify({body:'Fixed context',severity:'suggestion',anchor:{targetRef:{kind:'artifact',id:f.a.artifact.id},location:'line 1'}})]);
+ const comment=(await reviews.readArtifactReviewForActor(input)).assignment.draft.comments.find(c=>c.body==='Fixed context')!;assert.ok(comment);
+ await cli(['continue','comment','update','--comment',comment.commentId!,'--artifact','{"body":"Edited fixed context","severity":"risk"}']);
+ assert.ok((await reviews.readArtifactReviewForActor(input)).assignment.draft.comments.some(c=>c.body==='Edited fixed context'));
+ await cli(['continue','comment','delete','--comment',comment.commentId!]);
+ const before=(await reviews.readArtifactReviewForActor(input)).assignment;
+ const denied=await f.cli(['continue','comment','add','--node',openNode,'--artifact',JSON.stringify({body:'Outside',severity:'risk',anchor:{targetRef:{kind:'external',id:f.outside.id},location:'1'}}),'--output','json'],revised.changes);
+ assert.notEqual(denied.status,0);assert.equal(denied.stdout,'');const after=(await reviews.readArtifactReviewForActor(input)).assignment;assert.deepEqual(after.nodeStates,before.nodeStates);assert.deepEqual(after.draft,before.draft);
+});
+
+
+test('Reviewer production commands remain forbidden independently of target identity',async t=>{
+ const f=await evidenceFixture(t),r=await f.cli(['run','report','--run',f.runId,'--step',f.c.step.id,'--artifact','attack','--output','json']);assert.notEqual(r.status,0);assert.equal(r.stdout,'');assert.match(r.stderr,/REVIEW_SESSION_DENIED/);
+});
+test('Reviewer reads reject a cwd outside the bound Attempt',async t=>{
+ const f=await evidenceFixture(t),r=await f.cli(['run','artifact','show','--output','json'],{},f.f.cwd);assert.notEqual(r.status,0);assert.equal(r.stdout,'');assert.match(r.stderr,/REVIEW_SESSION_INVALID/);
 });

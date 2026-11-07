@@ -108,7 +108,7 @@ collect Action 由命令自动完成，Agent 不执行 enter/report；结果是�
 
 graph 可用 `run external add --run R --source S --content C` 登记原始依据，或用 `--change C --checkpoint D` 捕获同一固定 ChangeSet 的完整证据；两种来源互斥。External 由当前 Step 生产的 Artifact.dependencies 引用，不由 Step 直接引用。上报时用 `--depends-on artifact:A|external:E` 或结构化 `--file` 的 dependencies（互斥），补充 Artifact 须是本实例固定数据/控制来源中已接纳且当前有效的具体版本。强制输入不变；修订省略继承前身补充依赖，空数组清空，非空完整替换。不要为传递验收依据增加调度边或默认读取同 Action 最新产物。
 
-Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。当前候选和授权上游的 contract show 都须读取完整冻结契约。graph 支持固定 Artifact/External/确认；历史 flow 按 assignment/step 读取固定候选和上下文，遵循提示中的协议适用性。本人读取不依赖其他轮次记录或同轮他人的草稿锚点。导出写入前后核对文件身份，失败不删除他人替换的文件。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
+Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。当前候选和授权上游的 contract show 都须读取完整冻结契约。graph 支持固定 Artifact/External/确认；历史 flow 按 assignment/step 读取固定候选和上下文，遵循提示中的协议适用性。本人读取不依赖其他轮次记录或同轮他人的草稿锚点。导出写入前后核对文件身份，失败明确标示副本可能不完整并保留，不以路径检查后自动删除目标，避免误删并发替换文件。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
 
 #### graph：CLI 回溯
 

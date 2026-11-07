@@ -71,3 +71,28 @@ test('real production CLI loops and rewinds pin each acceptance Session to the c
  f.runner(['run','artifact','show','--run',f.runId,'--artifact',r1.artifactId,'--out',join(f.cwd,'historical-requirements.txt'),'--output','json']);assert.equal(await readFile(join(f.cwd,'historical-requirements.txt'),'utf8'),'requirements v1');
  assert.equal((await f.service.readArtifact(f.runId,r1.artifactId)).bytes.toString(),'requirements v1');assert.equal(await readFile(join(f.cwd,'history-r1.txt'),'utf8'),'requirements v1');
 });
+
+async function supplementalRevisionFixture(t:test.TestContext){
+ const f=await fixture(t,[action('R'),action('P','R'),action('C','P',true)]),r=await f.produce('R','requirements'),p=await f.produce('P','plan');
+ const body=(text:string)=>({content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:text}}});
+ const e1=await f.service.addExternal(f.runId,'E1',body('first external')),e2=await f.service.addExternal(f.runId,'E2',body('second external')),step=(await f.active('C')).id;
+ // API setup supplies an independent predecessor; the operation under test
+ // below crosses the real production CLI and restricted Session boundaries.
+ await f.service.withGraph(async g=>{await g.enter(f.runId,step);return g.report(f.runId,step,{text:'previous candidate',dependencies:[{kind:'artifact',id:r.artifactId},{kind:'external',id:e1.id}]});});
+ await(await f.claim(step)).decide('request_changes');return {f,r,p,e1,e2,step};
+}
+for(const operation of ['inherit','clear','replace'] as const)test(`production CLI independently ${operation}s supplemental dependencies while preserving mandatory inputs`,async t=>{
+ const {f,r,p,e1,e2,step}=await supplementalRevisionFixture(t);let result;
+ if(operation==='clear'){
+  const file=join(f.cwd,'clear-independent.json');await writeFile(file,JSON.stringify({content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'clear'}},dependencies:[]}));
+  result=JSON.parse(f.runner(['run','report','--run',f.runId,'--step',step,'--file',file,'--revision-summary','clear','--output','json']).stdout);
+ }else result=await f.produce('C',operation,['--revision-summary',operation,...(operation==='replace'?['--depends-on',`external:${e2.id}`]:[])]);
+ assert.ok(result.dependencies.some((d:any)=>d.id===p.artifactId));const current=await f.claim(step);current.read('artifact',p.artifactId,'mandatory.txt');
+ current.read('artifact',r.artifactId,'ancestor.txt',operation==='inherit');current.read('external',e1.id,'e1.txt',operation==='inherit');current.read('external',e2.id,'e2.txt',operation==='replace');
+});
+test('production CLI rejects an unrelated supplemental Artifact and accepts a causal ancestor',async t=>{
+ const f=await fixture(t,[action('R'),action('P','R'),action('U'),action('C','P',true)]),r=await f.produce('R','requirements');await f.produce('P','plan');const u=await f.produce('U','unrelated'),step=(await f.active('C')).id;
+ f.runner(['run','step','enter','--run',f.runId,'--step',step]);const before=(await f.service.snapshot(f.runId)).artifacts.length;
+ const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/outside this Step/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
+ await f.produce('C','valid',['--depends-on',`artifact:${r.artifactId}`]);const reader=await f.claim(step);reader.read('artifact',r.artifactId,'ancestor.txt');reader.read('artifact',u.artifactId,'unrelated.txt',false);
+});

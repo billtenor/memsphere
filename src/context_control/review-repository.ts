@@ -313,17 +313,16 @@ export async function resolveArtifactReviewComment(input: Parameters<typeof lega
 
 export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation: NodeMutation }) {
   if (!identity(input.reviewId)) return legacy.mutateArtifactReviewNodes(input);
-  await agentContext(input);
-  const materialIds = await use(input, async (g, id) => {
-    const snapshot = await g.reviewSnapshot(id.runId, id.stepId);
-    const step = snapshot.steps.find(s => s.id === id.stepId)!;
-    const round = step.reviewRounds?.at(-1);
-    if (round?.id !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
-    const candidate = snapshot.artifacts.find(a => a.id === round.artifactId)!;
-    const artifactIds = new Set([candidate.id, ...candidate.dependencies.filter(r => r.kind === "artifact").map(r => r.id)]);
-    const externalIds = snapshot.artifacts.filter(a => artifactIds.has(a.id)).flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id));
-    return [...[...artifactIds].map(id => `artifact:${id}`), ...externalIds.map(id => `external:${id}`)];
-  });
+  const context = await agentContext(input);
+  if (context.review.currentRoundId !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
+  const submission = context.review.submissions.find(s => s.id === context.round.submissionId)!;
+  // Reads and node writes consume the same personal, frozen context selection.
+  // The personal CAS below still checks that this Round is current at save time.
+  const materialIds = [
+    `artifact:${submission.id}`,
+    ...submission.contextArtifacts.flatMap(a => a.artifactId ? [`artifact:${a.artifactId}`] : []),
+    ...(submission.contextExternals ?? []).map(e => `external:${e.externalId}`)
+  ];
   return mutateAttempt(input, review => {
     if (!review.nodeTree || !review.nodeStates) throw failure("INVALID_STATE", "Review nodes are not enabled");
     review.comments = mutateReviewNode({ nodeTree: review.nodeTree, nodeStates: review.nodeStates }, review.comments, input.mutation, item => {

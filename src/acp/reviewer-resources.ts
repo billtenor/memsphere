@@ -3,7 +3,7 @@ import { graphArtifactDto } from "../context_control/review-repository.js";
 import { buildReviewContract } from "./review-contract.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
-import { open, realpath, lstat, rm } from "node:fs/promises";
+import { open, realpath, lstat } from "node:fs/promises";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { boundAgentReviewSession, boundReviewNodeContext } from "./review-session.js";
@@ -66,13 +66,16 @@ export async function exportReviewerBody(file: string, bytes: Uint8Array) {
   const verify = async () => {
     if (await realpath(dirname(target)) !== parent || !await ownsTarget()) throw denied(file);
   };
-  let complete = false;
   try {
     await verify();
     await handle.writeFile(bytes);
     await verify();
-    complete = true;
-  } finally { await handle.close(); if (!complete && await ownsTarget()) await rm(canonical, { force: true }); }
+  } catch (error) {
+    // Node has no portable unlink-if-this-inode operation. A path check followed
+    // by rm can delete a concurrent replacement; retain the failed copy instead.
+    if (error instanceof Error) error.message += "; export failed: output may be incomplete and was not automatically removed";
+    throw error;
+  } finally { await handle.close(); }
 }
 
 type Options = { run?: string; assignment?: string; artifact?: string | string[]; external?: string; review?: string; round?: string; step?: string; out?: string; output?: "text" | "json" };

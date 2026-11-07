@@ -8,7 +8,7 @@ defines:
   - "受限 Reviewer 的命令由真实 CLI 解析并在处理层核对 Session 身份；合法 --project 可在子命令前后或使用等号，只能等于绑定 Project。所有显式 Run/Assignment 值必须一致，重复参数中含冲突值也拒绝。资源查询不自动注入不兼容的 assignment；错误区分参数、身份冲突、Session 失效及对象越界。"
   - "graph Review 按轮次候选 Artifact 的不可变 dependencies 授权候选、直接强制或显式补充 Artifact，以及这些可读 Artifact 直接引用的 External；不默认开放所有祖先、分支或整个 Run。确认依据只含授权上下文 Artifact 对应原接纳轮次的已提交 Review，不公开当前候选他人草稿；无独立 Review 的接纳产物明确标识。"
   - "run review assignment show 列出固定对象和可执行读取命令；run artifact show --run R --artifact A --out F、run external show --run R --external E --out F 完整导出原始正文；contract show 支持授权 Artifact ID，当前候选与上游输入均返回同一冻结版本的 Procedure、Action、Artifact 完整契约及适用规则，不把 Action 摘要称为完整契约。Step 查询须唯一定位本轮允许版本；run show 与 step show 在 Session 中仅返回受限摘要。显式 review show/list 只能读取授权上下文的确认记录，无目标仍读本人节点。"
-  - "读取和写入都核对 Attempt 生命周期：被重试替换、失败、取消、未启动或经回溯撤销的启动身份拒绝；当前有效 Attempt 可读授权历史依据，本人成功提交后可回读原轮次但不能继续写入。普通只读不握手或推进状态。Session 导出仅可在 Attempt 真实目录中新建工作副本，拒绝目录外、符号链接逃逸及覆盖；写入前后核对路径与本次创建句柄的文件身份，失败只清理仍属于本次写入的目标，不能删除他人替换的文件。"
+  - "读取和写入都核对 Attempt 生命周期：被重试替换、失败、取消、未启动或经回溯撤销的启动身份拒绝；当前有效 Attempt 可读授权历史依据，本人成功提交后可回读原轮次但不能继续写入。普通只读不握手或推进状态。Session 导出仅可在 Attempt 真实目录中新建工作副本，拒绝目录外、符号链接逃逸及覆盖；写入前后核对路径与本次创建句柄的文件身份，导出失败必须明确标示副本可能不完整；不依据路径检查后再删除目标，以免误删并发替换文件，失败副本可保留待人工确认。"
   - "review wait 已就绪时直接返回结果；仍需等待时按 Runner 配置选择异步登记或同步等待，无需命令参数选择。重复异步调用仅复用活动任务，历史终态不阻止新的必要等待。"
   - "review-wait 任务固定轮次与接收 Agent 会话，queue 成功才 completed；失败和取消通过 status/error 表达，通知仅含来源标记与继续执行的 wait 命令，完整结果由该命令读取，不保存 result 或 delivery。"
   - 流程执行 Run 中针对某次不可变 Artifact Submission 的正式评审，用于让 Human 或 Agent 从不同视角检查产物。
