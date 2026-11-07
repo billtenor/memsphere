@@ -185,17 +185,6 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     }else content.append(bar);
     const deps = element("div", "cc-related");if(a.dependencies.length)deps.append(element("span","",label("依赖产物","Dependencies"))); a.dependencies.forEach(r => deps.append(r.kind === "artifact" ? button(snapshot.artifacts.find(a => a.id === r.id)?.name ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});choose(r.id);void open(r.id); }, "cc-text-button") : button(snapshot.externals?.find(e => e.id === r.id)?.source ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});void openExternal(r.id); }, "cc-text-button"))); if(!graphSelection)content.append(deps);
     const body = element("article", "cc-document", a.status === "draft" ? label("未提交", "Not submitted") : label("加载中…", "Loading…")); content.append(body);
-    if (a.writingProgress) {
-      const writing = a.writingProgress, progress = element("section", "cc-schema-writing");
-      progress.setAttribute("aria-label", label("Schema 撰写进度", "Schema writing progress"));
-      progress.append(element("p", "", `${label("进度", "Progress")} ${writing.index}/${writing.items.length}`));
-      const current = writing.items[writing.index]?.path;
-      if (current) progress.append(element("p", "", `${label("当前项", "Current field")}: ${current}`));
-      else progress.append(element("p", "", writing.submitting ? label("提交处理中", "Submitting") : label("待完整检查与提交", "Ready for final inspection and submission")));
-      progress.append(element("p", "", `${label("已跳过", "Skipped")}: ${writing.skipped.length}`));
-      for (const issue of writing.validation?.issues ?? []) progress.append(element("p", "cc-schema-issue", issue.message));
-      content.insertBefore(progress, body);
-    }
     const reviewStep=snapshot.graph?.work.find(step=>step.id===a.stepId);
     const reviewRound=reviewStep?.reviewRounds?.filter(round=>round.artifactId===id).at(-1);
     const inline=Boolean(mountReview&&reviewStep?.reviewHandle&&reviewRound);
@@ -252,10 +241,21 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const section=element("section","cc-upstream-steps");section.setAttribute("aria-label",label("上游步骤","Upstream steps"));section.append(element("h3","",label("上游步骤","Upstream steps")));
     const links=element("div","cc-upstream-links");for(const input of inputs){const link=graphMember(input.id);link.classList.add("cc-upstream-link");link.querySelector(".cc-member-arrow")!.textContent="←";links.append(link);}section.append(links);return section;
   }
-  function executionInformation(step:NonNullable<Snapshot["graph"]>["work"][number]){
+  function executionInformation(step:NonNullable<Snapshot["graph"]>["work"][number], artifact?: Artifact){
     const statuses:Record<string,string>={pending:label("待执行","Pending"),running:label("执行中","Running"),awaiting_review:label("待评审","Awaiting review"),done:label("已完成","Done"),failed:label("失败","Failed"),cancelled:label("已取消","Cancelled")};
     const info=element("details","cc-execution-info");info.dataset.disclosureKey=`execution:${step.id}`;info.append(element("summary","",label("执行信息","Execution information")));
     const facts=element("dl","cc-execution-facts");for(const [name,value]of [[label("状态","Status"),statuses[step.status]??step.status],[label("创建时间","Created"),step.createdAt],[label("开始时间","Started"),step.startedAt],[label("结束时间","Ended"),step.endedAt]])if(value){const content=element("dd");if(name!==label("状态","Status")){const time=element("time","",new Date(value).toLocaleString(english?"en":"zh-CN"));time.dateTime=value;content.append(time);}else content.textContent=value;facts.append(element("dt","",name),content);}info.append(facts);
+    if (artifact?.writingProgress) {
+      const writing = artifact.writingProgress, progress = element("section", "cc-schema-writing");
+      progress.setAttribute("aria-label", label("Schema 撰写进度", "Schema writing progress"));
+      progress.append(element("p", "", `${label("进度", "Progress")} ${writing.index}/${writing.items.length}`));
+      const current = writing.items[writing.index]?.path;
+      if (current) progress.append(element("p", "", `${label("当前项", "Current field")}: ${current}`));
+      else progress.append(element("p", "", writing.submitting ? label("提交处理中", "Submitting") : label("待完整检查与提交", "Ready for final inspection and submission")));
+      progress.append(element("p", "", `${label("已跳过", "Skipped")}: ${writing.skipped.length}`));
+      for (const issue of writing.validation?.issues ?? []) progress.append(element("p", "cc-schema-issue", issue.message));
+      info.append(progress);
+    }
     return info;
   }
   function actionDefinition(action: ProcedureAction) {
@@ -313,7 +313,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     if (!dialog || currentId !== artifactId || graphSelection !== selection) return;
     const head=dialog.querySelector<HTMLElement>(".cc-modal-head")!;dialog.querySelector(".cc-version-bar")?.prepend(executionSelect());graphBack(head);
     const header=dialog.querySelector(".cc-artifact-header");
-    const info=executionInformation(step),metadata=header?.querySelector(".cc-metadata");
+    const info=executionInformation(step, snapshot.artifacts.find(a=>a.id===artifactId)),metadata=header?.querySelector(".cc-metadata");
     if(metadata){const facts=info.querySelector("dl")!;facts.append(element("dt","",label("产物 ID","Artifact ID")),element("dd","cc-artifact-id",metadata.textContent??""));}
     header?.querySelector(".cc-artifact-info")?.remove();
     const upstream=upstreamSteps(step);if(upstream)header?.append(upstream);
