@@ -31,7 +31,8 @@ export function installReviewerCommands(program: Command) {
   const identities: Array<[string, unknown]> = [];
   const helpCommands = process.env.MEMSPHERE_REVIEW_HANDLE
     ? reviewerCapabilities(process.env.MEMSPHERE_REVIEW_HANDLE.startsWith("graph-review-") ? "graph" : "flow").commands
-    : reviewerCapabilities("flow").commands;
+    : reviewerCommands;
+  if (!process.env.MEMSPHERE_REVIEW_HANDLE) program.addHelpText("afterAll", "\nSession protocol hint is unavailable. Help lists both protocols; use run review assignment show to inspect the bound protocol. Fixed Artifact/External/confirmation targets require graph; flow supports pinned assignment/step reads.\n");
   const visit = (command: Command) => {
     for (const option of command.options) {
       const key = option.attributeName();

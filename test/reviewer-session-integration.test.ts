@@ -328,3 +328,10 @@ test('Reviewer production commands remain forbidden independently of target iden
 test('Reviewer reads reject a cwd outside the bound Attempt',async t=>{
  const f=await evidenceFixture(t),r=await f.cli(['run','artifact','show','--output','json'],{},f.f.cwd);assert.notEqual(r.status,0);assert.equal(r.stdout,'');assert.match(r.stderr,/REVIEW_SESSION_INVALID/);
 });
+
+
+test('graph sessions without a HANDLE hint discover External help and retain actual capability',async t=>{
+ const f=await evidenceFixture(t),help=await f.cli(['run','--help']);assert.equal(help.status,0,help.stderr);assert.match(help.stdout,/external/);
+ const detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);assert.equal(JSON.parse(detail.stdout).protocol,'graph');
+ const read=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(read.status,0,read.stderr);
+});

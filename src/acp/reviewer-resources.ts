@@ -6,7 +6,7 @@ import { dirname, resolve, relative, isAbsolute, basename, join } from "node:pat
 import { open, realpath, lstat } from "node:fs/promises";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
-import { boundAgentReviewSession, boundReviewNodeContext } from "./review-session.js";
+import { boundAgentReviewSession, boundReviewNodeContext, expandReviewArtifact } from "./review-session.js";
 import { inReviewerSession } from "./reviewer-commands.js";
 import { failure } from "../context_control/errors.js";
 import type { Artifact, External, Review, Step } from "../context_control/types.js";
@@ -100,10 +100,10 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     // Explicit Step reads must still use the pinned submission rather than latest Run state.
     if (operation === "artifact-show" && (o.step || o.out)) {
       const item = !o.step || o.step === context.review.stepId ? submission.artifact : submission.contextArtifacts.find(a => a.stepId === o.step)!.artifact;
-      const { requireRunContent } = await import("../project/run-data.js");
-      const value = item.storage === "file" && item.path ? (await requireRunContent((await readConfig()).runsRoot, "artifact", item.path)).toString("utf8") : item.value;
+      const artifact = await expandReviewArtifact((await readConfig(process.env.MEMSPHERE_CONFIG_PATH)).runsRoot, item);
+      const value = artifact.value;
       if (o.out) await exportReviewerBody(o.out, Buffer.from(typeof value === "string" ? value : JSON.stringify(value)));
-      emitCommandResult(o.out ? { out: o.out } : { artifact: { name: item.name, contentType: item.contentType, value } }, o.output); return true;
+      emitCommandResult(o.out ? { out: o.out } : { artifact, ...(!o.step || o.step === context.review.stepId ? { revisionSummary: submission.revisionSummary } : {}) }, o.output); return true;
     }
     return false;
   }

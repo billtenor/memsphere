@@ -38,6 +38,8 @@ Managed Memory 通过受控 ChangeSet 修改。Embedded CLI 使用当前 Git wor
 
 Reviewer Session 中，`memory list/read` 默认仍读当前 Project，不自动添加 `--run`；查阅绑定 Run 的实际冻结集合时显式指定 `--run <run-id>`，缺失引用不回退。当前 Memory 是辅助证据，正式评审规则与契约始终使用冻结版本。
 
+受限 Reviewer 的 `run review assignment show` 返回实际绑定协议及读取入口。旧 Session 缺少协议提示时，帮助会列出两套协议并说明边界；固定 Artifact/External/确认读取要求 graph，历史 flow 用 assignment/step 读取固定候选及上下文，保留完整 Artifact 元信息与候选原轮次的修订说明。
+
 ChangeSet 材料用 `memory change show <change-id> --checkpoint <digest>` 读取，默认 `--part summary`；其他选项为 `--part diff|validation`，或 `--part memory --reference <reference> --side before|after`。`--reference` 只筛选，不改变 part。省略 `--part` 与显式 `summary` 等价，正文省略 `--side` 与显式 `after` 等价；不存在的一侧为 null。输出为 JSON。digest 绑定范围、基线及校验结果，候选未校验修改不污染旧版本；过期、损坏、缺少冻结描述时明确失败，调用方需重新校验并更新材料引用。
 
 

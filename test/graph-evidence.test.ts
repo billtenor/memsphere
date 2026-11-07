@@ -80,3 +80,57 @@ test("loop and rewind acceptance snapshots pin concrete requirements and never d
   const history=await g.reviewSnapshot(start.run.id,c1.step.id,oldRound);assert.ok(history.artifacts.some(a=>a.id===r1.artifact.id));assert.equal((await g.readArtifact(start.run.id,r1.artifact.id)).bytes.toString(),'requirements v1');
  });
 });
+
+test("graph revision independently verifies External inherit", async t=>{
+ const {service}=await graphDomainFixture(t);
+ await service.withGraph(async g=>{
+  const a=action('A'); a.artifact!.review=['approval'];
+  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
+  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
+  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
+  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
+  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
+  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
+  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
+  await reject(first);
+  const revised=await g.report(start.run.id,step.id,{text:'revised',revisionSummary:'inherit'});
+  assert.deepEqual(revised.artifact.dependencies,first.artifact.dependencies);
+  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
+ });
+});
+
+test("graph revision independently verifies External clear", async t=>{
+ const {service}=await graphDomainFixture(t);
+ await service.withGraph(async g=>{
+  const a=action('A'); a.artifact!.review=['approval'];
+  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
+  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
+  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
+  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
+  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
+  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
+  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
+  await reject(first);
+  const revised=await g.report(start.run.id,step.id,{text:'revised',revisionSummary:'clear',dependencies:[]});
+  assert.deepEqual(revised.artifact.dependencies,[]);
+  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
+ });
+});
+
+test("graph revision independently verifies External replace", async t=>{
+ const {service}=await graphDomainFixture(t);
+ await service.withGraph(async g=>{
+  const a=action('A'); a.artifact!.review=['approval'];
+  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
+  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
+  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
+  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
+  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
+  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
+  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
+  await reject(first);
+  const revised=await g.report(start.run.id,step.id,{text:'revised',revisionSummary:'replace',dependencies:[{kind:'external',id:e2.id}]});
+  assert.deepEqual(revised.artifact.dependencies,[{kind:'external',id:e2.id}]);
+  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
+ });
+});

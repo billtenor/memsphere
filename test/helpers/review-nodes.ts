@@ -11,7 +11,7 @@ import { openContextControl } from "../../src/project/context-control.js";
 import { graphMemorySyntax } from "../../src/memory/syntax.js";
 import * as flow from "../../src/run/store.js";
 import * as reviews from "../../src/context_control/review-repository.js";
-export async function reviewNodeFixture(t: test.TestContext, graph: boolean, secondAgent = false, options: { reuseService?: boolean; statementRule?: boolean; project?: { fixture: Awaited<ReturnType<typeof businessFixture>>; service: NonNullable<Awaited<ReturnType<typeof openContextControl>>> } } = {}) {
+export async function reviewNodeFixture(t: test.TestContext, graph: boolean, secondAgent = false, options: { reuseService?: boolean; statementRule?: boolean; flowContext?: boolean; project?: { fixture: Awaited<ReturnType<typeof businessFixture>>; service: NonNullable<Awaited<ReturnType<typeof openContextControl>>> } } = {}) {
   const f = options.project?.fixture ?? (graph ? await initializedContextFixture(t) : await businessFixture(t, {}));
   const controlPlane = { runner: { permissions: ["artifact.read" as const, "artifact.submit" as const, "decision.decide" as const] }, actors: { human: { kind: "human" as const, name: "Human", permissions: ["artifact.read" as const, "decision.decide" as const] }, agent: { kind: "agent" as const, name: "Agent", permissions: ["artifact.read" as const, "decision.assess" as const], agent: { provider: "test", providerType: "traex" as const, command: process.execPath, args: [], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: 10000 } } } };
   const ruleFile = join(f.root, "memory/statements/checkpoint-rules.yaml");
@@ -36,8 +36,9 @@ export async function reviewNodeFixture(t: test.TestContext, graph: boolean, sec
     runId = result.snapshot.run.id; input = { runsRoot: join(f.root, "runs"), reviewId: reviews.graphReviewHandle(runId, result.step.id), roundId: result.step.reviewRounds![0].id, actorId: "agent", ...(options.reuseService !== false ? { service } : {}) };
   } else {
     const memoryRoot = join(f.root, "memory"); await mkdir(join(memoryRoot, "procedures"), { recursive: true });
-    await writeFile(join(memoryRoot, "procedures", "p.yaml"), withCurrentMemorySyntax(`!procedure\nname: p\nflow:\n  - !action\n    action: Make result\n    asserts: ${options.statementRule ? "\n      - !ref\n        target: statements/checkpoint-rules" : "[Check evidence, Check scope]"}\n    artifact: !artifact\n      name: Result\n      review: [reviewer]\n`));
-    const started = await flow.startRun({ name: "test", memoryRoot, runsRoot: join(f.root, "runs"), procedureName: "p", controlPlane, reviewConfiguration: reviewConfiguration({ procedure: "p", slots: { reviewer: ["agent", "human", ...(secondAgent ? ["agent2"] : [])] } }) });
+    await writeFile(join(memoryRoot, "procedures", "p.yaml"), withCurrentMemorySyntax(`!procedure\nname: p\nflow:\n${options.flowContext ? '  - !action\n    action: Prepare earlier evidence\n    artifact: !artifact\n      name: Earlier evidence\n      type: string\n      format: markdown\n' : ''}  - !action\n    action: Make result\n    asserts: ${options.statementRule ? "\n      - !ref\n        target: statements/checkpoint-rules" : "[Check evidence, Check scope]"}\n    artifact: !artifact\n      name: Result\n      review: [reviewer]\n`));
+    const started = await flow.startRun({ name: "test", memoryRoot, runsRoot: join(f.root, "runs"), procedureName: "p", controlPlane, reviewConfiguration: reviewConfiguration({ procedure: "p", flowIndexes: [options.flowContext ? 2 : 1], slots: { reviewer: ["agent", "human", ...(secondAgent ? ["agent2"] : [])] } }) });
+    if (options.flowContext) await flow.reportRun({ runsRoot: join(f.root, 'runs'), runId: started.id, artifact: { kind: 'inline', value: 'Earlier frozen evidence' } });
     const pending = await flow.reportRun({ runsRoot: join(f.root, "runs"), runId: started.id, artifact: { kind: "inline", value: "Candidate" } });
     const review = pending.artifactReviews![0]; runId = pending.id; input = { runsRoot: join(f.root, "runs"), reviewId: review.id, roundId: review.currentRoundId, actorId: "agent" };
   }

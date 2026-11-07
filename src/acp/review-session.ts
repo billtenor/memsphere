@@ -41,11 +41,11 @@ export async function agentReviewArtifactPayload(): Promise<unknown> {
   const submission = context.review.submissions.find((candidate) => candidate.id === context.round.submissionId);
   if (!submission) throw new Error(`Artifact Review Submission not found: ${context.round.submissionId}`);
   return {
-    artifact: await expandArtifact(binding.runsRoot, submission.artifact),
+    artifact: await expandReviewArtifact(binding.runsRoot, submission.artifact),
     contextArtifacts: await Promise.all(submission.contextArtifacts.map(async (item) => ({
       stepId: item.stepId,
       ...(item.artifactId ? { artifactId: item.artifactId } : {}),
-      artifact: await expandArtifact(binding.runsRoot, item.artifact)
+      artifact: await expandReviewArtifact(binding.runsRoot, item.artifact)
     }))),
     revisionSummary: submission.revisionSummary
   };
@@ -61,6 +61,7 @@ export async function agentReviewAssignmentDetailPayload(): Promise<unknown> {
   const context = await readBoundContext(binding);
   const resources = await (await import("./reviewer-resources.js")).reviewerResources();
   return {
+    protocol: binding.reviewId.startsWith("graph-review-") ? "graph" : "flow",
     ...(resources ? {
       artifactId: resources.candidate.id,
       references: [
@@ -165,7 +166,7 @@ async function readBoundContext(binding: BoundAgentReviewSession): Promise<Artif
   return { ...context, attempt };
 }
 
-async function expandArtifact(runsRoot: string, artifact: RunEvent["artifact"]): Promise<unknown> {
+export async function expandReviewArtifact(runsRoot: string, artifact: RunEvent["artifact"]) {
   const value = artifact.storage === "file" && artifact.path
     ? (await requireRunContent(runsRoot, "artifact", artifact.path)).toString("utf8")
     : artifact.value;
