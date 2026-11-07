@@ -6,7 +6,7 @@
 - `ci-change-guard.mjs`：检查 CI 修改并发布授权门禁。
 - `project-smoke.mjs`、`windows-package-smoke.mjs`：CI 的项目和 Windows 安装包冒烟验证。
 
-`npm test`、`npm run test:ci`、`npm run smoke:project` 的入口保持不变。工作流和测试中的路径已同步；测试矩阵、并发和超时标准不变。
+`npm test`、`npm run test:ci`、`npm run smoke:project` 的入口保持不变。测试矩阵、并发、测试选择及成功判定保持不变。普通与完整回归的测试 job 均使用 20 分钟上限：普通回归会自动纳入新集成测试，实测五分钟不足以完成；单个测试原有超时仍生效。安装包冒烟等其他 job 保留各自预算。
 
 整个目录受 CI change guard 保护。通用构建、迁移、开发安全检查和业务演示脚本保留在 scripts 根目录。
 

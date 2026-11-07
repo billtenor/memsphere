@@ -48,7 +48,9 @@ jobs:
     needs: plan
     name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
+    # Default jobs also include all new integration tests. Their measured
+    # runtime now exceeds five minutes; keep the existing full-run ceiling.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
