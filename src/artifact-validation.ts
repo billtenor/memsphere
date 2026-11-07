@@ -1418,6 +1418,7 @@ export async function projectSchemaContent(schema: SchemaNode, contract: Compile
     result.push({ contractPath, fieldPath, text: new TextDecoder("utf-8", { fatal: true }).decode(value.raw) });
     for (const child of deriveSchemaChildren(node, current, value, contractPath, fieldPath)) {
       if (typeof child.field === "object" && child.field.tag === "!schema") await walk(child.field, schemaContract(child.field, current), child.candidate, child.contractPath, child.fieldPath);
+      else if (typeof child.field === "string") result.push({ contractPath: child.contractPath, fieldPath: child.fieldPath, text: new TextDecoder("utf-8", { fatal: true }).decode(child.candidate.raw) });
     }
     if (Array.isArray(value.representation.value)) for (const [index, element] of value.representation.value.entries()) {
       for (const [j, item] of (node.item ? [node.item] : node.items ?? []).entries()) {

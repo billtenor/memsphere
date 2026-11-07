@@ -82,6 +82,6 @@ export type GraphFrame = {
 };
 export type SubmissionFrame = { draft?: { id: string; token: string }; artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
 export type GraphContract = { procedure: GraphProcedureMemory; artifactSpecs: Record<string, GraphArtifactSpec>; rules: Record<string, { asserts: EffectiveRuleTree; suggests: EffectiveRuleTree }> };
-export type Snapshot = { run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
+export type Snapshot = { artifactRevisions?: Record<string, number>; run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
 export type ReportInput = Body & { target?: string; name?: string; revisedFrom?: string; revisedSummary?: string; tags?: string[]; dependencies?: Ref[]; dependsOn?: string[] };
 export const textContent = (content: string, contentType = "text/plain"): Content => ({ model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType, content } });

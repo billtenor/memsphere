@@ -226,7 +226,8 @@ export class GraphRuntime {
         if (ref.kind !== "artifact" || !artifact || !historicalCompleteIds.includes(ref.id) || steps.find(s => s.id === artifact.stepId)?.source?.actionId !== source) throw failure("INVALID_STATE", "Step input is not an accepted Artifact of its source Action");
       }
     }
-    return { run, steps, artifacts, externals, reviews, completeIds, historicalCompleteIds, outputArtifactIds };
+    const artifactRevisions = Object.fromEntries(await Promise.all(artifacts.filter(a => a.writing).map(async a => [a.id, (await this.records.require<Artifact>("artifact", runId, a.id)).revision!] as const)));
+    return { ...(Object.keys(artifactRevisions).length ? { artifactRevisions } : {}), run, steps, artifacts, externals, reviews, completeIds, historicalCompleteIds, outputArtifactIds };
   }
   private creationOrder(run: Run, steps: Step[]) {
     const order = new Map<string, number>();
@@ -602,8 +603,8 @@ export class GraphRuntime {
     if (run.status !== "running") return this.snapshotValue(runId);
     this.active(run); await this.recoverRewind(runId); await this.materialize(runId);
     for (const step of await this.records.list<Step>("step", runId)) if ((step.frames?.length || step.writing) && effectiveStep((await this.run(runId)).value, step.id)) {
-      if (step.writing && step.status === "running") await this.recoverWriting(runId, step.id);
-      else if (step.frames?.length) await this.recoverSubmission(runId, step.id);
+      if (step.frames?.length) await this.recoverSubmission(runId, step.id);
+      else if (step.writing && step.status === "running") await this.recoverWriting(runId, step.id);
     }
     await this.cancelSupersededReviews(runId);
     for (const step of await this.records.list<Step>("step", runId)) if (effectiveStep((await this.run(runId)).value, step.id) && step.status === "awaiting_review") await this.settle(runId, step.id);
@@ -711,7 +712,7 @@ export class GraphRuntime {
     const writing = draft?.value.writing;
     return { runId, stepId, effective: effectiveStep(run, stepId), draft: draft?.value, position: draft && writing && !writing.submission && writing.index < writing.items.length ? writingPosition(draft.value, draft.revision!) : undefined,
       progress: writing ? { completed: writing.index, total: writing.items.length, remaining: writing.items.length - writing.index, fields: writing.items.map((item, i) => ({ id: item.id, path: item.schemaContext?.path, status: writing.skipped.includes(item.id) ? "skipped" : i < writing.index ? "completed" : i === writing.index ? "current" : "remaining" })) } : undefined,
-      current: writing?.items[writing.index], validation: step.validation && (!draft || step.validation.draftRevision === undefined || step.validation.draftRevision === draft.revision) ? step.validation : undefined, phase: writing?.submission ? "submitting" : writing && writing.index === writing.items.length ? "awaiting_finalization" : writing ? "writing" : "not_started",
+      current: writing?.items[writing.index], validation: step.validation && (!draft || step.validation.artifactId === draft.value.id && step.validation.draftRevision === draft.revision) ? step.validation : undefined, phase: writing?.submission || step.frames?.length ? "submitting" : writing && writing.index === writing.items.length ? "awaiting_finalization" : writing ? "writing" : step.artifact?.mode === "produce" ? "submitted" : "not_started",
       requirements: run.schemaContracts?.[step.source!.actionId]?.sources, rules: await this.rules(run, this.action(run, step)) };
   }
   async schemaWrite(runId: string, stepId: string, operation: "report" | "skip" | "repeat", position: string | undefined, value?: string | number) {

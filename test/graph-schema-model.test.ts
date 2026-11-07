@@ -3,6 +3,7 @@ import test from "node:test";
 import { parseMemoryEntity } from "../src/memory/store.js";
 import { collectMemoryReferenceTargets } from "../src/memory/references.js";
 import { parseSchemaModel, MEMSPHERE_SCHEMA_MODEL } from "../src/memory/schema-model.js";
+import { bounded } from "./helpers/fixture-process.js";
 import { graphDomainFixture } from "./helpers/graph-domain.js";
 import { validateGraphBody } from "../src/context_control/graph-content.js";
 import { checkModelDefinition } from "../src/project/model-validation.js";
@@ -18,12 +19,16 @@ test("graph accepts inline YAML and canonical Schema references, rejecting ambig
   for (const model of [{ definedBy: MEMSPHERE_SCHEMA_MODEL }, { definedBy: MEMSPHERE_SCHEMA_MODEL, ref: "schemas/report", definition }, { definedBy: "raw.json", ref: "schemas/report" }, { definedBy: MEMSPHERE_SCHEMA_MODEL, ref: "statements/report" }]) assert.throws(() => procedure(model));
   assert.throws(() => parseSchemaModel("!schema\ntype: string\n"), /explicit syntax/);
 });
-test("graph Schema validates structure while retaining independent model-management scope", async () => {
+test("ordinary model management rejects the graph-only Schema standard", async () => {
   await assert.rejects(checkModelDefinition({}, { modelRef: "report.json", metaModel: MEMSPHERE_SCHEMA_MODEL, source: definition, definition: undefined }), /only by graph/);
+});
+test("graph Schema rejects missing required structure and accepts matching payloads", async () => {
   const spec = procedure().actions[0].artifact!;
   const reader = async () => { throw Error("unexpected contentRef"); };
   await validateGraphBody({ content: { model: { definedBy: MEMSPHERE_SCHEMA_MODEL, definition }, payload: { contentType: "application/json", content: '{"summary":"ok"}' } } }, spec, reader);
   await assert.rejects(validateGraphBody({ content: { model: { definedBy: MEMSPHERE_SCHEMA_MODEL, definition }, payload: { contentType: "application/json", content: '{}' } } }, spec, reader), /summary/);
+});
+test("Schema Runtime reports field reflection as unsupported", async () => {
   const { runtime } = await checkModelDefinition({}, { modelRef: "report.json", metaModel: MEMSPHERE_SCHEMA_MODEL, source: definition, definition: undefined, scope: "graph" });
   assert.throws(() => runtime!.reflect({}), { code: "MODEL_REFLECTION_UNSUPPORTED" });
 });
@@ -116,7 +121,7 @@ test("a field failing its Schema keeps the same position and draft content", asy
   });
 });
 
-test("first writing entry wins against a direct report already preparing its frame", async t => {
+test("first writing entry wins against a direct report already preparing its frame", { timeout: 30000 }, async t => {
   const { service } = await graphDomainFixture(t);
   await service.withGraph(async g => {
     const start = await g.start({ name: "Path race", procedure: procedure() }), run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
@@ -129,13 +134,18 @@ test("first writing entry wins against a direct report already preparing its fra
       return update(c, id, value, options);
     };
     const reporting = g.report(run, step, { text: '{"summary":"direct"}' });
-    await atFrame; const writing = await g.enterSchema(run, step); release();
-    await assert.rejects(reporting, { code: "REVISION_CONFLICT" });
+    void reporting.catch(() => {});
+    let writing: Awaited<ReturnType<typeof g.enterSchema>>;
+    try {
+      await bounded(Promise.race([atFrame, reporting.then(() => { throw Error("Report finished before its frame barrier"); })]), "submission Step CAS barrier");
+      writing = await g.enterSchema(run, step); release();
+      await assert.rejects(reporting, { code: "REVISION_CONFLICT" });
+    } finally { release(); await Promise.allSettled([reporting]); }
     const snapshot = await g.snapshot(run); assert.equal(snapshot.artifacts.length, 1); assert.equal(snapshot.artifacts[0].id, writing.draft!.id);
     assert.equal(snapshot.artifacts[0].status, "draft"); assert.equal(snapshot.steps[0].status, "running");
   });
 });
-test("a direct submission wins against a first writing entry awaiting its Step CAS", async t => {
+test("a direct submission wins against a first writing entry awaiting its Step CAS", { timeout: 30000 }, async t => {
   const { service } = await graphDomainFixture(t);
   await service.withGraph(async g => {
     const start = await g.start({ name: "Direct path race", procedure: procedure() }), run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
@@ -147,9 +157,13 @@ test("a direct submission wins against a first writing entry awaiting its Step C
       if (candidate.writing && !candidate.frames?.length) { reached(); await gate; }
       return update(c, id, value, options);
     };
-    const entering = g.enterSchema(run, step); await atClaim;
-    const result = await g.report(run, step, { text: '{"summary":"direct"}' }); release();
-    await assert.rejects(entering, { code: "REVISION_CONFLICT" });
+    const entering = g.enterSchema(run, step); void entering.catch(() => {});
+    let result: Awaited<ReturnType<typeof g.report>>;
+    try {
+      await bounded(Promise.race([atClaim, entering.then(() => { throw Error("Entry finished before its claim barrier"); })]), "writing Step CAS barrier");
+      result = await g.report(run, step, { text: '{"summary":"direct"}' }); release();
+      await assert.rejects(entering, { code: "REVISION_CONFLICT" });
+    } finally { release(); await Promise.allSettled([entering]); }
     assert.equal(result.snapshot.artifacts.length, 1); assert.equal(result.step.status, "done"); assert.equal((await g.snapshot(run)).artifacts.length, 1);
   });
 });
@@ -168,7 +182,7 @@ for (const permissions of [["artifact.read"], ["artifact.read", "artifact.write"
   });
 });
 
-test("referenced Schema and rules are frozen, with cycles rejected before creating a Run", async t => {
+test("referenced Schema is frozen, with cycles rejected before creating a Run", async t => {
   const { service } = await graphDomainFixture(t);
   const p = procedure({ definedBy: MEMSPHERE_SCHEMA_MODEL, ref: "schemas/report" });
   const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
@@ -276,6 +290,7 @@ test("a requested revision starts a new draft and preserves the preceding submis
     await g.submitReview(run, step, first.step.reviewRounds![0].id, "runner", "request_changes", [], "Clarify summary");
     const revision = await g.enterSchema(run, step);
     assert.notEqual(revision.draft!.id, first.artifact.id); assert.equal(revision.draft!.revisedFrom, first.artifact.id);
+    assert.equal(revision.validation, undefined, "A new draft does not inherit the preceding submission validation");
     assert.equal((await g.enterSchema(run, step)).draft!.id, revision.draft!.id);
     await g.schemaWrite(run, step, "report", revision.position!, '{"summary":"second"}');
     const second = await g.report(run, step, { text: '{"summary":"second"}', revisionSummary: "Clarified" });
@@ -342,5 +357,105 @@ test("Schema final submission accepts a frozen content reference and retains it 
     assert.equal(recovered.steps[0].status, "done"); assert.equal(recovered.artifacts[0].id, draft.draft!.id);
     assert.deepEqual(recovered.artifacts[0].contentRef, contentRef);
     assert.equal(Buffer.from((await g.readArtifact(run, draft.draft!.id)).bytes).toString(), bytes.toString());
+  });
+});
+
+for (const reviewed of [false, true]) test(`status recovers an already submitted draft before ${reviewed ? "Review creation" : "Step completion"}`, async t => {
+  const { service } = await graphDomainFixture(t);
+  const p = procedure(); if (reviewed) p.actions[0].artifact!.review = ["approval"];
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Late recovery", procedure: p, ...(reviewed ? { controlPlane: { runner: { permissions: ["artifact.read", "artifact.write", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } } }, reviewConfiguration: { reviews: { "schema-graph#actions[write]": { policy: "artifact_acceptance.unanimous" } }, slots: { "schema-graph::approval": { actorIds: ["human"] } } } } : {}) });
+    const run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
+    const draft = await g.enterSchema(run, step); await g.schemaWrite(run, step, "report", draft.position!, '{"summary":"final"}');
+    let fail = true;
+    if (reviewed) {
+      const create = service.stores.review.create.bind(service.stores.review);
+      service.stores.review.create = async (...args) => { if (fail) { fail = false; throw Error("review interrupted"); } return create(...args); };
+    } else {
+      const update = service.stores.step.update.bind(service.stores.step);
+      service.stores.step.update = async (context, id, value, options) => {
+        if (fail && (value as import("../src/context_control/types.js").Step).status === "done") { fail = false; throw Error("completion interrupted"); }
+        return update(context, id, value, options);
+      };
+    }
+    await assert.rejects(g.report(run, step, { text: '{"summary":"final"}' }), /interrupted/);
+    const pending = await g.schemaShow(run, step);
+    assert.equal(pending.draft!.status, "submitted"); assert.equal(pending.phase, "submitting");
+    const recovered = await g.advance(run);
+    assert.equal(recovered.steps[0].status, reviewed ? "awaiting_review" : "done");
+    assert.equal(recovered.artifacts.length, 1); assert.equal(recovered.artifacts[0].id, draft.draft!.id);
+    assert.equal(recovered.artifacts[0].writing, undefined); assert.equal(recovered.reviews.length, reviewed ? 1 : 0);
+    assert.equal((await g.schemaShow(run, step)).phase, "submitted");
+    assert.deepEqual(await g.advance(run), recovered);
+  });
+});
+
+test("every Schema content group, including shorthand and defines-only fields, gates formal Review", async t => {
+  const { service } = await graphDomainFixture(t);
+  const { currentReviewNode, allReviewNodes, needsNodeReport } = await import("../src/review-nodes.js");
+  const reviews = await import("../src/context_control/review-repository.js");
+  const source = `!schema\nsyntax: ${syntax}\ntype: object\nfields:\n  - summary\n  - !schema\n    name: notes\n    defines: [Explain the notes]\n  - !schema\n    name: evidence\n    asserts: [Cite the source]\n`;
+  const p = procedure({ definedBy: MEMSPHERE_SCHEMA_MODEL, definition: source }); p.actions[0].artifact!.review = ["approval"];
+  const result = await service.withGraph(async g => {
+    const start = await g.start({ name: "Review every group", procedure: p, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { agent: { kind: "agent", name: "Reviewer", permissions: ["artifact.read", "decision.assess"], agent: { provider: "test", providerType: "traex", command: process.execPath, args: [], env: {}, startupTimeoutMs: 1000, idleTimeoutMs: 1000 } } } }, reviewConfiguration: { reviews: { "schema-graph#actions[write]": { policy: "artifact_acceptance.unanimous" } }, slots: { "schema-graph::approval": { actorIds: ["agent"] } } } });
+    await g.enter(start.run.id, start.steps[0].id);
+    return g.report(start.run.id, start.steps[0].id, { text: '{"summary":"S","notes":"N","evidence":"E"}' });
+  });
+  const input = { service, runsRoot: "unused", reviewId: reviews.graphReviewHandle(result.snapshot.run.id, result.step.id), roundId: result.step.reviewRounds![0].id, actorId: "agent" };
+  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
+  const bound = { ...input, attemptId: claimed.attempt.id }; await reviews.markArtifactReviewAgentCliReady(bound);
+  let read = await reviews.readArtifactReviewForActor(input);
+  const groups = allReviewNodes(read.assignment.nodeTree!).filter(n => n.requiresReport);
+  assert.equal(groups.length, 4); assert.ok(groups.every(needsNodeReport));
+  assert.ok(groups.some(n => n.name === "summary" && n.asserts.length === 0));
+  await assert.rejects(reviews.submitArtifactReviewAgentAssignment({ ...bound, vote: "approve" }), /incomplete/);
+  const visited: string[] = [];
+  while (currentReviewNode(read.assignment)) {
+    const node = currentReviewNode(read.assignment)!; visited.push(node.nodeId);
+    read = await reviews.mutateArtifactReviewNodes({ ...bound, mutation: { operation: "report", expectedNodeId: node.nodeId, artifact: { applicable: true } } });
+  }
+  assert.ok(groups.every(n => visited.includes(n.nodeId)));
+  await reviews.submitArtifactReviewAgentAssignment({ ...bound, vote: "approve" });
+  assert.equal((await reviews.readArtifactReviewForActor(input)).assignment.status, "submitted");
+});
+
+test("inline Schema freezes transitive Statement rules and their sources for the actual Review", async t => {
+  const { service } = await graphDomainFixture(t);
+  const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
+  const { allReviewNodes } = await import("../src/review-nodes.js");
+  const source = `!schema\nsyntax: ${syntax}\ntype: object\nfields:\n  - !schema\n    name: summary\n    asserts: [!ref {target: statements/base}]\n    suggests: [!ref {target: statements/advice}]\n`;
+  const p = procedure({ definedBy: MEMSPHERE_SCHEMA_MODEL, definition: source }); p.actions[0].artifact!.review = ["approval"];
+  assert.deepEqual(collectMemoryReferenceTargets(p).sort(), ["statements/advice", "statements/base"]);
+  const payload = (content: string) => ({ memoryRef: "fixture", payload: { contentType: "application/yaml", content } });
+  const memories = {
+    "procedures/schema-graph": payload(serializeMemoryYaml(p)),
+    "statements/base": payload(`!statement\nsyntax: ${syntax}\nname: base\nasserts: [!ref {target: statements/nested}]\n`),
+    "statements/nested": payload(`!statement\nsyntax: ${syntax}\nname: nested\nasserts: [Frozen requirement]\n`),
+    "statements/advice": payload(`!statement\nsyntax: ${syntax}\nname: advice\nsuggests: [Frozen suggestion]\n`)
+  };
+  for (const [ref, memory] of Object.entries(memories)) memory.memoryRef = ref;
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Frozen rules", procedure: p, memorySnapshot: { memories }, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { agent: { kind: "agent", name: "Reviewer", permissions: ["artifact.read", "decision.assess"], agent: { provider: "test", providerType: "traex", command: process.execPath, args: [], env: {}, startupTimeoutMs: 1000, idleTimeoutMs: 1000 } } } }, reviewConfiguration: { reviews: { "schema-graph#actions[write]": { policy: "artifact_acceptance.unanimous" } }, slots: { "schema-graph::approval": { actorIds: ["agent"] } } } });
+    memories["statements/nested"].payload.content = memories["statements/nested"].payload.content.replace("Frozen requirement", "Changed requirement");
+    memories["statements/advice"].payload.content = memories["statements/advice"].payload.content.replace("Frozen suggestion", "Changed suggestion");
+    await g.enter(start.run.id, start.steps[0].id);
+    const result = await g.report(start.run.id, start.steps[0].id, { text: '{"summary":"Conclusion"}' });
+    const nodes = allReviewNodes(result.snapshot.reviews[0].nodeTree!);
+    assert.ok(nodes.some(n => n.source?.memoryRef === "statements/nested" && n.asserts.some(r => r.text === "Frozen requirement")));
+    assert.ok(nodes.some(n => n.source?.memoryRef === "statements/advice" && n.suggests.some(r => r.text === "Frozen suggestion")));
+    assert.doesNotMatch(JSON.stringify(nodes), /Changed requirement|Changed suggestion/);
+  });
+});
+for (const scenario of ["missing", "wrong-kind", "cycle"] as const) test(`inline Schema ${scenario} Statement dependency rejects Run creation`, async t => {
+  const { service } = await graphDomainFixture(t);
+  const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
+  const target = scenario === "wrong-kind" ? "schemas/not-a-statement" : "statements/base";
+  const source = `!schema\nsyntax: ${syntax}\ntype: object\nfields:\n  - !schema\n    name: summary\n    asserts: [!ref {target: ${target}}]\n`;
+  const p = procedure({ definedBy: MEMSPHERE_SCHEMA_MODEL, definition: source });
+  const payload = (content: string) => ({ memoryRef: "fixture", payload: { contentType: "application/yaml", content } });
+  const memories = { "procedures/schema-graph": payload(serializeMemoryYaml(p)), ...(scenario === "wrong-kind" ? { [target]: payload(`!schema\nsyntax: ${syntax}\nname: not-a-statement\n`) } : scenario === "cycle" ? { [target]: payload(`!statement\nsyntax: ${syntax}\nname: base\nasserts: [!ref {target: statements/base}]\n`) } : {}) };
+  await service.withGraph(async g => {
+    await assert.rejects(g.start({ name: "Invalid rule dependency", procedure: p, memorySnapshot: { memories } }), scenario === "missing" ? /not found/i : scenario === "wrong-kind" ? /must identify a Statement/ : /cycl/i);
+    assert.deepEqual((await service.stores.run.list({})).items, []);
   });
 });

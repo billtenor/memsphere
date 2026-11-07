@@ -65,11 +65,6 @@ async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
     const round = step.reviewRounds!.at(-1)!;
     return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.language === "en" ? `Step ${step.id} is awaiting review (${round.id}). Execute review wait and wait for the result; do not invent additional work while waiting.` : `Step ${step.id} 正在等待评审（${round.id}）。执行 review wait 并等待结果，不要在等待期间自行增加工作。`, command: c ? `memsphere continue review wait` : `memsphere --project ${quote(project)} run review wait --review ${graphReviewHandle(run.id, step.id)}` });
   }
-  if (a.artifact?.model.definedBy === "memsphere/schema.json" && step.status === "running") {
-    const state = await g.schemaShow(run.id, step.id);
-    const command = c ? `memsphere continue enter-schema` : `memsphere --project ${quote(project)} run enter-schema --run ${run.id} --step ${step.id}`;
-    return `${a.description}\n\nSchema requirements:\n${JSON.stringify(state.requirements, null, 2)}\n\nSchema writing: ${state.phase}\nNext: ${command}`;
-  }
   const rules = await g.rules(run, a);
   const labels = run.language === "en" ? { procedure: "Procedure rules", asserts: "Step rules", suggests: "Step suggestions", artifactAsserts: "Artifact rules", artifactSuggests: "Artifact suggestions" } : { procedure: "流程规则", asserts: "Step 规则", suggests: "Step 建议", artifactAsserts: "产物规则", artifactSuggests: "产物建议" };
   const ruleText = (Object.keys(rules) as Array<keyof typeof rules>).flatMap(key => {
@@ -79,7 +74,13 @@ async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
   const materials = Object.entries(step.inputs ?? {}).map(([key, refs]) => refs.length
     ? `${key}:\n${refs.map(r => `- ${r.kind}:${r.id}\n  memsphere --project ${quote(project)} run artifact show --run ${quote(run.id)} --artifact ${quote(r.id)}`).join("\n")}`
     : `${key}: []`).join("\n");
-  return renderPrompt("run.graph-step", run.language, { runId: run.id, stepId: step.id, instruction: a.description, human: a.actor === "human", rules: ruleText || (run.language === "en" ? "None" : "无"), materials: materials || "[]", artifact: JSON.stringify({ name: a.artifact!.name, model: a.artifact!.model, payload: a.artifact!.payload }, null, 2), command: c ? `memsphere continue report --artifact-file <file>` : `memsphere --project ${quote(project)} run report --run ${run.id} --step ${step.id} --artifact-file <file>` });
+  const prompt = renderPrompt("run.graph-step", run.language, { runId: run.id, stepId: step.id, instruction: a.description, human: a.actor === "human", rules: ruleText || (run.language === "en" ? "None" : "无"), materials: materials || "[]", artifact: JSON.stringify({ name: a.artifact!.name, model: a.artifact!.model, payload: a.artifact!.payload }, null, 2), command: c ? `memsphere continue report --artifact-file <file>` : `memsphere --project ${quote(project)} run report --run ${run.id} --step ${step.id} --artifact-file <file>` });
+  if (a.artifact?.model.definedBy === "memsphere/schema.json" && step.status === "running") {
+    const state = await g.schemaShow(run.id, step.id);
+    const command = c ? `memsphere continue enter-schema` : `memsphere --project ${quote(project)} run enter-schema --run ${run.id} --step ${step.id}`;
+    return `${prompt}\n\nSchema requirements:\n${JSON.stringify(state.requirements, null, 2)}\n\nSchema writing: ${state.phase}\nNext: ${command}`;
+  }
+  return prompt;
 }
 export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: string, enter = true): Promise<string> {
   const run = snapshot.run;

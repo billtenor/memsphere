@@ -62,10 +62,13 @@ export async function freezeSchemaContract(spec: GraphArtifactSpec, memories: No
     if (node.fields) {
       result.fields = [];
       for (const [i, f] of node.fields.entries()) {
-        if (typeof f === "string") { result.fields.push(f); continue; }
+        if (typeof f === "string") { await member({ tag: "!schema", names: [f], defines: [] }, `fields[${i}]`, true); result.fields.push(f); continue; }
         if (f.tag === "!repeat") {
           const body = [];
-          for (const [j, b] of f.body.entries()) body.push(typeof b === "string" ? b : await member(b, `fields[${i}].body[${j}]`, true));
+          for (const [j, b] of f.body.entries()) {
+            const expanded = await member(typeof b === "string" ? { tag: "!schema", names: [b], defines: [] } : b, `fields[${i}].body[${j}]`, true);
+            body.push(typeof b === "string" ? b : expanded);
+          }
           result.fields.push({ ...f, body });
         } else result.fields.push(await member(f, `fields[${i}]`, true));
       }
@@ -120,8 +123,8 @@ export async function schemaReviewSources(frozen: FrozenSchemaContract, contentT
   const projected = instances.flatMap(instance => {
     const source = frozen.nodeSources[instance.contractPath];
     if (!source) return [];
-    return [{ ...source, name: instance.fieldPath || source.name, children: [], defines: [...(source.defines ?? []), `Artifact position: ${instance.fieldPath || "."}`, `Content:\n${instance.text}`] }];
+    return [{ ...source, requiresReport: true, name: instance.fieldPath || source.name, children: [], defines: [...(source.defines ?? []), `Artifact position: ${instance.fieldPath || "."}`, `Content:\n${instance.text}`] }];
   });
-  for (const [path, source] of Object.entries(frozen.nodeSources)) if (!present.has(path)) projected.push({ ...source, name: `${source.name} (no content instance)`, children: [], defines: [...(source.defines ?? []), "No content instance: optional field omitted, Repeat has no instances, or a union branch was not selected. Review applicability against the frozen contract."] });
+  for (const [path, source] of Object.entries(frozen.nodeSources)) if (!present.has(path)) projected.push({ ...source, requiresReport: true, name: `${source.name} (no content instance)`, children: [], defines: [...(source.defines ?? []), "No content instance: optional field omitted, Repeat has no instances, or a union branch was not selected. Review applicability against the frozen contract."] });
   return projected;
 }
