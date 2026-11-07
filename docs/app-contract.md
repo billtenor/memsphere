@@ -72,6 +72,8 @@ App 可在 `projectStores` 中声明 `{ "key": "expenses", "model": "example/exp
 
 在一次 backend operation 中，先用 `ctx.getProjectStoreBinding("expenses")` 获得 `{storeId, token}`，再用 `ctx.getStore("expenses", {expectedBinding: token})` 读取；将读取结果与 token 一起返回页面。写入时由页面传回 token 并再次传给 `getStore`。改绑或移除后旧 token 不再有效，App 应提示用户刷新；返回的共享 Store 句柄只在当前 operation 内有效。共享 operation 按 Project 串行执行；后台代码和 I/O 应响应 `ctx.signal` 并等待结束。忽略取消且无法结束的可信代码可能阻塞其他共享操作，须停止宿主进程后检查并恢复。不要在 operation 内同步调用 Project Store 登记、App 配置或模型维护命令。直接修改 Project 配置文件不受此并发保护。
 
+HTTP 客户端断连后若操作取消或失败，View 在宿主日志中记录 Project、App、操作和错误类别，不记录请求内容、配置或 token。底层写入可能已经部分完成时，使用者应检查数据后再重试。
+
 例如以下操作假设声明的 `expenses` 是 ValueStore；页面必须保留读取响应的 token，并在保存时传回：
 
 ```js

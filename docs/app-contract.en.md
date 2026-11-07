@@ -72,6 +72,8 @@ An App may declare `{ "key": "expenses", "model": "example/expense.json", "kind"
 
 Within a backend operation, obtain `{storeId, token}` using `ctx.getProjectStoreBinding("expenses")`, then read using `ctx.getStore("expenses", {expectedBinding: token})`. Return the token with the data and pass it back to `getStore` for writes. After rebinding or removal, stale tokens fail and the App should ask the user to refresh. Shared Store handles are valid only during the current operation. Shared operations are serialized per Project; backend code and I/O should respect `ctx.signal` and finish before returning. Trusted code that ignores cancellation and cannot finish can block shared operations until its host is stopped and the data inspected. Do not invoke Project Store registration, App configuration, or model maintenance synchronously inside an operation. Direct edits to Project configuration bypass this coordination.
 
+When an operation is cancelled or fails after its HTTP client disconnects, View logs the Project, App, operation and error category without the request content, configuration or token. Check the underlying data before retrying if a write might have partially completed.
+
 Enable/configure/disable update persistent configuration. View uses a fixed boot composition and requires restart for interface changes. Backend requests read current installation configuration. Disablement immediately blocks new App requests and Procedure Runs; in-flight operations are not automatically rolled back. Memory remains readable, existing Runs retain frozen content, and standalone executables remain independent.
 
 Remote distribution, upgrades, uninstall, adoption of existing Memory, execution gateways, and hot replacement are outside this version.

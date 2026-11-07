@@ -10,6 +10,36 @@ import type { Context } from "../data/api/context.js";
 import type { StoredData } from "../data/api/data-store.js";
 import { readBusinessProject } from "../project/business-stores.js";
 
+class ObservablePromise<T> extends Promise<T> {
+  static get [Symbol.species]() { return Promise; }
+  constructor(task: Promise<T>, private readonly observed: () => void) {
+    super((resolve, reject) => { void task.then(resolve, reject); });
+  }
+  override then<TResult1 = T, TResult2 = never>(
+    onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
+    onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
+  ): Promise<TResult1 | TResult2> {
+    const handleRejection = typeof onRejected === "function" ? (reason: unknown) => {
+      const result = onRejected(reason);
+      this.observed();
+      return result;
+    } : onRejected;
+    const next = new ObservablePromise(super.then(onFulfilled, handleRejection), this.observed);
+    void Promise.prototype.then.call(next, undefined, () => undefined);
+    return next;
+  }
+  override finally(onFinally?: (() => void) | null): Promise<T> {
+    if (typeof onFinally !== "function") return this.then();
+    const task = super.then(
+      value => Promise.resolve(onFinally()).then(() => value),
+      error => Promise.resolve(onFinally()).then(() => { throw error; })
+    );
+    const next = new ObservablePromise(task, this.observed);
+    void Promise.prototype.then.call(next, undefined, () => undefined);
+    return next;
+  }
+}
+
 export async function loadAppBackend(app: AppInstallation): Promise<AppBackend | undefined> {
   const spec = app.manifest.backend;
   if (!spec) return undefined;
@@ -42,16 +72,21 @@ async function invoke(project: AppProject, id: string, operation: string, input:
   const abort = () => controller.abort(signal?.reason);
   if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
   const inFlight = new Set<Promise<unknown>>();
-  const failures: unknown[] = [];
+  const failures: Array<{ error: unknown; observed: boolean }> = [];
   let closing = controller.signal.aborted;
   controller.signal.addEventListener("abort", () => { closing = true; }, { once: true });
   const deadline = app.manifest.projectStores.length ? setTimeout(() => controller.abort(new Error("App operation deadline exceeded")), 300_000) : undefined;
   deadline?.unref();
   const writes = new Set(["create", "update", "upsert", "delete", "append"]);
   const track = <T>(task: Promise<T>): Promise<T> => {
+    const state = { error: undefined as unknown, observed: false };
     inFlight.add(task);
-    void task.then(() => inFlight.delete(task), error => { inFlight.delete(task); failures.push(error); });
-    return task;
+    void task.then(() => inFlight.delete(task), error => { inFlight.delete(task); state.error = error; failures.push(state); });
+    // Awaiting a Promise subclass calls its then method, unlike an ordinary
+    // native Promise. This records when the App observes an expected error.
+    const result = new ObservablePromise(task, () => { state.observed = true; });
+    void Promise.prototype.then.call(result, undefined, () => undefined);
+    return result;
   };
   const wrapDataStream = (record: StoredData | undefined): StoredData | undefined => {
     if (!record) return record;
@@ -65,22 +100,22 @@ async function invoke(project: AppProject, id: string, operation: string, input:
         let settled = false;
         const done = track(new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; }));
         void done.catch(() => undefined);
-        const finish = (error?: unknown) => {
+        const finish = (error?: unknown, rejected = false) => {
           if (settled) return;
           settled = true;
           controller.signal.removeEventListener("abort", cancel);
-          if (error === undefined) resolveDone(); else rejectDone(error);
+          if (rejected) rejectDone(error); else resolveDone();
         };
-        const cancel = () => { void reader.cancel(controller.signal.reason).then(() => finish(), finish); };
+        const cancel = () => { void reader.cancel(controller.signal.reason).then(() => finish(), error => finish(error, true)); };
         controller.signal.addEventListener("abort", cancel, { once: true });
         return new ReadableStream<Uint8Array>({
           async pull(stream) {
             try {
               const item = await reader.read();
               if (item.done) { finish(); stream.close(); } else stream.enqueue(item.value);
-            } catch (error) { finish(error); stream.error(error); }
+            } catch (error) { finish(error, true); stream.error(error); }
           },
-          async cancel(reason) { try { await reader.cancel(reason); finish(); } catch (error) { finish(error); throw error; } }
+          async cancel(reason) { try { await reader.cancel(reason); finish(); } catch (error) { finish(error, true); throw error; } }
         });
       }
     } } } };
@@ -88,6 +123,7 @@ async function invoke(project: AppProject, id: string, operation: string, input:
   try {
     let result: unknown;
     let failure: unknown;
+    let failed = false;
     try {
       controller.signal.throwIfAborted();
       result = await backend.operations[operation].execute({ project: project.name, app: id, config: Object.freeze(structuredClone(app.config)), signal: controller.signal,
@@ -119,11 +155,12 @@ async function invoke(project: AppProject, id: string, operation: string, input:
           } });
         }
       }, input);
-    } catch (error) { failure = error; controller.abort(error); }
+    } catch (error) { failed = true; failure = error; controller.abort(error); }
     closing = true;
     while (inFlight.size) await Promise.allSettled([...inFlight]);
-    if (failure !== undefined) throw failure;
-    if (failures.length) throw failures[0];
+    if (failed) throw failure;
+    const unobserved = failures.find(item => !item.observed);
+    if (unobserved) throw unobserved.error;
     controller.signal.throwIfAborted();
     return result;
   } finally { closing = true; if (deadline) clearTimeout(deadline); signal?.removeEventListener("abort", abort); }

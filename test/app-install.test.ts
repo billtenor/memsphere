@@ -331,7 +331,8 @@ test("closing a View HTTP response aborts the running App operation", async () =
   }
 }));
 
-test("App installation binds a Project Store and shares records through the View API", async t => fixture(async (root, context, app) => {
+async function sharedHttpFixture(action: (fixture: { root: string; context: Awaited<ReturnType<typeof resolveProjectContext>>; origin: string; invoke: (operation: string, input: unknown) => Promise<any> }) => Promise<void>) {
+  return fixture(async (root, context, app) => {
   const { createBusinessStore } = await import("../src/project/business-stores.js");
   const { writeData } = await import("../src/project/data-service.js");
   await mutateModel({}, context.primary.paths.root, "create", "expense.json", { source: JSON.stringify({ type: "object", properties: { amount: { type: "number" } }, required: ["amount"], additionalProperties: false }) });
@@ -358,46 +359,40 @@ test("App installation binds a Project Store and shares records through the View
     assert.equal(response.status, 200);
     return (await response.json()).result;
   };
+  try { await action({root,context,origin,invoke}); }
+  finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  });
+}
+
+test("App installation shares a Project Store between View API and CLI",{timeout:30000},async()=>sharedHttpFixture(async({root,origin,invoke})=>{
+  const current=await invoke("read",{});assert.deepEqual(current.record.value,{amount:3});
+  await invoke("write",{token:current.token,value:{amount:8}});
+  const result=JSON.parse(execFileSync(process.execPath,[...cliArguments,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8"}));
+  assert.deepEqual(result.value,{amount:8});
+}));
+
+test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>sharedHttpFixture(async({root,context,origin,invoke})=>{
+  const current=await invoke("read",{});const http=await import("node:http");
+  const {FilesystemJsonValueStoreFactory}=await import("../src/data/extensions/filesystem-json-valuestore/index.js");
+  const {withSharedStoreLock}=await import("../src/project/shared-store-lock.js");
+  let releaseWrite!:()=>void,writeStarted!:()=>void,started!:()=>void,aborted!:()=>void,logged!:(value:Record<string,unknown>)=>void;
+  const writeBarrier=new Promise<void>(resolve=>{releaseWrite=resolve});const writeEntered=new Promise<void>(resolve=>{writeStarted=resolve});
+  const start=new Promise<void>(resolve=>{started=resolve});const abort=new Promise<void>(resolve=>{aborted=resolve});const log=new Promise<Record<string,unknown>>(resolve=>{logged=resolve});
+  const original=FilesystemJsonValueStoreFactory.prototype.openExisting;
+  t.mock.method(FilesystemJsonValueStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){const store=await original.apply(this,args);store.update=async()=>{writeStarted();await writeBarrier;throw Object.assign(new Error("sensitive input must not be logged"),{code:"EIO"})};return store;});
+  t.mock.method(console,"error",(message?:unknown)=>{try {const record=JSON.parse(String(message));if(record.event==="app_operation_disconnected")logged(record);} catch { /* Ignore unrelated diagnostics. */ }});
+  Object.assign(globalThis,{__issue137SharedStarted:started,__issue137SharedAborted:aborted});
+  const request=http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`,{method:"POST",headers:{"content-type":"application/json",origin}});request.on("error",()=>undefined);
   try {
-    const current = await invoke("read", {});
-    assert.deepEqual(current.record.value, { amount: 3 });
-    await invoke("write", { token: current.token, value: { amount: 8 } });
-    const result = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "data", "read", "first", "--store", "expenses", "--output", "json"], { cwd: root, encoding: "utf8" }));
-    assert.deepEqual(result.value, { amount: 8 });
-    const http = await import("node:http");
-    const { FilesystemJsonValueStoreFactory } = await import("../src/data/extensions/filesystem-json-valuestore/index.js");
-    let releaseWrite!: () => void, writeStarted!: () => void;
-    const writeBarrier = new Promise<void>(resolve => { releaseWrite = resolve; });
-    const writeEntered = new Promise<void>(resolve => { writeStarted = resolve; });
-    const originalOpen = FilesystemJsonValueStoreFactory.prototype.openExisting;
-    t.mock.method(FilesystemJsonValueStoreFactory.prototype, "openExisting", async function (...args: Parameters<typeof originalOpen>) {
-      const store = await originalOpen.apply(this, args);
-      const update = store.update.bind(store);
-      store.update = async (...writeArgs) => { writeStarted(); await writeBarrier; return update(...writeArgs); };
-      return store;
-    });
-    let started!: () => void, aborted!: () => void;
-    const start = new Promise<void>(resolve => { started = resolve; });
-    const abort = new Promise<void>(resolve => { aborted = resolve; });
-    Object.assign(globalThis, { __issue137SharedStarted: started, __issue137SharedAborted: aborted });
-    const request = http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`, { method: "POST", headers: { "content-type": "application/json", origin } });
-    request.on("error", () => undefined);
-    try {
-      request.end(JSON.stringify({ input: { token: current.token } }));
-      await Promise.race([start, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("shared operation did not start")), 5000))]);
-      await Promise.race([writeEntered, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("shared write did not start")), 5000))]);
-      request.destroy();
-      await Promise.race([abort, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("shared operation was not cancelled")), 5000))]);
-      const { configureApp } = await import("../src/app/install.js");
-      const configured = configureApp(context, "example.app", { store: "expenses" });
-      releaseWrite();
-      await configured;
-      const afterAbort = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "data", "read", "first", "--store", "expenses", "--output", "json"], { cwd: root, encoding: "utf8" }));
-      assert.deepEqual(afterAbort.value, { amount: 8 });
-    } finally {
-      releaseWrite();
-      delete (globalThis as Record<string, unknown>).__issue137SharedStarted;
-      delete (globalThis as Record<string, unknown>).__issue137SharedAborted;
-    }
-  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+    request.end(JSON.stringify({input:{token:current.token}}));await start;await writeEntered;request.destroy();await abort;
+    const {configureApp}=await import("../src/app/install.js");
+    const configuring=configureApp(context,"example.app",{store:"expenses"});
+    await assert.rejects(withSharedStoreLock(context.primary.paths.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
+    releaseWrite();const record=await log;
+    assert.equal(record.project,"test");assert.equal(record.app,"example.app");assert.equal(record.operation,"wait");assert.equal(record.code,"EIO");
+    assert(!JSON.stringify(record).includes(current.token));assert(!JSON.stringify(record).includes("sensitive input"));
+    await configuring;
+    const after=JSON.parse(execFileSync(process.execPath,[...cliArguments,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8"}));
+    assert.deepEqual(after.value,{amount:3});
+  } finally {releaseWrite();delete (globalThis as Record<string,unknown>).__issue137SharedStarted;delete (globalThis as Record<string,unknown>).__issue137SharedAborted;}
 }));
