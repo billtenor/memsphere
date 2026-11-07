@@ -1,4 +1,4 @@
-import { cp, readFile, writeFile } from "node:fs/promises";
+import { cp } from "node:fs/promises";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
 import { openContextControl } from "../../src/project/context-control.js";
@@ -26,19 +26,6 @@ export async function initializedContextFixture(t: TestContext, schemas: Record<
     await cp(join(source, entry), join(f.root, entry), { recursive: true });
   }
   return f;
-}
-
-/** Managed Memory fixtures keep their own Store configuration and Git history.
- * Only copy installed models and empty Context Control Stores, never Run data
- * or a claimed Reviewer identity. Installation is covered separately.
- */
-export async function copyInitializedContextBindings(root: string) {
-  const source = await installedBaseline();
-  for (const entry of ["models", "data"]) await cp(join(source, entry), join(root, entry), { recursive: true });
-  const config = JSON.parse(await readFile(join(root, "config.json"), "utf8"));
-  const installed = JSON.parse(await readFile(join(source, "config.json"), "utf8"));
-  config.dataStores = { ...config.dataStores, ...installed.dataStores };
-  await writeFile(join(root, "config.json"), JSON.stringify(config));
 }
 
 /** Legacy model-backed Artifact tests need installed models, without bindings
