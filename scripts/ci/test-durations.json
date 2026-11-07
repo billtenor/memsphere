@@ -451,6 +451,7 @@
     "view-shell-layout.test.ts": 0.59,
     "view-style-contract.test.ts": 0.6,
     "view-theme-registry.test.ts": 0.54,
-    "windows-prerequisites.test.ts": 0.42
+    "windows-prerequisites.test.ts": 0.42,
+    "procedure-graph-rewind-process.test.ts": 183.86
   }
 }
