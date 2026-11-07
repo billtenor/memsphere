@@ -11,6 +11,14 @@ export const reviewerCommands = [
   "run review comment add", "run review comment update", "run review comment delete",
   "run review report", "run review update", "run review submit"
 ] as const;
+export type ReviewerProtocol = "graph" | "flow";
+export function reviewerCapabilities(protocol: ReviewerProtocol) {
+  return {
+    protocol,
+    commands: reviewerCommands.filter(command => protocol === "graph" || command !== "run external show"),
+    targets: protocol === "graph" ? "candidate, fixed Artifact/External and submitted upstream confirmations" : "candidate and pinned context via assignment/step; fixed Artifact/External/confirmation targets are unsupported"
+  };
+}
 export const inReviewerSession = () => Boolean(process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
 function path(command: Command) {
   const names: string[] = [];
@@ -21,6 +29,9 @@ function path(command: Command) {
 export function installReviewerCommands(program: Command) {
   if (!inReviewerSession()) return;
   const identities: Array<[string, unknown]> = [];
+  const helpCommands = process.env.MEMSPHERE_REVIEW_HANDLE
+    ? reviewerCapabilities(process.env.MEMSPHERE_REVIEW_HANDLE.startsWith("graph-review-") ? "graph" : "flow").commands
+    : reviewerCapabilities("flow").commands;
   const visit = (command: Command) => {
     for (const option of command.options) {
       const key = option.attributeName();
@@ -29,7 +40,7 @@ export function installReviewerCommands(program: Command) {
     }
     command.configureHelp({ visibleCommands: c => c.commands.filter(child => {
       const p = path(child);
-      return p === "continue" || reviewerCommands.some(allowed => allowed === p || allowed.startsWith(`${p} `));
+      return p === "continue" || helpCommands.some(allowed => allowed === p || allowed.startsWith(`${p} `));
     }) });
     command.commands.forEach(visit);
   };
@@ -44,7 +55,9 @@ export function installReviewerCommands(program: Command) {
     for (const [key, value] of identities) if (!expected[key] || (key === "project" && typeof value === "string" ? value.trim() : value) !== expected[key]) throw failure("REVIEW_IDENTITY_CONFLICT", `${key} conflicts with this Agent Review Session`);
     process.env.MEMSPHERE_PROJECT = expected.project;
     if (p.startsWith("memory ") && identities.some(([key]) => key === "run") && !process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID) throw failure("REVIEW_IDENTITY_CONFLICT", "Session has no frozen Memory Run");
-    await boundAgentReviewSession();
+    const binding = await boundAgentReviewSession();
+    const capabilities = reviewerCapabilities(binding.reviewId.startsWith("graph-review-") ? "graph" : "flow");
+    if (p !== "continue" && !capabilities.commands.includes(p as typeof reviewerCommands[number])) throw failure("INVALID_ARGUMENT", `Command is unsupported in this ${capabilities.protocol} Review protocol: ${p}. ${capabilities.targets}`);
     if (p.startsWith("run review") && !["run review show", "run review list"].includes(p) || ["run artifact show", "run artifact contract show"].includes(p) && !action.opts().artifact && !action.opts().step && !action.opts().run) {
       action.setOptionValue("assignment", expected.assignment);
     }

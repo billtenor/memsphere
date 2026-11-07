@@ -115,17 +115,20 @@ export class GraphRuntime {
     catch (error) { throw Object.assign(error as object, { details: { runId: run.id, recoveryCommand: `memsphere run status --run ${run.id}`, message: "Run saved; recover it instead of starting a duplicate" } }); }
   }
   /** Selected review reads must not enumerate other Steps, Artifacts or Reviews. */
-  async reviewSnapshot(runId: string, stepId: string, roundId?: string): Promise<Snapshot> {
+  async reviewSnapshot(runId: string, stepId: string, roundId?: string, actorId?: string): Promise<Snapshot> {
     const run = (await this.run(runId)).value, step = (await this.step(run, stepId)).value;
     const selected = roundId === "current" ? step.reviewRounds?.at(-1)?.id : roundId;
-    const candidates = await Promise.all((step.reviewRounds ?? []).map(async r => (await this.records.require<Artifact>("artifact", runId, r.artifactId)).value));
+    const personalActor = actorId && step.reviewRounds?.find(r => r.id === selected)?.reviewConfig.reviewers[actorId]?.kind === "agent" ? actorId : undefined;
+    const rounds = personalActor ? (step.reviewRounds ?? []).filter(r => r.id === selected) : step.reviewRounds ?? [];
+    if (actorId && !rounds.some(r => Object.hasOwn(r.reviewConfig.reviewers, actorId))) throw failure("NOT_FOUND", "Review Assignment not found");
+    const candidates = await Promise.all(rounds.map(async r => (await this.records.require<Artifact>("artifact", runId, r.artifactId)).value));
     const visibleCandidates = roundId ? candidates.filter(a => a.id === step.reviewRounds?.find(r => r.id === selected)?.artifactId) : candidates;
     const ids = new Set(visibleCandidates.flatMap(a => a.dependencies.filter(r => r.kind === "artifact").map(r => r.id)));
     const artifacts = [...candidates, ...await Promise.all([...ids].filter(id => !candidates.some(a => a.id === id)).map(async id => (await this.records.require<Artifact>("artifact", runId, id)).value))];
     const sources = await Promise.all([...new Set(artifacts.filter(a => a.stepId !== step.id).map(a => a.stepId))].map(async id => (await this.step(run, id)).value));
     const externalIds = new Set([...visibleCandidates, ...artifacts.filter(a => ids.has(a.id))].flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id)));
     const externals = await Promise.all([...externalIds].map(async id => (await this.records.require<External>("external", runId, id)).value));
-    const keys = (step.reviewRounds ?? []).filter(r => !roundId || r.id === selected || r.id === step.reviewRounds?.at(-1)?.id).flatMap(r => [...Object.keys(r.reviewConfig.reviewers), "runner"].map(actor => graphReviewId(r.id, actor)));
+    const keys = rounds.filter(r => !roundId || r.id === selected || r.id === step.reviewRounds?.at(-1)?.id).flatMap(r => (personalActor ? [personalActor] : [...Object.keys(r.reviewConfig.reviewers), "runner"]).map(actor => graphReviewId(r.id, actor)));
     const reviews = (await Promise.all(keys.map(id => this.records.get<Review>("review", runId, id)))).flatMap(row => row ? [row.value] : []);
     const accepted = sources.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id);
     return { run, steps: [step, ...sources], artifacts, externals, reviews, completeIds: accepted.filter(id => effectiveStep(run, artifacts.find(a => a.id === id)!.stepId)), historicalCompleteIds: accepted, outputArtifactIds: [] };

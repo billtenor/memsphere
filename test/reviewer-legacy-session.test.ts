@@ -31,3 +31,15 @@ test("historical flow Session without a node tree retains native comment/submit 
  const historical=cli(['run','artifact','show','--output','json']);assert.equal(historical.status,0,historical.stderr);assert.match(historical.stdout,/Candidate/);assert.doesNotMatch(historical.stdout,/Replacement evidence/);
  const persisted=await reviews.readArtifactReviewForActor(f.input);assert.equal(persisted.assignment.submitted?.comments[0].body,'Legacy suggestion');assert.equal(persisted.assignment.submitted?.vote,'approve');
 });
+
+test('historical flow capabilities, help and target errors agree with the actual protocol',async t=>{
+ const f=await reviewNodeFixture(t,false),{buildArtifactReviewerPrompt}=await import('../src/acp/prompt.js');
+ const prompt=await buildArtifactReviewerPrompt({context:await reviews.readArtifactReviewForActor(f.input),promptVersion:'artifact-review-v3'});
+ assert.match(prompt,/"protocol": "flow"/);assert.doesNotMatch(prompt,/"run external show"/);assert.match(prompt,/fixed Artifact\/External\/confirmation targets are unsupported/);
+ const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url))});t.after(()=>runtime.cleanup());
+ const env={...process.env,MEMSPHERE_HOME:f.home,MEMSPHERE_CONFIG_PATH:join(f.root,'config.json'),MEMSPHERE_WORKSPACE_ROOT:f.cwd,MEMSPHERE_REVIEW_RUN_ID:f.runId,MEMSPHERE_REVIEW_HANDLE:f.input.reviewId,MEMSPHERE_REVIEW_ASSIGNMENT_ID:f.claimed.assignment.id!,MEMSPHERE_REVIEW_ATTEMPT_ID:f.bound.attemptId};
+ const cli=(args:string[])=>crossSpawn.sync(runtime.launcherPath,args,{cwd:f.cwd,env,encoding:'utf8',timeout:20000});
+ const help=cli(['run','--help']);assert.equal(help.status,0,help.stderr);assert.doesNotMatch(help.stdout,/external/);
+ for(const args of [['run','external','show','--external','unknown'],['run','artifact','show','--artifact','unknown']]){const r=cli([...args,'--output','json']);assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/INVALID_ARGUMENT/);assert.match(r.stderr,/graph|flow/);}
+ const read=cli(['run','artifact','show','--output','json']);assert.equal(read.status,0,read.stderr);assert.match(read.stdout,/Candidate/);
+});

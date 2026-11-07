@@ -1,4 +1,4 @@
-import { reviewerCommands } from "./reviewer-commands.js";
+import { reviewerCapabilities } from "./reviewer-commands.js";
 import { reviewNodeView } from "../review-nodes.js";
 import { reviewNodePromptModel } from "../prompts/review-nodes.js";
 import type { ArtifactReviewAgentContext } from "../run/store.js";
@@ -39,10 +39,12 @@ export async function buildArtifactReviewerPrompt(input: {
     };
   });
   if (assignment.nodeTree) {
+    const capabilities = reviewerCapabilities(review.id.startsWith("graph-review-") ? "graph" : "flow");
     const materials = {
-      allowedOperations: reviewerCommands,
+      allowedOperations: capabilities.commands,
+      capabilities,
       artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) },
-      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: a.artifactId ? `memsphere run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt` : undefined })),
+      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: capabilities.protocol === "graph" && a.artifactId ? `memsphere run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt` : `memsphere run artifact show --step ${JSON.stringify(a.stepId)} --out context-${submission.contextArtifacts.indexOf(a)}.txt` })),
       externals: submission.contextExternals?.map(e => ({ ...e, readCommand: `memsphere run external show --run ${run.id} --external ${e.externalId} --out ${e.externalId}.txt` })),
       memorySource: run.memorySource,
       memoryReads: {

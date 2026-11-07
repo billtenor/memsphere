@@ -43,10 +43,28 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
   const submission = step.store
     ? context.review.submissions.find(item => item.id === context.round.submissionId)
     : undefined;
+  const contract = buildReviewContract({
+    procedureName: frame?.memoryName ?? context.run.procedureName,
+    procedureRules: activeProcedureAssertTrees(context.run), step,
+    artifactName: context.review.artifactName
+  });
+  contract.artifact.modelTarget = step.store && context.run.modelTargets?.[step.store]
+    ? { storeId: step.store, modelRef: context.run.modelTargets[step.store].modelRef, dataId: submission?.artifact.modelTarget?.dataId ?? `${context.run.id}--${step.stepExecutionId}` }
+    : undefined;
+  return contract;
+}
+
+/** The same frozen contract shape is used for candidates and accepted inputs. */
+export function buildReviewContract(input: {
+  procedureName: string; procedureRules: EffectiveRuleTree[];
+  step: Pick<NonNullable<ReturnType<typeof currentStep>>, "instruction" | "assertTree" | "suggestTree" | "details" | "artifact" | "type" | "format" | "schema" | "final" | "reviewPolicy">;
+  artifactName: string;
+}): AgentReviewContract {
+  const { step } = input;
   return {
     procedure: {
-      name: frame?.memoryName ?? context.run.procedureName,
-      asserts: activeProcedureAssertTrees(context.run).flatMap(toEffectiveRuleDisplayEntries)
+      name: input.procedureName,
+      asserts: input.procedureRules.flatMap(toEffectiveRuleDisplayEntries)
     },
     action: {
       instruction: step.instruction,
@@ -55,11 +73,10 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
       details: step.details ?? []
     },
     artifact: {
-      name: step.artifact ?? context.review.artifactName,
+      name: step.artifact ?? input.artifactName,
       type: step.type,
       format: step.format,
       schema: toEffectiveRuleDisplayValue(step.schema),
-      modelTarget: step.store && context.run.modelTargets?.[step.store] ? { storeId: step.store, modelRef: context.run.modelTargets[step.store].modelRef, dataId: submission?.artifact.modelTarget?.dataId ?? `${context.run.id}--${step.stepExecutionId}` } : undefined,
       final: step.final ?? false,
       review: step.reviewPolicy
     }

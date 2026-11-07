@@ -1,8 +1,9 @@
 import { createHash } from "node:crypto";
 import { graphArtifactDto } from "../context_control/review-repository.js";
+import { buildReviewContract } from "./review-contract.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
-import { open, realpath, rm } from "node:fs/promises";
+import { open, realpath, lstat, rm } from "node:fs/promises";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { boundAgentReviewSession, boundReviewNodeContext } from "./review-session.js";
@@ -57,13 +58,21 @@ export async function exportReviewerBody(file: string, bytes: Uint8Array) {
   if (!contained(root, parent)) throw denied(file);
   const canonical = join(parent, basename(target));
   const handle = await open(canonical, "wx");
+  const identity = await handle.stat();
+  const ownsTarget = async () => {
+    try { const current = await lstat(canonical); return current.isFile() && current.dev === identity.dev && current.ino === identity.ino; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
+  };
+  const verify = async () => {
+    if (await realpath(dirname(target)) !== parent || !await ownsTarget()) throw denied(file);
+  };
   let complete = false;
   try {
-    if (await realpath(dirname(target)) !== parent || !contained(root, await realpath(target))) throw denied(file);
+    await verify();
     await handle.writeFile(bytes);
-    if (await realpath(dirname(target)) !== parent) throw denied(file);
+    await verify();
     complete = true;
-  } finally { await handle.close(); if (!complete) await rm(canonical, { force: true }); }
+  } finally { await handle.close(); if (!complete && await ownsTarget()) await rm(canonical, { force: true }); }
 }
 
 type Options = { run?: string; assignment?: string; artifact?: string | string[]; external?: string; review?: string; round?: string; step?: string; out?: string; output?: "text" | "json" };
@@ -83,7 +92,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     if (operation === "run-show" || operation === "step-show") {
       emitCommandResult({ id: context.run.id, name: context.run.name, status: context.run.status, stepIds: o.step ? [o.step] : allowedSteps }, o.output); return true;
     }
-    if (operation === "external-show" || o.review || o.artifact) throw denied(String(o.external ?? o.review ?? o.artifact));
+    if (operation === "external-show" || o.review || o.artifact) throw failure("INVALID_ARGUMENT", "Fixed Artifact/External/confirmation targets require a graph Review; this historical Session supports its candidate and context via --assignment or --step");
     // Legacy candidate/context payload and contracts retain the existing protocol.
     // Explicit Step reads must still use the pinned submission rather than latest Run state.
     if (operation === "artifact-show" && (o.step || o.out)) {
@@ -121,7 +130,13 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;
     if (a.id === candidate.id) result = await (await import("./review-session.js")).agentReviewArtifactContractPayload();
-    else result = { artifactId: a.id, action: await service.withGraph(async g => g.action(run, step)) };
+    else result = await service.withGraph(async g => {
+      const action = g.action(run, step), rules = await g.rules(run, action), dto = await expanded(a);
+      return buildReviewContract({ procedureName: run.memoryRef!.slice("procedures/".length), procedureRules: [rules.procedure], artifactName: a.name,
+        step: { instruction: action.description, artifact: a.name, type: dto.type, format: dto.format,
+          assertTree: rules.asserts, suggestTree: rules.suggests, reviewPolicy: step.reviewRounds?.find(r => r.artifactId === a.id)?.reviewConfig.policy.id,
+          details: [JSON.stringify(action.artifact?.model), JSON.stringify({ artifactAsserts: rules.artifactAsserts, artifactSuggests: rules.artifactSuggests })] } });
+    });
   } else if (operation === "run-show" || operation === "step-show") {
     if (o.step && !steps.some(s => s.id === o.step)) throw denied(o.step);
     result = { id: run.id, name: run.name, status: run.status, steps: steps.filter(s => !o.step || s.id === o.step).map(s => ({ id: s.id, source: s.source, status: s.status, artifactIds: artifacts.filter(a => a.stepId === s.id).map(a => a.id) })) };

@@ -43,7 +43,7 @@ export async function graphArtifactDto(service: NonNullable<Awaited<ReturnType<t
   const value = decodeGraphContent(body.bytes, body.contentType);
   return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType };
 }
-async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl): Promise<legacy.RunState> {
+async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl, actorId?:string): Promise<legacy.RunState> {
   const service = providedService ?? (await openContextControl(dirname(runsRoot)))!;
   return service.withGraph(async g => {
     const run = snapshot.run;
@@ -52,7 +52,7 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
     const reviews: ArtifactReview<legacy.RunEvent["artifact"]>[] = [];
     for (const step of snapshot.steps.filter(s => s.reviewRounds?.length&&(!selected||s.id===selected))) {
       const rounds: ArtifactReviewRound[] = [], submissions = [];
-      for (const round of step.reviewRounds!) {
+      for (const round of step.reviewRounds!.filter(r => !actorId || r.id === viewRoundId)) {
         const artifact = snapshot.artifacts.find(a => a.id === round.artifactId);
         if (!artifact || artifact.stepId !== step.id) throw failure("INVALID_STATE", "Frozen Review Artifact missing or belongs to another Step");
         const body=!viewRoundId||round.id===viewRoundId?await service.body(artifact):undefined;
@@ -84,7 +84,7 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
       reviews.push({ id: graphReviewHandle(run.id, step.id), stepId: step.id, artifactName: g.action(run, step).artifact!.name,
         policyId: step.reviewRounds!.at(-1)!.reviewConfig.policy.id, controlPlane: last.controlPlane!,
         status: run.status === "abandoned" || !effectiveStep(run, step.id) ? "cancelled" : last.status === "passed" ? "passed" : last.status === "changes_requested" ? "awaiting_revision" : last.status === "awaiting_runner_vote" ? "awaiting_runner_vote" : "pending",
-        currentRoundId: last.id, createdAt: rounds[0].createdAt, updatedAt: snapshot.reviews.filter(r => step.reviewRounds!.some(round => round.id === r.roundId)).map(r => r.endedAt ?? r.createdAt).sort().at(-1) ?? last.createdAt,
+        currentRoundId: step.reviewRounds!.at(-1)!.id, createdAt: step.reviewRounds![0].createdAt, updatedAt: snapshot.reviews.filter(r => step.reviewRounds!.some(round => round.id === r.roundId)).map(r => r.endedAt ?? r.createdAt).sort().at(-1) ?? last.createdAt,
         submissions, rounds, ...(last.result?.status === "passed" ? { outcome: { status: "passed" as const, submissionId: last.submissionId, roundId: last.id, completedAt: last.result.completedAt } } : {}) });
     }
     const step = snapshot.steps.find(s => s.id === selected) ?? snapshot.steps.find(s => effectiveStep(run, s.id) && s.status === "awaiting_review");
@@ -108,16 +108,20 @@ export async function readRun(runsRoot: string, id: string): Promise<legacy.RunS
   if (run && isGraphRun(run)) return project(runsRoot, await service!.snapshot(id));
   throw missing;
 }
-export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0] & {viewRoundId?:string;viewMaterialIndex?:number;service?:ContextControl}) {
+export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0] & {viewRoundId?:string;viewMaterialIndex?:number;service?:ContextControl;viewActorId?:string}) {
   const id = identity(input.reviewId); if (!id) return legacy.findArtifactReview(input);
-  const run = await use(input, async (g,_,service) => project(input.runsRoot, await g.reviewSnapshot(id.runId,id.stepId,input.viewRoundId), id.stepId,input.viewRoundId,input.viewMaterialIndex,service));
+  const run = await use(input, async (g,_,service) => {
+    const snapshot = await g.reviewSnapshot(id.runId,id.stepId,input.viewRoundId,input.viewActorId);
+    const personal = input.viewActorId && snapshot.steps.find(s => s.id === id.stepId)?.reviewRounds?.find(r => r.id === input.viewRoundId)?.reviewConfig.reviewers[input.viewActorId]?.kind === "agent" ? input.viewActorId : undefined;
+    return project(input.runsRoot, snapshot, id.stepId,input.viewRoundId,input.viewMaterialIndex,service,personal);
+  });
   const review = run.artifactReviews!.find(r => r.id === input.reviewId);
   if (!review) throw failure("NOT_FOUND", `Graph Step has no Review: ${id.stepId}`);
   return { run, review };
 }
 export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0]) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForActor(input);
-  return legacy.artifactReviewForActor({ ...await findArtifactReview({ ...input, viewRoundId: input.roundId }), roundId: input.roundId, actorId: input.actorId });
+  return legacy.artifactReviewForActor({ ...await findArtifactReview({ ...input, viewRoundId: input.roundId, viewActorId: input.actorId }), roundId: input.roundId, actorId: input.actorId });
 }
 export async function readArtifactReviewForRunner(input: Parameters<typeof legacy.readArtifactReviewForRunner>[0]) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForRunner(input);
