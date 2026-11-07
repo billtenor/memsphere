@@ -57,6 +57,10 @@ const app = acp
       }
     }
     if (mode === "rewind-gated") {
+      // Test teardown addresses this owned fixture through its unique gate,
+      // never through a potentially recycled Provider PID.
+      void processGate(process.env.REVIEW_TEST_GATES,'wait',`release-provider:${process.env.REVIEW_TEST_READY}`,undefined,undefined,true)
+        .then(()=>process.exit(0), error=>{ console.error(error); process.exitCode=1; });
       await processGate(process.env.REVIEW_TEST_GATES,'publish',`provider-launched:${process.env.REVIEW_TEST_READY}`);
       if(process.env.REVIEW_TEST_RESISTANT){process.on("SIGTERM",()=>{});process.on("SIGUSR1",()=>process.removeAllListeners("SIGTERM"));}
       if (process.env.REVIEW_TEST_SETUP_API) {
