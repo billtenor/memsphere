@@ -92,6 +92,7 @@ async function invoke(project: AppProject, id: string, operation: string, input:
           const getReader = output.getReader.bind(output);
           const pipeTo = output.pipeTo.bind(output);
           const pipeThrough = output.pipeThrough.bind(output);
+          const cancel = output.cancel.bind(output);
           const tee = output.tee.bind(output);
           const values = (output as unknown as { values(options?: { preventCancel?: boolean }): AsyncIterableIterator<Uint8Array> }).values.bind(output);
           const iterator = (options?: { preventCancel?: boolean }) => {
@@ -109,11 +110,13 @@ async function invoke(project: AppProject, id: string, operation: string, input:
                 if (property === "read") return (...readArgs: unknown[]) => observable(
                   (target.read as (...args: unknown[]) => Promise<ReadableStreamReadResult<Uint8Array>>).apply(target, readArgs), observeStream);
                 if (property === "closed") return observable(target.closed, observeStream);
+                if (property === "cancel") return (reason?: unknown) => observable(target.cancel(reason), observeStream);
                 const value = Reflect.get(target, property, target);
                 return typeof value === "function" ? value.bind(target) : value;
               } });
             } },
             pipeTo: { value: (destination: WritableStream<Uint8Array>, options?: StreamPipeOptions) => observable(pipeTo(destination, options), observeStream) },
+            cancel: { value: (reason?: unknown) => observable(cancel(reason), observeStream) },
             pipeThrough: { value: (transform: ReadableWritablePair<Uint8Array, Uint8Array>, options?: StreamPipeOptions) => instrument(pipeThrough(transform, options)) },
             tee: { value: () => { const [left, right] = tee(); return [instrument(left), instrument(right)]; } },
             values: { value: iterator },
@@ -165,7 +168,6 @@ async function invoke(project: AppProject, id: string, operation: string, input:
     closing = true;
     while (inFlight.size) await internally(() => Promise.allSettled([...inFlight]));
     await promises?.drain();
-    await promises?.flush();
     if (failed) throw failure;
     promises?.check();
     controller.signal.throwIfAborted();

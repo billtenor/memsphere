@@ -108,6 +108,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     branchrethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).catch(e=>e).then(e=>{throw e});return 'started';}},
     branchhandled: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},'one',input.value);void p.catch(()=> 'recovered');void p.finally(()=>{}).catch(()=> 'also recovered');return 'started';}},
     native:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},input.id??'one',input.value);const native=input.mode==='all'?Promise.all([p]):input.mode==='resolve'?Promise.resolve(p):(async()=>{await p})();if(input.recover){await native.catch(()=>{});return 'recovered';}void native;return 'started';}},
+    nativebarrier:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},'one',input.value);const native=input.mode==='all'?Promise.all([p]):(async()=>{await p})();void native.catch(async error=>{globalThis.__issue137RecoveryEntered(input.key);await(globalThis.__issue137RecoveryBarriers?.[input.key]??globalThis.__issue137RecoveryBarrier);if(input.outcome==='throw')throw error;if(input.outcome==='reject')return Promise.reject(error);return 'recovered';});return 'started';}},
     throwundefined: {kind:'read', execute: async () => {throw undefined;}},
     fire: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);return 'started';}},
     firethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);throw new Error('backend failure');}},
@@ -115,7 +116,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     leak: {kind:'read', execute: async (ctx,input) => {globalThis.__issue137LeakedStore=await ctx.getStore('expenses',{expectedBinding:input.token});}},
     hold: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});process.send({event:'locked'});await new Promise(resolve=>process.once('message',resolve));await store.upsert({},'one',{name:'child',count:7});}}
   }};`);
-  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",branchfinally:"write",branchthen:"write",branchrethrow:"write",branchhandled:"write",native:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
+  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",branchfinally:"write",branchthen:"write",branchrethrow:"write",branchhandled:"write",native:"write",nativebarrier:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
   const manifest = appManifestSchema.parse({ schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example",projectStores:[{key:"expenses",model:"record.json",kind:"ValueStore",configKey:"store"}],backend:{entry:"backend.mjs",operations} });
   await writeFile(join(root,"app.json"),JSON.stringify(manifest));
   const project = {name:"test-project",paths:projectPaths(fixture.root),memoryRoot:join(fixture.root,"memory"),config:await readBusinessProject(fixture.root)} as AppProject;
@@ -245,17 +246,76 @@ for(const mode of ["all","resolve","async"])test(`native ${mode} preserves succe
   await assert.rejects(f.invoke("native",input),{code:"ALREADY_EXISTS"});
 });
 
-test("concurrent App operations keep their Promise failures separate", {timeout:30000}, async t => {
-  const failing = await valueFixture(t);
-  const healthy = await valueFixture(t);
-  const token = (await failing.read()).binding.token;
-  const [failed, succeeded] = await Promise.allSettled([
-    failing.invoke("native", {mode:"all", token, value:{name:"duplicate",count:2}}),
-    healthy.read()
+for (const mode of ["all", "async"]) for (const outcome of ["recover", "throw", "reject"]) {
+  test(`native ${mode} waits for delayed ${outcome} before returning and releasing the lock`, {timeout:30000}, async t => {
+    const f = await valueFixture(t);
+    const token = (await f.read()).binding.token;
+    let release!: () => void;
+    let entered!: () => void;
+    const barrier = new Promise<void>(resolve => { release = resolve; });
+    const reached = new Promise<void>(resolve => { entered = resolve; });
+    Object.assign(globalThis, {__issue137RecoveryBarrier:barrier, __issue137RecoveryEntered:entered});
+    let completed = false;
+    let configured = false;
+    try {
+      const result = f.invoke("nativebarrier", {mode, outcome, token, value:{name:"duplicate",count:2}})
+        .then(value => { completed = true; return {value}; }, error => { completed = true; return {error}; });
+      await reached;
+      const switching = f.configureApp(f.context, "example.app", {store:"second"}).then(() => { configured = true; });
+      const {withSharedStoreLock} = await import("../src/project/shared-store-lock.js");
+      await assert.rejects(withSharedStoreLock(f.fixture.root, async () => {}, AbortSignal.timeout(300)), {name:"TimeoutError"});
+      assert.equal(completed, false);
+      assert.equal(configured, false);
+      release();
+      const settled = await result;
+      if (outcome === "recover") assert.deepEqual(settled, {value:"started"});
+      else assert.equal("error" in settled && settled.error.code, "ALREADY_EXISTS");
+      await switching;
+      assert.equal(configured, true);
+    } finally {
+      release();
+      delete (globalThis as Record<string,unknown>).__issue137RecoveryBarrier;
+      delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+    }
+  });
+}
+
+test("overlapping App scopes remain independent when one closes before the other fails", {timeout:30000}, async t => {
+  const first = await valueFixture(t);
+  const second = await valueFixture(t);
+  const firstToken = (await first.read()).binding.token;
+  const secondToken = (await second.read()).binding.token;
+  let releaseFirst!: () => void, releaseSecond!: () => void;
+  let firstEntered!: () => void, secondEntered!: () => void;
+  const barriers = {
+    first: new Promise<void>(resolve => { releaseFirst = resolve; }),
+    second: new Promise<void>(resolve => { releaseSecond = resolve; })
+  };
+  const bothEntered = Promise.all([
+    new Promise<void>(resolve => { firstEntered = resolve; }),
+    new Promise<void>(resolve => { secondEntered = resolve; })
   ]);
-  assert.equal(failed.status, "rejected");
-  if (failed.status === "rejected") assert.equal(failed.reason.code, "ALREADY_EXISTS");
-  assert.equal(succeeded.status, "fulfilled");
+  Object.assign(globalThis, {
+    __issue137RecoveryBarriers: barriers,
+    __issue137RecoveryEntered: (key:string) => key === "first" ? firstEntered() : secondEntered()
+  });
+  try {
+    const successful = first.invoke("nativebarrier", {key:"first", mode:"all", outcome:"recover", token:firstToken, value:{name:"duplicate",count:2}});
+    const failing = second.invoke("nativebarrier", {key:"second", mode:"async", outcome:"throw", token:secondToken, value:{name:"duplicate",count:2}})
+      .then(value => ({value}), error => ({error}));
+    await bothEntered;
+    releaseFirst();
+    assert.equal(await successful, "started");
+    const {withSharedStoreLock} = await import("../src/project/shared-store-lock.js");
+    await assert.rejects(withSharedStoreLock(second.fixture.root, async () => {}, AbortSignal.timeout(300)), {name:"TimeoutError"});
+    releaseSecond();
+    const settled = await failing;
+    assert.equal("error" in settled && settled.error.code, "ALREADY_EXISTS");
+  } finally {
+    releaseFirst(); releaseSecond();
+    delete (globalThis as Record<string,unknown>).__issue137RecoveryBarriers;
+    delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+  }
 });
 
 test("App Promise tracking leaves unrelated unhandled rejections unchanged", async () => {
@@ -395,7 +455,7 @@ async function dataFixture(t: import("node:test").TestContext) {
   await fixture.createStore("files", "record.json", "data");
   await writeData({}, fixture.root, "files", "one.json", "create", { kind: "value", value: { name: "first", count: 1 } });
   const root = join(fixture.directory, "data-app"); await mkdir(root);
-  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read", streammode:"read", streamwrite:"read", streampartial:"read" } } });
+  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read", streammode:"read", streamwrite:"read", streampartial:"read", streamcancel:"read" } } });
   await writeFile(join(root, "app.json"), JSON.stringify(manifest));
   await writeFile(join(root, "backend.mjs"), `export default {operations:{
     read:{kind:'read',execute:async ctx=>{const binding=await ctx.getProjectStoreBinding('files');const store=await ctx.getStore('files',{expectedBinding:binding.token});const item=await store.get({},'one.json');const text=await new Response(item.data.payload.content.stream()).text();return {token:binding.token,value:JSON.parse(text)};}},
@@ -405,6 +465,7 @@ async function dataFixture(t: import("node:test").TestContext) {
     streammode:{kind:'read',execute:async(ctx,input)=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');let stream=item.data.payload.content.stream();try {if(input.mode==='tee')stream=stream.tee()[0];if(input.mode==='through')stream=stream.pipeThrough(new TransformStream());if(input.mode==='pipe')await stream.pipeTo(new WritableStream({write(){}}));else if(input.mode==='values')for await(const _ of stream.values()){}else for await(const _ of stream){}return 'complete';} catch(e){if(!input.recover)throw e;if(e.message!=='read failure')throw e;return 'recovered';}}},
     streamwrite:{kind:'read',execute:async(ctx,input)=>{const s=await ctx.getStore('files',{expectedBinding:input.token});if(input.method==='delete')return s.delete({},'one.json');const data={id:input.method==='create'?'new.json':'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>{globalThis.__issue137Streams++;return new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('{}'));c.close();}});}}}};return s[input.method]({},data);}},
     streampartial:{kind:'read',execute:async(ctx,input)=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');const reader=item.data.payload.content.stream().getReader();await reader.read();if(input.recover){try{await reader.read();}catch(e){if(e.message!=='later read failure')throw e;return 'recovered';}}return 'started';}},
+    streamcancel:{kind:'read',execute:async(ctx,input)=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');const stream=item.data.payload.content.stream();if(input.prefetch)await new Promise(resolve=>setImmediate(resolve));try{await(input.reader?stream.getReader().cancel():stream.cancel());return 'cancelled';}catch(error){if(!input.recover)throw error;if(error.message!=='cancel failure')throw error;return 'recovered';}}},
     write:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});const bytes=new TextEncoder().encode(JSON.stringify(input.value));await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({start(c){c.enqueue(bytes);c.close();}})}}});}},
     broken:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({pull(c){c.error(new Error('input failure'));}})}}});}},
     appendfail:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.append({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>{globalThis.__issue137Streams++;let count=0;return new ReadableStream({pull(c){if(count++===0)c.enqueue(new TextEncoder().encode('x'));else c.error(new Error('append input failure'));}});}}}});}}
@@ -464,6 +525,35 @@ for(const recover of [false,true]) test(`a later DataStore stream failure is ${r
   if(recover)assert.equal(await invokeAppOperation(project,"example.data","streampartial",{recover}),"recovered");
   else await assert.rejects(invokeAppOperation(project,"example.data","streampartial",{recover}),/later read failure/);
 });
+
+for (const reader of [false, true]) for (const outcome of ["success", "recover", "unhandled", "prefetch"]) {
+  test(`DataStore ${reader ? "reader.cancel" : "stream.cancel"} handles ${outcome} and releases its lock`, {timeout:30000}, async t => {
+    const f = await dataFixture(t);
+    const {FilesystemDataStoreFactory} = await import("../src/data/extensions/filesystem-datastore/index.js");
+    const original = FilesystemDataStoreFactory.prototype.openExisting;
+    t.mock.method(FilesystemDataStoreFactory.prototype, "openExisting", async function(...args:Parameters<typeof original>) {
+      const store = await original.apply(this, args);
+      if (args[1] !== "files") return store;
+      const get = store.get.bind(store);
+      store.get = async (...a) => {
+        const item = await get(...a);
+        if (item) item.data.payload.content.stream = () => new ReadableStream({
+          start(controller) {
+            if (outcome === "prefetch") controller.error(new Error("cancel failure"));
+            else controller.enqueue(new Uint8Array([1]));
+          },
+          cancel() { if (outcome !== "success") throw new Error("cancel failure"); }
+        });
+        return item;
+      };
+      return store;
+    });
+    const invocation = f.invokeAppOperation(f.project, "example.data", "streamcancel", {reader, prefetch:outcome === "prefetch", recover:outcome === "recover" || outcome === "prefetch"});
+    if (outcome === "unhandled") await assert.rejects(invocation, /cancel failure/);
+    else assert.equal(await invocation, outcome === "success" ? "cancelled" : "recovered");
+    await f.configureApp(f.context, "example.data", {store:"files"});
+  });
+}
 
 test("an unfinished output stream keeps reconfiguration waiting until it settles",{timeout:30000},async t=>{
   const {project,context,configureApp,invokeAppOperation}=await dataFixture(t);
