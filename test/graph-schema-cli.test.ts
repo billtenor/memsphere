@@ -10,14 +10,14 @@ const exec = promisify(execFile), cli = fileURLToPath(new URL("../dist/cli.js", 
 
 async function schemaCliFixture(t: test.TestContext) {
   const f = await initializedContextFixture(t);
-  await exec("git", ["init", "-b", "master"], { cwd: f.root });
+  await exec("git", ["init", "-b", "master"], { cwd: f.root, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" });
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
   config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
   await writeFile(join(f.root, "config.json"), JSON.stringify(config));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "", MEMSPHERE_REVIEW_SESSION_ID: "", CODEX_THREAD_ID: "schema-cli", TRAECLI_THREAD_ID: "" };
-  const call = async (...args: string[]) => JSON.parse((await exec(process.execPath, [cli, "--project", "test-project", ...args, "--output", "json"], { cwd: f.root, env })).stdout);
-  const raw = async (...args: string[]) => (await exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })).stdout;
+  const call = async (...args: string[]) => JSON.parse((await exec(process.execPath, [cli, "--project", "test-project", ...args, "--output", "json"], { cwd: f.root, env, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" })).stdout);
+  const raw = async (...args: string[]) => (await exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" })).stdout;
   return { f, call, raw };
 }
 
@@ -32,6 +32,12 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const saved = await call("continue", "schema", "report", "--position", initial.position, "--artifact", '{"summary":"draft"}');
   assert.equal(saved.draft.id, initial.draft.id); assert.equal(saved.phase, "awaiting_finalization");
   await assert.rejects(call("run", "schema", "report", "--run", run, "--step", step, "--position", initial.position, "--artifact", '{"summary":"late"}'), /Writing position changed/);
+  const reference = join(f.directory, "invalid-reference.json");
+  await writeFile(reference, JSON.stringify({ contentRef: { storeId: "context_control/artifacts", dataId: `${run}/${initial.draft.id}`, sha256: "0".repeat(64) } }));
+  await assert.rejects(call("continue", "report", "--file", reference), /SHA-256 mismatch/);
+  const failed = await call("continue", "schema", "show");
+  assert.match(failed.validation.issues[0].message, /SHA-256 mismatch/); assert.equal(failed.validation.sha256, undefined);
+  assert.equal(failed.draft.content.payload.content, saved.draft.content.payload.content);
   const copy = join(f.directory, "copy.json");
   await call("continue", "artifact", "export", "--file", copy);
   assert.deepEqual(JSON.parse(await readFile(copy, "utf8")), { summary: "draft" });
@@ -56,4 +62,28 @@ test("Schema native entry and Continue retain all rule scopes, input links and H
   for (const prompt of [delivered.prompt, native]) {
     for (const requirement of ["Workflow rule", "Action rule", "Artifact rule", delivered.artifactId, "run artifact show", "summary", "Human", "enter-schema"]) assert.ok(prompt.includes(requirement), requirement);
   }
+});
+
+test("CLI and Continue keep concurrent Schema Step drafts and their positions isolated", { timeout: 90000 }, async t => {
+  const { f, call, raw } = await schemaCliFixture(t);
+  const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
+  const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["schema-parallel"], defines: ["Independent reports"], actions: ["a", "b"].map(id => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: id, model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nfields: [summary]\n" }, payload: { contentType: "application/json" } } })) };
+  const file = join(f.directory, "parallel.yaml"); await writeFile(file, serializeMemoryYaml(source as import("../src/memory/ast.js").GraphProcedureMemory));
+  const started = await call("run", "start", "--file", file, "--name", "Parallel drafts");
+  const snapshot = await call("run", "show", "--run", started.runId);
+  const a = snapshot.steps.find((s: any) => s.source.actionId === "a").id, b = snapshot.steps.find((s: any) => s.source.actionId === "b").id;
+  await raw("run", "step", "enter", "--run", started.runId, "--step", a); const first = await call("continue", "enter-schema");
+  await raw("run", "step", "enter", "--run", started.runId, "--step", b); const second = await call("continue", "enter-schema");
+  assert.notEqual(first.draft.id, second.draft.id);
+  await call("continue", "schema", "report", "--position", second.position, "--artifact", '{"summary":"B"}');
+  await assert.rejects(call("run", "schema", "report", "--run", started.runId, "--step", a, "--position", first.position, "--artifact", '{"summary":"wrong target"}'), /bound to another target/);
+  await raw("run", "step", "enter", "--run", started.runId, "--step", a);
+  const resumed = await call("continue", "schema", "show"); assert.equal(resumed.position, first.position); assert.equal(resumed.draft.content.payload.content, "");
+  await call("continue", "schema", "report", "--position", first.position, "--artifact", '{"summary":"A"}');
+  const untouched = await call("run", "schema", "show", "--run", started.runId, "--step", b); assert.equal(untouched.draft.content.payload.content, '{"summary":"B"}');
+  const aDone = await call("continue", "report", "--artifact", '{"summary":"A"}'); assert.equal(aDone.artifactId, first.draft.id);
+  const bDraft = await call("continue", "schema", "show"); assert.equal(bDraft.draft.id, second.draft.id);
+  const bDone = await call("continue", "report", "--artifact", '{"summary":"B"}'); assert.equal(bDone.artifactId, second.draft.id);
+  const completed = await call("run", "show", "--run", started.runId);
+  assert.deepEqual(new Set(completed.completeIds), new Set([first.draft.id, second.draft.id]));
 });

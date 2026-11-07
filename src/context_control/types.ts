@@ -31,7 +31,7 @@ export type Step = {
   source?: { memoryRef: string; actionId: string };
   inputs?: Record<string, Ref[]>; artifact?: StepResult;
   reviewRounds?: ReviewRound[];
-  validation?: { draftRevision?: number; sha256: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
+  validation?: { draftRevision?: number; sha256?: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
   frames?: Array<{ id: string; type: "submission"; submissionFrame: SubmissionFrame }>;
   writing?: { draftId: string; baseSubmittedArtifactId?: string };
   reads?: Record<string, { readAt: string }>;

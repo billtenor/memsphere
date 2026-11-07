@@ -326,7 +326,7 @@
         "artifactId": {
           "$ref": "#/definitions/Id",
           "title": "被检查产物",
-          "description": "被检查的 Artifact 标识；sha256 对应本次实际检查的内容。"
+          "description": "被检查的 Artifact 标识；sha256 如存在对应实际检查的内容，引用解析失败时不填写，成功校验必须填写。"
         },
         "checkedAt": {
           "$ref": "#/definitions/Timestamp",
@@ -377,7 +377,6 @@
         }
       },
       "required": [
-        "sha256",
         "checkedAt",
         "status",
         "issues"

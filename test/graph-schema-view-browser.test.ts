@@ -50,5 +50,13 @@ test("graph draft dialog shows positioned progress and Markdown on desktop and n
     await page.getByRole("region", { name: "Schema 撰写进度" }).getByText(/3\/3/).waitFor();
     await page.locator(".cc-document").getByText("42", { exact: true }).waitFor();
     assert.equal(await page.locator(".cc-schema-issue").count(), 0);
+    await assert.rejects(service.withGraph(g => g.report(state.run, state.step, { contentRef: { storeId: "context_control/artifacts", dataId: `${state.run}/${state.draft.draft!.id}`, sha256: "0".repeat(64) } })), /SHA-256 mismatch/);
+    await page.getByRole("button", { name: "关闭", exact: true }).click();
+    await page.getByRole("button", { name: "刷新", exact: true }).click();
+    await page.locator('.pg-node[data-action-id="write"]').click();
+    await page.locator(".cc-schema-issue").getByText(/SHA-256 mismatch/).waitFor();
+    await page.getByRole("region", { name: "Schema 撰写进度" }).getByText(/3\/3/).waitFor();
+    assert.equal((await service.withGraph(g => g.schemaShow(state.run, state.step))).draft!.content!.payload.content.includes("42"), true);
+
   } finally { try { await browser?.close(); } finally { await new Promise<void>(resolve => server.close(() => resolve())); } }
 });

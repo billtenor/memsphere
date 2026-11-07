@@ -12,6 +12,7 @@ function variant(value: RecordValue, discriminator: string, cases: Record<string
   for (const field of fields) if (has(value, field) !== selected.includes(field)) invalid(`${path}.${field}`);
 }
 function step(value: RecordValue, path: string) {
+  if (value.validation?.status === "passed" && !value.validation.sha256) invalid(`${path}.validation.sha256`);
   const frames = value.frames ?? [];
   if (frames.some((frame: RecordValue) => frame.type === "submission") && frames.length !== 1) invalid(`${path}.frames: submission must be the sole recovery intent`);
   for (const [i, frame] of frames.entries()) {

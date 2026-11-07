@@ -459,3 +459,183 @@ for (const scenario of ["missing", "wrong-kind", "cycle"] as const) test(`inline
     assert.deepEqual((await service.stores.run.list({})).items, []);
   });
 });
+
+for (const winner of ["save", "seal"] as const) test(`draft ${winner} wins without a late save overwriting the submitted identity`, { timeout: 30000 }, async t => {
+  const { service } = await graphDomainFixture(t);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Save versus seal", procedure: procedure() });
+    const run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
+    const draft = await g.enterSchema(run, step);
+    let reached!: () => void, release!: () => void, pause = true;
+    const atSave = new Promise<void>(r => { reached = r; }), gate = new Promise<void>(r => { release = r; });
+    const update = service.stores.artifact.update.bind(service.stores.artifact);
+    service.stores.artifact.update = async (context, id, value, options) => {
+      const a = value as import("../src/context_control/types.js").Artifact;
+      if (pause && a.id === draft.draft!.id && a.writing?.index === 1 && !a.writing.submission) { pause = false; reached(); await bounded(gate, "release draft save"); }
+      return update(context, id, value, options);
+    };
+    const saving = g.schemaWrite(run, step, "report", draft.position!, '{"summary":"late field"}'); void saving.catch(() => {});
+    let final: Awaited<ReturnType<typeof g.report>>;
+    try {
+      await bounded(Promise.race([atSave, saving.then(() => { throw Error("Save missed its CAS barrier"); })]), "draft save CAS");
+      if (winner === "save") {
+        // A fresh full submission cannot seal a draft until its last save lands.
+        await assert.rejects(g.report(run, step, { text: '{"summary":"final"}' }), { code: "SCHEMA_INCOMPLETE" });
+        release(); await saving;
+        final = await g.report(run, step, { text: '{"summary":"final"}' });
+      } else {
+        await g.schemaWrite(run, step, "report", draft.position!, '{"summary":"winning field"}');
+        final = await g.report(run, step, { text: '{"summary":"final"}' });
+        release(); await assert.rejects(saving, { code: "REVISION_CONFLICT" });
+      }
+    } finally { release(); await bounded(Promise.allSettled([saving]), "pending draft save cleanup"); }
+    assert.equal(final.artifact.id, draft.draft!.id); assert.equal(final.artifact.content!.payload.content, '{"summary":"final"}');
+    const snapshot = await g.advance(run);
+    assert.equal(snapshot.artifacts.length, 1); assert.deepEqual(snapshot.completeIds, [draft.draft!.id]); assert.equal(snapshot.reviews.length, 0);
+  });
+});
+
+for (const phase of ["save", "seal", "recovery"] as const) test(`rewind fences an in-flight ${phase} after admission from effective Review and downstream results`, { timeout: 30000 }, async t => {
+  const { service } = await graphDomainFixture(t);
+  const p = procedure(); p.actions[0].artifact!.review = ["approval"];
+  p.actions.push({ tag: "!action", id: "consume", description: "Consume", dependencies: [{ tag: "!dependency", from: "write" }], artifact: { name: "Consumed", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } } });
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "In-flight rewind", procedure: p, controlPlane: { runner: { permissions: ["artifact.read", "artifact.write", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } } }, reviewConfiguration: { reviews: { "schema-graph#actions[write]": { policy: "artifact_acceptance.unanimous" } }, slots: { "schema-graph::approval": { actorIds: ["human"] } } } });
+    const run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
+    let draft = await g.enterSchema(run, step);
+    if (phase !== "save") draft = await g.schemaWrite(run, step, "report", draft.position!, '{"summary":"old"}');
+    let reached!: () => void, release!: () => void, pause = true;
+    const atWrite = new Promise<void>(r => { reached = r; }), gate = new Promise<void>(r => { release = r; });
+    const update = service.stores.artifact.update.bind(service.stores.artifact);
+    service.stores.artifact.update = async (context, id, value, options) => {
+      const a = value as import("../src/context_control/types.js").Artifact;
+      const selected = phase === "save" ? a.writing?.index === 1 && !a.writing.submission : phase === "seal" ? Boolean(a.writing?.submission) : a.status === "submitted";
+      if (pause && a.id === draft.draft!.id && selected) { pause = false; reached(); await bounded(gate, "release admitted old Artifact CAS"); }
+      return update(context, id, value, options);
+    };
+    let pending: Promise<unknown> | undefined, rewinding: ReturnType<typeof g.rewind> | undefined;
+    let releaseEntry = () => {}, replacement = "";
+    const advance = g.advance.bind(g);
+    try {
+      if (phase === "recovery") {
+        // Rewind normally recovers existing frames in its preflight. Start it
+        // first, then admit submission recovery before the rewind intent saves.
+        let reachedEntry!: () => void, hold = true;
+        const atEntry = new Promise<void>(r => { reachedEntry = r; });
+        const entryGate = new Promise<void>(r => { releaseEntry = r; });
+        g.advance = async id => { const snapshot = await advance(id); if (hold) { hold = false; reachedEntry(); await bounded(entryGate, "release rewind preflight"); } return snapshot; };
+        rewinding = g.rewind(run, step, "Replace the requirements"); void rewinding.catch(() => {});
+        await bounded(Promise.race([atEntry, rewinding.then(() => { throw Error("Rewind missed its preflight barrier"); })]), "rewind preflight");
+      }
+      pending = phase === "save" ? g.schemaWrite(run, step, "report", draft.position!, '{"summary":"old"}') : g.report(run, step, { text: '{"summary":"old"}' });
+      void pending.catch(() => {});
+      await bounded(Promise.race([atWrite, pending.then(() => { throw Error("Old request missed its admitted-write barrier"); })]), "admitted Artifact CAS barrier");
+      if (rewinding) { releaseEntry(); replacement = (await rewinding).replacementStepId; }
+      else replacement = (await g.rewind(run, step, "Replace the requirements")).replacementStepId;
+      release(); await assert.rejects(pending, { code: "STEP_SUPERSEDED" });
+    } finally {
+      release(); releaseEntry(); g.advance = advance;
+      await bounded(Promise.allSettled([...(pending ? [pending] : []), ...(rewinding ? [rewinding] : [])]), "old in-flight request cleanup");
+    }
+    const rewound = await g.advance(run);
+    assert.equal(rewound.completeIds.length, 0); assert.equal(rewound.outputArtifactIds.length, 0); assert.equal(rewound.reviews.length, 0);
+    assert.ok(!rewound.steps.some(s => s.source?.actionId === "consume"));
+    await assert.rejects(g.enterSchema(run, step), { code: "STEP_SUPERSEDED" });
+    await g.enter(run, replacement);
+    const fresh = await g.enterSchema(run, replacement); assert.notEqual(fresh.draft!.id, draft.draft!.id);
+    await g.schemaWrite(run, replacement, "report", fresh.position!, '{"summary":"replacement"}');
+    const submitted = await g.report(run, replacement, { text: '{"summary":"replacement"}' });
+    const round = submitted.step.reviewRounds!.at(-1)!.id;
+    await g.submitReview(run, replacement, round, "human", "approve");
+    await g.submitReview(run, replacement, round, "runner", "approve");
+    const snapshot = await g.advance(run);
+    assert.deepEqual(snapshot.completeIds, [fresh.draft!.id]);
+    assert.ok(snapshot.reviews.every(r => r.artifactId === fresh.draft!.id));
+    assert.equal(snapshot.steps.filter(s => s.source?.actionId === "consume").length, 1);
+    assert.deepEqual(snapshot.steps.find(s => s.source?.actionId === "consume")!.inputs, { write: [{ kind: "artifact", id: fresh.draft!.id }] });
+    assert.equal(snapshot.artifacts.find(a => a.id === fresh.draft!.id)!.content!.payload.content, '{"summary":"replacement"}');
+  });
+});
+
+for (const surface of ["full", "lazy"] as const) test(`${surface} View keeps draft value and diagnostic revision from the same read when a save interleaves`, { timeout: 30000 }, async t => {
+  const { service } = await graphDomainFixture(t);
+  const { contextRunPayload } = await import("../src/context_control/view.js");
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Coherent View read", procedure: procedure() });
+    const run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
+    const initial = await g.enterSchema(run, step);
+    await assert.rejects(g.schemaWrite(run, step, "report", initial.position!, '{}'), /summary/);
+    const failure = (await g.schemaShow(run, step)).validation!;
+    const get = service.stores.artifact.get.bind(service.stores.artifact); let interleave = true;
+    service.stores.artifact.get = async (context, id) => {
+      const row = await get(context, id);
+      if (interleave && id === `${run}/${initial.draft!.id}`) {
+        interleave = false;
+        await g.schemaWrite(run, step, "report", initial.position!, '{"summary":"newer saved body"}');
+      }
+      return row;
+    };
+    const snapshot = surface === "full" ? await g.snapshot(run) : (await service.viewProjection(run, "action", "write"))!;
+    const shown = contextRunPayload(snapshot).context.artifacts.find(a => a.id === initial.draft!.id)!.writingProgress!;
+    assert.equal(shown.index, 0); assert.deepEqual(shown.validation, failure);
+    const latest = contextRunPayload(await g.snapshot(run)).context.artifacts.find(a => a.id === initial.draft!.id)!.writingProgress!;
+    assert.equal(latest.index, 1); assert.equal(latest.validation, undefined);
+  });
+});
+
+test("failed reference submission replaces the latest draft diagnostic without changing its body or position", async t => {
+  const { service: base } = await graphDomainFixture(t);
+  const { ContextControl } = await import("../src/context_control/service.js");
+  const { createHash } = await import("node:crypto");
+  let bytes = Buffer.from('{}'), contentType = "application/json";
+  const service = new ContextControl(base.stores, async () => ({ bytes, contentType }));
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Reference diagnostics", procedure: procedure() });
+    const run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
+    const initial = await g.enterSchema(run, step);
+    const draft = await g.schemaWrite(run, step, "report", initial.position!, '{"summary":"saved draft"}');
+    await assert.rejects(g.report(run, step, { text: '{}' }), /summary/);
+    const ref = () => ({ storeId: "input", dataId: "report", sha256: createHash("sha256").update(bytes).digest("hex") });
+    for (const kind of ["hash", "mime", "schema"] as const) {
+      bytes = Buffer.from('{}'); contentType = kind === "mime" ? "text/plain" : "application/json";
+      await assert.rejects(g.report(run, step, { contentRef: kind === "hash" ? { ...ref(), sha256: "0".repeat(64) } : ref() }));
+      const after = await g.schemaShow(run, step);
+      assert.equal(after.validation!.status, "failed"); assert.equal(after.validation!.sha256, undefined);
+      assert.match(after.validation!.issues[0].message, kind === "hash" ? /SHA-256 mismatch/ : kind === "mime" ? /Expected application\/json/ : /summary/);
+      assert.deepEqual(after.draft, draft.draft); assert.equal(after.phase, "awaiting_finalization");
+      const snapshot = await g.snapshot(run); assert.equal(snapshot.reviews.length, 0); assert.equal(snapshot.steps[0].frames?.length ?? 0, 0);
+    }
+  });
+});
+
+test("a successful validation cannot be persisted without the checked content identity", async t => {
+  const { service } = await graphDomainFixture(t);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Verified identity", procedure: procedure() });
+    await g.enter(start.run.id, start.steps[0].id);
+    const result = await g.report(start.run.id, start.steps[0].id, { text: '{"summary":"verified"}' });
+    const id = `${start.run.id}/${result.step.id}`, row = (await service.stores.step.get({}, id))!;
+    const invalid = structuredClone(row.value) as import("../src/context_control/types.js").Step;
+    delete invalid.validation!.sha256;
+    await assert.rejects(service.stores.step.update({}, id, invalid, { expectedRevision: row.revision! }), /validation.sha256/);
+    assert.deepEqual(await service.stores.step.get({}, id), row);
+  });
+});
+
+for (const target of ["artifact", "step", "run"] as const) test(`a payload pointing to its mutable ${target} record is rejected before sealing so the draft remains recoverable`, async t => {
+  const { service: base } = await graphDomainFixture(t);
+  const { ContextControl } = await import("../src/context_control/service.js");
+  const { createHash } = await import("node:crypto");
+  const reader = async (ref: { dataId: string }) => ({ bytes: Buffer.from(JSON.stringify((await base.stores[target].get({}, ref.dataId))!.value)), contentType: "application/json" });
+  const service = new ContextControl(base.stores, reader);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "No mutable self reference", procedure: procedure({ definedBy: MEMSPHERE_SCHEMA_MODEL, definition: `!schema\nsyntax: ${syntax}\ntype: object\n` }) });
+    const run = start.run.id, step = start.steps[0].id; await g.enter(run, step);
+    const initial = await g.enterSchema(run, step); const saved = await g.schemaWrite(run, step, "report", initial.position!, '{}');
+    const dataId = target === "run" ? run : `${run}/${target === "step" ? step : initial.draft!.id}`, bytes = (await reader({ dataId })).bytes;
+    await assert.rejects(g.report(run, step, { contentRef: { storeId: base.stores[target].id, dataId, sha256: createHash("sha256").update(bytes).digest("hex") } }), /own mutable context record/);
+    assert.deepEqual((await g.schemaShow(run, step)).draft, saved.draft);
+    assert.equal((await g.advance(run)).steps[0].frames?.length ?? 0, 0);
+    assert.equal((await g.report(run, step, { text: '{}' })).step.status, "done");
+  });
+});

@@ -234,7 +234,7 @@ test("explicit Schema model upgrade preserves existing records and rejects impli
     const model = structuredClone(asset.definition) as any;
     if (asset.entity === "review") delete model.definitions.ReviewNode.properties.requiresReport;
     else if (asset.entity === "run") delete model.properties.schemaContracts;
-    else { delete model.properties.writing; if (asset.entity === "step") { delete model.definitions.SubmissionFrame.properties.draft; delete model.definitions.Validation.properties.draftRevision; } }
+    else { delete model.properties.writing; if (asset.entity === "step") { delete model.definitions.SubmissionFrame.properties.draft; delete model.definitions.Validation.properties.draftRevision; delete model.definitions.Validation.allOf; model.definitions.Validation.required.unshift("sha256"); model.definitions.Validation.properties.artifactId.description = "被检查的 Artifact 标识；sha256 对应本次实际检查的内容。"; } }
     assert.equal(definitionHash(model), previous[asset.entity as keyof typeof previous]);
     await publishFixtureDefinition(f.root, asset.id, JSON.stringify(model));
   }

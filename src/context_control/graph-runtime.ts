@@ -200,9 +200,10 @@ export class GraphRuntime {
   private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.run(runId)).value;
     assertContextControlRecord("memsphere/context_control/run.json", run);
-    const [steps, artifacts, externals, reviews] = await Promise.all([
-      this.records.list<Step>("step", runId), this.records.list<Artifact>("artifact", runId), this.records.list<External>("external", runId), this.records.list<Review>("review", runId)
+    const [steps, artifactRows, externals, reviews] = await Promise.all([
+      this.records.list<Step>("step", runId), this.records.listRows<Artifact>("artifact", runId), this.records.list<External>("external", runId), this.records.list<Review>("review", runId)
     ]);
+    const artifacts = artifactRows.map(row => row.value);
     const historicalCompleteIds = steps.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id);
     for (const id of historicalCompleteIds) if (!artifacts.some(a => a.id === id && a.status === "submitted")) throw failure("INVALID_STATE", `Completed Step has no submitted Artifact: ${id}`);
     const completeIds = historicalCompleteIds.filter(id => effectiveStep(run, artifacts.find(a => a.id === id)!.stepId));
@@ -226,7 +227,7 @@ export class GraphRuntime {
         if (ref.kind !== "artifact" || !artifact || !historicalCompleteIds.includes(ref.id) || steps.find(s => s.id === artifact.stepId)?.source?.actionId !== source) throw failure("INVALID_STATE", "Step input is not an accepted Artifact of its source Action");
       }
     }
-    const artifactRevisions = Object.fromEntries(await Promise.all(artifacts.filter(a => a.writing).map(async a => [a.id, (await this.records.require<Artifact>("artifact", runId, a.id)).revision!] as const)));
+    const artifactRevisions = Object.fromEntries(artifactRows.filter(row => row.value.writing).map(row => [row.value.id, row.revision!]));
     return { ...(Object.keys(artifactRevisions).length ? { artifactRevisions } : {}), run, steps, artifacts, externals, reviews, completeIds, historicalCompleteIds, outputArtifactIds };
   }
   private creationOrder(run: Run, steps: Step[]) {
@@ -728,7 +729,7 @@ export class GraphRuntime {
         await reportSchemaItem(draft.writing!, String(value));
       }
       catch (error) {
-        const validation = { artifactId: draft.id, draftRevision: row.revision!, sha256: createHash("sha256").update(draft.content!.payload.content).digest("hex"), checkedAt: now(), status: "failed" as const, issues: [{ message: error instanceof Error ? error.message : String(error), path: item.schemaContext?.path }] };
+        const validation = { artifactId: draft.id, draftRevision: row.revision!, sha256: createHash("sha256").update(String(value)).digest("hex"), checkedAt: now(), status: "failed" as const, issues: [{ message: error instanceof Error ? error.message : String(error), path: item.schemaContext?.path }] };
         await this.productionStep(runId, stepId);
         await this.records.update("step", runId, stepRow, { ...step, validation });
         throw error;
@@ -770,12 +771,15 @@ export class GraphRuntime {
     if (draft && (!draft.value.writing || draft.value.writing.index < draft.value.writing.items.length)) throw failure("SCHEMA_INCOMPLETE", "Complete all Schema fields before submitting");
     if (draft?.value.writing?.submission) throw Object.assign(failure("RECOVERY_REQUIRED", "A draft submission is sealed; recover status before retrying"), { details: { runId, stepId } });
     let checked: Awaited<ReturnType<typeof validateGraphBody>>;
-    try { checked = await validateGraphBody(body, action.artifact, this.reader); }
+    try {
+      checked = await validateGraphBody(body, action.artifact, this.reader);
+      const mutableRecords: Array<["run" | "step" | "artifact", string]> = [["run", runId], ["step", stepId], ...(draft ? [["artifact", draft.value.id] as ["artifact", string]] : [])];
+      if (body.contentRef && mutableRecords.some(([entity, id]) => body.contentRef!.storeId === this.records.stores[entity].id && body.contentRef!.dataId === this.records.key(entity, runId, id))) throw failure("INVALID_ARGUMENT", "A submission cannot use its own mutable context record as the payload reference");
+    }
     catch (error) {
-      if (body.content) {
-        step.validation = { ...(draft ? { artifactId: draft.value.id, draftRevision: draft.revision } : {}), sha256: createHash("sha256").update(body.content.payload.content).digest("hex"), checkedAt: now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error) }] };
-        await this.records.update("step", runId, row, step);
-      }
+      step.validation = { ...(draft ? { artifactId: draft.value.id, draftRevision: draft.revision } : {}), ...(body.content ? { sha256: createHash("sha256").update(body.content.payload.content).digest("hex") } : {}), checkedAt: now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error) }] };
+      await this.productionStep(runId, stepId);
+      await this.records.update("step", runId, row, step);
       throw error;
     }
     await this.productionStep(runId, stepId);
