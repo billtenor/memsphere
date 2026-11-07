@@ -52,7 +52,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const cleanupFailure=Error('injected first owned Job probe failure');
  const jobCleanupAttempts:number[]=[];
  const cleanupJob=async(job:string|undefined,i:number)=>{
-  if(failCleanupJob){jobCleanupAttempts.push(i);if(i===0)throw cleanupFailure;}
+  if(failCleanupJob){jobCleanupAttempts.push(i);if(jobCleanupAttempts.length===1)throw cleanupFailure;}
   if(process.platform==='win32'&&job)await stopFixtureJob(job);
  };
  const alive=async(pid:number)=>(await observed.alive(pid))[0];
@@ -346,7 +346,8 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   failCleanupJob=true;verifiedCleanup=false;
   const includesOriginal=(error:unknown):boolean=>error===cleanupFailure||error instanceof AggregateError&&error.errors.some(includesOriginal);
   await assert.rejects(resources.close(),includesOriginal);
-  assert.deepEqual(jobCleanupAttempts,[0,1],'the second owned Job is attempted after the first fails');
+  assert.equal(jobCleanupAttempts.length,2,'the second owned Job is attempted after the first fails');
+  assert.deepEqual([...jobCleanupAttempts].sort(),[0,1],'both owned Jobs are attempted');
   await untilFixture(async()=>!(await verification.alive(...pids)).some(Boolean),'all original ACP executions exit after a cleanup probe failure');
  });
 
