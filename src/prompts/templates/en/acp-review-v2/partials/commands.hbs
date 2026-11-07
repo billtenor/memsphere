@@ -1,31 +1,31 @@
 ## Available Memsphere commands
 - Read the complete candidate Artifact:
-  memsphere run artifact show --output json
+  "$MEMSPHERE_CLI" run artifact show --output json
 - Read the complete Review contract, including the full Schema snapshot:
-  memsphere run artifact contract show --output json
+  "$MEMSPHERE_CLI" run artifact contract show --output json
 - Check this review's status, permissions, and your own comments:
-  memsphere run review assignment show --output json
+  "$MEMSPHERE_CLI" run review assignment show --output json
 - View the Run outline, including every step, its Artifact summary, and the current step:
-  memsphere run show --output json
+  "$MEMSPHERE_CLI" run show --output json
 - Inspect one step from that outline:
-  memsphere run step show --step "<step-ref>" --output json
+  "$MEMSPHERE_CLI" run step show --step "<step-ref>" --output json
 - Read a prior Artifact from the outline when it is relevant:
-  memsphere run artifact show --step "<step-ref>" --output json
+  "$MEMSPHERE_CLI" run artifact show --step "<step-ref>" --output json
 - Discover and read project Memory (current Project by default):
-  memsphere memory list --output json
-  memsphere memory read <reference> --output json
-- Memory list returns items and an optional nextCursor; the default page contains up to 100 entries. For a complete list, continue with memsphere memory list --cursor <nextCursor> --output json using the same filters until nextCursor is absent.
+  "$MEMSPHERE_CLI" memory list --output json
+  "$MEMSPHERE_CLI" memory read <reference> --output json
+- Memory list returns items and an optional nextCursor; the default page contains up to 100 entries. For a complete list, continue with "$MEMSPHERE_CLI" memory list --cursor <nextCursor> --output json using the same filters until nextCursor is absent.
 - Add a concrete review comment. Comment bodies use Markdown:
   - Choose an explicit severity: `blocking`, `risk`, or `suggestion`.
   - For a short single-line comment:
-    memsphere run review comment --severity <blocking|risk|suggestion> --body <text> --output json
+    "$MEMSPHERE_CLI" run review comment --severity <blocking|risk|suggestion> --body <text> --output json
   - For a multiline comment, write Markdown to a file:
-    memsphere run review comment --severity <blocking|risk|suggestion> --body-file <path> --output json
+    "$MEMSPHERE_CLI" run review comment --severity <blocking|risk|suggestion> --body-file <path> --output json
   - Do not encode line breaks as literal `\n` sequences.
 - Submit the final vote and summary:
-  memsphere run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json
+  "$MEMSPHERE_CLI" run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json
 
-Memory reads use the current Project by default; no --run is added automatically. To inspect this Run's frozen snapshot, explicitly use `memsphere memory list --run <run-id> --output json` or `memsphere memory read <reference> --run <run-id> --output json` (when a snapshot is available). Formal review rules and contracts always use the frozen version; current Project Memory is supporting evidence.
-Read ChangeSet evidence through `memsphere memory change show <change-id> --checkpoint <digest> --part summary|diff|validation`. For Memory source use `--part memory --reference <reference> --side before|after`; a missing side is null. A stale digest is rejected. Review materials must identify the ChangeSet ID, checkpoint digest, relevant references and these commands, rather than copy full Memory text into an Artifact or depend on internal storage paths. This entrypoint is read-only; validate/edit/publish/claim remain unavailable to reviewers.
+Memory reads use the current Project by default; no --run is added automatically. To inspect this Run's frozen snapshot, explicitly use `"$MEMSPHERE_CLI" memory list --run <run-id> --output json` or `"$MEMSPHERE_CLI" memory read <reference> --run <run-id> --output json` (when a snapshot is available). Formal review rules and contracts always use the frozen version; current Project Memory is supporting evidence.
+Read ChangeSet evidence through `"$MEMSPHERE_CLI" memory change show <change-id> --checkpoint <digest> --part summary|diff|validation`. For Memory source use `--part memory --reference <reference> --side before|after`; a missing side is null. A stale digest is rejected. Review materials must identify the ChangeSet ID, checkpoint digest, relevant references and these commands, rather than copy full Memory text into an Artifact or depend on internal storage paths. This entrypoint is read-only; validate/edit/publish/claim remain unavailable to reviewers.
 
 Omitting --part is equivalent to --part summary. For --part memory, omitting --side is equivalent to --side after. All explicit options remain available; --reference only filters. Checkpoints pin scope, baseline and validation as well as content. Unvalidated candidate edits cannot change these materials. An old checkpoint without a frozen material description requires explicit revalidation by the Runner; reviewers cannot validate it.

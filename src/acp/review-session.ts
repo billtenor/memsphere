@@ -1,3 +1,4 @@
+import { reviewerCommand } from "./reviewer-invocation.js";
 import { currentReviewNode, reviewNodeView, reviewNodeProgress, nodeSubmitSchema, type NodeMutation, type ReviewNodeState } from "../review-nodes.js";
 import { requireRunContent } from "../project/run-data.js";
 import { isAbsolute, join, relative, resolve } from "node:path";
@@ -65,12 +66,12 @@ export async function agentReviewAssignmentDetailPayload(): Promise<unknown> {
     ...(resources ? {
       artifactId: resources.candidate.id,
       references: [
-        ...resources.artifacts.map(a => ({ kind: "artifact", id: a.id, stepId: a.stepId, confirmation: resources.confirmations.some(r => r.artifactId === a.id) ? "submitted-reviews" : a.id === resources.candidate.id ? "current-candidate" : "accepted-without-independent-review", readCommand: `memsphere run artifact show --run ${resources.run.id} --artifact ${a.id} --out ${a.id}.md` })),
-        ...resources.externals.map(e => ({ kind: "external", id: e.id, source: e.source, viaArtifactIds: resources.artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id), readCommand: `memsphere run external show --run ${resources.run.id} --external ${e.id} --out ${e.id}.txt` })),
-        ...resources.confirmations.map(r => ({ kind: "review", id: r.id, artifactId: r.artifactId, roundId: r.roundId, readCommand: `memsphere run review show --review ${r.id} --output json` }))
+        ...resources.artifacts.map(a => ({ kind: "artifact", id: a.id, stepId: a.stepId, confirmation: resources.confirmations.some(r => r.artifactId === a.id) ? "submitted-reviews" : a.id === resources.candidate.id ? "current-candidate" : "accepted-without-independent-review", readCommand: reviewerCommand(`run artifact show --run ${resources.run.id} --artifact ${a.id} --out ${a.id}.md`) })),
+        ...resources.externals.map(e => ({ kind: "external", id: e.id, source: e.source, viaArtifactIds: resources.artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id), readCommand: reviewerCommand(`run external show --run ${resources.run.id} --external ${e.id} --out ${e.id}.txt`) })),
+        ...resources.confirmations.map(r => ({ kind: "review", id: r.id, artifactId: r.artifactId, roundId: r.roundId, readCommand: reviewerCommand(`run review show --review ${r.id} --output json`) }))
       ]
     } : {}),
-    memoryReads: { project: "memsphere memory list --output json", frozen: process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID ? `memsphere memory list --run ${context.run.id} --output json` : undefined },
+    memoryReads: { project: reviewerCommand("memory list --output json"), frozen: process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID ? reviewerCommand(`memory list --run ${context.run.id} --output json`) : undefined },
     status: context.assignment.status,
     reviewProgress: reviewNodeProgress(context.assignment, context.assignment.status),
     binding: context.assignment.binding,

@@ -6,11 +6,12 @@ import { bytesContent } from "../src/data/extensions/shared/payload.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import crossSpawn from "cross-spawn";
-import { mkdir, readFile, writeFile, symlink } from "node:fs/promises";
+import { mkdir, readFile, writeFile, symlink, chmod } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
+import { assertWindowsPrerequisites } from "../src/windows-prerequisites.js";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
 import type { GraphAction, GraphProcedureMemory } from "../src/memory/ast.js";
@@ -71,13 +72,23 @@ async function evidenceFixture(t: test.TestContext) {
   return { f, service, runId, a, u, e, eRef, outside, c, input, first, attempt, runtime, env, cli, bytes, opened };
 }
 
-test('generated Artifact and External read commands execute inside the restricted launcher', { timeout: 120000 }, async t => {
-  const { f, service, runId, a, u, e, eRef, outside, c, input, first, attempt, runtime, env, cli, bytes, opened } = await evidenceFixture(t);
-  const generatedPrompt=await buildArtifactReviewerPrompt({context:await reviews.readArtifactReviewForActor(input),locale:"zh-CN",promptVersion:"artifact-review-v3"});
-  const generatedReads=[...generatedPrompt.matchAll(/memsphere run (?:artifact|external) show --run [a-z0-9-]+ --(?:artifact|external) [a-z0-9-]+ --out [a-z0-9.-]+/g)].map(m=>m[0]);
-  assert.equal(generatedReads.length,4,"both Artifact inputs and both External references have read commands");
-  for(const command of generatedReads){const r=await cli([...command.split(" ").slice(1),"--output","json"]);assert.equal(r.status,0,command+": "+r.stderr);}
+async function shellWithWrongGlobalCli(f: Awaited<ReturnType<typeof evidenceFixture>>) {
+  const wrongBin=join(f.f.directory,'wrong-global');await mkdir(wrongBin);await writeFile(join(wrongBin,'memsphere'),'#!/bin/sh\necho WRONG_GLOBAL_CLI >&2\nexit 93\n');await chmod(join(wrongBin,'memsphere'),0o700);
+  const quote=(s:string)=>"'"+s.replaceAll("'", "'\"'\"'")+"'";
+  const bash=process.platform==='win32'?(await assertWindowsPrerequisites())!.gitBashPath:'bash';
+  const posix=(s:string)=>s.replaceAll('\\','/').replace(/^([a-zA-Z]):/,(_,drive:string)=>'/'+drive.toLowerCase());
+  const launcher=process.platform==='win32'?join(f.runtime.directory,'memsphere'):f.runtime.launcherPath;
+  return (command:string,changes:NodeJS.ProcessEnv={})=>{const r=crossSpawn.sync(bash,['-lc',`export PATH=${quote(posix(wrongBin))}:"$PATH"\n${command}`],{cwd:f.attempt,env:{...f.env,MEMSPHERE_CLI:posix(launcher),...changes},encoding:'utf8',timeout:20000,maxBuffer:2_000_000});assert.ifError(r.error);return r;};
+}
 
+test('generated Artifact and External read commands execute inside the restricted launcher', { timeout: 120000 }, async t => {
+  const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f);
+  const wrong=run('memsphere --version');assert.equal(wrong.status,93);assert.match(wrong.stderr,/WRONG_GLOBAL_CLI/);
+  const generatedPrompt=await buildArtifactReviewerPrompt({context:await reviews.readArtifactReviewForActor(f.input),locale:"zh-CN",promptVersion:"artifact-review-v3"});
+  const generatedReads=[...generatedPrompt.matchAll(/"readCommand":\s*("(?:\\.|[^"\\])*")/g)].map(m=>JSON.parse(m[1]) as string);
+  assert.equal(generatedReads.length,4,"both Artifact inputs and both External references have read commands");
+  const missing=run(generatedReads[0],{MEMSPHERE_CLI:""});assert.notEqual(missing.status,0);assert.doesNotMatch(missing.stderr,/WRONG_GLOBAL_CLI/);
+  for(const command of generatedReads){const r=run(command+' --output json');assert.equal(r.status,0,command+": "+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
 });
 
 test('global Project positions work and explicit conflicting identities are rejected', { timeout: 120000 }, async t => {
@@ -334,4 +345,12 @@ test('graph sessions without a HANDLE hint discover External help and retain act
  const f=await evidenceFixture(t),help=await f.cli(['run','--help']);assert.equal(help.status,0,help.stderr);assert.match(help.stdout,/external/);
  const detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);assert.equal(JSON.parse(detail.stdout).protocol,'graph');
  const read=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(read.status,0,read.stderr);
+});
+
+test('assignment references, preview export and node commands stay bound after shell PATH replacement',async t=>{
+ const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);
+ for(const reference of JSON.parse(detail.stdout).references){const r=run(reference.readCommand);assert.equal(r.status,0,reference.readCommand+': '+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
+ const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const exported=run(JSON.parse(preview.stdout).exportCommand.replace('<file>','preview-body.txt'));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
+ await reviews.markArtifactReviewAgentCliReady({...f.input,attemptId:f.first.attempt.id});
+ const node=await f.cli(['run','review','show']);assert.equal(node.status,0,node.stderr);const command=/^"\$MEMSPHERE_CLI" continue report --artifact .+$/m.exec(node.stdout)?.[0];assert.ok(command,node.stdout);const reported=run(command);assert.equal(reported.status,0,reported.stderr);assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
 });

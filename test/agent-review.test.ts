@@ -479,8 +479,9 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /"rulePath": "asserts\[0\]"/);
     assert.match(prompt, /"text": "Keep the review evidence traceable\."/);
     assert.doesNotMatch(prompt, /"text": "The candidate must be concrete\."/);
-    assert.match(prompt, /memsphere run artifact show/);
-    assert.match(prompt, /memsphere continue report --artifact/);
+    assert.match(prompt, /MEMSPHERE_CLI/);
+    assert.match(prompt, /run artifact show/);
+    assert.match(prompt, /"\$MEMSPHERE_CLI" continue report --artifact/);
     assert.doesNotMatch(prompt, /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     await assert.rejects(

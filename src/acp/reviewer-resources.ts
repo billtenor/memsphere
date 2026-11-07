@@ -1,3 +1,4 @@
+import { reviewerCommand } from "./reviewer-invocation.js";
 import { createHash } from "node:crypto";
 import { graphArtifactDto } from "../context_control/review-repository.js";
 import { buildReviewContract } from "./review-contract.js";
@@ -132,7 +133,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     else {
       const text = /^(text\/|application\/(?:json|yaml|x-yaml|xml|javascript))/.test(body.contentType);
       const chars = text ? Array.from(Buffer.from(body.bytes).toString("utf8")) : [];
-      result = { runId: run.id, id: item.id, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : { dependencies: item.dependencies }), contentType: body.contentType, ...(text ? { content: chars.slice(0, 200).join("") } : {}), truncated: chars.length > 200, exportCommand: `memsphere run ${operation === "artifact-show" ? "artifact" : "external"} show --run ${run.id} --${operation === "artifact-show" ? "artifact" : "external"} ${item.id} --out <file>` };
+      result = { runId: run.id, id: item.id, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : { dependencies: item.dependencies }), contentType: body.contentType, ...(text ? { content: chars.slice(0, 200).join("") } : {}), truncated: chars.length > 200, exportCommand: reviewerCommand(`run ${operation === "artifact-show" ? "artifact" : "external"} show --run ${run.id} --${operation === "artifact-show" ? "artifact" : "external"} ${item.id} --out <file>`) };
     }
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;

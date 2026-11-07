@@ -21,7 +21,7 @@ async function race(t: test.TestContext, phase: 'open'|'write'|'failure', replac
  if(${JSON.stringify(phase)}==='open')await gate();else{const write=h.writeFile.bind(h);h.writeFile=async(...a)=>{await write(...a);await gate();if(${JSON.stringify(phase)}==='failure')throw Error('controlled write failure');};}}return h;};syncBuiltinESMExports();`);
  const child=crossSpawn(runtime.launcherPath,['run','artifact','show','--out',target,'--output','json'],{cwd:f.cwd,env:{...process.env,...session,NODE_OPTIONS:`--import=${pathToFileURL(preload).href}`},stdio:['ignore','pipe','pipe']});
  let stdout='',stderr='';child.stdout!.on('data',b=>stdout+=b);child.stderr!.on('data',b=>stderr+=b);
- const exited=new Promise<number|null>((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});
+ const exited=new Promise<number|null>((resolve,reject)=>{child.once('error',reject);child.once('close',resolve);});
  t.after(()=>{if(child.exitCode===null)child.kill();});
  const deadline=Date.now()+15000;
  for(;;){try{await access(ready);break;}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}if(child.exitCode!==null)throw Error(stderr);assert.ok(Date.now()<deadline,'child did not reach barrier');await delay(10);}

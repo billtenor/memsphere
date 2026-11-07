@@ -18,7 +18,8 @@ for (const graph of [true, false]) for (const locale of ["en", "zh-CN"] as const
     const f = await reviewNodeFixture(t, graph);
     const context = await reviews.readArtifactReviewForActor(f.input);
     const prompt = await buildArtifactReviewerPrompt({ context, locale, promptVersion: "artifact-review-v3" });
-    assert.match(prompt, /memsphere memory change show/);
+    assert.match(prompt, /"\$MEMSPHERE_CLI" memory change show/);
+    assert.doesNotMatch(prompt, /\bmemsphere (?:run|memory|continue)\b/);
     assert.match(prompt, /--checkpoint/);
     assert.match(prompt, locale === "en" ? /no --run is added automatically/ : /不会自动添加 --run/);
     assert.match(prompt, locale === "en" ? /Formal review rules and contracts always use the frozen version/ : /正式评审规则与契约始终采用冻结版本/);
@@ -97,8 +98,8 @@ test("startup ChangeSet provenance is metadata rather than an assumed live check
   context.run.memorySource = { kind: "changeset", project: "test-project", changeId: "old-start-source", checkpointDigest: "a".repeat(64), baseRevision: "old-base" };
   const prompt = await buildArtifactReviewerPrompt({ context, locale: "en", promptVersion: "artifact-review-v3" });
   assert.match(prompt, /old-start-source/);
-  assert.ok(prompt.includes(`memsphere memory list --run ${context.run.id}`));
-  assert.doesNotMatch(prompt, /memsphere memory change show old-start-source/);
+  assert.ok(prompt.includes(`memory list --run ${context.run.id}`));
+  assert.doesNotMatch(prompt, /memory change show old-start-source/);
 });
 
 for (const ambiguous of [false,true]) test(`historical flow contract ${ambiguous?'rejects differing caller rules':'retains frozen called-procedure rules'}`,async t=>{
@@ -116,4 +117,10 @@ test('historical flow contract cannot select a later called procedure with the s
  const f=await reviewNodeFixture(t,false),context=await reviews.readArtifactReviewForActor(f.input),expected=buildAgentReviewContract(context),run=structuredClone(context.run);
  run.stack=[{type:'procedure',memoryName:'other',index:0,steps:[{...run.plan![0],instruction:'Different current procedure'}]}];
  assert.deepEqual(buildAgentReviewContract({...context,run}),expected);
+});
+
+for(const version of ['artifact-review-v1','artifact-review-v2'])for(const locale of ['zh-CN','en'] as const)test(`${version} ${locale} binds initial and reminder commands to the Session launcher`,async t=>{
+ const f=await reviewNodeFixture(t,false),context=await reviews.readArtifactReviewForActor(f.input);delete context.assignment.nodeTree;delete context.assignment.nodeStates;
+ const initial=await buildArtifactReviewerPrompt({context,locale,promptVersion:version}),reminder=buildArtifactReviewerReminder(locale,version);
+ for(const prompt of [initial,reminder]){assert.match(prompt,/\$MEMSPHERE_CLI/);assert.doesNotMatch(prompt,/\bmemsphere (?:run|memory|continue)\b/);}
 });

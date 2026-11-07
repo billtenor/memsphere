@@ -40,6 +40,8 @@ Reviewer Session 中，`memory list/read` 默认仍读当前 Project，不自动
 
 受限 Reviewer 的 `run review assignment show` 返回实际绑定协议及读取入口。旧 Session 缺少协议提示时，帮助会列出两套协议并说明边界；固定 Artifact/External/确认读取要求 graph，历史 flow 用 assignment/step 读取固定候选及上下文，保留完整 Artifact 元信息与候选原轮次的修订说明。历史 flow 的 contract 查询只支持绑定候选，在步骤通过或 Run 完成后仍按冻结契约读取；上下文契约或旧调用祖先规则无法确定时明确失败。
 
+Reviewer 内执行所有读取与审查命令时，显式使用本 Attempt 注入的 Session launcher：Bash 为 `"$MEMSPHERE_CLI"`，PowerShell 为 `& $env:MEMSPHERE_CLI`，CMD 为 `"%MEMSPHERE_CLI%"`。返回的命令及材料中的普通 `memsphere` 示例均采用此入口；PATH 或同名工具可能指向其他版本。变量缺失时报告入口不可用，不回退全局安装。
+
 ChangeSet 材料用 `memory change show <change-id> --checkpoint <digest>` 读取，默认 `--part summary`；其他选项为 `--part diff|validation`，或 `--part memory --reference <reference> --side before|after`。`--reference` 只筛选，不改变 part。省略 `--part` 与显式 `summary` 等价，正文省略 `--side` 与显式 `after` 等价；不存在的一侧为 null。输出为 JSON。digest 绑定范围、基线及校验结果，候选未校验修改不污染旧版本；过期、损坏、缺少冻结描述时明确失败，调用方需重新校验并更新材料引用。
 
 

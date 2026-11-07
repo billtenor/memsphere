@@ -1,3 +1,4 @@
+import { reviewerCommand } from "./reviewer-invocation.js";
 import { reviewerCapabilities } from "./reviewer-commands.js";
 import { reviewNodeView } from "../review-nodes.js";
 import { reviewNodePromptModel } from "../prompts/review-nodes.js";
@@ -44,17 +45,17 @@ export async function buildArtifactReviewerPrompt(input: {
       allowedOperations: capabilities.commands,
       capabilities,
       artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) },
-      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: capabilities.protocol === "graph" && a.artifactId ? `memsphere run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt` : `memsphere run artifact show --step ${JSON.stringify(a.stepId)} --out context-${submission.contextArtifacts.indexOf(a)}.txt` })),
-      externals: submission.contextExternals?.map(e => ({ ...e, readCommand: `memsphere run external show --run ${run.id} --external ${e.externalId} --out ${e.externalId}.txt` })),
+      inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: capabilities.protocol === "graph" && a.artifactId ? reviewerCommand(`run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt`) : reviewerCommand(`run artifact show --step ${JSON.stringify(a.stepId)} --out context-${submission.contextArtifacts.indexOf(a)}.txt`) })),
+      externals: submission.contextExternals?.map(e => ({ ...e, readCommand: reviewerCommand(`run external show --run ${run.id} --external ${e.externalId} --out ${e.externalId}.txt`) })),
       memorySource: run.memorySource,
       memoryReads: {
-        project: "memsphere memory list --output json",
-        frozen: (run.memorySnapshot || run.frozenMemoryRunId) ? `memsphere memory list --run ${run.id} --output json` : undefined
+        project: reviewerCommand("memory list --output json"),
+        frozen: (run.memorySnapshot || run.frozenMemoryRunId) ? reviewerCommand(`memory list --run ${run.id} --output json`) : undefined
       },
       commands: {
-        assignment: "memsphere run review assignment show --assignment " + assignment.id,
-        artifact: "memsphere run artifact show --assignment " + assignment.id,
-        contract: "memsphere run artifact contract show --assignment " + assignment.id
+        assignment: reviewerCommand("run review assignment show --assignment ") + assignment.id,
+        artifact: reviewerCommand("run artifact show --assignment ") + assignment.id,
+        contract: reviewerCommand("run artifact contract show --assignment ") + assignment.id
       }
     };
     return renderPrompt("acp.review-v3.initial", locale, reviewNodePromptModel(
