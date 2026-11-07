@@ -9,6 +9,8 @@ export const contextControlStyles = `
 .cc-work-step { margin:8px 0; padding:12px; border:1px solid var(--mem-view-color-border); border-radius:8px; }
 .cc-work summary { cursor:pointer; overflow-wrap:anywhere; }
 .cc-work pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.cc-procedure-definition, .cc-action-definition { min-width:0; overflow-wrap:anywhere; }
+.cc-action-definition pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
 

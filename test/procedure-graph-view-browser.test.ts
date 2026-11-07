@@ -27,9 +27,6 @@ test("graph View renders Markdown and submits a Human inline opinion inside the 
     await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${report.snapshot.run.id}`);
     try{await page.locator(".pg-node[data-action-id=A]").waitFor();assert.ok(requests.some(url=>url.includes("representation=overview")));assert.equal(requests.some(url=>url.includes("artifact-reviews")||url.includes("representation=action")||url.includes("representation=artifacts")||url.includes("/content")),false);}finally{releaseList();}
 
-    await page.getByText("Overall frozen rule", { exact: true }).waitFor();
-    await page.getByText("Graph goal", { exact: true }).waitFor();
-
     let releaseReview!:()=>void;const reviewGate=new Promise<void>(resolve=>{releaseReview=resolve;});
     await page.route("**/artifact-reviews/**/rounds/**",async route=>{await reviewGate;await route.continue();});
     await page.locator(".pg-node[data-action-id=A]").click();
@@ -37,9 +34,6 @@ test("graph View renders Markdown and submits a Human inline opinion inside the 
     try{await page.locator(".cc-pane-content h1").filter({hasText:"Graph candidate"}).waitFor();assert.equal(await page.locator("#artifact-review-my-panel").count(),0,"visible content must not await review");}finally{releaseReview();}
     await page.unroute("**/artifact-reviews/**/rounds/**");
     const modal = page.locator(".cc-dialog"); await modal.locator("#artifact-review-my-panel").waitFor();
-    await modal.locator(".cc-action-definition > summary").click();
-    assert.match(await modal.locator(".cc-action-definition").innerText(), /步骤规则[\s\S]*Action frozen rule[\s\S]*产物规则[\s\S]*Artifact frozen rule/);
-    await modal.locator(".cc-action-definition > summary").click();
     const ratio=async()=> (await modal.locator(".cc-pane-review").boundingBox())!.width/(await modal.locator(".cc-modal-columns").boundingBox())!.width;
     assert.ok(Math.abs(await ratio()-.3)<.01);
     await page.setViewportSize({width:1440,height:600});assert.ok(Math.abs(await ratio()-.3)<.01);
@@ -172,13 +166,13 @@ test('two executions and a reviewed revision retain exact artifacts and reading 
 
 test('English Run shows frozen procedure and action rules beside an execution', {timeout:60000}, async t => {
  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
- const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['english-run'],defines:['Frozen definition'],goals:['Frozen goal'],asserts:['Overall rule'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Prepare',asserts:['Action rule'],dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Document',asserts:['Artifact rule'],model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['english-run'],defines:['Frozen definition '+ 'x'.repeat(800)],goals:['Frozen goal'],asserts:['Overall rule'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Prepare',asserts:['Action rule '+ 'y'.repeat(800)],dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Document',asserts:['Artifact rule'],model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
  const start=await service.withGraph(g=>g.start({name:'English run',procedure}));
  const config=await readProjectConfig('test-project',f.home);config.language='en';
  const server=createViewServer(config);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const browser=await browserScope();
  try{const page=await browser.newPage({viewport:{width:390,height:844}});await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${start.run.id}`);
   await page.getByText('Overall rule',{exact:true}).waitFor();await page.locator('.pg-node[data-action-id=A]').click();const dialog=page.locator('.cc-dialog[open]');await dialog.locator('.cc-action-definition > summary').click();
-  assert.match(await dialog.locator('.cc-action-definition').innerText(),/Action rules[\s\S]*Action rule[\s\S]*Artifact rules[\s\S]*Artifact rule/);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true);
+  assert.match(await dialog.locator('.cc-action-definition').innerText(),/Action rules[\s\S]*Action rule[\s\S]*Artifact rules[\s\S]*Artifact rule/);await dialog.locator('.pg-original-definition > summary').click();assert.equal(await dialog.locator('.cc-step-body').evaluate(el=>el.scrollWidth<=el.clientWidth),true);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true);
  }finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
 });
 
@@ -189,4 +183,18 @@ test('closing a loading action prevents its late response from reopening the dia
  let release!:()=>void,arrive!:()=>void;const gate=new Promise<void>(r=>{release=r;}),entered=new Promise<void>(r=>{arrive=r;});
  try{const page=await browser.newPage();await page.addInitScript(()=>{const original=window.fetch;window.fetch=async (...args)=>{const response=await original(...args);if(response.url.includes('representation=action')){const json=response.json.bind(response);response.json=async()=>{const value=await json();setTimeout(()=>{(window as any).__actionConsumed=true;},0);return value;};}return response;};});await page.route('**/runs/*?representation=action&action=A',async route=>{arrive();await gate;await route.continue();});await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${start.run.id}`);await page.locator('.pg-node[data-action-id=A]').click();await entered;await page.locator('.cc-dialog').getByRole('button',{name:'关闭',exact:true}).click();const response=page.waitForResponse(r=>r.url().includes('representation=action'));release();await response;await page.waitForFunction(()=>(window as any).__actionConsumed===true,{timeout:10000});assert.equal(await page.locator('.cc-dialog[open]').count(),0);
  }finally{release();await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
+});
+
+test('missing frozen rule never displays a live namesake and retains artifact review navigation', {timeout:60000}, async t => {
+ const {serializeMemoryYaml}=await import('../src/memory/serializer.js');const {mkdir,writeFile}=await import('node:fs/promises');const {join}=await import('node:path');
+ const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!,ref='statements/rules',memoryRef='procedures/missing-frozen';
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['missing-frozen'],defines:['Frozen description'],asserts:[{tag:'!ref',target:ref}],mode:'graph',actions:[{tag:'!action',id:'A',description:'Prepare',asserts:[{tag:'!ref',target:ref}],dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Document',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/markdown'},review:['human']}}]};
+ const statement=`!statement\nsyntax: ${graphMemorySyntax}\nnames: [rules]\ndefines: [Rules]\nasserts: [Frozen rule]\n`;
+ const start=await service.withGraph(g=>g.start({name:'Missing frozen',procedure,memorySnapshot:{memories:{[memoryRef]:{memoryRef,payload:{contentType:'application/yaml',content:serializeMemoryYaml(procedure)}},[ref]:{memoryRef:ref,payload:{contentType:'application/yaml',content:statement}}}},controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.decide']}},acpProviders:{}},reviewConfiguration:{reviews:{'missing-frozen#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'missing-frozen::human':{actorIds:['human']}}}}));
+ await service.withGraph(async g=>{await g.enter(start.run.id,start.steps[0].id);await g.report(start.run.id,start.steps[0].id,{text:'# Frozen artifact'});});
+ const stored=(await service.stores.run.get({},start.run.id))!,value=structuredClone(stored.value) as typeof start.run;delete value.memorySnapshot!.memories[ref];await service.stores.run.update({},start.run.id,value,{expectedRevision:stored.revision});
+ await mkdir(join(f.root,'memory/statements'),{recursive:true});await writeFile(join(f.root,'memory/statements/rules.yaml'),statement.replace('Frozen rule','LIVE RULE MUST NOT APPEAR'));
+ const server=createViewServer(await readProjectConfig('test-project',f.home));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const browser=await browserScope();
+ try{const page=await browser.newPage();await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${start.run.id}`);const overall=page.locator('.cc-procedure-definition .pg-rule-reference');await overall.locator('summary').click();await overall.getByText('此快照中无可用的规则来源正文。').waitFor();await page.locator('.pg-node[data-action-id=A]').click();const dialog=page.locator('.cc-dialog[open]');await dialog.locator('.cc-action-definition > summary').click();await dialog.locator('.pg-rule-reference summary').click();await dialog.getByText('此快照中无可用的规则来源正文。').waitFor();await dialog.getByRole('heading',{name:'Frozen artifact',exact:true}).waitFor();await dialog.locator('.cc-pane-review').waitFor();assert.equal(await dialog.locator('.cc-pane-review').isVisible(),true);assert.equal(await page.getByText('LIVE RULE MUST NOT APPEAR',{exact:true}).count(),0);
+ }finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
 });

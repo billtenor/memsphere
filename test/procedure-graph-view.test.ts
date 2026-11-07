@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { businessFixture } from "./helpers/business-data.js";
@@ -96,6 +96,8 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
  if(mode==='missing')delete memories[refs[0]];
  else memories[refs[0]].payload.content=mode==='malformed'?'[':mode==='wrong-kind'?`!concept\nsyntax: ${graphMemorySyntax}\nnames: [bad-rules]\ndefines: [Wrong kind]\n`:`!statement\nsyntax: ${graphMemorySyntax}\nnames: [bad-rules]\ndefines: [Cycle]\nasserts:\n  - !ref\n    target: statements/bad-rules\n`;
  await service.stores.run.update({},started.run.id,value,{expectedRevision:stored.revision});
+ await mkdir(join(f.root,'memory/statements'),{recursive:true});
+ await writeFile(join(f.root,'memory/statements/bad-rules.yaml'),source('bad-rules').replace('bad-rules evidence','LIVE RULE MUST NOT APPEAR'));
  const before=await service.stores.run.get({},started.run.id);
  const server=createViewServer(await readProjectConfig('test-project',f.home));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
  const api=`http://127.0.0.1:${(server.address()as AddressInfo).port}/api/projects/test-project/runs/${started.run.id}`;
@@ -104,6 +106,9 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
   assert.deepEqual(overview.run.context.graph.procedure.effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
   assert.equal(overview.run.memorySnapshot,undefined);assert.equal(overview.run.context.run.memorySnapshot,undefined);
   assert.equal(overview.run.context.graph.procedure.actions[0].effectiveRules,undefined);
+  const actionResponse=await fetch(`${api}?representation=action&action=A`);assert.equal(actionResponse.status,200);const actionPayload=await actionResponse.json();
+  assert.deepEqual(actionPayload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.doesNotMatch(JSON.stringify(actionPayload),/LIVE RULE MUST NOT APPEAR/);assert.doesNotMatch(JSON.stringify(overview),/LIVE RULE MUST NOT APPEAR/);
   const response=await fetch(api);assert.equal(response.status,200,await response.clone().text());const payload=await response.json();
   assert.equal(payload.run.context.graph.work.length,1);assert.equal(payload.run.context.graph.procedure.actions[0].asserts.length,2);
   assert.deepEqual(payload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
