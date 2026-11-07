@@ -35,6 +35,26 @@ test("Project Store binding rejects an incompatible Store instead of creating an
   await assert.rejects(projectStoreBinding(project, app, "expenses"), { code: "APP_STORE_MISMATCH" });
 });
 
+test("Project Store binding rejects a different model of the same kind", async t => {
+  const fixture=await businessFixture(t);await fixture.createStore();
+  const manifest=appManifestSchema.parse({schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example",projectStores:[{key:"expenses",model:"other.json",kind:"ValueStore",configKey:"store"}]});
+  const project={paths:{root:fixture.root},memoryRoot:`${fixture.root}/memory`} as AppProject;
+  await assert.rejects(projectStoreBinding(project,{manifest,config:{store:"records"}} as AppInstallation,"expenses"),{code:"APP_STORE_MISMATCH"});
+});
+
+test("Project Store binding rejects undeclared keys",async t=>{
+  const fixture=await businessFixture(t);const project={paths:{root:fixture.root},memoryRoot:`${fixture.root}/memory`} as AppProject;
+  const manifest=appManifestSchema.parse({schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example"});
+  await assert.rejects(projectStoreBinding(project,{manifest,config:{}} as AppInstallation,"missing"),{code:"APP_STORE_NOT_FOUND"});
+});
+
+test("manifest rejects duplicate App and Project Store keys",()=>{
+  const manifest={schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example",stores:[{key:"same",model:"record.json",kind:"ValueStore",factory:"memsphere/filesystem-json",config:{}}],projectStores:[{key:"same",model:"record.json",kind:"ValueStore",configKey:"store"}]};
+  assert.equal(appManifestSchema.safeParse({...manifest,projectStores:[]}).success,true);
+  const result=appManifestSchema.safeParse(manifest);assert.equal(result.success,false);
+  if(!result.success)assert(result.error.issues.some(issue=>issue.message==="duplicate stores"));
+});
+
 test("App binding rejects the internal context-control Stores", async t => {
   const fixture = await businessFixture(t);
   const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.app", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "runs", model: "record.json", kind: "ValueStore", configKey: "store" }] });
@@ -80,6 +100,9 @@ async function valueFixture(t: import("node:test").TestContext) {
     unhandledchain: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).then(()=>{});return 'started';}},
     unhandledfinally: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).finally(()=>{});return 'started';}},
     caughtchain: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});return store.create({},'one',input.value).then(()=>false).catch(e=>e.code==='ALREADY_EXISTS');}},
+    asyncrethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).catch(async e=>{await Promise.resolve();throw e;});return 'started';}},
+    asyncreject: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).catch(async e=>Promise.reject(e));return 'started';}},
+    asyncrecover: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).catch(async ()=>{await Promise.resolve();return 'recovered';});return 'started';}},
     throwundefined: {kind:'read', execute: async () => {throw undefined;}},
     fire: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);return 'started';}},
     firethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);throw new Error('backend failure');}},
@@ -87,7 +110,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     leak: {kind:'read', execute: async (ctx,input) => {globalThis.__issue137LeakedStore=await ctx.getStore('expenses',{expectedBinding:input.token});}},
     hold: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});process.send({event:'locked'});await new Promise(resolve=>process.once('message',resolve));await store.upsert({},'one',{name:'child',count:7});}}
   }};`);
-  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
+  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
   const manifest = appManifestSchema.parse({ schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example",projectStores:[{key:"expenses",model:"record.json",kind:"ValueStore",configKey:"store"}],backend:{entry:"backend.mjs",operations} });
   await writeFile(join(root,"app.json"),JSON.stringify(manifest));
   const project = {name:"test-project",paths:projectPaths(fixture.root),memoryRoot:join(fixture.root,"memory"),config:await readBusinessProject(fixture.root)} as AppProject;
@@ -163,10 +186,13 @@ test("a read and its binding token remain consistent across a rebinding attempt"
   const original=FilesystemJsonValueStoreFactory.prototype.openExisting;
   t.mock.method(FilesystemJsonValueStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){const store=await original.apply(this,args);const get=store.get.bind(store);store.get=async(...a)=>{reached();await barrier;return get(...a)};return store;});
   const reading=f.read();await entered;
-  const switching=f.configureApp(f.context,"example.app",{store:"second"});
+  let switched=false;
+  const switching=f.configureApp(f.context,"example.app",{store:"second"}).then(()=>{switched=true;});
   await assert.rejects(withSharedStoreLock(f.fixture.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
+  assert.equal(switched,false,"configure must not complete while the read is in flight");
+  assert.equal((await f.readAppState(f.project)).installations["example.app"]!.config.store,"first");
   release();const fromA=await reading;assert.deepEqual(fromA.row?.value,{name:"old",count:1});
-  await switching;
+  await switching;assert.equal(switched,true);
   await assert.rejects(f.invoke("write",{token:fromA.binding.token,value:{name:"wrong",count:1}}),{code:"APP_STORE_BINDING_CHANGED"});
 });
 
@@ -184,6 +210,16 @@ test("an unobserved rejected Store write fails the operation", {timeout:30000}, 
 test("a chained catch can handle a Store error",{timeout:30000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;
   assert.equal(await f.invoke("caughtchain",{token,value:{name:"duplicate",count:2}}),true);
+});
+
+for (const operation of ["asyncrethrow", "asyncreject"] as const) test(`${operation} cannot hide a Store rejection`,{timeout:30000},async t=>{
+  const f=await valueFixture(t);const token=(await f.read()).binding.token;
+  await assert.rejects(f.invoke(operation,{token,value:{name:"duplicate",count:2}}),{code:"ALREADY_EXISTS"});
+});
+
+test("an asynchronous catch can recover from a Store rejection",{timeout:30000},async t=>{
+  const f=await valueFixture(t);const token=(await f.read()).binding.token;
+  assert.equal(await f.invoke("asyncrecover",{token,value:{name:"duplicate",count:2}}),"started");
 });
 
 test("a fulfillment-only chain does not hide an unobserved Store rejection",{timeout:30000},async t=>{
@@ -281,10 +317,13 @@ async function dataFixture(t: import("node:test").TestContext) {
   await fixture.createStore("files", "record.json", "data");
   await writeData({}, fixture.root, "files", "one.json", "create", { kind: "value", value: { name: "first", count: 1 } });
   const root = join(fixture.directory, "data-app"); await mkdir(root);
-  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write" } } });
+  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read" } } });
   await writeFile(join(root, "app.json"), JSON.stringify(manifest));
   await writeFile(join(root, "backend.mjs"), `export default {operations:{
     read:{kind:'read',execute:async ctx=>{const binding=await ctx.getProjectStoreBinding('files');const store=await ctx.getStore('files',{expectedBinding:binding.token});const item=await store.get({},'one.json');const text=await new Response(item.data.payload.content.stream()).text();return {token:binding.token,value:JSON.parse(text)};}},
+    streamunhandled:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');item.data.payload.content.stream();return 'started';}},
+    streamcaught:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');try {await item.data.payload.content.stream().getReader().read();} catch(e) {if(e.message!=='read failure')throw e;return 'recovered';}}},
+    streamresponse:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');try {await new Response(item.data.payload.content.stream()).text();} catch(e) {if(e.message!=='read failure')throw e;return 'recovered';}}},
     write:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});const bytes=new TextEncoder().encode(JSON.stringify(input.value));await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({start(c){c.enqueue(bytes);c.close();}})}}});}},
     broken:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({pull(c){c.error(new Error('input failure'));}})}}});}},
     appendfail:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.append({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>{globalThis.__issue137Streams++;let count=0;return new ReadableStream({pull(c){if(count++===0)c.enqueue(new TextEncoder().encode('x'));else c.error(new Error('append input failure'));}});}}}});}}
@@ -302,6 +341,38 @@ test("App reads and updates an existing Project DataStore",{timeout:30000},async
   assert.deepEqual(loaded.value,{name:"first",count:1});
   await invokeAppOperation(project,"example.data","write",{token:loaded.token,value:{name:"second",count:2}});
   assert.deepEqual((await readData({},fixture.root,"files","one.json")).value,{name:"second",count:2});
+  const {execFileSync}=await import("node:child_process");const {resolve}=await import("node:path");
+  execFileSync(process.execPath,[resolve("dist/cli.js"),"--project","test-project","data","update","one.json","--store","files","--value",'{"name":"cli","count":3}',"--output","json"],{cwd:fixture.cwd,env:{...process.env,MEMSPHERE_HOME:fixture.home},encoding:"utf8"});
+  assert.deepEqual((await invokeAppOperation(project,"example.data","read",{}) as {value:unknown}).value,{name:"cli",count:3});
+});
+
+for (const operation of ["streamunhandled", "streamcaught", "streamresponse"] as const) test(`DataStore output stream ${operation} preserves failure observation`,{timeout:30000},async t=>{
+  const {project,invokeAppOperation}=await dataFixture(t);
+  const {FilesystemDataStoreFactory}=await import("../src/data/extensions/filesystem-datastore/index.js");
+  const original=FilesystemDataStoreFactory.prototype.openExisting;
+  t.mock.method(FilesystemDataStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){
+    const store=await original.apply(this,args);if(args[1]!=="files")return store;const get=store.get.bind(store);
+    store.get=async(...a)=>{const item=await get(...a);if(item)item.data.payload.content.stream=()=>new ReadableStream({pull(c){c.error(new Error("read failure"));}});return item;};
+    return store;
+  });
+  if(operation==="streamunhandled") await assert.rejects(invokeAppOperation(project,"example.data",operation,{}),/read failure/);
+  else assert.equal(await invokeAppOperation(project,"example.data",operation,{}),"recovered");
+});
+
+test("an unfinished output stream keeps reconfiguration waiting until it settles",{timeout:30000},async t=>{
+  const {project,context,configureApp,invokeAppOperation}=await dataFixture(t);
+  const {FilesystemDataStoreFactory}=await import("../src/data/extensions/filesystem-datastore/index.js");
+  let release!:()=>void,started!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{started=resolve});t.after(()=>release());
+  const original=FilesystemDataStoreFactory.prototype.openExisting;
+  t.mock.method(FilesystemDataStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){
+    const store=await original.apply(this,args);if(args[1]!=="files")return store;const get=store.get.bind(store);
+    store.get=async(...a)=>{const item=await get(...a);if(item)item.data.payload.content.stream=()=>new ReadableStream({async pull(c){started();await barrier;c.close();}});return item;};return store;
+  });
+  const running=invokeAppOperation(project,"example.data","streamunhandled",{});await entered;
+  let configured=false;const switching=configureApp(context,"example.data",{store:"files"}).then(()=>{configured=true;});
+  const {withSharedStoreLock}=await import("../src/project/shared-store-lock.js");
+  await assert.rejects(withSharedStoreLock(project.paths.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
+  assert.equal(configured,false);release();assert.equal(await running,"started");await switching;assert.equal(configured,true);
 });
 
 test("a failing DataStore replacement stream preserves the original record",{timeout:30000},async t=>{

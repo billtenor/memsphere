@@ -364,11 +364,26 @@ async function sharedHttpFixture(action: (fixture: { root: string; context: Awai
   });
 }
 
+test("unbound Project Store allows install but prevents check, enable and invoke",{timeout:30000},async()=>fixture(async(_root,context,app)=>{
+  const manifest=JSON.parse(await readFile(join(app,"app.json"),"utf8"));
+  manifest.projectStores=[{key:"expenses",model:"expense.json",kind:"ValueStore",configKey:"store"}];
+  manifest.backend={entry:"backend.mjs",operations:{read:"read"}};
+  await writeFile(join(app,"app.json"),JSON.stringify(manifest));
+  await writeFile(join(app,"backend.mjs"),"export default {operations:{read:{kind:'read',execute:async()=>true}}};");
+  await installApp(context,app,{});
+  const check=await checkApp(context.primary,"example.app");assert.equal(check.status,"unavailable");
+  assert.equal(check.items.find(item=>item.name==="project-store:expenses")?.available,false);
+  await assert.rejects(setAppEnabled(context,"example.app",true),{code:"APP_NOT_READY"});
+  await assert.rejects(invokeAppOperation(context.primary,"example.app","read",{}),{code:"APP_DISABLED"});
+}));
+
 test("App installation shares a Project Store between View API and CLI",{timeout:30000},async()=>sharedHttpFixture(async({root,origin,invoke})=>{
   const current=await invoke("read",{});assert.deepEqual(current.record.value,{amount:3});
   await invoke("write",{token:current.token,value:{amount:8}});
   const result=JSON.parse(execFileSync(process.execPath,[...cliArguments,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8"}));
   assert.deepEqual(result.value,{amount:8});
+  execFileSync(process.execPath,[...cliArguments,"--project","test","data","update","first","--store","expenses","--value",'{"amount":11}',"--output","json"],{cwd:root,encoding:"utf8"});
+  assert.deepEqual((await invoke("read",{})).record.value,{amount:11});
 }));
 
 test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>sharedHttpFixture(async({root,context,origin,invoke})=>{
@@ -386,12 +401,13 @@ test("HTTP disconnect keeps the binding locked until in-flight write ends and lo
   try {
     request.end(JSON.stringify({input:{token:current.token}}));await start;await writeEntered;request.destroy();await abort;
     const {configureApp}=await import("../src/app/install.js");
-    const configuring=configureApp(context,"example.app",{store:"expenses"});
+    let configured=false;const configuring=configureApp(context,"example.app",{store:"expenses"}).then(()=>{configured=true;});
     await assert.rejects(withSharedStoreLock(context.primary.paths.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
+    assert.equal(configured,false,"configure must wait for the in-flight write");
     releaseWrite();const record=await log;
     assert.equal(record.project,"test");assert.equal(record.app,"example.app");assert.equal(record.operation,"wait");assert.equal(record.code,"EIO");
     assert(!JSON.stringify(record).includes(current.token));assert(!JSON.stringify(record).includes("sensitive input"));
-    await configuring;
+    await configuring;assert.equal(configured,true);
     const after=JSON.parse(execFileSync(process.execPath,[...cliArguments,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8"}));
     assert.deepEqual(after.value,{amount:3});
   } finally {releaseWrite();delete (globalThis as Record<string,unknown>).__issue137SharedStarted;delete (globalThis as Record<string,unknown>).__issue137SharedAborted;}

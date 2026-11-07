@@ -12,7 +12,7 @@ import { readBusinessProject } from "../project/business-stores.js";
 
 class ObservablePromise<T> extends Promise<T> {
   static get [Symbol.species]() { return Promise; }
-  constructor(task: Promise<T>, private readonly observed: () => void) {
+  constructor(task: Promise<T>, private readonly observed: () => void, private readonly follow: (task: Promise<unknown>) => void) {
     super((resolve, reject) => { void task.then(resolve, reject); });
   }
   override then<TResult1 = T, TResult2 = never>(
@@ -20,11 +20,11 @@ class ObservablePromise<T> extends Promise<T> {
     onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
     const handleRejection = typeof onRejected === "function" ? (reason: unknown) => {
-      const result = onRejected(reason);
-      this.observed();
-      return result;
+      return Promise.resolve(onRejected(reason)).then(value => { this.observed(); return value; });
     } : onRejected;
-    const next = new ObservablePromise(super.then(onFulfilled, handleRejection), this.observed);
+    const task = super.then(onFulfilled, handleRejection);
+    this.follow(task);
+    const next = new ObservablePromise(task, this.observed, this.follow);
     void Promise.prototype.then.call(next, undefined, () => undefined);
     return next;
   }
@@ -34,7 +34,8 @@ class ObservablePromise<T> extends Promise<T> {
       value => Promise.resolve(onFinally()).then(() => value),
       error => Promise.resolve(onFinally()).then(() => { throw error; })
     );
-    const next = new ObservablePromise(task, this.observed);
+    this.follow(task);
+    const next = new ObservablePromise(task, this.observed, this.follow);
     void Promise.prototype.then.call(next, undefined, () => undefined);
     return next;
   }
@@ -78,13 +79,19 @@ async function invoke(project: AppProject, id: string, operation: string, input:
   const deadline = app.manifest.projectStores.length ? setTimeout(() => controller.abort(new Error("App operation deadline exceeded")), 300_000) : undefined;
   deadline?.unref();
   const writes = new Set(["create", "update", "upsert", "delete", "append"]);
-  const track = <T>(task: Promise<T>): Promise<T> => {
+  const follow = (task: Promise<unknown>) => {
+    inFlight.add(task);
+    void task.then(() => inFlight.delete(task), () => inFlight.delete(task));
+  };
+  const track = <T>(task: Promise<T>, exposeObserver?: (observe: () => void) => void): Promise<T> => {
     const state = { error: undefined as unknown, observed: false };
+    const observe = () => { state.observed = true; };
+    exposeObserver?.(observe);
     inFlight.add(task);
     void task.then(() => inFlight.delete(task), error => { inFlight.delete(task); state.error = error; failures.push(state); });
     // Awaiting a Promise subclass calls its then method, unlike an ordinary
     // native Promise. This records when the App observes an expected error.
-    const result = new ObservablePromise(task, () => { state.observed = true; });
+    const result = new ObservablePromise(task, observe, follow);
     void Promise.prototype.then.call(result, undefined, () => undefined);
     return result;
   };
@@ -98,8 +105,9 @@ async function invoke(project: AppProject, id: string, operation: string, input:
         let resolveDone!: () => void;
         let rejectDone!: (reason: unknown) => void;
         let settled = false;
-        const done = track(new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; }));
-        void done.catch(() => undefined);
+        let observeStream = () => {};
+        const done = track(new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; }), observe => { observeStream = observe; });
+        void Promise.prototype.then.call(done, undefined, () => undefined);
         const finish = (error?: unknown, rejected = false) => {
           if (settled) return;
           settled = true;
@@ -108,7 +116,7 @@ async function invoke(project: AppProject, id: string, operation: string, input:
         };
         const cancel = () => { void reader.cancel(controller.signal.reason).then(() => finish(), error => finish(error, true)); };
         controller.signal.addEventListener("abort", cancel, { once: true });
-        return new ReadableStream<Uint8Array>({
+        const stream = new ReadableStream<Uint8Array>({
           async pull(stream) {
             try {
               const item = await reader.read();
@@ -117,6 +125,21 @@ async function invoke(project: AppProject, id: string, operation: string, input:
           },
           async cancel(reason) { try { await reader.cancel(reason); finish(); } catch (error) { finish(error, true); throw error; } }
         });
+        const getReader = stream.getReader.bind(stream);
+        Object.defineProperty(stream, "getReader", { value: (...args: unknown[]) => {
+          const output = (getReader as (...args: unknown[]) => ReadableStreamDefaultReader<Uint8Array>)(...args);
+          return new Proxy(output, { get(target, property) {
+            if (property === "read") return (...readArgs: unknown[]) => {
+              const task = (target.read as (...args: unknown[]) => Promise<ReadableStreamReadResult<Uint8Array>>).apply(target, readArgs);
+              const result = new ObservablePromise(task, observeStream, follow);
+              void Promise.prototype.then.call(result, undefined, () => undefined);
+              return result;
+            };
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          } });
+        } });
+        return stream;
       }
     } } } };
   };
