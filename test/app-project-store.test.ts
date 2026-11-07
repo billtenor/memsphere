@@ -107,6 +107,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     branchthen: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},'one',input.value);void p.catch(()=> 'recovered');void p.then(()=>{});return 'started';}},
     branchrethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.create({},'one',input.value).catch(e=>e).then(e=>{throw e});return 'started';}},
     branchhandled: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},'one',input.value);void p.catch(()=> 'recovered');void p.finally(()=>{}).catch(()=> 'also recovered');return 'started';}},
+    native:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},input.id??'one',input.value);const native=input.mode==='all'?Promise.all([p]):input.mode==='resolve'?Promise.resolve(p):(async()=>{await p})();if(input.recover){await native.catch(()=>{});return 'recovered';}void native;return 'started';}},
     throwundefined: {kind:'read', execute: async () => {throw undefined;}},
     fire: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);return 'started';}},
     firethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);throw new Error('backend failure');}},
@@ -114,7 +115,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     leak: {kind:'read', execute: async (ctx,input) => {globalThis.__issue137LeakedStore=await ctx.getStore('expenses',{expectedBinding:input.token});}},
     hold: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});process.send({event:'locked'});await new Promise(resolve=>process.once('message',resolve));await store.upsert({},'one',{name:'child',count:7});}}
   }};`);
-  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",branchfinally:"write",branchthen:"write",branchrethrow:"write",branchhandled:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
+  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",branchfinally:"write",branchthen:"write",branchrethrow:"write",branchhandled:"write",native:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
   const manifest = appManifestSchema.parse({ schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example",projectStores:[{key:"expenses",model:"record.json",kind:"ValueStore",configKey:"store"}],backend:{entry:"backend.mjs",operations} });
   await writeFile(join(root,"app.json"),JSON.stringify(manifest));
   const project = {name:"test-project",paths:projectPaths(fixture.root),memoryRoot:join(fixture.root,"memory"),config:await readBusinessProject(fixture.root)} as AppProject;
@@ -236,6 +237,36 @@ test("each rejected branch can recover independently",{timeout:30000},async t=>{
   assert.equal(await f.invoke("branchhandled",{token,value:{name:"duplicate",count:2}}),"started");
 });
 
+for(const mode of ["all","resolve","async"])test(`native ${mode} preserves success, recovery and unhandled failure`,{timeout:30000},async t=>{
+  const f=await valueFixture(t);const token=(await f.read()).binding.token;
+  const input={mode,token,value:{name:"new",count:2}};
+  assert.equal(await f.invoke("native",{...input,id:"new"}),"started");
+  assert.equal(await f.invoke("native",{...input,recover:true}),"recovered");
+  await assert.rejects(f.invoke("native",input),{code:"ALREADY_EXISTS"});
+});
+
+test("concurrent App operations keep their Promise failures separate", {timeout:30000}, async t => {
+  const failing = await valueFixture(t);
+  const healthy = await valueFixture(t);
+  const token = (await failing.read()).binding.token;
+  const [failed, succeeded] = await Promise.allSettled([
+    failing.invoke("native", {mode:"all", token, value:{name:"duplicate",count:2}}),
+    healthy.read()
+  ]);
+  assert.equal(failed.status, "rejected");
+  if (failed.status === "rejected") assert.equal(failed.reason.code, "ALREADY_EXISTS");
+  assert.equal(succeeded.status, "fulfilled");
+});
+
+test("App Promise tracking leaves unrelated unhandled rejections unchanged", async () => {
+  const {spawnSync} = await import("node:child_process");
+  const module = new URL("../src/app/promise-scope.ts", import.meta.url).href;
+  const script = `import {AppPromiseScope} from ${JSON.stringify(module)};const scope=new AppPromiseScope();Promise.reject(new Error('outside-operation'));setImmediate(()=>scope.close());`;
+  const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {encoding:"utf8"});
+  assert.equal(child.status, 1);
+  assert.match(child.stderr, /outside-operation/);
+});
+
 test("an unhandled Promise branch drains the failing write before reconfiguration",{timeout:30000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;
   const {FilesystemJsonValueStoreFactory}=await import("../src/data/extensions/filesystem-json-valuestore/index.js");
@@ -355,7 +386,7 @@ async function dataFixture(t: import("node:test").TestContext) {
   await fixture.createStore("files", "record.json", "data");
   await writeData({}, fixture.root, "files", "one.json", "create", { kind: "value", value: { name: "first", count: 1 } });
   const root = join(fixture.directory, "data-app"); await mkdir(root);
-  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read", streammode:"read", streamwrite:"read" } } });
+  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read", streammode:"read", streamwrite:"read", streampartial:"read" } } });
   await writeFile(join(root, "app.json"), JSON.stringify(manifest));
   await writeFile(join(root, "backend.mjs"), `export default {operations:{
     read:{kind:'read',execute:async ctx=>{const binding=await ctx.getProjectStoreBinding('files');const store=await ctx.getStore('files',{expectedBinding:binding.token});const item=await store.get({},'one.json');const text=await new Response(item.data.payload.content.stream()).text();return {token:binding.token,value:JSON.parse(text)};}},
@@ -364,6 +395,7 @@ async function dataFixture(t: import("node:test").TestContext) {
     streamresponse:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');try {await new Response(item.data.payload.content.stream()).text();} catch(e) {if(e.message!=='read failure')throw e;return 'recovered';}}},
     streammode:{kind:'read',execute:async(ctx,input)=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');let stream=item.data.payload.content.stream();try {if(input.mode==='tee')stream=stream.tee()[0];if(input.mode==='through')stream=stream.pipeThrough(new TransformStream());if(input.mode==='pipe')await stream.pipeTo(new WritableStream({write(){}}));else if(input.mode==='values')for await(const _ of stream.values()){}else for await(const _ of stream){}return 'complete';} catch(e){if(!input.recover)throw e;if(e.message!=='read failure')throw e;return 'recovered';}}},
     streamwrite:{kind:'read',execute:async(ctx,input)=>{const s=await ctx.getStore('files',{expectedBinding:input.token});if(input.method==='delete')return s.delete({},'one.json');const data={id:input.method==='create'?'new.json':'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>{globalThis.__issue137Streams++;return new ReadableStream({start(c){c.enqueue(new TextEncoder().encode('{}'));c.close();}});}}}};return s[input.method]({},data);}},
+    streampartial:{kind:'read',execute:async(ctx,input)=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');const reader=item.data.payload.content.stream().getReader();await reader.read();if(input.recover){try{await reader.read();}catch(e){if(e.message!=='later read failure')throw e;return 'recovered';}}return 'started';}},
     write:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});const bytes=new TextEncoder().encode(JSON.stringify(input.value));await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({start(c){c.enqueue(bytes);c.close();}})}}});}},
     broken:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({pull(c){c.error(new Error('input failure'));}})}}});}},
     appendfail:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.append({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>{globalThis.__issue137Streams++;let count=0;return new ReadableStream({pull(c){if(count++===0)c.enqueue(new TextEncoder().encode('x'));else c.error(new Error('append input failure'));}});}}}});}}
@@ -410,6 +442,18 @@ for(const mode of ["pipe","iterator","values","tee","through"] as const) test(`D
   });
   assert.equal(await invokeAppOperation(project,"example.data","streammode",{mode,recover:true}),"recovered");
   await assert.rejects(invokeAppOperation(project,"example.data","streammode",{mode,recover:false}),/read failure/);
+});
+
+for(const recover of [false,true]) test(`a later DataStore stream failure is ${recover?"recovered when caught":"reported after a partial read"}`,{timeout:30000},async t=>{
+  const {project,invokeAppOperation}=await dataFixture(t);
+  const {FilesystemDataStoreFactory}=await import("../src/data/extensions/filesystem-datastore/index.js");
+  const original=FilesystemDataStoreFactory.prototype.openExisting;
+  t.mock.method(FilesystemDataStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){
+    const store=await original.apply(this,args);if(args[1]!=="files")return store;const get=store.get.bind(store);
+    store.get=async(...a)=>{const item=await get(...a);if(item)item.data.payload.content.stream=()=>{let count=0;return new ReadableStream({pull(c){if(count++===0)c.enqueue(new Uint8Array([1]));else c.error(new Error("later read failure"));}});};return item;};return store;
+  });
+  if(recover)assert.equal(await invokeAppOperation(project,"example.data","streampartial",{recover}),"recovered");
+  else await assert.rejects(invokeAppOperation(project,"example.data","streampartial",{recover}),/later read failure/);
 });
 
 test("an unfinished output stream keeps reconfiguration waiting until it settles",{timeout:30000},async t=>{

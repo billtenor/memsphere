@@ -9,30 +9,7 @@ import { projectStoreBinding } from "./project-stores.js";
 import type { Context } from "../data/api/context.js";
 import type { StoredData } from "../data/api/data-store.js";
 import { readBusinessProject } from "../project/business-stores.js";
-
-class ObservablePromise<T> extends Promise<T> {
-  static get [Symbol.species]() { return Promise; }
-  constructor(task: Promise<T>, private readonly observed: () => void, private readonly branch: <U>(task: Promise<U>) => Promise<U>) {
-    super((resolve, reject) => { void task.then(resolve, reject); });
-  }
-  override then<TResult1 = T, TResult2 = never>(
-    onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
-    onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
-  ): Promise<TResult1 | TResult2> {
-    // Responsibility moves to this particular child; siblings stay independent.
-    this.observed();
-    return this.branch(super.then(onFulfilled, onRejected));
-  }
-  override finally(onFinally?: (() => void) | null): Promise<T> {
-    if (typeof onFinally !== "function") return this.then();
-    this.observed();
-    const task = super.then(
-      value => Promise.resolve(onFinally()).then(() => value),
-      error => Promise.resolve(onFinally()).then(() => { throw error; })
-    );
-    return this.branch(task);
-  }
-}
+import { AppPromiseScope } from "./promise-scope.js";
 
 export async function loadAppBackend(app: AppInstallation): Promise<AppBackend | undefined> {
   const spec = app.manifest.backend;
@@ -66,23 +43,19 @@ async function invoke(project: AppProject, id: string, operation: string, input:
   const abort = () => controller.abort(signal?.reason);
   if (signal?.aborted) abort(); else signal?.addEventListener("abort", abort, { once: true });
   const inFlight = new Set<Promise<unknown>>();
-  const failures: Array<{ error: unknown; observed: boolean }> = [];
   let closing = controller.signal.aborted;
   controller.signal.addEventListener("abort", () => { closing = true; }, { once: true });
   const deadline = app.manifest.projectStores.length ? setTimeout(() => controller.abort(new Error("App operation deadline exceeded")), 300_000) : undefined;
   deadline?.unref();
+  const promises = app.manifest.projectStores.length ? new AppPromiseScope() : undefined;
+  const internally = <T>(action: () => T): T => promises ? promises.ignore(action) : action();
   const writes = new Set(["create", "update", "upsert", "delete", "append"]);
   const track = <T>(task: Promise<T>, exposeObserver?: (observe: () => void) => void, onObserved?: () => void): Promise<T> => {
-    const state = { error: undefined as unknown, observed: false };
-    const observe = () => { state.observed = true; onObserved?.(); };
-    exposeObserver?.(observe);
+    exposeObserver?.(() => promises?.consume(task));
+    promises?.watch(task, onObserved);
     inFlight.add(task);
-    void task.then(() => inFlight.delete(task), error => { inFlight.delete(task); state.error = error; failures.push(state); });
-    // Awaiting a Promise subclass calls its then method, unlike a native Promise.
-    // Each child gets its own failure state, including rethrows and sibling branches.
-    const result = new ObservablePromise(task, observe, branch => track(branch));
-    void Promise.prototype.then.call(result, undefined, () => undefined);
-    return result;
+    internally(() => { void task.then(() => inFlight.delete(task), () => inFlight.delete(task)); });
+    return task;
   };
   const observable = <T>(task: Promise<T>, observed: () => void): Promise<T> => track(task, undefined, observed);
   const wrapDataStream = (record: StoredData | undefined): StoredData | undefined => {
@@ -97,7 +70,7 @@ async function invoke(project: AppProject, id: string, operation: string, input:
         let settled = false;
         let observeStream = () => {};
         const done = track(new Promise<void>((resolve, reject) => { resolveDone = resolve; rejectDone = reject; }), observe => { observeStream = observe; });
-        void Promise.prototype.then.call(done, undefined, () => undefined);
+        internally(() => { void Promise.prototype.then.call(done, undefined, () => undefined); });
         const finish = (error?: unknown, rejected = false) => {
           if (settled) return;
           settled = true;
@@ -158,7 +131,7 @@ async function invoke(project: AppProject, id: string, operation: string, input:
     let failed = false;
     try {
       controller.signal.throwIfAborted();
-      result = await backend.operations[operation].execute({ project: project.name, app: id, config: Object.freeze(structuredClone(app.config)), signal: controller.signal,
+      const execute = () => backend.operations[operation].execute({ project: project.name, app: id, config: Object.freeze(structuredClone(app.config)), signal: controller.signal,
         getProjectStoreBinding: async key => {
           if (closing) throw new AppError("APP_OPERATION_CLOSED", "Operation is closed");
           const binding = await projectStoreBinding(project, app, key, controller.signal);
@@ -187,13 +160,15 @@ async function invoke(project: AppProject, id: string, operation: string, input:
           } });
         }
       }, input);
+      result = await (promises ? promises.run(execute) : execute());
     } catch (error) { failed = true; failure = error; controller.abort(error); }
     closing = true;
-    while (inFlight.size) await Promise.allSettled([...inFlight]);
+    while (inFlight.size) await internally(() => Promise.allSettled([...inFlight]));
+    await promises?.drain();
+    await promises?.flush();
     if (failed) throw failure;
-    const unobserved = failures.find(item => !item.observed);
-    if (unobserved) throw unobserved.error;
+    promises?.check();
     controller.signal.throwIfAborted();
     return result;
-  } finally { closing = true; if (deadline) clearTimeout(deadline); signal?.removeEventListener("abort", abort); }
+  } finally { promises?.close(); closing = true; if (deadline) clearTimeout(deadline); signal?.removeEventListener("abort", abort); }
 }
