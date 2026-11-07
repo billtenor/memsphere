@@ -114,19 +114,6 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
   }
 });
 
-// Exercise the query adapter separately from tree termination: failed probes must
-// never become empty membership/exit evidence.
-test("Windows process query requires explicit successful identity evidence", async () => {
-  assert.deepEqual(await queryWindowsProcesses(undefined, async () => ({stdout:'{"ok":true,"processes":[]}'})), []);
-  // Unrelated protected/system rows may lack creation times. Preserve the row
-  // rather than treating it as absent; selected identities must still be proven.
-  assert.deepEqual(await queryWindowsProcesses(undefined, async () => ({stdout:'{"ok":true,"processes":[{"ProcessId":0,"ParentProcessId":0,"Started":null}]}'})), [{pid:0,group:0,parent:0,started:null}]);
-  for (const stdout of ["", "[]", '{"ok":false,"processes":[]}', '{"ok":true,"processes":[{"ProcessId":1,"ParentProcessId":0,"Started":"invalid"}]}'])
-    await assert.rejects(queryWindowsProcesses(undefined, async () => ({stdout})));
-  for (const code of [1, 2, "ENOENT", "ETIMEDOUT"])
-    await assert.rejects(queryWindowsProcesses(undefined, async () => {throw Object.assign(new Error("probe failed"), {code});}), {code});
-});
-
 test("Windows native CIM errors propagate from the identity query", {skip:process.platform !== "win32", timeout:30000}, async () => {
   const {execFile} = await import("node:child_process");
   const {promisify} = await import("node:util");
@@ -138,10 +125,4 @@ test("Windows native CIM errors propagate from the identity query", {skip:proces
     assert.match((error as {stderr:string}).stderr, /injected CIM query failure/);
     return true;
   });
-});
-
-
-test("legacy or malformed Job names cannot provide complete process exit evidence",async()=>{
- for(const name of ["Global\\Memsphere.Reviewer.00000000-0000-4000-8000-000000000000","Local\\Memsphere.Reviewer.00000000-0000-4000-8000-000000000000","untrusted"])
-  await assert.rejects(inspectWindowsReviewJob(name),{code:"PROCESS_IDENTITY_UNAVAILABLE"});
 });

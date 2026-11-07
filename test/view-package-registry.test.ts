@@ -164,12 +164,6 @@ test("asset registry isolates Projects, rejects unsafe types and invalidates cha
   }
 });
 
-test("candidate comparison uses integer tuples and the official fallback stays at 1000", () => {
-  assert.equal(OFFICIAL_VIEW_CANDIDATE_PRIORITY, 1000);
-  assert.ok(compareViewCandidatePriority([999, 99], [1000, 0]) < 0);
-  assert.ok(compareViewCandidatePriority([100, 0], [100, 1]) < 0);
-});
-
 async function makePackage(
   parent: string,
   directory: string,

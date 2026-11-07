@@ -14,173 +14,8 @@ export async function discoverTestFiles(directory) {
   return groups.flat().sort();
 }
 
-// Fixed exclusions preserve the previous native PR coverage. New test paths
-// are included automatically; adding an exclusion is a protected CI change.
-export const defaultTestExclusions = [
-  "agent-activity.test.ts",
-  "archive-run-data.test.ts",
-  "archive-worker-guard.test.ts",
-  "artifact-format-fixtures.test.ts",
-  "artifact-migration.test.ts",
-  "artifact-review-browser.test.ts",
-  "artifact-review-view.test.ts",
-  "artifact-review.test.ts",
-  "artifact-validation.test.ts",
-  "builtin-memory-view.test.ts",
-  "builtin-run-view.test.ts",
-  "ci/ci-change-guard.test.ts",
-  "ci/ci-workflow.test.ts",
-  "ci/full-health.test.ts",
-  "ci/test-plan.test.ts",
-  "ci/test-runner.test.ts",
-  "cli-output-format.test.ts",
-  "cli-presentation.test.ts",
-  "command-state-store.test.ts",
-  "config.test.ts",
-  "context-control-cli.test.ts",
-  "context-control-graph.test.ts",
-  "context-control-invariants.test.ts",
-  "context-control-lifecycle.test.ts",
-  "context-control-memory-store.test.ts",
-  "context-control-outputs.test.ts",
-  "context-control-run-lock.test.ts",
-  "context-control-upgrade.test.ts",
-  "context-control-view-browser.test.ts",
-  "context-control-view-read.test.ts",
-  "context-control-view.test.ts",
-  "context-control.test.ts",
-  "context-run-summaries.test.ts",
-  "control-plane.test.ts",
-  "daemon-integration.test.ts",
-  "data-command.test.ts",
-  "data-extension-registry.test.ts",
-  "data-extensions.test.ts",
-  "data-filesystem-hierarchy-process.test.ts",
-  "data-interfaces.test.ts",
-  "data-json-schema-metamodel.test.ts",
-  "data-json-schema.test.ts",
-  "data-json-serializer.test.ts",
-  "data-manager.test.ts",
-  "data-plain-reflection.test.ts",
-  "data-preparation.test.ts",
-  "data-raw.test.ts",
-  "default-content-style.test.ts",
-  "disclosure-state.test.ts",
-  "file-memory-provider.test.ts",
-  "json-patch.test.ts",
-  "json-path.test.ts",
-  "legacy-general-task-upgrade.test.ts",
-  "list-pagination-cli.test.ts",
-  "market-changeset.test.ts",
-  "market-store.test.ts",
-  "market-view.test.ts",
-  "memory-catalog.test.ts",
-  "memory-changeset-collaboration.test.ts",
-  "memory-cli.test.ts",
-  "memory-command.test.ts",
-  "memory-diff.test.ts",
-  "memory-navigation.test.ts",
-  "memory-references.test.ts",
-  "memory-rules.test.ts",
-  "memory-schema.test.ts",
-  "memory-serializer.test.ts",
-  "memory-store.test.ts",
-  "memory-syntax.test.ts",
-  "memory-write-access.test.ts",
-  "model-asset-checkout.test.ts",
-  "model-browser-state.test.ts",
-  "model-command.test.ts",
-  "model-definition-component-browser.test.ts",
-  "model-market-package.test.ts",
-  "model-market.test.ts",
-  "model-prototype-tree.test.ts",
-  "model-publication.test.ts",
-  "model-registration-browser.test.ts",
-  "model-schema-references.test.ts",
-  "model-unavailable.test.ts",
-  "model-upgrade.test.ts",
-  "model-validation.test.ts",
-  "models-builtin-view-browser.test.ts",
-  "models-view-slots-browser.test.ts",
-  "module-manifest.test.ts",
-  "package-release.test.ts",
-  "page-layout-view.test.ts",
-  "pagination.test.ts",
-  "procedure-graph-canvas-browser.test.ts",
-  "procedure-graph-cli.test.ts",
-  "procedure-graph-content.test.ts",
-  "procedure-graph-presentation.test.ts",
-  "procedure-graph-review.test.ts",
-  "procedure-graph-rewind.test.ts",
-  "procedure-graph-runtime.test.ts",
-  "procedure-graph-syntax.test.ts",
-  "procedure-graph-view-browser.test.ts",
-  "procedure-graph-view.test.ts",
-  "product-positioning.test.ts",
-  "project-memory-provider.test.ts",
-  "project-model-registration-cli.test.ts",
-  "project-models.test.ts",
-  "project-preparation.test.ts",
-  "prompt-renderer.test.ts",
-  "review-node-cli.test.ts",
-  "review-node-content-cli.test.ts",
-  "review-node-graph-paths.test.ts",
-  "review-node-order.test.ts",
-  "review-node-prompt-contract.test.ts",
-  "review-node-receipts.test.ts",
-  "review-node-regressions.test.ts",
-  "review-node-rewind.test.ts",
-  "review-node-store.test.ts",
-  "review-node-target-race.test.ts",
-  "review-nodes.test.ts",
-  "run-abandonment-view.test.ts",
-  "run-changeset.test.ts",
-  "run-command.test.ts",
-  "run-data-access.test.ts",
-  "run-model-storage.test.ts",
-  "run-start-cli.test.ts",
-  "run-summary-requests.test.ts",
-  "runner-delegated-review-cli.test.ts",
-  "runner-identity.test.ts",
-  "schema-contract-migration.test.ts",
-  "schema-writing-view.test.ts",
-  "settings-builtin-module.test.ts",
-  "settings-builtin-view-browser.test.ts",
-  "skill-command.test.ts",
-  "system-model-creation.test.ts",
-  "system-models.test.ts",
-  "validate-command.test.ts",
-  "view-browser.test.ts",
-  "view-fault-isolation-browser.test.ts",
-  "view-global-style-contract.test.ts",
-  "view-host-composition.test.ts",
-  "view-host.test.ts",
-  "view-locales.test.ts",
-  "view-models.test.ts",
-  "view-package-browser.test.ts",
-  "view-package-config.test.ts",
-  "view-package-example.test.ts",
-  "view-package-router-browser.test.ts",
-  "view-project-switch.test.ts",
-  "view-responsive.test.ts",
-  "view-sdk.test.ts",
-  "view-settings-browser.test.ts",
-  "view-settings.test.ts",
-  "view-shell-layout.test.ts",
-  "view-style-contract.test.ts",
-  "view-theme-registry.test.ts"
-];
-const defaultExclusions = new Set(defaultTestExclusions);
-const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
-const testKey = file => (isAbsolute(file) ? relative(testDirectory, file) : file).split(sep).join("/");
-// Routing changes only the owning job, never whether a discovered test runs.
-function nativeGroup(file, source) {
-  const key = testKey(file);
-  if (key === "project-command.test.ts") return "package-platform";
-  if (["system-upgrade-changeset.test.ts", "run-model-artifact.test.ts", "memory-changeset.test.ts"].includes(key) || testCategory(file, source) === "project-upgrade") return "platform-upgrades";
-  return "platform-core";
-}
 export const testSuites = {
+  unit: { title: "Unit tests", categories: [] },
   "package-platform": { title: "Packaged Job Platform Contracts", categories: [] },
   "platform-core": { title: "Platform Core Contracts", categories: [] },
   "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
@@ -200,14 +35,9 @@ export const testSuites = {
   core: { title: "Projects, Memory & Runtime", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core", "runtime-core"] }
 };
 
-// Default native jobs use the same category boundaries as full, with fixed exclusions.
-for (const [name, definition] of Object.entries({ ...testSuites })) {
-  if (definition.categories.length) testSuites[`native-${name}`] = definition;
-}
-
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
-  const name = basename(file);
+  const name = basename(file).replace(".unit.test.ts", ".test.ts");
   if (["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"].includes(name)) return "runtime-upgrades";
   if (name === "embedded-changeset.test.ts") return "memory-core";
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
@@ -222,18 +52,12 @@ export function testCategory(file, source) {
   return "runtime-core";
 }
 
-export function selectTests(files, sources, durations, suite = "all") {
+/** Unit files are explicitly split and reviewed, never inferred from filenames of product domains. */
+export function selectTests(files, sources, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
-    if (suite.startsWith("native-")) {
-      return !defaultExclusions.has(testKey(file)) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
-    }
-    if (["platform", "platform-and-upgrades", "platform-core", "platform-upgrades", "package-platform"].includes(suite)) {
-      if (defaultExclusions.has(testKey(file))) return false;
-      return suite === "platform" || suite === "platform-and-upgrades" || nativeGroup(file, sources[file]) === suite;
-    }
+    if (suite === "unit") return file.endsWith(".unit.test.ts");
     return testSuites[suite].categories.includes(testCategory(file, sources[file]));
-  })
-    .sort((a, b) => (durations[basename(b)] ?? 2) - (durations[basename(a)] ?? 2) || a.localeCompare(b, "en"));
+  }).sort((a, b) => a.localeCompare(b, "en"));
 }

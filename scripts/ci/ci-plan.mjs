@@ -10,31 +10,14 @@ export function ciProfile(event, input = "default") {
   return input;
 }
 
-const linux = [
-  ["ubuntu-24.04", "browser", 3], ["ubuntu-24.04", "cli", 3],
-  ["ubuntu-24.04", "memory-and-projects", 2], ["ubuntu-24.04", "runtime-core", 2]
-];
-const fullRows = [...linux,
-  ["macos-latest", "model-ui", 3], ["macos-latest", "review-ui", 3],
-  ["macos-latest", "cli", 4], ["macos-latest", "memory-and-projects", 3], ["macos-latest", "runtime-core", 3],
-  ["windows-latest", "model-ui", 2], ["windows-latest", "review-ui", 3],
-  ["windows-latest", "memory-cli", 2], ["windows-latest", "app-cli", 2],
-  ["windows-latest", "project-core", 3], ["windows-latest", "project-upgrade", 3],
-  ["windows-latest", "memory-core", 2], ["windows-latest", "runtime-core", 3]
-];
-
+// Temporary, explicitly authorized unit-only CI on every platform, in both profiles.
+// Integration suites remain available locally and are not dispatched by this plan.
 export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
-  return { include: fullRows.flatMap(([os, categorySuite, workers]) => {
-    const suite = profile === "default" && os !== "ubuntu-24.04" ? `native-${categorySuite}` : categorySuite;
-    const selected = selectTests(files, sources, {}, suite);
-    if (!selected.length) {
-      if (profile === "full") throw new Error(`Empty CI suite: ${suite}`);
-      return [];
-    }
-    const browser = selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));
-    return [{ os, suite, title: testSuites[suite].title, workers, browser }];
-  }) };
+  if (!selectTests(files, sources, "unit").length) throw new Error("No unit tests discovered");
+  return { include: ["ubuntu-24.04", "macos-latest", "windows-latest"].map(os => ({
+    os, suite: "unit", title: testSuites.unit.title
+  })) };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

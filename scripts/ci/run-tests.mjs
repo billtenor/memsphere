@@ -1,6 +1,6 @@
 import { readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { discoverTestFiles, selectTests, testSuites } from "./test-plan.mjs";
@@ -9,10 +9,8 @@ import { terminateTestProcesses } from "./test-processes.mjs";
 const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
 const files = (await discoverTestFiles(testDirectory)).map(name => resolve(testDirectory, name));
 const testName = file => relative(testDirectory, file).split(sep).join("/");
-const platformDurations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
-const durations = platformDurations[process.platform] ?? platformDurations.win32;
 const nodeArguments = [];
-let concurrency = 2;
+let concurrency = availableParallelism();
 let suite = "all";
 let listOnly = false;
 let resultsPath = process.env.CI_TEST_RESULTS;
@@ -25,7 +23,7 @@ for (const argument of process.argv.slice(2)) {
 }
 if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Concurrency must be a positive integer");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(file, "utf8")])));
-const selected = selectTests(files, sources, durations, suite);
+const selected = selectTests(files, sources, suite);
 const title = suite === "all" ? "All tests" : testSuites[suite].title;
 if (listOnly) {
   console.log(JSON.stringify({ suite, title, files: selected }, null, 2));

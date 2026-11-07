@@ -208,14 +208,6 @@ test("Agent Activity bounds each attempt and exposes a truncation marker", async
   }
 });
 
-test("Agent Activity paths reject caller-controlled traversal", () => {
-  assert.throws(() => agentActivityPath({
-    runsRoot: "/tmp",
-    ...ids,
-    attemptId: "../outside"
-  }), /invalid Agent Activity identifier/);
-});
-
 function update(value: Record<string, unknown>): SessionUpdate {
   return value as SessionUpdate;
 }

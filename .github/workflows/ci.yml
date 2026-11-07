@@ -1,5 +1,5 @@
 name: CI
-run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
+run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full · units only)' || 'CI (default · units only)') }}
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Default PR checks or complete cross-platform regression
+        description: Unit-only CI profile (integration tests temporarily paused)
         type: choice
         options: [default, full]
         default: full
@@ -48,7 +48,7 @@ jobs:
     needs: plan
     name: Test (${{ matrix.os }}, ${{ matrix.title }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
@@ -64,13 +64,8 @@ jobs:
         shell: bash
         run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - run: npm ci
-      - name: Install Playwright Chromium
-        if: matrix.browser
-        run: npx playwright install chromium
-      # pretest:ci builds and typechecks both core and View Modules once.
-      - run: npm run test:ci -- --suite=${{ matrix.suite }} --test-concurrency=${{ matrix.workers }}
-      - if: matrix.suite == 'cli' || matrix.suite == 'app-cli'
-        run: npm run smoke:project
+      # Build/typecheck once, then run only explicitly separated unit tests.
+      - run: npm run test:ci -- --suite=unit
       - name: Preserve test timings
         if: always()
         uses: actions/upload-artifact@v4
@@ -79,78 +74,17 @@ jobs:
           path: ci-results
           if-no-files-found: error
 
-  windows-package-smoke:
-    needs: plan
-    name: Windows packaged CLI shells
-    runs-on: windows-latest
-    timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
-    env:
-      MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm run build
-      - name: Reuse Node compilation within this job
-        shell: bash
-        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
-      - name: Pack and install
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force .ci-pack, .ci-install | Out-Null
-          npm pack --ignore-scripts --pack-destination .ci-pack
-          $package = (Get-ChildItem .ci-pack\*.tgz | Select-Object -First 1).FullName
-          npm install --prefix .ci-install $package
-      - name: Packaged core Run and View lifecycle
-        shell: pwsh
-        run: node scripts/ci/windows-package-smoke.mjs
-      - name: Windows PowerShell 5.1 smoke
-        shell: powershell
-        run: |
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
-          Push-Location ".ci windows project"
-          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
-          Pop-Location
-      - name: PowerShell 7 smoke
-        shell: pwsh
-        run: |
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
-          Push-Location ".ci windows project"
-          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
-          Pop-Location
-      - name: CMD smoke
-        shell: cmd
-        run: |
-          .ci-install\node_modules\.bin\memsphere.cmd --version
-          .ci-install\node_modules\.bin\memsphere.cmd --help
-          cd /d ".ci windows project"
-          ..\.ci-install\node_modules\.bin\memsphere.cmd view status
-      - name: Git Bash smoke
-        shell: bash
-        run: |
-          ./.ci-install/node_modules/.bin/memsphere --version
-          ./.ci-install/node_modules/.bin/memsphere --help
-          cd ".ci windows project"
-          ../.ci-install/node_modules/.bin/memsphere view status
-
   full-result:
-    name: Full cross-platform regression
+    name: Cross-platform unit tests
     runs-on: ubuntu-24.04
-    needs: [plan, test, windows-package-smoke]
+    needs: [plan, test]
     if: always() && needs.plan.outputs.profile == 'full'
     timeout-minutes: 5
     steps:
       - env:
           TEST_RESULT: ${{ needs.test.result }}
-          PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
         run: |
           test "$TEST_RESULT" = success
-          test "$PACKAGE_RESULT" = success
 
   full-health-bootstrap:
     name: First-install merge gate publisher

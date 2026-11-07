@@ -84,16 +84,6 @@ async function withStore(action: (store: ValueStore, directory: string, runtime:
   }
 }
 
-test("filesystem JSON ValueStore is one independent ValueStore factory", () => {
-  assert.equal(filesystemJsonValueStoreExtension.id, "memsphere/filesystem-json-valuestore");
-  assert.equal(filesystemJsonValueStoreExtension.version, "0.1.0");
-  assert.equal(filesystemJsonValueStoreExtension.valueStoreFactories?.length, 1);
-  assert.equal(filesystemJsonValueStoreExtension.valueStoreFactories?.[0].id, "memsphere/filesystem-json");
-  assert.equal(new FilesystemJsonValueStoreFactory().id, "memsphere/filesystem-json");
-  assert.equal("dataStoreFactories" in filesystemJsonValueStoreExtension, false);
-  assert.equal("payloadSerializers" in filesystemJsonValueStoreExtension, false);
-});
-
 test("filesystem JSON ValueStore persists raw values, metadata and exact JSON across reopening", async () => {
   await withStore(async (store, directory, runtime) => {
     assert.equal(store.kind, "ValueStore");

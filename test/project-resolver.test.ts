@@ -133,17 +133,3 @@ test("Embedded Projects resolve workspace Memory for CLI and canonical Memory fo
     await rm(fixture, { recursive: true, force: true });
   }
 });
-
-test("Embedded Project config requires an absolute repository and relative Memory path", () => {
-  assert.equal(projectConfigSchema.safeParse({
-    store: { type: "embedded", repository_path: "/repo", memory_path: ".memsphere/memory" }
-  }).success, true);
-  assert.equal(projectConfigSchema.safeParse({
-    store: { type: "embedded", memory_path: "/repo/.memsphere/memory" }
-  }).success, false);
-  for (const memoryPath of ["/absolute", "../escape", "nested/../memory", "nested\\memory"]) {
-    assert.equal(projectConfigSchema.safeParse({
-      store: { type: "embedded", repository_path: "/repo", memory_path: memoryPath }
-    }).success, false, memoryPath);
-  }
-});

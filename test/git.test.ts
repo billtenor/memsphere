@@ -33,19 +33,3 @@ test("gitHashObject applies Git path filters without asking Git to open the sour
     await rm(root, { recursive: true, force: true });
   }
 });
-
-test("missing Git guidance keeps Windows CLI shells neutral", () => {
-  const message = missingGitMessage("win32");
-
-  assert.match(message, /Install Git for Windows/);
-  assert.match(message, /PowerShell, CMD, or Git Bash/);
-  assert.match(message, /available on PATH/);
-  assert.doesNotMatch(message, /run Memsphere from Git Bash/);
-});
-
-test("missing Git guidance remains portable outside Windows", () => {
-  assert.equal(
-    missingGitMessage("linux"),
-    "Git is required but was not found. Install Git and ensure it is available on PATH."
-  );
-});

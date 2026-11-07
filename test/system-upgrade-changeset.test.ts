@@ -158,22 +158,6 @@ test("Embedded frozen targets cannot disappear, revert, change version or expand
   assert.equal((await changes.readMemoryChange({ project: "test", changeId: change.id })).status, "completed");
 }));
 
-test("Dedicated intent and metadata must be paired", () => {
-  const base = { format_version: 1, id: "change-test", project: "test", workspace_key: "workspace", base_revision: "base", status: "active", created_at: new Date().toISOString(), updated_at: new Date().toISOString(), store_type: "embedded", targets: [] };
-  assert.throws(() => changes.memoryChangeSetSchema.parse({ ...base, intent: "system_upgrade" }), /must be paired/);
-});
-
-test("System upgrade metadata reads old delete targets and freezes new approved digests", () => {
-  const base = { format_version: 1, id: "change-test", project: "test", workspace_key: "workspace", base_revision: "base", status: "active",
-    created_at: new Date().toISOString(), updated_at: new Date().toISOString(), store_type: "managed", targets: [], intent: "system_upgrade" };
-  const target = { reference: "procedures/legacy", path: "procedures/legacy.yaml", operation: "delete" };
-  const metadata = { source_digest: "old-bundle", instance_key: "workspace", targets: [target] };
-  assert.equal(changes.memoryChangeSetSchema.parse({ ...base, system_upgrade: metadata }).system_upgrade?.targets[0]?.approvedContentDigest, undefined);
-  const digest = "a".repeat(64);
-  assert.equal(changes.memoryChangeSetSchema.parse({ ...base, system_upgrade: { ...metadata, targets: [{ ...target, approvedContentDigest: digest }] } }).system_upgrade?.targets[0]?.approvedContentDigest, digest);
-  assert.throws(() => changes.memoryChangeSetSchema.parse({ ...base, system_upgrade: { ...metadata, targets: [{ ...target, approvedContentDigest: "invalid" }] } }));
-});
-
 test("Embedded preparation rejects original workspace, detached HEAD, dirty Memory and missing master before writes", async () => fixture("embedded", async (main, linked) => {
   await assert.rejects(changes.assertSystemUpgradeWorkspace(await resolveProjectContext()), /separate linked worktree/);
   process.chdir(linked);

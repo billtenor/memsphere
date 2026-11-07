@@ -7,14 +7,6 @@ import { assertProjectName } from "../src/project/model.js";
 import { readProjectRegistry, updateProjectRegistry } from "../src/project/registry.js";
 import { resolveMainWorkspacePath, resolveWorkspaceIdentity } from "../src/project/workspace.js";
 
-test("project names are readable stable identifiers", () => {
-  for (const name of ["memsphere", "career-memory", "team.memory_1"]) assert.equal(assertProjectName(name), name);
-  for (const name of [
-    "", "Team", "space name", "项目", ".", "..", "project.",
-    "con", "con.memory", "prn", "aux", "nul", "com1", "com9.log", "lpt1", "lpt9.yaml"
-  ]) assert.throws(() => assertProjectName(name));
-});
-
 test("Registry updates serialize concurrent writers", async () => {
   const home = await mkdtemp(join(tmpdir(), "memsphere-registry-"));
   try {

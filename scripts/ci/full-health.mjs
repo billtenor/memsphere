@@ -6,15 +6,16 @@ export const WORKFLOW_ID = 335696122;
 export const CONTEXT = "Merge gate / full regression";
 export const LEGACY_CONTEXT = "Full health / master";
 const bootstrapTitles = ["Initialize PR merge gate", "Full health bootstrap"];
-export const FULL_JOB = "Full cross-platform regression";
+// CONTEXT retains the installed branch-rule identity; this temporary CI proves units only.
+export const FULL_JOB = "Cross-platform unit tests";
 export const ACTIONS_APP_ID = 15368;
 const target = `https://github.com/${REPOSITORY}/actions/workflows/ci.yml`;
 const result = (state, description, run) => ({ state, description, target_url: run?.html_url || target });
 
 // A PR's own latest full is an explicit repair escape hatch, including while master is waiting.
 export function decideHealth(master, own, hasMasterHistory = true) {
-  if (own) return result(own.state, `PR full: ${own.reason}`, own.run);
-  if (master) return result(master.state, `master full: ${master.reason}`, master.run);
+  if (own) return result(own.state, `PR unit-only CI: ${own.reason}`, own.run);
+  if (master) return result(master.state, `master unit-only CI: ${master.reason}`, master.run);
   return hasMasterHistory
     ? result("pending", "Waiting for full on the latest master commit")
     : result("failure", "No master full history; run full manually on master or this PR head");
@@ -75,8 +76,8 @@ export async function verifySource(api) {
 export async function fullEvidence(api, run) {
   if (run.workflow_id !== WORKFLOW_ID || run.repository?.full_name !== REPOSITORY) return undefined;
   if (!(run.event === "workflow_dispatch" || ((run.event === "push" || run.event === "schedule") && run.head_branch === "master"))) return undefined;
-  if (bootstrapTitles.includes(run.display_title) || run.display_title === "CI (default)") return undefined;
-  const marked = run.display_title === "CI (full)" || run.event === "schedule";
+  if (bootstrapTitles.includes(run.display_title) || ["CI (default)", "CI (default · units only)"].includes(run.display_title)) return undefined;
+  const marked = ["CI (full)", "CI (full · units only)"].includes(run.display_title) || run.event === "schedule";
   // Pushes only became full when the fixed profile marker was introduced.
   // Earlier master pushes were default and must not require a jobs query each.
   if (run.event === "push" && !marked) return undefined;
@@ -84,7 +85,10 @@ export async function fullEvidence(api, run) {
   if (!marked || run.status === "completed") {
     jobs = await api.list(`/actions/runs/${run.id}/attempts/${run.run_attempt || 1}/jobs`, "jobs");
   }
-  const summaries = jobs?.filter(job => job.name === FULL_JOB) || [];
+  // Older full runs remain valid historical evidence; new runs explicitly
+  // summarize only units while integration CI is paused by the owner.
+  const summaryName = run.display_title?.includes("units only") ? FULL_JOB : undefined;
+  const summaries = jobs?.filter(job => summaryName ? job.name === summaryName : [FULL_JOB, "Full cross-platform regression"].includes(job.name)) || [];
   if (!marked && !summaries.some(job => job.status !== "completed" || job.conclusion !== "skipped")) return undefined;
   if (run.status !== "completed") {
     // Preserve the previous attempt in the audit evidence; it must never supply an old green light.
@@ -216,7 +220,7 @@ async function main() {
     const event = JSON.parse(await readFile(env.GITHUB_EVENT_PATH, "utf8"));
     // This filter only saves work for explicitly inapplicable profiles. Actual health is
     // always recomputed from the API, including unknown/legacy or out-of-order events.
-    if (["CI (default)", ...bootstrapTitles].includes(event.workflow_run?.display_title)) return;
+    if (["CI (default)", "CI (default · units only)", ...bootstrapTitles].includes(event.workflow_run?.display_title)) return;
   }
   const reports = await refreshHealth(api, { publish, bootstrap, env });
   console.log(JSON.stringify(reports.map(({ number, sha, state, description, target_url, masterSha }) =>

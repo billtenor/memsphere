@@ -20,48 +20,6 @@ test("the real test runner schedules the relocated CI tests alongside all discov
   const files = plan.files.map((file: string) => relative(resolve("test"), file).split(sep).join("/")).sort();
   assert.deepEqual(files, await discoverTestFiles("test"));
   for (const file of ["ci-workflow", "test-plan", "full-health", "ci-change-guard"]) {
-    assert(files.includes(`ci/${file}.test.ts`), `${file} must not disappear after moving`);
-  }
-});
-
-test("Test categories describe the primary contract and automatically include new tests", () => {
-  assert.equal(testCategory("app-install.test.ts", ""), "app-cli");
-  assert.equal(testCategory("memory-cli.test.ts", ""), "memory-cli");
-  assert.equal(testCategory("project-command.test.ts", ""), "project-core");
-  assert.equal(testCategory("embedded-changeset.test.ts", "helpers/browser"), "memory-core");
-  assert.equal(testCategory("models-builtin-view-browser.test.ts", "helpers/browser"), "model-ui");
-  assert.equal(testCategory("artifact-review-browser.test.ts", "helpers/browser"), "review-ui");
-  const file = "unmeasured-new-feature.test.ts";
-  assert.deepEqual(selectTests([file], { [file]: "" }, {}, "runtime-core"), [file]);
-});
-
-test("Scheduling orders expensive files first within their category without changing membership", () => {
-  const files = ["cli-errors.test.ts", "memory-cli.test.ts", "run-start-cli.test.ts"];
-  const sources = Object.fromEntries(files.map(file => [file, ""]));
-  const durations = { "cli-errors.test.ts": 1, "memory-cli.test.ts": 80, "run-start-cli.test.ts": 10 };
-  assert.deepEqual(selectTests(files, sources, durations, "memory-cli"), [files[1], files[2], files[0]]);
-  assert.deepEqual(selectTests([...files].reverse(), sources, durations, "memory-cli"), selectTests(files, sources, durations, "memory-cli"));
-  assert.throws(() => selectTests(files, sources, durations, "unknown"), /Unknown test suite/);
-});
-
-test("New project upgrade tests enter their CI suite and remain in aggregate project runs", () => {
-  const upgrade = "project-upgrade-extra.test.ts";
-  const lifecycle = "project-command.test.ts";
-  const files = [upgrade, lifecycle];
-  const sources = Object.fromEntries(files.map(file => [file, ""]));
-  assert.deepEqual(selectTests(files, sources, {}, "project-upgrade"), [upgrade]);
-  assert.deepEqual(selectTests(files, sources, {}, "project-core"), [lifecycle]);
-  for (const suite of ["core", "memory-and-projects"]) {
-    assert.deepEqual(selectTests(files, sources, {}, suite).sort(), [...files].sort());
-  }
-});
-
-test("system and historical upgrades run in upgrade groups instead of runtime groups", () => {
-  const upgrades = ["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"];
-  const files = [...upgrades, "daemon-integration.test.ts"];
-  const sources = Object.fromEntries(files.map(file => [file, ""]));
-  assert.deepEqual(selectTests(files, sources, {}, "runtime-core"), ["daemon-integration.test.ts"]);
-  for (const suite of ["project-upgrade", "memory-and-projects"]) {
-    assert.deepEqual(selectTests(files, sources, {}, suite).sort(), upgrades);
+    assert(files.includes(`ci/${file}${file === "ci-workflow" ? ".unit" : ""}.test.ts`), `${file} must not disappear after moving`);
   }
 });

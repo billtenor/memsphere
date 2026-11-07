@@ -66,7 +66,7 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     await mkdir(join(directory, "scripts/ci"), { recursive: true }); await mkdir(join(directory, "test"));
     // Run the actual runner code against a tiny isolated suite, never the whole
     // repository recursively. All four files are copied without modification.
-    for (const file of ["run-tests.mjs", "test-processes.mjs", "test-plan.mjs", "test-durations.json"]) {
+    for (const file of ["run-tests.mjs", "test-processes.mjs", "test-plan.mjs"]) {
       await copyFile(resolve("scripts/ci", file), join(directory, "scripts/ci", file));
     }
     for (let i = 0; i < count; i++) await copyFile(resolve("test/fixtures/runner-process-tree.mjs"), join(directory, "test", `a-${i}.test.ts`));

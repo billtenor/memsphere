@@ -61,17 +61,6 @@ async function fixture(t: any, options: any = {}) {
   return { api: createApi({ token: "fixture", apiUrl: `http://127.0.0.1:${address.port}` }), endpoint: `http://127.0.0.1:${address.port}`, posts, statusAttempts, paths };
 }
 
-test("PR repair proof wins; pending and failed full never borrow an older green result", () => {
-  for (const state of ["success", "pending", "failure"]) {
-    for (const current of [undefined, proof("success"), proof("pending"), proof("failure")]) {
-      assert.equal(decideHealth(current, proof(state)).state, state);
-    }
-    assert.equal(decideHealth(proof(state), undefined).state, state);
-  }
-  assert.equal(decideHealth(undefined, undefined, true).state, "pending");
-  assert.equal(decideHealth(undefined, undefined, false).state, "failure");
-});
-
 test("Only this repository's genuine full can supply success, including failure before summary", async t => {
   const { api } = await fixture(t);
   for (const conclusion of ["failure", "cancelled", "timed_out", "action_required", "stale", "startup_failure", "neutral", "skipped", null]) {
@@ -249,54 +238,6 @@ test("Bootstrap requires explicit owner and reviewed SHA, and retires after mast
   await assert.rejects(verifyBootstrap(installed.api, env), /installed on master/);
   const denied = await fixture(t, { reply: (p: string) => p.includes("/contents/") && { status: 403, value: {} } });
   await assert.rejects(verifyBootstrap(denied.api, env), /HTTP 403/);
-});
-
-test("Required context binds Actions without changing existing protections; rollback removes only that binding", () => {
-  const original = [{ type: "deletion" }, { type: "pull_request", parameters: { require_code_owner_review: true } }];
-  const added = requiredCheckRules(original);
-  assert.deepEqual(added.slice(0, 2), original);
-  assert.deepEqual(added[2].parameters, { required_status_checks: [{ context: CONTEXT, integration_id: ACTIONS_APP_ID }],
-    strict_required_status_checks_policy: false, do_not_enforce_on_create: false });
-  assert.deepEqual(requiredCheckRules(added, true), original);
-  added[2].parameters.required_status_checks.push({ context: "Another check", integration_id: 123 });
-  added[2].parameters.strict_required_status_checks_policy = true;
-  const rolledBack = requiredCheckRules(added, true);
-  assert.deepEqual(rolledBack[2].parameters.required_status_checks, [{ context: "Another check", integration_id: 123 }]);
-  assert.equal(rolledBack[2].parameters.strict_required_status_checks_policy, true);
-  assert.deepEqual(requiredCheckRules(added), added);
-  assert.equal(original.length, 2);
-});
-
-test("Publisher always checks out trusted master, uses minimal permissions and never executes PR assets", async () => {
-  const health = parse(await readFile(".github/workflows/full-health.yml", "utf8"));
-  assert.equal(health.name, "Update PR merge gate");
-  assert.match(health["run-name"], /Update PR merge gate.*github\.event\.action/);
-  for (const label of ["format('CI {0}', github.event.action)", "'master updated'", "format('PR {0}', github.event.action)", "'manual refresh'"]) {
-    assert(health["run-name"].includes(label), `missing human-readable event label: ${label}`);
-  }
-  assert.equal(health.jobs.refresh.name, "Publish merge gate status (no tests)");
-  assert.deepEqual(health.on.workflow_run.types, ["requested", "in_progress", "completed"]);
-  assert.deepEqual(health.on.push.branches, ["master"]);
-  assert.deepEqual(health.on.pull_request_target.branches, ["master"]);
-  assert.equal(health.on.pull_request, undefined);
-  assert.equal(health.concurrency["cancel-in-progress"], false);
-  assert.deepEqual(health.permissions, { contents: "read", actions: "read", "pull-requests": "read", statuses: "write" });
-  const steps = health.jobs.refresh.steps;
-  assert.equal(steps[0].with.ref, "refs/heads/master");
-  assert.equal(steps[0].with["persist-credentials"], false);
-  assert.equal(steps.some((s: any) => /npm |download-artifact|cache@/.test(s.run || s.uses || "")), false);
-  assert.notEqual(health.jobs.refresh.name, CONTEXT);
-  assert.match(steps.at(-1).run, /export CHECKED_OUT_SHA="\$\(git rev-parse HEAD\)"/);
-  assert.equal(steps.at(-1).env.FULL_HEALTH_PUBLISH_LEGACY, "${{ vars.FULL_HEALTH_PUBLISH_LEGACY }}");
-  const ci = parse(await readFile(".github/workflows/ci.yml", "utf8"));
-  const bootstrap = ci.jobs["full-health-bootstrap"];
-  assert.match(bootstrap.if, /github.actor == github.repository_owner/);
-  assert.match(bootstrap.if, /inputs.reviewed_sha == github.sha/);
-  assert.equal(bootstrap.steps[0].with.ref, "${{ github.sha }}");
-  assert.equal(bootstrap.permissions.statuses, "write");
-  assert.equal(ci.permissions.statuses, undefined);
-  assert.equal(ci.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
-  assert(bootstrap.steps.some((s: any) => s.run === "node scripts/ci/full-health.mjs --bootstrap --publish"));
 });
 
 

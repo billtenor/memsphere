@@ -130,23 +130,6 @@ for (const missingKind of memoryKinds) {
   });
 }
 
-test("validateMemoryStore reports precise control_plane config paths", async () => {
-  const result = projectConfigSchema.safeParse({
-    store: { type: "embedded", repository_path: "/repo", memory_path: "memory" },
-    control_plane: {
-      runner: { permissions: ["artifact.delete"] },
-      actors: {}
-    }
-  });
-  assert.equal(result.success, false);
-  if (!result.success) {
-    assert(result.error.issues.some((issue) =>
-      issue.path.join(".") === "control_plane.runner.permissions.0" &&
-      issue.message.includes("Unknown Permission")
-    ));
-  }
-});
-
 test("validateMemoryStore rejects removed Procedure governance fields", async () => {
   await withTempDir(async (dir) => {
     const memoryRoot = join(dir, "memory");

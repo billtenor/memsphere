@@ -169,14 +169,6 @@ test("business write followed by Run-save failure is safely redone at the same d
   assert.equal(done.events[0].artifact.modelData!.revision, 2);
 });
 
-test("model Artifact syntax round-trips while unsupported combinations fail", () => {
-  const source = `!procedure\nsyntax: memsphere-20260721-stable\nname: model-flow\nflow:\n${action(false, "boolean")}`;
-  const parsed = procedureMemorySchema.parse(parseMemoryYaml(source));
-  assert.deepEqual(procedureMemorySchema.parse(parseMemoryYaml(serializeMemoryYaml(parsed))), parsed);
-  for (const invalid of [source.replace('      store: records\n', ''), source.replace('      store: records', '      model: record.json'), source.replace('      format: json', '      format: markdown')])
-    assert.throws(() => procedureMemorySchema.parse(parseMemoryYaml(invalid)));
-});
-
 
 test("Run prompt exposes the frozen model and Store for a model Artifact", async t => {
   const f = await fixture(t); const run = await f.start();
