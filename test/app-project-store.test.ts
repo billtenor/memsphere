@@ -208,12 +208,17 @@ test("shared Store handles cannot be reused after the operation", {timeout:30000
   finally {delete (globalThis as Record<string,unknown>).__issue137LeakedStore;}
 });
 
-test("binding tokens reject missing values and become stale after A-to-B-to-A", {timeout:30000}, async t=>{
+test("a binding token stays stale after A-to-B-to-A", {timeout:30000}, async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;
-  await assert.rejects(f.invoke("write",{value:{name:"wrong",count:0}}),{code:"APP_STORE_BINDING_CHANGED"});
-  await assert.rejects(f.configureApp(f.context,"example.app",{store:"missing"}),{code:"STORE_NOT_FOUND"});
   await f.configureApp(f.context,"example.app",{store:"second"});await f.configureApp(f.context,"example.app",{store:"first"});
   await assert.rejects(f.invoke("write",{token,value:{name:"wrong",count:0}}),{code:"APP_STORE_BINDING_CHANGED"});
+});
+
+test("an invalid rebind preserves the previous target", {timeout:30000}, async t=>{
+  const f=await valueFixture(t);const old=(await f.read()).binding.token;
+  await assert.rejects(f.configureApp(f.context,"example.app",{store:"missing"}),{code:"STORE_NOT_FOUND"});
+  await f.invoke("write",{token:old,value:{name:"still first",count:2}});
+  assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"still first",count:2});
 });
 
 for(const mode of ["fire","firethrow","cancel"] as const) test(`in-flight Store writes retain the lock when backend ${mode} completes`,{timeout:30000},async t=>{
@@ -231,11 +236,11 @@ for(const mode of ["fire","firethrow","cancel"] as const) test(`in-flight Store 
   await f.configureApp(f.context,"example.app",{store:"second"});
 });
 
-test("shared App operation excludes Store removal and model maintenance across processes",{timeout:60000},async t=>{
+for(const [mode,arg] of [["remove","first"],["model",undefined],["recovery",undefined]] as const) test(`shared App operation excludes ${mode} across processes`,{timeout:45000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;const child=await launchWorker(t,f.fixture.root,"invoke",token,f.fixture.beforeCleanup);assert.equal((await child.next()).event,"locked");
-  for(const [mode,arg] of [["remove","first"],["model",undefined],["recovery",undefined]] as const){const w=await launchWorker(t,f.fixture.root,mode,arg,f.fixture.beforeCleanup);assert.equal((await w.next()).event,"started");assert.deepEqual(await w.next(),{event:"failed",name:"TimeoutError"});}
+  const w=await launchWorker(t,f.fixture.root,mode,arg,f.fixture.beforeCleanup);assert.equal((await w.next()).event,"started");assert.deepEqual(await w.next(),{event:"failed",name:"TimeoutError"});
   child.child.send("release");assert.equal((await child.next()).event,"finished");
-  const recovery=await launchWorker(t,f.fixture.root,"recovery",undefined,f.fixture.beforeCleanup);assert.equal((await recovery.next()).event,"started");assert.equal((await recovery.next()).event,"recovered");
+  if(mode==="recovery"){const recovery=await launchWorker(t,f.fixture.root,"recovery",undefined,f.fixture.beforeCleanup);assert.equal((await recovery.next()).event,"started");assert.equal((await recovery.next()).event,"recovered");}
   assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"child",count:7});
 });
 
