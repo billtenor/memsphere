@@ -8,26 +8,151 @@ defines:
 sections:
   - !statement
     names:
-      - 避免过度设计
+      - 可维护性
     defines:
-      - 引导开发者结合 memsphere 的实际产品责任与维护成本判断设计复杂度。
-    asserts:
-      - 系统不以消除所有错误为目标；面对异常时应优先守住数据、权限和结果正确性，能够清楚暴露并由 Human 或 Agent 通过重试、重启或重新执行解决的问题，可以作为正常失败路径。
-      - 新增复杂度应与问题的实际影响相称；不应仅为理论完备、全状态覆盖或极端路径自动恢复而扩大状态模型、跨层协议和维护范围，应结合实际影响、恢复成本和新增设计负担作出工程判断。
-  - !statement
-    names:
-      - System Memory 同步
-    defines:
-      - 约束代码变更与 System Memory、skill 冗余说明保持一致。
-    asserts:
-      - 代码变更影响用户或 agent 可见的概念、命令、YAML、流程或行为时，必须在同一需求中检查并更新对应 System Memory；纯内部重构且语义不变时可以不更新。
-      - System Memory 必须修改 reserved-memory 中的源文件，并同步更新当前开发 Project 的 Memory 副本；新增、重命名或删除 System Memory 时必须同步更新 reserved-memory/manifest.json。
-      - System Memory 更新后必须同步检查 src/skills/memsphere/SKILL.md 中的冗余说明，并通过 memsphere validate 与相关测试；存在 Memory 交付差异时还必须执行 memsphere memory change validate [change-id]，普通 validate 不能代替变更级校验。
-      - 新增的用户可见能力没有对应 System Memory 时，必须补建合适的 System Memory，不得只修改代码、README 或 skill。
+      - 规定代码组织与表达中影响长期理解和修改成本的开发要求。
     sections:
       - !statement
         names:
+          - 复杂度控制
+        defines:
+          - 引导开发者结合 memsphere 的实际产品责任与维护成本判断设计复杂度。
+        asserts:
+          - 系统不以消除所有错误为目标；面对异常时应优先守住数据、权限和结果正确性，能够清楚暴露并由 Human 或 Agent 通过重试、重启或重新执行解决的问题，可以作为正常失败路径。
+          - 新增复杂度应与问题的实际影响相称；不应仅为理论完备、全状态覆盖或极端路径自动恢复而扩大状态模型、跨层协议和维护范围，应结合实际影响、恢复成本和新增设计负担作出工程判断。
+      - !statement
+        names:
+          - 业务模型
+        defines:
+          - 规范业务对象、状态、关系与约束在代码中的表达。
+        asserts:
+          - 领域对象、状态和关系必须对应明确的业务含义；不得仅因技术执行流程、存储格式或工具适配需要，就引入没有业务责任的新概念。
+          - 同一业务事实和约束必须有明确的权威表达；派生表达须能追溯其来源，不得让不同入口或模块各自定义互相冲突的业务含义。
+      - !statement
+        names:
+          - 术语
+        defines:
+          - 规范业务意图的命名及术语在各类表达中的一致性。
+        asserts:
+          - 变量、函数、类型和模块的名称必须表达其业务意图与责任，使读者能区分它处理的对象和产生的结果，不得用实现步骤或模糊词语掩盖业务含义。
+          - 同一概念在代码、测试、接口和 Memory 中必须使用一致术语；相同名称不得承载不同含义，必要的技术术语须与业务概念保持清楚边界。
+      - !statement
+        names:
+          - 职责划分
+        defines:
+          - 规范模块与操作的责任边界及业务规则的归属。
+        asserts:
+          - 模块和操作必须有明确责任；入口适配、业务决策与持久化机制应在各自边界内完成，不得把彼此独立的变化原因混在同一实现中。
+          - 业务规则必须由负责该规则的模块统一表达和执行，多入口应复用该责任边界；不得把规则散落到调用方各自维护，也不得仅因代码相似就抽取没有独立责任的公共层。
+      - !statement
+        names:
+          - 分层与封装
+        defines:
+          - 规范层间依赖及内部状态与约束的封装边界。
+        asserts:
+          - 跨层调用必须遵循既定依赖方向并使用公开契约，不得通过读取或修改内部表示绕开被调用方的业务校验和状态约束。
+          - 数据不变量及改变相关状态的操作必须由能够维护该约束的边界封装；调用方不应依赖内部步骤的顺序或字段组合来替被调用方保证正确性。
+          - 封装对外暴露的接口及公开信息应完整、清晰地表达其契约，使调用方无需阅读内部实现即可理解和正确使用。接口或命名无法充分表达的内容，应通过必要的注释或其他公开说明补充。
+      - !statement
+        names:
+          - 代码表达
+        defines:
+          - 规范代码与注释对抽象层次、副作用和设计意图的表达。
+        asserts:
+          - 同一段主逻辑应保持一致的抽象层次，把需要独立理解的细节放在有明确含义的操作中；拆分和抽象必须改善责任或表达，不得以机械行数限制或层数指标代替判断。
+          - 操作的副作用必须能从名称、接口或明确契约中识别；读取接口不得隐式修改被查询的业务状态或推进无关流程，恢复、调度和写入应有明确入口及作用范围。
+          - 注释应说明业务原因、约束、非显然的取舍或不能直接从代码得知的边界，不得只复述代码；修改实现时必须同步核对注释是否仍然准确。
+  - !statement
+    names:
+      - 运行正确性
+    defines:
+      - 规定系统运行中状态、并发、错误与资源处理的正确性要求。
+    sections:
+      - !statement
+        names:
+          - 状态管理
+        defines:
+          - 规范运行状态的权威来源、迁移与一致性边界。
+        asserts:
+          - 每项运行状态必须明确其权威来源、允许的迁移和负责修改它的操作；派生状态须遵循明确的一致性契约，不得让多个可写副本互相覆盖或各自决定同一事实。
+          - 状态判断、保存及完成标记必须符合实际保证的一致性边界；操作中断或部分成功时，应如实保留已完成与未完成的事实，不得把未提交结果标为完成，也不得为形式统一新增不必要的状态或跨记录事务。
+      - !statement
+        names:
+          - 并发与锁
+        defines:
+          - 规范并发准入及并发保护的对象、范围和复杂度取舍。
+        asserts:
+          - 设计并发控制前必须先明确当前业务操作是否允许并发；不允许时必须严格限制并行并明确拒绝竞争请求，不得以加锁排队代替业务上的并发准入决定。
+          - 需要并发保护时，必须先说明被保护的具体对象、不变量和可能发生的竞争，只保护维持该不变量所需的最小范围；不得把独立对象或无相关状态修改的读取随意纳入 Project、Run 或其他全局锁。
+          - 新增并发保护前必须盘点已有锁、事务、原子创建、唯一性约束和 CAS，确认它们覆盖的对象及保证；已有机制足以保护同一约束时不得重复加锁，确有缺口时应说明新增保护解决的具体问题。
+          - 处理极端并发或异常交错时，应在守住数据、权限和结果正确性的前提下比较明确报错、显式重试或恢复与新增协调机制的成本；不得仅为使所有路径自动成功而扩大锁范围、状态模型或跨层协议，安全失败可以是正常结果。
+      - !statement
+        names:
+          - 错误处理
+        defines:
+          - 规范失败事实的表达以及重试与恢复的边界。
+        asserts:
+          - 失败必须保留足以定位问题的原因和上下文，并区分操作所处阶段、已经产生的效果与尚未完成的工作；不得吞掉影响正确性的错误、伪装成功或把部分成功描述为从未执行。
+          - 重试或恢复前必须确认前次执行结果以及重复执行的安全边界；结果不确定时不得盲目重发可能产生重复副作用的操作，自动重试必须有明确适用条件和终止边界。
+      - !statement
+        names:
+          - 资源管理
+        defines:
+          - 规范资源生命周期中的持有责任与清理边界。
+        asserts:
+          - 文件、锁、进程、连接及其他资源必须有明确的取得者、持有责任和释放时机；正常完成、失败和中断路径均须按实际生命周期处理，不能依赖后续无关操作代为清理。
+          - 释放或清理资源前必须确认其归属和当前身份，只处理本操作有权管理的对象，不得误清理其他任务或后来复用的资源；保护方式应与实际风险相称，不为极端情况引入无必要的通用管理层。
+  - !statement
+    names:
+      - 契约变更
+    defines:
+      - 规范用户或 Agent 可见行为与语法契约的变更边界。
+    sections:
+      - !statement
+        names:
+          - 行为变更
+        defines:
+          - 规范已有产品行为及兼容性承诺的变更与确认。
+        asserts:
+          - 修改已有行为前必须识别用户或 Agent 可观察的输入、输出、副作用、失败路径和兼容性影响，并使已确认需求、实现、验证及 Memory 对同一行为保持一致。
+          - 施工中发现需要改变已确认的产品行为或兼容性承诺时，必须先说明差异并取得 human 确认；不得把行为变化藏在内部重构、优化或错误处理之中。
+      - !statement
+        names:
+          - Syntax 关键字
+        defines:
+          - 规定 Memsphere YAML 语法设计、审批和施工过程中的维护要求。
+        sections:
+          - !statement
+            names:
+              - 关键字变更准入
+            defines:
+              - 约束 Memsphere YAML syntax 新关键字从技术方案进入施工的显式审批边界。
+            asserts:
+              - 技术方案准备新增任何 syntax 关键字时，必须包含独立的 Markdown 一级标题“# Syntax 关键字变更”，不得把关键字变更隐藏在实现细节、数据模型或兼容性章节中。
+              - “# Syntax 关键字变更”章节必须逐项列出本轮允许新增的全部关键字，并说明每个关键字的名称、允许出现的区块、值结构和业务含义。
+              - 技术方案未在“# Syntax 关键字变更”章节显式列举某个关键字时，施工过程不得自主添加该关键字；未包含该章节等价于本轮不允许新增任何 syntax 关键字。
+              - 施工过程中发现确有必要新增计划外关键字时，必须暂停相关实现，先修订技术方案的“# Syntax 关键字变更”章节并取得 human 明确认可，再继续施工。
+  - !statement
+    names:
+      - Memory 同步
+    defines:
+      - 约束代码变更与 System Memory、skill 冗余说明保持一致。
+    sections:
+      - !statement
+        names:
+          - 通用要求
+        defines:
+          - 规定代码变更所需 Memory 同步的通用范围与维护要求。
+        asserts:
+          - 代码变更影响用户或 agent 可见的概念、命令、YAML、流程或行为时，必须在同一需求中检查并更新对应 System Memory；纯内部重构且语义不变时可以不更新。
+          - System Memory 必须修改 reserved-memory 中的源文件，并同步更新当前开发 Project 的 Memory 副本；新增、重命名或删除 System Memory 时必须同步更新 reserved-memory/manifest.json。
+          - System Memory 更新后必须同步检查 src/skills/memsphere/SKILL.md 中的冗余说明，并通过 memsphere validate 与相关测试；存在 Memory 交付差异时还必须执行 memsphere memory change validate [change-id]，普通 validate 不能代替变更级校验。
+          - 新增的用户可见能力没有对应 System Memory 时，必须补建合适的 System Memory，不得只修改代码、README 或 skill。
+      - !statement
+        names:
           - Memory DSL 与实体模型
+        defines:
+          - 规定 Memory 语法与实体模型变更对应的 Memory 同步范围。
         asserts:
           - 修改 src/memory 中的 AST、schema、syntax、YAML、serializer、factory，或修改 artifact-validation 与 migration 契约时，必须更新 memsphere-yaml-syntax-rules。
           - 修改 Concept、Statement、Procedure 或 Schema 的字段、语义和组合规则时，必须同步更新对应的 Concept Memory 与 entity schema；影响通用 Memory 语义时还必须更新“Memory”。
@@ -35,40 +160,32 @@ sections:
       - !statement
         names:
           - Memory 发现与读取
+        defines:
+          - 规定 Memory 发现、导航和读取行为变更对应的 Memory 同步范围。
         asserts:
           - 修改 memory list、memory read、Node 导航、reference 解析、catalog、provider 或 store 的用户可见行为时，必须更新 memsphere-memory-access-rules。
           - 修改 scope 查找、Memory Store 抽象或 Agent 读取方式时，必须同步检查 memsphere-memory-access-rules 与 Skill 的读取说明；影响概念理解时再检查 memsphere-memory 与 memsphere-framework。
       - !statement
         names:
           - Procedure Run 与 Artifact
+        defines:
+          - 规定流程执行与产物行为变更对应的 Memory 同步范围。
         asserts:
           - 修改 run start、report、status、Schema 填写、Repeat、Artifact 校验或人机步骤行为时，必须更新 memsphere-procedure、memsphere-procedure-schema、memsphere-schema-schema、memsphere-yaml-syntax-rules 和 skill 的 Run 说明。
           - 修改通用任务执行方式或 Procedure 编写与验收要求时，必须检查当前 Skill 的自由探索路由及 memsphere-procedure-construction。
       - !statement
         names:
           - Review
+        defines:
+          - 规定 Artifact 与 Memory 评审行为变更对应的 Memory 同步范围。
         asserts:
           - 修改 Artifact Review 数据模型、状态流转、snapshot、comment 定位或 View 操作时，必须更新 memsphere-procedure，并检查 memsphere-framework、相关教程与 skill；不得引用已经移除的 memsphere-review Memory。
           - 修改独立 Memory Review 的数据模型、状态流转或 View 操作时，必须检查 memsphere-memory-review-process、相关教程与 skill。
       - !statement
         names:
           - Project 创建与预置安装
+        defines:
+          - 规定 Project 配置与预置资源安装变更对应的 Memory 同步范围。
         asserts:
           - 修改 Project create、全局或 Project config、Workspace Binding、System Memory bootstrap/受控更新或 Project Catalog 读取行为时，必须更新 Skill 的 Project 使用说明及对应规则；只有影响产品概念的含义、边界或关系时，才更新 memsphere-framework。
           - 修改 System Memory 清单或安装路径时，必须更新 manifest、Reserved Store 测试和当前开发 Project 的 Memory 副本；受控 Managed Store 的更新必须通过 ChangeSet 发布。
-  - !statement
-    names:
-      - Yaml 语法维护规则
-    defines:
-      - 规定 Memsphere YAML 语法设计、审批和施工过程中的维护要求。
-    sections:
-      - !statement
-        names:
-          - Syntax 关键字变更准入
-        defines:
-          - 约束 Memsphere YAML syntax 新关键字从技术方案进入施工的显式审批边界。
-        asserts:
-          - 技术方案准备新增任何 syntax 关键字时，必须包含独立的 Markdown 一级标题“# Syntax 关键字变更”，不得把关键字变更隐藏在实现细节、数据模型或兼容性章节中。
-          - “# Syntax 关键字变更”章节必须逐项列出本轮允许新增的全部关键字，并说明每个关键字的名称、允许出现的区块、值结构和业务含义。
-          - 技术方案未在“# Syntax 关键字变更”章节显式列举某个关键字时，施工过程不得自主添加该关键字；未包含该章节等价于本轮不允许新增任何 syntax 关键字。
-          - 施工过程中发现确有必要新增计划外关键字时，必须暂停相关实现，先修订技术方案的“# Syntax 关键字变更”章节并取得 human 明确认可，再继续施工。
