@@ -87,7 +87,7 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
  const {serializeMemoryYaml}=await import('../src/memory/serializer.js');
  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
  const refs=['statements/bad-rules','statements/good-rules'];
- const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],asserts:refs.map(target=>({tag:'!ref',target})),mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],asserts:refs.map(target=>({tag:'!ref',target})),mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',asserts:refs.map(target=>({tag:'!ref',target})),model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}},{tag:'!action',id:'B',description:'Other action',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'A'}],artifact:{name:'Other result',asserts:refs.map(target=>({tag:'!ref',target})),model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
  const memoryRef='procedures/best-effort-rules';
  const source=(name:string)=>`!statement\nsyntax: ${graphMemorySyntax}\nnames: [${name}]\ndefines: [Rule source]\nasserts: [${name} evidence]\n`;
  const started=await service.withGraph(g=>g.start({name:`Rule ${mode}`,procedure,memorySnapshot:{memories:{[memoryRef]:{memoryRef,payload:{contentType:'application/yaml',content:serializeMemoryYaml(procedure)}},...Object.fromEntries(refs.map(reference=>[reference,{memoryRef:reference,payload:{contentType:'application/yaml',content:source(reference.split('/')[1])}}]))}}}));
@@ -108,6 +108,13 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
   assert.equal(overview.run.context.graph.procedure.actions[0].effectiveRules,undefined);
   const actionResponse=await fetch(`${api}?representation=action&action=A`);assert.equal(actionResponse.status,200);const actionPayload=await actionResponse.json();
   assert.deepEqual(actionPayload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.deepEqual(actionPayload.run.context.graph.procedure.actions[0].artifact.effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.equal(actionPayload.run.context.graph.procedure.effectiveRules,undefined);
+  assert.equal(actionPayload.run.context.graph.procedure.actions[1].effectiveRules,undefined);
+  assert.equal(actionPayload.run.context.graph.procedure.actions[1].artifact.effectiveRules,undefined);
+  const artifactsResponse=await fetch(`${api}?representation=artifacts`);assert.equal(artifactsResponse.status,200);const artifactsPayload=await artifactsResponse.json();
+  assert.equal(artifactsPayload.run.context.graph.procedure.effectiveRules,undefined);
+  for(const item of artifactsPayload.run.context.graph.procedure.actions){assert.equal(item.effectiveRules,undefined);assert.equal(item.artifact.effectiveRules,undefined);}
   assert.doesNotMatch(JSON.stringify(actionPayload),/LIVE RULE MUST NOT APPEAR/);assert.doesNotMatch(JSON.stringify(overview),/LIVE RULE MUST NOT APPEAR/);
   const response=await fetch(api);assert.equal(response.status,200,await response.clone().text());const payload=await response.json();
   assert.equal(payload.run.context.graph.work.length,1);assert.equal(payload.run.context.graph.procedure.actions[0].asserts.length,2);

@@ -1703,7 +1703,7 @@ async function handleRequest(
       if(representation&&["overview","artifacts","action"].includes(representation)){
         const projection=await withContextControlViewRead(config.scopeRoot,()=>contextLocation.service.viewProjection(runId,representation as "overview"|"artifacts"|"action",url.searchParams.get("action")??undefined));
         if(projection){
-          const payload=await contextRunDetailPayload(projection,true,representation==="overview");
+          const payload=await contextRunDetailPayload(projection,true,{surface:representation as "overview"|"artifacts"|"action",actionId:url.searchParams.get("action")??undefined});
           const {memorySnapshot,permissionConfig,reviewConfig,...base}=payload;
           const {memorySnapshot:_memory,permissionConfig:_permissions,reviewConfig:_reviews,...run}=payload.context.run;
           sendJson(response,200,{run:{...base,context:{...payload.context,run,lazy:true}}});return;

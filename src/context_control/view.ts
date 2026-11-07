@@ -30,7 +30,7 @@ export function contextRunPayload(snapshot: Snapshot, lightweight = false) {
     contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, ...(graph ? { graph } : {}) } };
 }
 /** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
-export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false, overview = false) {
+export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false, projection?: { surface: 'overview' | 'artifacts' | 'action'; actionId?: string }) {
   const payload = contextRunPayload(snapshot, lightweight);
   const procedure = payload.context.graph?.procedure;
   if (!procedure) return payload;
@@ -44,7 +44,10 @@ export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = 
     statements.set(reference, entity);
     return entity;
   };
-  const sources = overview ? [procedure] : [procedure, ...procedure.actions.flatMap(action => [action, action.artifact])];
+  const actions = projection?.surface === 'action' ? procedure.actions.filter(action => action.id === projection.actionId) : procedure.actions;
+  const sources = !projection ? [procedure, ...actions.flatMap(action => [action, action.artifact])]
+    : projection.surface === 'overview' ? [procedure]
+    : projection.surface === 'action' ? actions.flatMap(action => [action, action.artifact]) : [];
   for (const source of sources) {
     if (!source) continue;
     const effectiveRules = {};
