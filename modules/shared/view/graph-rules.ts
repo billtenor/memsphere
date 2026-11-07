@@ -19,10 +19,13 @@ export function graphRuleGroup(title: string, declarations: unknown[] | undefine
     list.className = 'pg-values';
     group.append(list);
     const appendProjection = (host: HTMLElement, source: RuleProjection) => {
+        const content = document.createElement('div');
+        content.className = 'pg-rule-content';
+        host.append(content);
         for (const text of source.defines ?? []) {
             const p = document.createElement('p');
             p.textContent = text;
-            host.append(p);
+            content.append(p);
         }
         const items = document.createElement('ul');
         for (const value of source[channel] ?? []) {
@@ -34,13 +37,13 @@ export function graphRuleGroup(title: string, declarations: unknown[] | undefine
             items.append(item);
         }
         if (items.childElementCount)
-            host.append(items);
+            content.append(items);
         for (const section of source.sections ?? []) {
             const details = document.createElement('details'), summary = document.createElement('summary');
             summary.textContent = section.name ?? (english ? 'Section' : '章节');
             details.append(summary);
             appendProjection(details, section);
-            host.append(details);
+            content.append(details);
         }
     };
     const appendReference = (host: HTMLElement, target: string, source?: RuleProjection) => {
