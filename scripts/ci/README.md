@@ -10,7 +10,7 @@
 | 普通 `*.integration.test.ts` | Linux | Linux、macOS、Windows |
 | `*.system.test.ts` | Linux、macOS、Windows | Linux、macOS、Windows |
 
-四层使用独立 CI job。OS 契约位于 `test/platform/`、`test/ci/platform/`，或在文件头声明 `// @integration-platform: native`。声明依据是被测契约，不能只因 fixture 使用文件或进程就扩大平台覆盖。进程、跨进程锁、文件系统、Git/worktree、Memory 发布、升级、Context/Review、产物归档和模型存储按职责分组，每个文件在适用平台仅执行一次。
+理论模型包含 unit、module、integration、system、e2e 五层；当前建设前四层，e2e 尚无独立套件，也不新增占位作业。已建设的四层使用独立 CI job。OS 契约位于 `test/platform/`、`test/ci/platform/`，或在文件头声明 `// @integration-platform: native`。声明依据是被测契约，不能只因 fixture 使用文件或进程就扩大平台覆盖。进程、跨进程锁、文件系统、Git/worktree、Memory 发布、升级、Context/Review、产物归档和模型存储按职责分组，每个文件在适用平台仅执行一次。
 
 系统层包含产品 API、浏览器、真实命令树和完整后台服务功能验证；即使文件位于 platform 目录，也不会进入集成矩阵。Windows 打包 CLI/Shell 冒烟同属系统层，单独运行并测量。系统层每个平台一个作业、完整执行全部文件，不与集成职责分组合并；完整 full 汇总必须确认四层及 Windows 打包作业成功。
 
