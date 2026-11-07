@@ -50,8 +50,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const graphCard = element("section", "cc-graph-card"); graphCard.setAttribute("aria-label", label("产物依赖图", "Artifact dependency graph")); const artifactCanvas=createGraphCanvas({locale,viewport:graphHost});graphCard.append(artifactCanvas.element);root.append(graphCard);
   const work = element("section", "cc-work"); root.insertBefore(work, graphCard);
   const definitionInfo = element("details", "cc-procedure-definition");
-  definitionInfo.open = true;
-  definitionInfo.append(element("summary", "cc-procedure-summary", label("流程详情", "Procedure details")));
+  definitionInfo.append(element("summary", "cc-procedure-summary", label("流程信息", "Procedure information")));
   const definitionBody = element("div", "cc-procedure-definition-body");
   definitionInfo.append(definitionBody);
   let definitionKey = "";
@@ -362,7 +361,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       const nextKey = JSON.stringify(value);
       if (nextKey === snapshotKey) return;
       const detailChanged = !snapshot || detailFingerprint(snapshot) !== detailFingerprint(value);
-      if (snapshot && snapshot.run.id !== value.run.id) definitionInfo.open = true;
+      if (snapshot && snapshot.run.id !== value.run.id) definitionInfo.open = false;
       if(value.lazy&&snapshot?.run.id===value.run.id){
         value.artifacts=snapshot.artifacts;artifactsLoaded=false;
         if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
