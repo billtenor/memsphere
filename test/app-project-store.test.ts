@@ -109,6 +109,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     branchhandled: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},'one',input.value);void p.catch(()=> 'recovered');void p.finally(()=>{}).catch(()=> 'also recovered');return 'started';}},
     native:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},input.id??'one',input.value);const native=input.mode==='all'?Promise.all([p]):input.mode==='resolve'?Promise.resolve(p):(async()=>{await p})();if(input.recover){await native.catch(()=>{});return 'recovered';}void native;return 'started';}},
     nativebarrier:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});const p=store.create({},'one',input.value);const native=input.mode==='all'?Promise.all([p]):(async()=>{await p})();void native.catch(async error=>{globalThis.__issue137RecoveryEntered(input.key);await(globalThis.__issue137RecoveryBarriers?.[input.key]??globalThis.__issue137RecoveryBarrier);if(input.outcome==='throw')throw error;if(input.outcome==='reject')return Promise.reject(error);return 'recovered';});return 'started';}},
+    reenter: {kind:'write', execute: async (_ctx,input) => {const {configureApp}=await import(${JSON.stringify(new URL('../src/app/install.ts',import.meta.url).href)});return configureApp(input.context,'example.app',{store:'second'});}},
     throwundefined: {kind:'read', execute: async () => {throw undefined;}},
     fire: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);return 'started';}},
     firethrow: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.upsert({},'one',input.value);throw new Error('backend failure');}},
@@ -116,7 +117,7 @@ async function valueFixture(t: import("node:test").TestContext) {
     leak: {kind:'read', execute: async (ctx,input) => {globalThis.__issue137LeakedStore=await ctx.getStore('expenses',{expectedBinding:input.token});}},
     hold: {kind:'write', execute: async (ctx,input) => {const store=await ctx.getStore('expenses',{expectedBinding:input.token});process.send({event:'locked'});await new Promise(resolve=>process.once('message',resolve));await store.upsert({},'one',{name:'child',count:7});}}
   }};`);
-  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",branchfinally:"write",branchthen:"write",branchrethrow:"write",branchhandled:"write",native:"write",nativebarrier:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
+  const operations = { read:"read",write:"write",update:"read",remove:"read",create:"read",caught:"write",unhandled:"write",unhandledchain:"write",unhandledfinally:"write",caughtchain:"write",asyncrethrow:"write",asyncreject:"write",asyncrecover:"write",branchfinally:"write",branchthen:"write",branchrethrow:"write",branchhandled:"write",native:"write",nativebarrier:"write",reenter:"write",throwundefined:"read",fire:"write",firethrow:"write",cancel:"write",leak:"read",hold:"write" };
   const manifest = appManifestSchema.parse({ schemaVersion:1,id:"example.app",name:"Example",version:"1.0.0",description:"Example",projectStores:[{key:"expenses",model:"record.json",kind:"ValueStore",configKey:"store"}],backend:{entry:"backend.mjs",operations} });
   await writeFile(join(root,"app.json"),JSON.stringify(manifest));
   const project = {name:"test-project",paths:projectPaths(fixture.root),memoryRoot:join(fixture.root,"memory"),config:await readBusinessProject(fixture.root)} as AppProject;
@@ -151,6 +152,21 @@ test("shared ValueStore reads existing records and writes are visible to Project
   const f=await valueFixture(t);const current=await f.read();assert.deepEqual(current.row?.value,{name:"old",count:1});
   await f.invoke("write",{token:current.binding.token,value:{name:"updated",count:2}});
   assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"updated",count:2});
+});
+
+test("App configuration reentry fails promptly and releases the shared Project lock", {timeout:10000}, async t => {
+  const f = await valueFixture(t);
+  const before = await f.read();
+  await assert.rejects(f.invoke("reenter", {context:f.context}), {code:"SHARED_STORE_LOCK_REENTRY"});
+  const state = await f.readAppState(f.project);
+  assert.equal(state.installations["example.app"]!.config.store, "first");
+  const after = await f.read();
+  assert.equal(after.binding.token, before.binding.token);
+  assert.deepEqual(after.row?.value, {name:"old",count:1});
+  await f.configureApp(f.context, "example.app", {store:"second"});
+  const rebound = await f.read();
+  assert.notEqual(rebound.binding.token, before.binding.token);
+  assert.equal(rebound.row, undefined);
 });
 
 test("old-page delete after rebind cannot alter either Store", {timeout:30000}, async t=>{
