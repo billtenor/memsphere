@@ -11,7 +11,7 @@ import { resolveProjectContext } from "../src/project/resolver.js";
 import { readConfig } from "../src/config.js";
 import { createMemoryCatalogForConfig, createProjectMemoryCatalogs } from "../src/memory/factory.js";
 import { startRun } from "../src/run/store.js";
-import { checkApp, installApp, setAppEnabled } from "../src/app/install.js";
+import { checkApp, configureApp, installApp, setAppEnabled } from "../src/app/install.js";
 import { readAppState } from "../src/app/state.js";
 import { packageDigest } from "../src/app/files.js";
 import { bindCli, checkCli, listClis, registerCli, showCli } from "../src/tools/registry.js";
@@ -23,6 +23,7 @@ import { createProjectModelHost } from "../src/project/models.js";
 // The packed CLI is checked separately by the guide acceptance workflow.
 const cliArguments = ["--import", import.meta.resolve("tsx"), resolve("src/cli.ts")];
 const expenseExample = resolve("examples/apps/expense");
+const projectStoreExample = resolve("examples/apps/project-store");
 async function fixture(action: (root: string, context: Awaited<ReturnType<typeof resolveProjectContext>>, app: string) => Promise<void>, embedded = false) {
   const root = await mkdtemp(join(tmpdir(), "memsphere-app-test-"));
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT, gitConfig: process.env.GIT_CONFIG_GLOBAL,
@@ -385,6 +386,122 @@ test("App installation shares a Project Store between View API and CLI",{timeout
   execFileSync(process.execPath,[...cliArguments,"--project","test","data","update","first","--store","expenses","--value",'{"amount":11}',"--output","json"],{cwd:root,encoding:"utf8"});
   assert.deepEqual((await invoke("read",{})).record.value,{amount:11});
 }));
+
+for (const operation of ["save", "remove"] as const) {
+  test(`example caller displays refresh and confirmation after a stale ${operation}`, {timeout:30000}, async () => fixture(async (_root, context) => {
+    const {createBusinessStore} = await import("../src/project/business-stores.js");
+    const {writeData, readData} = await import("../src/project/data-service.js");
+    const {createRecordEditor, createHttpInvoker} = await import(new URL("../examples/apps/project-store/record-editor.mjs", import.meta.url).href);
+    await mutateModel({}, context.primary.paths.root, "create", "example/expense.json", {source:JSON.stringify({type:"object",properties:{amount:{type:"number"}},required:["amount"],additionalProperties:false})});
+    for (const [id, amount] of [["expenses-a",3],["expenses-b",99]] as const) {
+      await createBusinessStore({}, context.primary.paths.root, id, {model:"example/expense.json",kind:"value",factory:"memsphere/filesystem-json",config:{directory:`data/${id}`}});
+      await writeData({}, context.primary.paths.root, id, "first", "create", {kind:"value",value:{amount}});
+    }
+    await installApp(context, projectStoreExample, {expensesStore:"expenses-a"});
+    await setAppEnabled(context, "org.example.project-store", true);
+    const config = await readConfig();
+    config.view = {host:"127.0.0.1",port:0};
+    const server = createViewServer(config);
+    await new Promise<void>(resolve => server.listen(0,"127.0.0.1",resolve));
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const messages: string[] = [];
+    const displayed: any[] = [];
+    const confirmations: any[] = [];
+    let confirm = false;
+    const editor = createRecordEditor({
+      invoke:createHttpInvoker({baseUrl,project:"test"}),
+      notify:(message:string) => { messages.push(message); console.log(`caller ${operation}: ${message}`); },
+      showRecord:(record:unknown) => { displayed.push(record); console.log(`caller record: ${JSON.stringify(record)}`); },
+      confirmTarget:async (target:unknown) => { confirmations.push(target); return confirm; }
+    });
+    const change = () => operation === "save" ? editor.save({amount:8}) : editor.remove();
+    try {
+      await editor.load("first");
+      await configureApp(context,"org.example.project-store",{expensesStore:"expenses-b"});
+      assert.equal((await change()).status,"binding-changed");
+      assert(messages.some(message => message.includes("数据来源已改变") && message.includes("重新确认")));
+      assert(messages.some(message => message.includes("expenses-b") && message.includes("不会自动重试")));
+      assert.equal(displayed.at(-1).storeId,"expenses-b");
+      assert.deepEqual(displayed.at(-1).record.value,{amount:99});
+      assert.equal(confirmations.length,0,"stale request must refresh without automatically applying to B");
+      assert.deepEqual((await readData({},context.primary.paths.root,"expenses-a","first")).value,{amount:3});
+      assert.deepEqual((await readData({},context.primary.paths.root,"expenses-b","first")).value,{amount:99});
+      assert.equal((await change()).status,"cancelled");
+      assert.equal(confirmations.at(-1).storeId,"expenses-b");
+      assert.deepEqual((await readData({},context.primary.paths.root,"expenses-b","first")).value,{amount:99});
+      confirm = true;
+      assert.equal((await change()).status,operation === "save" ? "saved" : "removed");
+      assert.deepEqual((await readData({},context.primary.paths.root,"expenses-a","first")).value,{amount:3});
+      if (operation === "save") assert.deepEqual((await readData({},context.primary.paths.root,"expenses-b","first")).value,{amount:8});
+      else await assert.rejects(readData({},context.primary.paths.root,"expenses-b","first"),{code:"NOT_FOUND"});
+      if (operation === "save") await verifyTerminalCaller(context, baseUrl);
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  }));
+}
+
+async function verifyTerminalCaller(context: Awaited<ReturnType<typeof resolveProjectContext>>, baseUrl: string) {
+  const {spawn} = await import("node:child_process");
+  const {readData} = await import("../src/project/data-service.js");
+  await configureApp(context,"org.example.project-store",{expensesStore:"expenses-a"});
+  const child = spawn(process.execPath, [join(projectStoreExample,"client.mjs"),baseUrl,"test","first"], {stdio:["pipe","pipe","pipe"]});
+  let output = "", stderr = "", cursor = 0, ended = false;
+  let problem: Error | undefined;
+  let waiting: {marker:string;resolve:()=>void;reject:(error:Error)=>void;timer:ReturnType<typeof setTimeout>} | undefined;
+  const settle = () => {
+    if (!waiting) return;
+    const position = output.indexOf(waiting.marker,cursor);
+    if (position >= 0) {
+      cursor = position + waiting.marker.length;
+      const ready = waiting; waiting = undefined; clearTimeout(ready.timer); ready.resolve();
+    } else if (ended || problem) {
+      const failed = waiting; waiting = undefined; clearTimeout(failed.timer);
+      failed.reject(problem ?? new Error(`terminal exited before ${failed.marker}: ${output}\n${stderr}`));
+    }
+  };
+  child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+  child.stdout.on("data",chunk => { output += chunk; settle(); });
+  child.stderr.on("data",chunk => { stderr += chunk; });
+  child.on("error",error => { problem = error; settle(); });
+  child.stdin.on("error",error => { problem = error; settle(); });
+  const closed = new Promise<number|null>(resolve => child.once("close",code => { ended = true; settle(); resolve(code); }));
+  const until = (marker:string) => new Promise<void>((resolve,reject) => {
+    const timer = setTimeout(() => {
+      waiting = undefined;
+      reject(new Error(`terminal did not display ${marker}: ${output}\n${stderr}`));
+    },10000);
+    waiting = {marker,resolve,reject,timer}; settle();
+  });
+  const enter = (line:string) => child.stdin.write(`${line}\n`);
+  try {
+    await until("命令> ");
+    assert(output.includes('"storeId":"expenses-a"'));
+    await configureApp(context,"org.example.project-store",{expensesStore:"expenses-b"});
+    enter('save {"amount":12}');
+    await until("数据来源已改变，请刷新并重新确认目标后再保存或删除。");
+    await until("命令> ");
+    assert(output.includes('"storeId":"expenses-b"'));
+    assert.deepEqual((await readData({},context.primary.paths.root,"expenses-b","first")).value,{amount:8});
+    enter('save {"amount":12}');
+    await until("确认在 expenses-b 保存？输入 yes 确认：");
+    enter("no");
+    await until("已取消，本次未修改当前目标的数据。");
+    await until("命令> ");
+    assert.deepEqual((await readData({},context.primary.paths.root,"expenses-b","first")).value,{amount:8});
+    enter('save {"amount":12}');
+    await until("确认在 expenses-b 保存？输入 yes 确认：");
+    enter("yes");
+    await until("保存成功。");
+    await until("命令> ");
+    assert.deepEqual((await readData({},context.primary.paths.root,"expenses-a","first")).value,{amount:3});
+    assert.deepEqual((await readData({},context.primary.paths.root,"expenses-b","first")).value,{amount:12});
+    enter("quit");
+    assert.equal(await closed,0,stderr);
+    console.log(`terminal caller transcript:\n${output}`);
+  } finally {
+    if (!ended) child.kill();
+    await closed;
+  }
+}
 
 test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>sharedHttpFixture(async({root,context,origin,invoke})=>{
   const current=await invoke("read",{});const http=await import("node:http");

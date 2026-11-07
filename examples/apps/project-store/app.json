@@ -8,5 +8,5 @@
   "projectStores": [
     { "key": "expenses", "model": "example/expense.json", "kind": "ValueStore", "configKey": "expensesStore" }
   ],
-  "backend": { "entry": "backend.mjs", "operations": { "read": "read", "save": "write" } }
+  "backend": { "entry": "backend.mjs", "operations": { "read": "read", "save": "write", "remove": "write" } }
 }
