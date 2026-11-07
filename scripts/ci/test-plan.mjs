@@ -29,6 +29,7 @@ export const testSuites = {
   "platform-rewind": { title: "Platform integration · Rewind & process ownership", categories: [] },
   "platform-filesystem": { title: "Platform integration · Filesystem & paths", categories: [] },
   "platform-upgrade": { title: "Platform integration · Project upgrades", categories: [] },
+  "platform-memory-publication": { title: "Platform integration · Memory publication", categories: [] },
   "platform-git": { title: "Platform integration · Git & worktrees", categories: [] },
   platform: { title: "Platform integration", categories: [] },
   "model-ui": { title: "Models & Settings UI", categories: ["model-ui"] },

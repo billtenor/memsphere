@@ -12,7 +12,7 @@ export function ciProfile(event, input = "default") {
 
 const systems = ["ubuntu-24.04", "macos-latest", "windows-latest"];
 const portableSuites = ["integration-model-ui", "integration-review-ui", "integration-cli", "integration-memory-and-projects", "integration-runtime-core"];
-const nativeSuites = ["platform-process", "platform-locks", "platform-cli", "platform-rewind", "platform-filesystem", "platform-git", "platform-upgrade"];
+const nativeSuites = ["platform-process", "platform-locks", "platform-cli", "platform-rewind", "platform-filesystem", "platform-git", "platform-memory-publication", "platform-upgrade"];
 
 export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);

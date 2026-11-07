@@ -8,7 +8,7 @@
 | `test/platform/`、`test/ci/platform/` 原生集成契约 | Linux、macOS、Windows | Linux、macOS、Windows |
 | 其他集成/模块协作测试 | Linux | Linux、macOS、Windows |
 
-`platform` 目录明确表示被测契约有操作系统差异风险。进程生命周期、跨进程锁、原生 CLI、回溯进程归属、文件系统、Git/worktree 与项目升级分别分组；普通浏览器集成按模型/设置与内容/评审界面分组，每个文件在适用系统上只分配一次。普通浏览器或 HTTP 业务契约不会只因使用浏览器或通过 Git 准备 fixture 就归为原生测试。Windows 专有 API 用例保留适用平台限制，不把其他系统跳过说成验证通过。
+`platform` 目录明确表示被测契约有操作系统差异风险。进程生命周期、跨进程锁、原生 CLI、回溯进程归属、文件系统、Git/worktree、Memory 发布与项目升级分别分组；普通浏览器集成按模型/设置与内容/评审界面分组，每个文件在适用系统上只分配一次。普通浏览器或 HTTP 业务契约不会只因使用浏览器或通过 Git 准备 fixture 就归为原生测试。Windows 专有 API 用例保留适用平台限制，不把其他系统跳过说成验证通过。
 
 - `npm run test:unit` 构建后运行全部单元文件；`npm test` 保留本地全部测试入口。
 - `node scripts/ci/run-tests.mjs --suite=unit --list` 查看单元选取；`--suite=integration` 查看全部非单元测试；`--suite=platform` 查看原生契约。CI 的业务分组由 `ci-plan.mjs` 组合相应子集。
