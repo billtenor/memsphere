@@ -29,6 +29,12 @@ export type ProcedureAction = {
 };
 export type ProcedureDefinition = {
     actions: ProcedureAction[];
+    names?: string[];
+    defines?: string[];
+    goals?: string[];
+    asserts?: unknown[];
+    suggests?: unknown[];
+    effectiveRules?: RuleProjection;
 };
 export type ProcedureEdge = {
     dependencyIndex?: number;
@@ -189,12 +195,15 @@ export function createProcedureGraph(initial: ProcedureDefinition, options: {
         if (requirements && options.rulesBody)
             requirements.append(options.rulesBody(a));
         else
-            for (const source of [a, a.artifact])
+            for (const [source, scope] of [[a, t('步骤规则', 'Action rules')], [a.artifact, t('产物规则', 'Artifact rules')]] as const) {
+                if (!source?.asserts?.length && !source?.suggests?.length) continue;
+                const scoped = el('section'); scoped.append(el('h4', scope)); requirements!.append(scoped);
                 for (const channel of ['asserts', 'suggests'] as const) {
                     const view = graphRuleGroup(channel === 'asserts' ? t('必须遵守', 'Required rules') : t('建议', 'Suggestions'), source?.[channel], source?.effectiveRules, channel, Boolean(en));
                     if (view)
-                        requirements!.append(view);
+                        scoped.append(view);
                 }
+            }
         if (a.artifact?.model) {
             const model = a.artifact.model as Record<string, unknown>;
             const modelGroup = el('div');

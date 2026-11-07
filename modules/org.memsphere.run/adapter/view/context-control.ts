@@ -1,6 +1,8 @@
+import { effectiveRuleStyles } from "../../../shared/view/effective-rules.js";
 import { joinEvidence, type JoinFrame } from './graph-run-projection.js';
 import { createGraphCanvas, graphStatistics } from '../../../shared/view/graph-canvas.js';
 import { createProcedureGraph, type ProcedureDefinition, type ProcedureAction } from "../../../shared/view/procedure-graph.js";
+import { graphRuleGroup } from "../../../shared/view/graph-rules.js";
 import type { ViewUi } from "@memsphere/view-sdk";
 import { renderArtifactValue } from "./run-detail.js";
 import { contextControlStyles } from "./context-control-styles.js";
@@ -44,10 +46,15 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const english = locale?.startsWith("en");
   const label = (zh: string, en: string) => english ? en : zh;
   const root = element("section", "cc-exploration"); root.dataset.contextControl = "";
-  const style = element("style"); style.textContent = contextControlStyles; root.append(style);
+  const style = element("style"); style.textContent = contextControlStyles + effectiveRuleStyles; root.append(style);
   const graphHost = element("div", "cc-canvas-scroll");
   const graphCard = element("section", "cc-graph-card"); graphCard.setAttribute("aria-label", label("产物依赖图", "Artifact dependency graph")); const artifactCanvas=createGraphCanvas({locale,viewport:graphHost});graphCard.append(artifactCanvas.element);root.append(graphCard);
   const work = element("section", "cc-work"); root.insertBefore(work, graphCard);
+  const definitionInfo = element("details", "cc-procedure-definition");
+  definitionInfo.append(element("summary", "cc-procedure-summary", label("流程信息", "Procedure information")));
+  const definitionBody = element("div", "cc-procedure-definition-body");
+  definitionInfo.append(definitionBody);
+  let definitionKey = "";
   let snapshot: Snapshot, history: ReturnType<typeof artifactHistory>, selected: string | undefined, currentId: string | undefined;
   let currentKind: "artifact" | "external" = "artifact";
   let dialog: HTMLDialogElement | undefined, origin: HTMLElement | undefined, generation = 0, disposed = false, layoutGeneration = 0;
@@ -251,6 +258,11 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const facts=element("dl","cc-execution-facts");for(const [name,value]of [[label("状态","Status"),statuses[step.status]??step.status],[label("创建时间","Created"),step.createdAt],[label("开始时间","Started"),step.startedAt],[label("结束时间","Ended"),step.endedAt]])if(value){const content=element("dd");if(name!==label("状态","Status")){const time=element("time","",new Date(value).toLocaleString(english?"en":"zh-CN"));time.dateTime=value;content.append(time);}else content.textContent=value;facts.append(element("dt","",name),content);}info.append(facts);
     return info;
   }
+  function actionDefinition(action: ProcedureAction) {
+    const details = element("details", "cc-action-definition");
+    details.append(element("summary", "", label("流程定义", "Procedure definition")), procedureCanvas!.actionBody(action));
+    return details;
+  }
   async function openGraphAction(action: ProcedureAction, stepId?: string, chosenArtifactId?: string) {
     if(snapshot.lazy&&!loadedActions.has(action.id)){
       disposeReview?.();renderController?.abort();const requestGeneration=++generation;
@@ -294,7 +306,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
         const heading=element("div","cc-member-heading");heading.append(element("h3","",label("产物成员","Artifact members")),ui.badge({text:String(count)}));body.append(heading);
         const list=element("div","cc-member-list");for(const [source,ids]of items){if(!ids.length){const definition=(snapshot.graph!.procedure as ProcedureDefinition).actions.find(a=>a.id===source);list.append(element("p","cc-member-empty",`${definition?.artifact?.name??source} · ${label("0 个产物","0 artifacts")}`));}for(const id of ids)list.append(graphMember(id));}body.append(list);
       }else body.append(element("p","cc-step-empty",label("本次执行尚未产生产物。","This execution has no artifact yet.")));
-      body.append(executionInformation(step));graphBack(head);
+      body.append(actionDefinition(action), executionInformation(step));graphBack(head);
       dialog.replaceChildren(head, body); dialog.setAttribute("aria-label",label("运行详情","Run details")); if (!dialog.open) dialog.showModal(); return;
     }
     await open(artifactId);
@@ -305,7 +317,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     if(metadata){const facts=info.querySelector("dl")!;facts.append(element("dt","",label("产物 ID","Artifact ID")),element("dd","cc-artifact-id",metadata.textContent??""));}
     header?.querySelector(".cc-artifact-info")?.remove();
     const upstream=upstreamSteps(step);if(upstream)header?.append(upstream);
-    header?.append(info);
+    header?.append(actionDefinition(action), info);
 
   }
   async function openExternal(id: string) {
@@ -361,6 +373,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       const nextKey = JSON.stringify(value);
       if (nextKey === snapshotKey) return;
       const detailChanged = !snapshot || detailFingerprint(snapshot) !== detailFingerprint(value);
+      if (snapshot && snapshot.run.id !== value.run.id) definitionInfo.open = false;
       if(value.lazy&&snapshot?.run.id===value.run.id){
         value.artifacts=snapshot.artifacts;artifactsLoaded=false;
         if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
@@ -373,6 +386,20 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       work.hidden = !value.graph;
       if (value.graph) {
         const definition = value.graph.procedure as ProcedureDefinition;
+        const nextDefinitionKey = JSON.stringify([value.run.id, definition.names, definition.defines, definition.goals, definition.asserts, definition.suggests, definition.effectiveRules]);
+        if (nextDefinitionKey !== definitionKey) {
+        definitionKey = nextDefinitionKey;
+        definitionBody.replaceChildren();
+        for (const [title, values] of [[label("名称", "Names"), definition.names], [label("定义", "Definitions"), definition.defines], [label("目标", "Goals"), definition.goals]] as const) {
+          if (!values?.length) continue;
+          const section = element("section"), list = element("ul"); section.append(element("h3", "", title), list);
+          values.forEach(value => list.append(element("li", "", value))); definitionBody.append(section);
+        }
+        for (const channel of ["asserts", "suggests"] as const) {
+          const group = graphRuleGroup(channel === "asserts" ? label("总体要求", "Overall requirements") : label("总体建议", "Overall suggestions"), definition[channel], definition.effectiveRules, channel, Boolean(english));
+          if (group) definitionBody.append(group);
+        }
+        }
         artifactCanvas.setStatistics(graphStatistics(definition.actions));
         const summary = (id: string) => `${snapshot.graph!.work.filter(step => step.source?.actionId === id).length} ${label("次执行", "executions")}`;
         if (!procedureCanvas) {
@@ -398,7 +425,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
             } else body.append(element("p", "", evidence.state === "condition-not-accepted" ? label("最近一次汇合的条件未通过", "The latest join condition was not accepted") : label("暂无可用的汇合记录", "No join evidence available")));
             return body;
           }, onClose:()=>{graphSelection=undefined;}, onAction: action => { void openGraphAction(action); } });
-          work.replaceChildren(procedureCanvas.element);
+          work.replaceChildren(definitionInfo, procedureCanvas.element);
         } else procedureCanvas.update(definition);
       } else { procedureCanvas?.dispose(); procedureCanvas = undefined; work.replaceChildren();artifactCanvas.setSummary(label("自由探索","Exploration"),`${label("产物","Artifacts")} ${value.artifacts.length} · ${label("执行","Executions")} ${value.steps.length} · ${label("外部资料","External sources")} ${value.externals?.length??0}`); }
       syncGraphView();

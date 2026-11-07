@@ -1,3 +1,4 @@
+import { appendEffectiveRules, countEffectiveRules, effectiveRuleStyles } from "../../../shared/view/effective-rules.js";
 import { createProcedureGraph, type ProcedureDefinition } from "../../../shared/view/procedure-graph.js";
 import {
   defineViewPlugin,
@@ -876,7 +877,7 @@ function createMemoryPageMounts(
     async mount({ element, portal: mountPortal }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
-      style.textContent = memoryStyles + contentFlowStyles + defaultContentStyles + pageLayoutStyles;
+      style.textContent = memoryStyles + effectiveRuleStyles + contentFlowStyles + defaultContentStyles + pageLayoutStyles;
       element.append(style);
       element.classList.add("memory-surface", `memory-${surface}-surface`);
       await ensure(context.route);
@@ -3067,45 +3068,6 @@ function renderRuleReference(ref: JsonRecord, effective: JsonRecord | undefined,
   return wrap;
 }
 
-function effectiveEntries(node: JsonRecord, channel: "asserts" | "suggests"): unknown[] {
-  const direct = node[channel];
-  if (Array.isArray(direct)) return direct;
-  if (Array.isArray(node.entries)) return node.entries;
-  return [];
-}
-
-function countEffectiveRules(node: JsonRecord): number {
-  let count = 0;
-  for (const value of [...effectiveEntries(node, "asserts"), ...effectiveEntries(node, "suggests")]) {
-    if (typeof value === "string" || (value && typeof value === "object" && (value as JsonRecord).kind === "rule")) count += 1;
-    else if (value && typeof value === "object") count += countEffectiveRules(value as JsonRecord);
-  }
-  for (const section of array(node.sections)) count += countEffectiveRules(section);
-  return count;
-}
-
-function appendEffectiveRules(parent: HTMLElement, node: JsonRecord, channel: "asserts" | "suggests"): void {
-  const entries = effectiveEntries(node, channel);
-  if (entries.length) {
-    const list = document.createElement("ul"); list.className = "effective-rule-list";
-    for (const entry of entries) {
-      if (typeof entry === "string") list.append(el("li", "", entry));
-      else if (entry && typeof entry === "object") {
-        const record = entry as JsonRecord;
-        if (record.kind === "rule") list.append(el("li", "", String(record.text ?? "")));
-        else appendEffectiveRules(list, record, channel);
-      }
-    }
-    parent.append(list);
-  }
-  for (const section of array(node.sections)) {
-    const block = el("section", "memory-node");
-    block.append(el("h4", "", String(section.name ?? "")));
-    for (const definition of array(section.defines)) block.append(el("p", "", scalar(definition)));
-    appendEffectiveRules(block, section, channel);
-    parent.append(block);
-  }
-}
 function appendStringList(parent: HTMLElement, key: string, values: unknown[], path: string, comment?: CommentCallback, t: (key: string) => string = value => value, ui?: ViewUi): void {
   if (!values.length) return;
   const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block", ui);

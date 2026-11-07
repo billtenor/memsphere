@@ -35,7 +35,7 @@ export function contextRunPayload(snapshot: Snapshot, lightweight = false) {
     contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, artifacts: snapshot.artifacts.map(a => ({ ...a, ...(a.writing ? { writingProgress: { index: a.writing.index, items: a.writing.items.map(item => ({ id: item.id, path: item.schemaContext?.path })), skipped: a.writing.skipped, submitting: Boolean(a.writing.submission), validation: snapshot.steps.find(s => s.id === a.stepId)?.validation?.artifactId === a.id && snapshot.steps.find(s => s.id === a.stepId)?.validation?.draftRevision === snapshot.artifactRevisions?.[a.id] ? snapshot.steps.find(s => s.id === a.stepId)?.validation : undefined } } : {}) })), ...(graph ? { graph } : {}) } };
 }
 /** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
-export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false) {
+export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false, projection?: { surface: 'overview' | 'artifacts' | 'action'; actionId?: string }) {
   const payload = contextRunPayload(snapshot, lightweight);
   const procedure = payload.context.graph?.procedure;
   if (!procedure) return payload;
@@ -53,11 +53,15 @@ export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = 
     const frozen = snapshot.run.schemaContracts?.[action.id];
     if (frozen && action.artifact) Object.assign(action.artifact.model, { frozenDefinition: frozen.definition });
   }
-  for (const action of procedure.actions) for (const source of [action, action.artifact]) {
+  const actions = projection?.surface === 'action' ? procedure.actions.filter(action => action.id === projection.actionId) : procedure.actions;
+  const sources = !projection ? [procedure, ...actions.flatMap(action => [action, action.artifact])]
+    : projection.surface === 'overview' ? [procedure]
+    : projection.surface === 'action' ? actions.flatMap(action => [action, action.artifact]) : [];
+  for (const source of sources) {
     if (!source) continue;
     const effectiveRules = {};
     for (const channel of ['asserts', 'suggests'] as const) {
-      const parts = source[channel];
+      const parts = channel === "asserts" ? source.asserts : "suggests" in source ? source.suggests : undefined;
       const projected = [];
       for (const part of parts ?? []) {
         if (typeof part === 'string') continue;
