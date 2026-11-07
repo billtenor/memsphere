@@ -28,7 +28,11 @@ export const contextControlStyles = `
 .cc-exploration .pg-dialog .pg-detail-group h4:not(.pg-group-title) { margin:10px 0 4px; }
 .cc-exploration .pg-dialog .pg-values li + li { margin-top:4px; }
 .cc-action-definition pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
-.cc-exploration .pg-rule-content { margin-inline-start:16px; min-width:0; }
+.cc-exploration .pg-rule-reference { margin:0; }
+.cc-exploration .pg-rule-reference > summary { cursor:pointer; list-style:none; }
+.cc-exploration .pg-rule-reference > summary::-webkit-details-marker { display:none; }
+.cc-exploration .effective-rule-section h4 { margin:0 0 8px; font-size:13px; color:var(--mem-view-color-text); }
+.cc-exploration .pg-detail-group .effective-rule-section h4 { margin:0 0 8px; font-size:13px; color:var(--mem-view-color-text); }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
 

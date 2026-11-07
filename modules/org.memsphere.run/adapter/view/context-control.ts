@@ -1,3 +1,4 @@
+import { effectiveRuleStyles } from "../../../shared/view/effective-rules.js";
 import { joinEvidence, type JoinFrame } from './graph-run-projection.js';
 import { createGraphCanvas, graphStatistics } from '../../../shared/view/graph-canvas.js';
 import { createProcedureGraph, type ProcedureDefinition, type ProcedureAction } from "../../../shared/view/procedure-graph.js";
@@ -45,7 +46,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const english = locale?.startsWith("en");
   const label = (zh: string, en: string) => english ? en : zh;
   const root = element("section", "cc-exploration"); root.dataset.contextControl = "";
-  const style = element("style"); style.textContent = contextControlStyles; root.append(style);
+  const style = element("style"); style.textContent = contextControlStyles + effectiveRuleStyles; root.append(style);
   const graphHost = element("div", "cc-canvas-scroll");
   const graphCard = element("section", "cc-graph-card"); graphCard.setAttribute("aria-label", label("产物依赖图", "Artifact dependency graph")); const artifactCanvas=createGraphCanvas({locale,viewport:graphHost});graphCard.append(artifactCanvas.element);root.append(graphCard);
   const work = element("section", "cc-work"); root.insertBefore(work, graphCard);
