@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { parseMemoryEntity } from "../src/memory/store.js";
 import { collectMemoryReferenceTargets } from "../src/memory/references.js";
@@ -72,18 +73,27 @@ test("submission recovers a sealed draft after the Step frame write is interrupt
     const start = await g.start({ name: "Recovery", procedure: procedure() }), run = start.run.id, step = start.steps[0].id;
     await g.enter(run, step); const writing = await g.enterSchema(run, step);
     await g.schemaWrite(run, step, "report", writing.position!, '{"summary":"draft"}');
+    await assert.rejects(g.report(run, step, { text: "{}" }), /summary/);
     const update = service.stores.step.update.bind(service.stores.step);
     let fail = true;
     service.stores.step.update = async (c, id, value, options) => {
       if (fail && (value as import("../src/context_control/types.js").Step).frames?.length) { fail = false; throw Error("frame interrupted"); }
       return update(c, id, value, options);
     };
-    await assert.rejects(g.report(run, step, { text: '{"summary":"final"}' }), /frame interrupted/);
+    await assert.rejects(g.report(run, step, { text: '{"summary":"final"}' }), (error: any) => {
+      assert.match(error.message, /frame interrupted/);
+      assert.deepEqual(error.details, { runId: run, stepId: step, artifactId: writing.draft!.id, recoveryCommand: `memsphere run status --run ${run}`, message: "Draft submission sealed; recover status before repeating report" });
+      return true;
+    });
     const sealed = await g.schemaShow(run, step); assert.equal(sealed.phase, "submitting");
     const recovered = await g.advance(run);
     assert.equal(recovered.artifacts.length, 1); assert.equal(recovered.artifacts[0].id, writing.draft!.id);
     assert.equal(recovered.artifacts[0].content!.payload.content, '{"summary":"final"}');
     assert.equal(recovered.steps[0].status, "done");
+    assert.equal(recovered.steps[0].validation?.status, "passed");
+    assert.equal(recovered.steps[0].validation?.artifactId, writing.draft!.id);
+    assert.equal(recovered.steps[0].validation?.sha256, createHash("sha256").update('{"summary":"final"}').digest("hex"));
+    assert.deepEqual((await g.schemaShow(run, step)).validation, recovered.steps[0].validation);
     assert.deepEqual((await g.advance(run)).artifacts, recovered.artifacts);
   });
 });
@@ -356,6 +366,10 @@ test("Schema final submission accepts a frozen content reference and retains it 
     const recovered = await g.advance(run);
     assert.equal(recovered.steps[0].status, "done"); assert.equal(recovered.artifacts[0].id, draft.draft!.id);
     assert.deepEqual(recovered.artifacts[0].contentRef, contentRef);
+    assert.equal(recovered.steps[0].validation?.status, "passed");
+    assert.equal(recovered.steps[0].validation?.sha256, contentRef.sha256);
+    assert.equal(recovered.steps[0].validation?.artifactId, draft.draft!.id);
+    assert.deepEqual((await g.schemaShow(run, step)).validation, recovered.steps[0].validation);
     assert.equal(Buffer.from((await g.readArtifact(run, draft.draft!.id)).bytes).toString(), bytes.toString());
   });
 });

@@ -399,7 +399,7 @@ export class GraphRuntime {
     if ((stage.nextStatus === "awaiting_review") !== Object.hasOwn(stage, "round")) throw failure("INVALID_STATE", "Submission round must match awaiting_review status");
     const spec = this.action(run, step).artifact;
     if (!spec) throw failure("INVALID_STATE", "Collect has a submission frame");
-    await validateGraphBody(stage.artifact, spec, this.reader);
+    const checked = await validateGraphBody(stage.artifact, spec, this.reader);
     if (stage.draft) {
       const draft = await this.records.require<Artifact>("artifact", runId, stage.draft.id);
       if (draft.value.status === "draft") {
@@ -440,6 +440,7 @@ export class GraphRuntime {
     }
     row = await this.step(run, stepId); step = structuredClone(row.value); stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
     if (!stage) return;
+    step.validation = { sha256: checked.sha256, artifactId: stage.artifact.id, checkedAt: now(), status: "passed", issues: [] };
     step.artifact = { mode: "produce", id: stage.artifact.id }; step.status = stage.nextStatus;
     if (stage.round && !step.reviewRounds?.some(r => r.id === stage!.round!.id)) step.reviewRounds = [...(step.reviewRounds ?? []), stage.round];
     if (stage.nextStatus === "done") { step.completionSequence = stage.completionSequence; step.endedAt = stage.endedAt; }
@@ -793,20 +794,41 @@ export class GraphRuntime {
     const round = createGraphRound(run, this.procedure(run), action, artifact.id);
     const token = newId("frame");
     const submissionFrame: SubmissionFrame = { artifact, nextStatus: round ? "awaiting_review" : "done", ...(round ? { round } : {}), ...(draft ? { draft: { id: draft.value.id, token } } : {}) };
-    if (draft) {
-      const sealed = structuredClone(draft.value);
-      if (artifact.content) { sealed.content = artifact.content; delete sealed.contentRef; }
-      else { sealed.contentRef = artifact.contentRef; delete sealed.content; }
-      sealed.writing!.submission = { token, frame: submissionFrame };
+    let savedSubmission: "sealed" | "saved" | undefined;
+    try {
+      if (draft) {
+        const sealed = structuredClone(draft.value);
+        if (artifact.content) { sealed.content = artifact.content; delete sealed.contentRef; }
+        else { sealed.contentRef = artifact.contentRef; delete sealed.content; }
+        sealed.writing!.submission = { token, frame: submissionFrame };
+        await this.productionStep(runId, stepId);
+        await this.records.update("artifact", runId, draft, sealed);
+        savedSubmission = "sealed";
+      }
+      step.validation = { sha256: checked.sha256, artifactId: artifact.id, checkedAt: now(), status: "passed", issues: [] };
+      step.frames = [{ id: token, type: "submission", submissionFrame }];
       await this.productionStep(runId, stepId);
-      await this.records.update("artifact", runId, draft, sealed);
+      await this.records.update("step", runId, row, step);
+      savedSubmission ??= "saved";
+      await this.recoverSubmission(runId, stepId);
+      const snapshot = await this.advance(runId); requireEffectiveStep(snapshot.run, stepId);
+      return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact };
+    } catch (error) {
+      const details = { ...(error as { details?: object }).details, runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}` };
+      if (!savedSubmission) {
+        // A Store write may have persisted before its caller observed an error.
+        // Read the fixed intent back rather than retrying or claiming no effect.
+        try {
+          if (draft && (await this.records.require<Artifact>("artifact", runId, draft.value.id)).value.writing?.submission?.token === token) savedSubmission = "sealed";
+          const current = (await this.step(run, stepId)).value;
+          if (!savedSubmission && (current.frames?.some(frame => frame.id === token) || current.artifact?.mode === "produce" && current.artifact.id === artifact.id)) savedSubmission = "saved";
+        } catch {
+          throw Object.assign(error as object, { details: { ...details, message: "Submission save outcome could not be confirmed; recover status before repeating report" } });
+        }
+      }
+      if (!savedSubmission) throw error;
+      throw Object.assign(error as object, { details: { ...details, message: savedSubmission === "sealed" ? "Draft submission sealed; recover status before repeating report" : "Submission identity saved; recover status before repeating report" } });
     }
-    step.validation = { sha256: checked.sha256, artifactId: artifact.id, checkedAt: now(), status: "passed", issues: [] };
-    step.frames = [{ id: token, type: "submission", submissionFrame }];
-    await this.productionStep(runId, stepId);
-    await this.records.update("step", runId, row, step);
-    try { await this.recoverSubmission(runId, stepId); const snapshot = await this.advance(runId); requireEffectiveStep(snapshot.run, stepId); return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact }; }
-    catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}`, message: "Submission identity saved; recover status before repeating report" } }); }
   }
   async submitReview(runId: string, stepId: string, roundId: string, actorId: string | "runner", vote: ArtifactReviewVoteValue, comments: ArtifactReviewComment[] = [], summary?: string, delegationNote?: string, guard?: { expectedRevision?: number; attemptId?: string; human?: boolean }) {
     requireGraphVote(vote);

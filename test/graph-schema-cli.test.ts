@@ -87,3 +87,33 @@ test("CLI and Continue keep concurrent Schema Step drafts and their positions is
   const completed = await call("run", "show", "--run", started.runId);
   assert.deepEqual(new Set(completed.completeIds), new Set([first.draft.id, second.draft.id]));
 });
+
+test("CLI status recovery replaces a previous failed diagnostic with the sealed submission hash", { timeout: 90000 }, async t => {
+  const { f, call } = await schemaCliFixture(t);
+  const { openContextControl } = await import("../src/project/context-control.js");
+  const { createHash } = await import("node:crypto");
+  const service = (await openContextControl(f.root))!;
+  const final = '{"summary":"recovered final"}';
+  const identity = await service.withGraph(async g => {
+    const p = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["recover-cli"], defines: ["Report"], actions: [{ tag: "!action", id: "report", description: "Report", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Report", model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nfields: [summary]\n" }, payload: { contentType: "application/json" } } }] };
+    const start = await g.start({ name: "Recovery", procedure: p as import("../src/memory/ast.js").GraphProcedureMemory });
+    const run = start.run.id, step = start.steps[0].id;
+    await g.enter(run, step); const draft = await g.enterSchema(run, step);
+    await g.schemaWrite(run, step, "report", draft.position!, '{"summary":"draft"}');
+    await assert.rejects(g.report(run, step, { text: "{}" }), /summary/);
+    const update = service.stores.step.update.bind(service.stores.step);
+    service.stores.step.update = async (context, id, value, options) => {
+      if ((value as import("../src/context_control/types.js").Step).frames?.length) throw Error("frame interrupted");
+      return update(context, id, value, options);
+    };
+    try { await assert.rejects(g.report(run, step, { text: final }), /frame interrupted/); }
+    finally { service.stores.step.update = update; }
+    return { run, step, artifactId: draft.draft!.id };
+  });
+  await call("run", "status", "--run", identity.run);
+  const state = await call("run", "schema", "show", "--run", identity.run, "--step", identity.step);
+  assert.equal(state.phase, "submitted");
+  assert.equal(state.validation.status, "passed"); assert.equal(state.validation.artifactId, identity.artifactId);
+  assert.equal(state.validation.sha256, createHash("sha256").update(final).digest("hex"));
+  assert.deepEqual(state.validation.issues, []);
+});
