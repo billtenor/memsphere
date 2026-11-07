@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { businessFixture } from "./helpers/business-data.js";
@@ -87,7 +87,7 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
  const {serializeMemoryYaml}=await import('../src/memory/serializer.js');
  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
  const refs=['statements/bad-rules','statements/good-rules'];
- const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],asserts:refs.map(target=>({tag:'!ref',target})),mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',asserts:refs.map(target=>({tag:'!ref',target})),model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}},{tag:'!action',id:'B',description:'Other action',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'A'}],artifact:{name:'Other result',asserts:refs.map(target=>({tag:'!ref',target})),model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
  const memoryRef='procedures/best-effort-rules';
  const source=(name:string)=>`!statement\nsyntax: ${graphMemorySyntax}\nnames: [${name}]\ndefines: [Rule source]\nasserts: [${name} evidence]\n`;
  const started=await service.withGraph(g=>g.start({name:`Rule ${mode}`,procedure,memorySnapshot:{memories:{[memoryRef]:{memoryRef,payload:{contentType:'application/yaml',content:serializeMemoryYaml(procedure)}},...Object.fromEntries(refs.map(reference=>[reference,{memoryRef:reference,payload:{contentType:'application/yaml',content:source(reference.split('/')[1])}}]))}}}));
@@ -96,10 +96,26 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
  if(mode==='missing')delete memories[refs[0]];
  else memories[refs[0]].payload.content=mode==='malformed'?'[':mode==='wrong-kind'?`!concept\nsyntax: ${graphMemorySyntax}\nnames: [bad-rules]\ndefines: [Wrong kind]\n`:`!statement\nsyntax: ${graphMemorySyntax}\nnames: [bad-rules]\ndefines: [Cycle]\nasserts:\n  - !ref\n    target: statements/bad-rules\n`;
  await service.stores.run.update({},started.run.id,value,{expectedRevision:stored.revision});
+ await mkdir(join(f.root,'memory/statements'),{recursive:true});
+ await writeFile(join(f.root,'memory/statements/bad-rules.yaml'),source('bad-rules').replace('bad-rules evidence','LIVE RULE MUST NOT APPEAR'));
  const before=await service.stores.run.get({},started.run.id);
  const server=createViewServer(await readProjectConfig('test-project',f.home));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
  const api=`http://127.0.0.1:${(server.address()as AddressInfo).port}/api/projects/test-project/runs/${started.run.id}`;
  try{
+  const overviewResponse=await fetch(`${api}?representation=overview`);assert.equal(overviewResponse.status,200,await overviewResponse.clone().text());const overview=await overviewResponse.json();
+  assert.deepEqual(overview.run.context.graph.procedure.effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.equal(overview.run.memorySnapshot,undefined);assert.equal(overview.run.context.run.memorySnapshot,undefined);
+  assert.equal(overview.run.context.graph.procedure.actions[0].effectiveRules,undefined);
+  const actionResponse=await fetch(`${api}?representation=action&action=A`);assert.equal(actionResponse.status,200);const actionPayload=await actionResponse.json();
+  assert.deepEqual(actionPayload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.deepEqual(actionPayload.run.context.graph.procedure.actions[0].artifact.effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.equal(actionPayload.run.context.graph.procedure.effectiveRules,undefined);
+  assert.equal(actionPayload.run.context.graph.procedure.actions[1].effectiveRules,undefined);
+  assert.equal(actionPayload.run.context.graph.procedure.actions[1].artifact.effectiveRules,undefined);
+  const artifactsResponse=await fetch(`${api}?representation=artifacts`);assert.equal(artifactsResponse.status,200);const artifactsPayload=await artifactsResponse.json();
+  assert.equal(artifactsPayload.run.context.graph.procedure.effectiveRules,undefined);
+  for(const item of artifactsPayload.run.context.graph.procedure.actions){assert.equal(item.effectiveRules,undefined);assert.equal(item.artifact.effectiveRules,undefined);}
+  assert.doesNotMatch(JSON.stringify(actionPayload),/LIVE RULE MUST NOT APPEAR/);assert.doesNotMatch(JSON.stringify(overview),/LIVE RULE MUST NOT APPEAR/);
   const response=await fetch(api);assert.equal(response.status,200,await response.clone().text());const payload=await response.json();
   assert.equal(payload.run.context.graph.work.length,1);assert.equal(payload.run.context.graph.procedure.actions[0].asserts.length,2);
   assert.deepEqual(payload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
