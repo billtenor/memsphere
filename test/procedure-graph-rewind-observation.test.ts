@@ -3,7 +3,7 @@ import test from "node:test";
 import { EventEmitter, once } from "node:events";
 import { spawn, type ChildProcess } from "node:child_process";
 import { captureProcessIdentity, type ProcessIdentity } from "../src/context_control/review-process.js";
-import { bounded, cleanupFixtureResources, createFixtureProcesses, fixtureProcesses, sameProcess, stopFixtureChild, verifyFixtureTreeExit } from "./helpers/fixture-process.js";
+import { bounded, cleanupFixtureResources, createFixtureProcesses, fixtureProcesses, sameProcess, stopFixtureChild, verifyFixtureTreeExit, windowsFixtureIdentities } from "./helpers/fixture-process.js";
 import { pinWindowsProcess } from "./helpers/windows-process-handle.js";
 import { ownedProcessObserver } from "./helpers/windows-process-observer.js";
 import { rewindFixtureResources } from "./helpers/fixture-process.js";
@@ -234,4 +234,30 @@ test("Windows fixture CIM host reads fresh identities and never reuses evidence 
   await watched.close();
   await assert.rejects(watched.alive(unrelated.child.pid!), /observer is closed/);
   assert.ok(sameProcess(unrelated.identity, await captureProcessIdentity(unrelated.child.pid!)));
+});
+
+
+test("Windows fixture uses fresh CIM identities when numeric PID signal access is denied", async () => {
+  const identity = { pid: 2147483647, group: 2147483647, started: "1000" };
+  const kill = process.kill;
+  let current: typeof identity | undefined = identity;
+  process.kill = ((pid, signal) => {
+    if (pid === identity.pid) throw Object.assign(Error("Signal probe access denied"), { code: "EPERM" });
+    return kill(pid, signal);
+  }) as typeof process.kill;
+  try {
+    const watched = fixtureProcesses(pids => windowsFixtureIdentities(pids, async () => current ? [{ ...current, parent: 1 }] : []));
+    watched.rememberSnapshot(identity);
+    assert.deepEqual(await watched.alive(identity.pid), [true], "CIM must still identify an original survivor");
+    current = { ...identity, started: "2000" };
+    assert.deepEqual(await watched.alive(identity.pid), [false], "a later owner is not the original process");
+    current = undefined;
+    assert.deepEqual(await watched.alive(identity.pid), [false], "a fresh successful CIM absence proves exit");
+  } finally { process.kill = kill; }
+});
+
+test("Windows fixture never converts failed or incomplete CIM evidence into process exit", async () => {
+  const failed = Error("controlled CIM failure");
+  await assert.rejects(windowsFixtureIdentities([123], async () => { throw failed; }), error => error === failed);
+  await assert.rejects(windowsFixtureIdentities([123], async () => [{ pid: 123, group: 123, parent: 1, started: null }]), /no creation identity/);
 });

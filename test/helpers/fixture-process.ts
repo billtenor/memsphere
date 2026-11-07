@@ -23,11 +23,13 @@ async function identities(pids: number[], query = queryWindowsProcesses): Promis
     const result = await Promise.all(pids.map(async pid => [pid, await captureProcessIdentity(pid)] as const));
     return new Map(result.filter((row): row is readonly [number, ProcessIdentity] => row[1] !== undefined));
   }
-  // One fresh CIM snapshot per observation, never a cached exit decision.
-  const selected = new Set(pids.filter(pid => {
-    try { process.kill(pid, 0); return true; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ESRCH") return false; throw error; }
-  }));
+  return windowsFixtureIdentities(pids, query);
+}
+
+export async function windowsFixtureIdentities(pids: number[], query = queryWindowsProcesses): Promise<Map<number, ProcessIdentity>> {
+  // A numeric signal probe can deny access to a retiring or recycled PID.
+  // Only the fresh CIM creation identity (or explicit absence) is exit evidence.
+  const selected = new Set(pids);
   if (!selected.size) return new Map();
   return new Map((await query()).filter(row => selected.has(row.pid)).map(row => {
     if (!row.started) throw Error(`Process ${row.pid} has no creation identity`);
