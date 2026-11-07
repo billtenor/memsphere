@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import crossSpawn from "cross-spawn";
 import { managedProjectFixture } from "./project.js";
+import { copyInitializedContextBindings } from "./initialized-context.js";
 import { runGit } from "../../src/git.js";
 import { editMemories, publishMemoryChange, renameMemory, validateMemoryChange } from "../../src/memory/changeset.js";
 import { readProjectRegistry } from "../../src/project/registry.js";
@@ -44,6 +45,7 @@ export async function changeShowFixture(t: test.TestContext) {
   await runGit(["init", "-b", "master"], { cwd: workspace });
   await managedProjectFixture("project", { bind: true, systemMemory: false });
   const projectRoot = (await readProjectRegistry(home)).projects.project.root;
+  await copyInitializedContextBindings(projectRoot);
   const seed = await editMemories({ references: ["concepts/existing", "concepts/deleted", "concepts/old-name", "concepts/late-delete", "concepts/late-rename", "concepts/scope-only", "statements/dependency"] });
   const dependency = join(seed.candidateRoot, "statements/dependency.yaml");
   await writeFile(dependency, (await readFile(dependency, "utf8")).replace("asserts: []", "asserts: [Frozen dependency rule.]"));
