@@ -9,7 +9,7 @@ import { contextControlStyles } from "./context-control-styles.js";
 import { layoutGraph } from "./graph-layout.js";
 
 type Artifact = { writingProgress?: { index: number; items: Array<{ path?: string }>; skipped: string[]; validation?: {issues: Array<{message: string}>}; submitting?: boolean }; id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
-type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ writing?: unknown; id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
+type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ writing?: { draftId: string }; id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag); node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
@@ -291,7 +291,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     };
     const result = step.artifact as { mode?: string; id?: string; items?: Record<string,string[]> } | undefined;
     const candidates = snapshot.artifacts.filter(a => a.stepId === step.id);
-    const artifactId = candidates.some(a => a.id === chosenArtifactId) ? chosenArtifactId : result?.id ?? step.reviewRounds?.at(-1)?.artifactId ?? candidates.at(-1)?.id;
+    const artifactId = candidates.some(a => a.id === chosenArtifactId) ? chosenArtifactId : candidates.find(a => a.id === step.writing?.draftId)?.id ?? result?.id ?? step.reviewRounds?.at(-1)?.artifactId ?? candidates.at(-1)?.id;
     selection.artifactId = artifactId;
     if (!artifactId) {
       disposeReview?.();
