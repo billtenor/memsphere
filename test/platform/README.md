@@ -10,6 +10,6 @@
 - `memory-publication/`：Memory 发布、ChangeSet 协作和版本作用域。
 - `upgrade/`：升级期间冻结版本、发布及 worktree 隔离。
 
-从混合文件拆出的 `.system.test.ts` 也可能保留在这里，但它们验证命令、产品 HTTP 或完整服务功能，当前不执行。目录不能覆盖文件明确声明的测试层级。
+从混合文件拆出的 `.system.test.ts` 也可能保留在这里，但它们验证命令、产品 HTTP 或完整服务功能，归系统作业在三个系统运行，Windows 专有用例按实际适用条件执行。目录不能覆盖文件明确声明的测试层级。
 
 CI 执行器的原生进程测试保留在受保护的 `test/ci/platform/`。Windows 专有 API 用例保留适用平台 skip，不把跳过说成该系统验证通过。

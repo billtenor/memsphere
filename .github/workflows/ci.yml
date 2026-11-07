@@ -1,5 +1,5 @@
 name: CI
-run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || 'CI (unit + module + integration)' }}
+run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
 
 on:
   pull_request:
@@ -39,6 +39,7 @@ jobs:
       profile: ${{ steps.plan.outputs.profile }}
       unit_matrix: ${{ steps.plan.outputs.unit_matrix }}
       module_matrix: ${{ steps.plan.outputs.module_matrix }}
+      system_matrix: ${{ steps.plan.outputs.system_matrix }}
       integration_matrix: ${{ steps.plan.outputs.integration_matrix }}
     steps:
       - uses: actions/checkout@v7
@@ -107,6 +108,39 @@ jobs:
           path: ci-results
           if-no-files-found: error
 
+  system-tests:
+    needs: plan
+    name: System tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # No custom job timeout during the Human-authorized system benchmark.
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.system_matrix) }}
+    env:
+      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Install Playwright Chromium
+        if: matrix.browser
+        run: npx playwright install chromium
+      # Build/typecheck once, then run only complete subsystem system tests.
+      - run: npm run test:ci -- --suite=system
+      - name: Preserve test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-${{ matrix.os }}-${{ matrix.suite }}
+          path: ci-results
+          if-no-files-found: error
+
   integration-tests:
     needs: plan
     name: ${{ matrix.title }} (${{ matrix.os }})
@@ -140,12 +174,10 @@ jobs:
           if-no-files-found: error
 
   windows-package-smoke:
-    # Packaged CLI lifecycle is a system test, deferred during this exploration.
-    if: false
+    # Packaged CLI lifecycle is measured separately from the file-based system suite.
     needs: plan
     name: Windows packaged CLI shells
     runs-on: windows-latest
-    timeout-minutes: 5
     env:
       MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
     steps:
@@ -203,19 +235,21 @@ jobs:
   full-result:
     name: Full cross-platform regression
     runs-on: ubuntu-24.04
-    needs: [plan, unit-tests, module-tests, integration-tests, windows-package-smoke]
-    if: false # System tests are deferred; never publish partial coverage as full.
+    needs: [plan, unit-tests, module-tests, integration-tests, system-tests, windows-package-smoke]
+    if: always() && needs.plan.outputs.profile == 'full'
     timeout-minutes: 5
     steps:
       - env:
           UNIT_RESULT: ${{ needs.unit-tests.result }}
           MODULE_RESULT: ${{ needs.module-tests.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+          SYSTEM_RESULT: ${{ needs.system-tests.result }}
           PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
         run: |
           test "$UNIT_RESULT" = success
           test "$MODULE_RESULT" = success
           test "$INTEGRATION_RESULT" = success
+          test "$SYSTEM_RESULT" = success
           test "$PACKAGE_RESULT" = success
 
   full-health-bootstrap:

@@ -33,13 +33,13 @@ test('default runs portable integration on Linux and native contracts on all sys
 test('full assigns every discovered unit and integration file exactly once per system', () => {
   for (const os of systems) {
     const assigned=createCiPlan('full',files,sources).include.filter(row=>row.os===os).flatMap(row=>selectTests(files,sources,row.suite));
-    assert.deepEqual(assigned.sort(),files.filter(file=>!file.endsWith('.system.test.ts')).sort());
+    assert.deepEqual(assigned.sort(),[...files].sort());
   }
   assert.throws(()=>createCiPlan('full',[...files,'platform/unowned/new.integration.test.ts'],{...sources,'platform/unowned/new.integration.test.ts':''}),/Unassigned or duplicate/);
 });
 
 test('unit and integration jobs are separate, retain five-minute limits and build before execution', () => {
-  for (const name of ['unit-tests','module-tests','integration-tests','windows-package-smoke','full-result'])assert.equal(workflow.jobs[name]['timeout-minutes'],5);
+  for (const name of ['unit-tests','module-tests','integration-tests','full-result'])assert.equal(workflow.jobs[name]['timeout-minutes'],5);
   const unit=workflow.jobs['unit-tests'],integration=workflow.jobs['integration-tests'];
   assert.equal(unit.strategy.matrix,'${{ fromJSON(needs.plan.outputs.unit_matrix) }}');
   assert.equal(integration.strategy.matrix,'${{ fromJSON(needs.plan.outputs.integration_matrix) }}');
@@ -47,21 +47,21 @@ test('unit and integration jobs are separate, retain five-minute limits and buil
   assert(!unit.steps.some(step=>step.run?.includes('playwright install')));
   assert(integration.steps.some(step=>step.run==='npm run test:ci -- --suite=${{ matrix.suite }}'));
   assert(integration.steps.some(step=>step.run==='npx playwright install chromium'&&step.if==='matrix.browser'));
-  assert.deepEqual(workflow.jobs['full-result'].needs,['plan','unit-tests','module-tests','integration-tests','windows-package-smoke']);
+  assert.deepEqual(workflow.jobs['full-result'].needs,['plan','unit-tests','module-tests','integration-tests','system-tests','windows-package-smoke']);
   assert.equal(workflow.jobs['full-result'].name,'Full cross-platform regression');
   const result=workflow.jobs['full-result'].steps.at(-1);
-  for(const name of ['UNIT_RESULT','MODULE_RESULT','INTEGRATION_RESULT','PACKAGE_RESULT'])assert(result.run.includes(`test "$${name}" = success`));
+  for(const name of ['UNIT_RESULT','MODULE_RESULT','INTEGRATION_RESULT','SYSTEM_RESULT','PACKAGE_RESULT'])assert(result.run.includes(`test "$${name}" = success`));
 });
 
 test('CI keeps PR cancellation separate from master and manual full histories', () => {
   assert.equal(ciProfile('pull_request','full'),'default');assert.equal(ciProfile('push'),'full');
   assert.equal(ciProfile('workflow_dispatch','full'),'full');assert.throws(()=>ciProfile('workflow_dispatch','unknown'),/Unknown CI profile/);
   assert.deepEqual(workflow.on.push.branches,['master']);assert.match(workflow.concurrency['cancel-in-progress'],/github.event_name != 'push'/);
-  assert.equal(workflow.jobs['full-result'].if,false);
+  assert.equal(workflow.jobs['full-result'].if,"always() && needs.plan.outputs.profile == 'full'");
 });
 
 
-test('module jobs run the full second layer on every OS, and deferred system coverage cannot become full evidence', () => {
+test('module jobs run the full second layer on every OS, and full evidence requires all four layers', () => {
   for (const profile of ['default','full']) {
     const rows=createCiPlan(profile,files,sources).include.filter(row=>row.layer==='module');
     assert.deepEqual(rows.map(row=>row.os),systems);
@@ -72,14 +72,14 @@ test('module jobs run the full second layer on every OS, and deferred system cov
   assert(moduleJob.steps.some(step=>step.run==='npm run test:ci -- --suite=module'));
   assert(!moduleJob.steps.some(step=>step.run?.includes('playwright install')));
   assert.equal(workflow.jobs['integration-tests'].if,undefined);
-  assert.equal(workflow.jobs['windows-package-smoke'].if,false);
-  assert.equal(workflow.jobs['full-result'].if,false);
-  assert(workflow['run-name'].includes('CI (unit + module + integration)'));
-  assert(!workflow['run-name'].includes('CI (full)'));
+  assert.equal(workflow.jobs['windows-package-smoke'].if,undefined);
+  assert.equal(workflow.jobs['full-result'].if,"always() && needs.plan.outputs.profile == 'full'");
+  assert(workflow['run-name'].includes('CI (default)'));
+  assert(workflow['run-name'].includes('CI (full)'));
 });
 
 
-test('every file declares a layer and system tests stay out of all CI profiles and default local runs', () => {
+test('every file declares a layer and all system tests run once per OS in separate jobs, while default local runs remain explicit', () => {
   assert.throws(()=>createCiPlan('default',[...files,'unclassified.test.ts'],{...sources,'unclassified.test.ts':''}),/explicit layer suffix/);
   const systemFiles=['browser.system.test.ts','platform/process/cli.system.test.ts'];
   const rootNative='model-storage.integration.test.ts';
@@ -88,8 +88,22 @@ test('every file declares a layer and system tests stay out of all CI profiles a
   for(const profile of ['default','full'])for(const os of systems){
     const assigned=createCiPlan(profile,discovered,texts).include.filter(row=>row.os===os).flatMap(row=>selectTests(discovered,texts,row.suite));
     assert(assigned.includes(rootNative));
-    for(const file of systemFiles)assert(!assigned.includes(file));
+    for(const file of systemFiles)assert.equal(assigned.filter(f=>f===file).length,1);
   }
   assert.deepEqual(selectTests(discovered,texts,'system').sort(),systemFiles.sort());
   assert(!selectTests(discovered,texts,'regression').some(file=>systemFiles.includes(file)));
+});
+
+
+test('system benchmark has no custom job deadline and keeps the five-minute lower-layer limits', () => {
+  for(const name of ['system-tests','windows-package-smoke'])assert.equal(Object.hasOwn(workflow.jobs[name],'timeout-minutes'),false);
+  const job=workflow.jobs['system-tests'];
+  assert.equal(job.strategy.matrix,'${{ fromJSON(needs.plan.outputs.system_matrix) }}');
+  assert(job.steps.some(step=>step.run==='npm run test:ci -- --suite=system'));
+  assert(job.steps.some(step=>step.run==='npx playwright install chromium'&&step.if==='matrix.browser'));
+  for(const profile of ['default','full']){
+    const rows=createCiPlan(profile,files,sources).include.filter(row=>row.layer==='system');
+    assert.deepEqual(rows.map(row=>row.os),systems);
+    for(const row of rows){assert.equal(row.suite,'system');assert.equal(row.browser,true);assert.deepEqual(selectTests(files,sources,row.suite),['browser.system.test.ts']);}
+  }
 });

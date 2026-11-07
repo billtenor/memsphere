@@ -19,14 +19,14 @@ export function createCiPlan(profile, files, sources) {
   if (!selectTests(files, sources, "unit").length) throw new Error("No unit tests discovered");
   const unknown = files.filter(file => !isUnitTest(file) && !isModuleTest(file) && !isIntegrationTest(file) && !isSystemTest(file));
   if (unknown.length) throw new Error(`Tests need an explicit layer suffix: ${unknown.join(", ")}`);
-  const include = systems.flatMap(os => ["unit", "module", ...nativeSuites, ...(profile === "full" || os === "ubuntu-24.04" ? portableSuites : [])].flatMap(suite => {
+  const include = systems.flatMap(os => ["unit", "module", "system", ...nativeSuites, ...(profile === "full" || os === "ubuntu-24.04" ? portableSuites : [])].flatMap(suite => {
     const selected = selectTests(files, sources, suite);
     if (!selected.length) return [];
-    return [{ os, suite, layer: ["unit", "module"].includes(suite) ? suite : "integration", title: testSuites[suite].title,
+    return [{ os, suite, layer: ["unit", "module", "system"].includes(suite) ? suite : "integration", title: testSuites[suite].title,
       browser: !["unit", "module"].includes(suite) && selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])) }];
   }));
   for (const os of systems) {
-    const expected = files.filter(file => !isSystemTest(file) && (profile === "full" || os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file, sources[file]))).sort();
+    const expected = files.filter(file => profile === "full" || os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isSystemTest(file) || isPlatformTest(file, sources[file])).sort();
     const assigned = include.filter(row => row.os === os).flatMap(row => selectTests(files, sources, row.suite)).sort();
     if (JSON.stringify(assigned) !== JSON.stringify(expected)) throw new Error(`Unassigned or duplicate tests on ${os}`);
   }
@@ -43,5 +43,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`matrix=${JSON.stringify(plan)}`);
   console.log(`unit_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "unit")})}`);
   console.log(`module_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "module")})}`);
+  console.log(`system_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "system")})}`);
   console.log(`integration_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "integration")})}`);
 }

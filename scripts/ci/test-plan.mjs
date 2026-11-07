@@ -18,7 +18,7 @@ export const testSuites = {
   regression: { title: "Unit, module & integration tests", categories: [] },
   unit: { title: "Unit tests", categories: [] },
   module: { title: "Module tests", categories: [] },
-  system: { title: "System tests (deferred)", categories: [] },
+  system: { title: "System tests", categories: [] },
   integration: { title: "Integration tests", categories: [] },
   "integration-model-ui": { title: "Integration · Models & Settings UI", categories: ["model-ui"] },
   "integration-review-ui": { title: "Integration · Content, Reviews & Shell UI", categories: ["review-ui"] },
