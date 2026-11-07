@@ -30,7 +30,7 @@ test("actual ACP fs/read_text_file rejects direct and symlink escapes", async t 
 
 for (const phase of ['before-open','after-read'] as const) test(`actual ACP read rejects file replacement ${phase} without returning content`, async t => {
  const fs=await import('node:fs/promises'),{syncBuiltinESMExports}=await import('node:module');
- const root=await mkdtemp(join(tmpdir(),'memsphere-review-fs-race-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const root=await fs.realpath(await mkdtemp(join(tmpdir(),'memsphere-review-fs-race-')));t.after(()=>rm(root,{recursive:true,force:true}));
  const workspace=join(root,'workspace');await mkdir(workspace);const target=join(workspace,'input.txt'),outside=join(root,'outside.txt');
  await writeFile(target,'INTERNAL_EVIDENCE');await writeFile(outside,'OUTSIDE_SECRET');
  const replace=async()=>{await fs.rename(target,join(workspace,'original.txt'));await symlink(outside,target);};
