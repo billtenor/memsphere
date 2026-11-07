@@ -87,7 +87,7 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
  const {serializeMemoryYaml}=await import('../src/memory/serializer.js');
  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
  const refs=['statements/bad-rules','statements/good-rules'];
- const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['best-effort-rules'],defines:['Frozen display'],asserts:refs.map(target=>({tag:'!ref',target})),mode:'graph',actions:[{tag:'!action',id:'A',description:'Read rules',asserts:refs.map(target=>({tag:'!ref',target})),dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Result',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
  const memoryRef='procedures/best-effort-rules';
  const source=(name:string)=>`!statement\nsyntax: ${graphMemorySyntax}\nnames: [${name}]\ndefines: [Rule source]\nasserts: [${name} evidence]\n`;
  const started=await service.withGraph(g=>g.start({name:`Rule ${mode}`,procedure,memorySnapshot:{memories:{[memoryRef]:{memoryRef,payload:{contentType:'application/yaml',content:serializeMemoryYaml(procedure)}},...Object.fromEntries(refs.map(reference=>[reference,{memoryRef:reference,payload:{contentType:'application/yaml',content:source(reference.split('/')[1])}}]))}}}));
@@ -100,6 +100,10 @@ for (const mode of ['missing', 'malformed', 'wrong-kind', 'cycle'] as const) tes
  const server=createViewServer(await readProjectConfig('test-project',f.home));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
  const api=`http://127.0.0.1:${(server.address()as AddressInfo).port}/api/projects/test-project/runs/${started.run.id}`;
  try{
+  const overviewResponse=await fetch(`${api}?representation=overview`);assert.equal(overviewResponse.status,200,await overviewResponse.clone().text());const overview=await overviewResponse.json();
+  assert.deepEqual(overview.run.context.graph.procedure.effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);
+  assert.equal(overview.run.memorySnapshot,undefined);assert.equal(overview.run.context.run.memorySnapshot,undefined);
+  assert.equal(overview.run.context.graph.procedure.actions[0].effectiveRules,undefined);
   const response=await fetch(api);assert.equal(response.status,200,await response.clone().text());const payload=await response.json();
   assert.equal(payload.run.context.graph.work.length,1);assert.equal(payload.run.context.graph.procedure.actions[0].asserts.length,2);
   assert.deepEqual(payload.run.context.graph.procedure.actions[0].effectiveRules.asserts.map((rule:any)=>rule.reference),[refs[1]]);

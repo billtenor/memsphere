@@ -30,7 +30,7 @@ export function contextRunPayload(snapshot: Snapshot, lightweight = false) {
     contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, ...(graph ? { graph } : {}) } };
 }
 /** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
-export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false) {
+export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false, overview = false) {
   const payload = contextRunPayload(snapshot, lightweight);
   const procedure = payload.context.graph?.procedure;
   if (!procedure) return payload;
@@ -44,11 +44,12 @@ export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = 
     statements.set(reference, entity);
     return entity;
   };
-  for (const action of procedure.actions) for (const source of [action, action.artifact]) {
+  const sources = overview ? [procedure] : [procedure, ...procedure.actions.flatMap(action => [action, action.artifact])];
+  for (const source of sources) {
     if (!source) continue;
     const effectiveRules = {};
     for (const channel of ['asserts', 'suggests'] as const) {
-      const parts = source[channel];
+      const parts = channel === "asserts" ? source.asserts : "suggests" in source ? source.suggests : undefined;
       const projected = [];
       for (const part of parts ?? []) {
         if (typeof part === 'string') continue;
