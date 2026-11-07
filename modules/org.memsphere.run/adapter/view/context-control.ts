@@ -50,6 +50,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const graphCard = element("section", "cc-graph-card"); graphCard.setAttribute("aria-label", label("产物依赖图", "Artifact dependency graph")); const artifactCanvas=createGraphCanvas({locale,viewport:graphHost});graphCard.append(artifactCanvas.element);root.append(graphCard);
   const work = element("section", "cc-work"); root.insertBefore(work, graphCard);
   const definitionInfo = element("section", "cc-procedure-definition");
+  let definitionKey = "";
   let snapshot: Snapshot, history: ReturnType<typeof artifactHistory>, selected: string | undefined, currentId: string | undefined;
   let currentKind: "artifact" | "external" = "artifact";
   let dialog: HTMLDialogElement | undefined, origin: HTMLElement | undefined, generation = 0, disposed = false, layoutGeneration = 0;
@@ -369,6 +370,9 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       work.hidden = !value.graph;
       if (value.graph) {
         const definition = value.graph.procedure as ProcedureDefinition;
+        const nextDefinitionKey = JSON.stringify([value.run.id, definition.names, definition.defines, definition.goals, definition.asserts, definition.suggests, definition.effectiveRules]);
+        if (nextDefinitionKey !== definitionKey) {
+        definitionKey = nextDefinitionKey;
         definitionInfo.replaceChildren();
         for (const [title, values] of [[label("名称", "Names"), definition.names], [label("定义", "Definitions"), definition.defines], [label("目标", "Goals"), definition.goals]] as const) {
           if (!values?.length) continue;
@@ -378,6 +382,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
         for (const channel of ["asserts", "suggests"] as const) {
           const group = graphRuleGroup(channel === "asserts" ? label("总体要求", "Overall requirements") : label("总体建议", "Overall suggestions"), definition[channel], definition.effectiveRules, channel, Boolean(english));
           if (group) definitionInfo.append(group);
+        }
         }
         artifactCanvas.setStatistics(graphStatistics(definition.actions));
         const summary = (id: string) => `${snapshot.graph!.work.filter(step => step.source?.actionId === id).length} ${label("次执行", "executions")}`;
