@@ -96,21 +96,27 @@ test("cleanup addresses the owned ChildProcess object even if its numeric PID ha
   assert.equal(originalHandleSignals, 1, "an exited child is not signalled again");
 });
 
-async function liveChild(t: test.TestContext) {
+async function liveChild(t: test.TestContext, observed?: Awaited<ReturnType<typeof createFixtureProcesses>>) {
   const child = spawn(process.execPath, ["-e", "process.on('message',()=>{});process.send('ready');"], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
   t.after(() => stopFixtureChild(child));
   await bounded(once(child, "message"), "fixture readiness");
-  const identity = await captureProcessIdentity(child.pid!);
+  if (observed) await observed.remember(child.pid!);
+  const identity = observed ? observed.original(child.pid!) : await captureProcessIdentity(child.pid!);
   assert.ok(identity);
   return { child, identity };
 }
 
 test("owned child cleanup after exit leaves a real unrelated fixture alive", async t => {
-  const old = await liveChild(t), unrelated = await liveChild(t);
-  assert.ok(sameProcess(old.identity, await captureProcessIdentity(old.child.pid!)));
+  // Observe through one owned CIM host on Windows: repeated PowerShell cold
+  // starts can exhaust the production query timeout under parallel CI load.
+  // Every alive() still takes a fresh creation-identity snapshot.
+  const observed = await createFixtureProcesses(t.signal);
+  t.after(() => observed.close());
+  const old = await liveChild(t, observed), unrelated = await liveChild(t, observed);
+  assert.deepEqual(await observed.alive(old.child.pid!, unrelated.child.pid!), [true, true]);
   await stopFixtureChild(old.child); // The check-to-cleanup window closes here.
   await stopFixtureChild(old.child);
-  assert.ok(sameProcess(unrelated.identity, await captureProcessIdentity(unrelated.child.pid!)));
+  assert.deepEqual(await observed.alive(old.child.pid!, unrelated.child.pid!), [false, true]);
 });
 
 test("a failed Job probe cannot skip other owned Jobs, workers or transport cleanup", async t => {
