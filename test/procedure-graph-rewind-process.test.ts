@@ -161,9 +161,13 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
   if(ownAttempt?.workerPid===worker.pid)ownedJob=ownAttempt.workerJob;
   processes[i]={workerPid:worker.pid!,worker,exited:once(worker,'exit'),errors:()=>errors,ready,...info};
  };
- // Only the native dispatcher needs the unrelated assignment already claimed.
- // Other workers use separate Review records and can reach readiness together.
+ // The native dispatcher needs the unrelated assignment already claimed.
+ // The teardown fault case must register owner 0 before owner 1: it injects
+ // failure into owner 0 and verifies that cleanup then reaches owner 1.
+ // Parallel file writes otherwise make cleanup registration order arbitrary.
+ // Other cases keep both independent Review records starting concurrently.
  if(nativeDispatch){await launch(1);await launch(0);}
+ else if(failOnce&&submitted){await launch(0);await launch(1);}
  else {
   const results=await Promise.allSettled([0,1].map(launch));
   for(const result of results)if(result.status==='rejected')throw result.reason;
