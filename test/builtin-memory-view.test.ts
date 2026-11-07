@@ -1218,3 +1218,70 @@ test('flow Memory expands referenced rules using shared nested section presentat
  const server=createServer((request,response)=>{const url=new URL(request.url??'/','http://localhost');if(url.pathname===memoryBundlePath)return send(response,200,'text/javascript',bundle);if(url.pathname===viewSdkBundlePath)return send(response,200,'text/javascript',sdk);if(url.pathname===viewRuntimeBundlePath)return send(response,200,'text/javascript',runtime);if(url.pathname==='/api/projects')return json(response,{current:'demo',projects:[{name:'demo'}]});if(url.pathname==='/api/changes')return json(response,{changes:[]});if(url.pathname==='/api/memories')return json(response,{memories:[{id:'procedures/flow-rules',kind:'procedures',names:['flow-rules']},{id:'statements/rules',kind:'statements',names:['rules']}]});if(url.pathname==='/api/memories/procedures/flow-rules')return json(response,{memory:{id:'procedures/flow-rules',kind:'procedures',entity:{names:['flow-rules'],defines:['Flow'],flow:[{tag:'!action',action:'Prepare',asserts:[reference],effectiveRules:{asserts:[projection]}}]}}});return send(response,200,'text/html',renderViewHostHtml('en',[instance]));});
  const origin=await listen(server),browser=await browserScope();try{const page=await browser.newPage();await page.goto(`${origin}/memories/procedures/flow-rules`);const panel=page.locator('details.action-contracts').first();await panel.locator(':scope > summary').click();const rule=panel.locator('.rule-reference');await rule.locator('.rule-reference-toggle').click();const body=rule.locator('.effective-rule-inline');await body.getByText('Nested rule',{exact:true}).waitFor();assert.equal(await body.locator('.effective-rule-section').count(),2);assert.equal(await body.locator('.effective-rule-section .effective-rule-section').count(),1);assert.equal(await body.evaluate(el=>getComputedStyle(el).borderLeftWidth),'2px');}finally{await browser.close();await close(server);}
 });
+
+async function graphRulesFixture() {
+ const [bundle,sdk,runtime]=await Promise.all([buildMemoryBundle(),browserModule('../src/view/view-sdk.ts'),browserRuntimeBundle()]);
+ const engine=await build({entryPoints:[fileURLToPath(new URL('../modules/shared/view/graph-layout.ts',import.meta.url))],bundle:true,format:'esm',write:false});
+ const compare=await build({stdin:{contents:`import {createProcedureGraph} from './modules/shared/view/procedure-graph.ts'; import {contextControlStyles} from './modules/org.memsphere.run/adapter/view/context-control-styles.ts'; import {effectiveRuleStyles} from './modules/shared/view/effective-rules.ts'; export function mount(graph){const host=document.createElement('div');host.className='cc-exploration';const style=document.createElement('style');style.textContent=contextControlStyles+effectiveRuleStyles;host.append(style);const canvas=createProcedureGraph(graph,{locale:'en'});host.append(canvas.element);document.body.append(host);canvas.show('Compare',canvas.actionBody(graph.actions[0]));}`,resolveDir:process.cwd(),loader:'ts'},bundle:true,format:'esm',write:false});
+ const reference={tag:'!ref',target:'statements/shared'};
+ const rule={reference:'statements/shared',defines:['Source definition'],asserts:['Required text'],suggests:['Suggested text'],sections:[{name:'Parent',defines:['Parent definition'],sections:[{name:'Child',asserts:['Nested required'],suggests:['Nested suggestion']}]}]};
+ const action=(id:string)=>({id,description:`Action ${id}`,asserts:['Direct requirement',reference],suggests:[reference],effectiveRules:{asserts:[rule],suggests:[rule]},dependencies:[{from:'START'}],artifact:{name:`Artifact ${id}`,asserts:[reference],suggests:[reference],effectiveRules:{asserts:[rule],suggests:[rule]}}});
+ const graph={names:['rules-graph'],mode:'graph',actions:[action('A'),action('B'),{id:'missing',description:'Missing source',asserts:[{tag:'!ref',target:'statements/missing'}],dependencies:[{from:'START'}]}]};
+ const instance:ViewHostBootInstance={pluginPath:memoryBundlePath,routeBasePath:'/',module:{projectId:'demo',moduleId:'org.memsphere.memory',moduleVersion:'0.1.5',instanceId:'memory'}};
+ const server=createServer((request,response)=>{const url=new URL(request.url??'/','http://local');if(url.pathname===memoryBundlePath)return send(response,200,'text/javascript',bundle);if(url.pathname===viewSdkBundlePath)return send(response,200,'text/javascript',sdk);if(url.pathname===viewRuntimeBundlePath)return send(response,200,'text/javascript',runtime);if(url.pathname==='/compare-run.js')return send(response,200,'text/javascript',compare.outputFiles[0].text);if(url.pathname==='/assets/procedure-graph-layout.js')return send(response,200,'text/javascript',engine.outputFiles[0].text);if(url.pathname==='/api/projects')return json(response,{current:'demo',projects:[{name:'demo'}]});if(url.pathname==='/api/changes')return json(response,{changes:[]});if(url.pathname==='/api/memories')return json(response,{memories:[{id:'procedures/rules-graph',kind:'procedures',names:['rules-graph']},{id:'statements/shared',kind:'statements',names:['shared']}]});if(url.pathname==='/api/memories/procedures/rules-graph')return json(response,{memory:{id:'procedures/rules-graph',kind:'procedures',entity:graph}});if(url.pathname==='/api/memories/statements/shared')return json(response,{memory:{id:'statements/shared',kind:'statements',entity:{names:['shared'],defines:['Navigation destination']}}});return send(response,200,'text/html',renderViewHostHtml('en',[instance]));});
+ const origin=await listen(server),browser=await browserScope(),page=await browser.newPage({viewport:{width:900,height:800}});
+ await page.goto(`${origin}/memories/procedures/rules-graph`);await page.locator('.pg-node[data-action-id=A]').click();await page.locator('.pg-dialog[open]').waitFor();
+ return {page,graph,close:async()=>{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}};
+}
+
+test('graph Memory and Run share rule grouping and computed chapter styles, including user overrides',async()=>{
+ const f=await graphRulesFixture(),{page}=f;
+ try{
+  const dialog=page.locator('.pg-dialog[open]');
+  assert.match(await dialog.innerText(),/Action rules/);assert.match(await dialog.innerText(),/Artifact rules/);
+  const refs=dialog.locator('.pg-rule-reference');assert.equal(await refs.count(),4);
+  for(const ref of await refs.all())await ref.locator('summary').click();
+  const metrics=()=>page.locator('.pg-dialog[open]').evaluate(host=>{const section=host.querySelector<HTMLElement>('.effective-rule-section')!,child=section.querySelector<HTMLElement>('.effective-rule-section')!,summary=host.querySelector<HTMLElement>('.rule-reference-summary')!,heading=section.querySelector('h4')!;const css=getComputedStyle(section);return {padding:css.padding,border:css.borderLeftWidth,background:css.backgroundColor,headingMargin:getComputedStyle(heading).margin,headingSize:getComputedStyle(heading).fontSize,summaryGap:getComputedStyle(summary).gap,indent:child.getBoundingClientRect().left-section.getBoundingClientRect().left,labels:[...host.querySelectorAll('.rule-reference-toggle')].map(e=>e.textContent),rules:[...host.querySelectorAll('.effective-rule-list')].map(e=>e.textContent)};});
+  const memory=await metrics();assert.ok(memory.indent>0);assert.ok(memory.rules.some(text=>text?.includes('Nested suggestion')));
+  await page.keyboard.press('Escape');
+  await page.evaluate(async graph=>{const module=await import('/compare-run.js');module.mount(graph);},f.graph);
+  for(const ref of await page.locator('.cc-exploration .pg-rule-reference').all())await ref.locator('summary').click();
+  assert.deepEqual(await metrics(),memory);
+  await page.addStyleTag({content:'.effective-rule-section { padding-left: 27px; }'});
+  assert.equal(await page.locator('.pg-dialog[open] .effective-rule-section').first().evaluate(el=>getComputedStyle(el).paddingLeft),'27px');
+  await page.locator('.pg-dialog[open] header button').click();await page.locator('.memory-detail-module .pg-node[data-action-id=A]').click();
+  assert.equal(await page.locator('.pg-dialog[open] .effective-rule-section').first().evaluate(el=>getComputedStyle(el).paddingLeft),'27px');
+ }finally{await f.close();}
+});
+
+test('graph Memory keeps same-reference reading choices separate by action and rule scope',async()=>{
+ const f=await graphRulesFixture(),{page}=f;
+ try{
+  await page.locator('.pg-dialog[open] .pg-rule-reference').first().locator('summary').click();
+  await page.keyboard.press('Escape');await page.locator('.pg-node[data-action-id=B]').click();
+  assert.equal(await page.locator('.pg-dialog[open] .pg-rule-reference[open]').count(),0);
+  await page.keyboard.press('Escape');await page.locator('.pg-node[data-action-id=A]').click();
+  assert.equal(await page.locator('.pg-dialog[open] .pg-rule-reference[open]').count(),1);
+  assert.equal(await page.locator('.pg-dialog[open] .pg-rule-reference').first().getAttribute('open'),'');
+  // Re-render the current Memory without reloading the document session.
+  await page.keyboard.press('Escape');
+  const refreshed=page.waitForResponse(response=>response.url().includes('/api/memories/procedures/rules-graph'));
+  await refreshDisclosureView(page,'Refresh list');await refreshed;
+  await page.locator('.pg-node[data-action-id=A]').click();
+  assert.equal(await page.locator('.pg-dialog[open] .pg-rule-reference[open]').count(),1);
+ }finally{await f.close();}
+});
+
+test('graph Memory source navigation and missing-source feedback remain usable on a narrow screen',async()=>{
+ const f=await graphRulesFixture(),{page}=f;
+ try{
+  await page.setViewportSize({width:390,height:844});
+  const ref=page.locator('.pg-dialog[open] .pg-rule-reference').first();await ref.locator('summary').click();
+  assert.equal(await ref.getAttribute('open'),'');
+  const overflow=await page.locator('.pg-dialog[open]').evaluate(el=>el.scrollWidth>el.clientWidth);assert.equal(overflow,false);
+  await ref.locator('.memory-ref-link').click();await page.waitForURL(/statements\/shared/);await page.getByText('Navigation destination',{exact:true}).waitFor({state:'attached'});
+  await page.goto(page.url().replace('statements/shared','procedures/rules-graph'));await page.locator('.pg-node[data-action-id=missing]').click();
+  await page.locator('.pg-dialog[open] .pg-rule-reference > summary').click();
+  assert.match(await page.locator('.pg-dialog[open] .effective-rule-inline').innerText(),/not found|unavailable/i);
+ }finally{await f.close();}
+});

@@ -68,6 +68,8 @@ export function createProcedureGraph(initial: ProcedureDefinition, options: {
     }>;
     edgeDetails?: (edge: ProcedureEdge) => HTMLElement | undefined;
     rulesBody?: (action: ProcedureAction) => HTMLElement;
+    ruleReferenceLabel?: (target: string) => HTMLElement;
+    ruleUnavailableText?: string;
     onClose?: () => void;
     definitionBody?: (action: ProcedureAction) => HTMLElement;
 } = {}) {
@@ -199,7 +201,7 @@ export function createProcedureGraph(initial: ProcedureDefinition, options: {
                 if (!source?.asserts?.length && !source?.suggests?.length) continue;
                 const scoped = el('section'); scoped.append(el('h4', scope)); requirements!.append(scoped);
                 for (const channel of ['asserts', 'suggests'] as const) {
-                    const view = graphRuleGroup(channel === 'asserts' ? t('必须遵守', 'Required rules') : t('建议', 'Suggestions'), source?.[channel], source?.effectiveRules, channel, Boolean(en));
+                    const view = graphRuleGroup(channel === 'asserts' ? t('必须遵守', 'Required rules') : t('建议', 'Suggestions'), source?.[channel], source?.effectiveRules, channel, Boolean(en), { referenceLabel: options.ruleReferenceLabel, keyPrefix: JSON.stringify([a.id, scope]), unavailableText: options.ruleUnavailableText });
                     if (view)
                         scoped.append(view);
                 }
@@ -493,14 +495,20 @@ const procedureGraphStyles = `
 .pg .pg-condition{padding:1px 5px;font-size:10px;line-height:1.5}.pg
 
 .pg-dialog .pg-action-details{padding:0 24px 20px;font-size:13px;line-height:1.65}
-.pg-detail-group{padding:20px 0;border-bottom:1px solid var(--mem-view-color-border)}
-.pg-dialog .pg-group-title{font-size:13px;font-weight:600;color:var(--mem-view-color-text);margin:0 0 14px}
-.pg-detail-group>.pg-info{margin:0;grid-template-columns:84px minmax(0,1fr);font-size:13px;gap:10px 16px}
+.pg-detail-group{padding:12px 0;border-bottom:1px solid var(--mem-view-color-border)}
+.pg-action-details .pg-group-title{font-size:13px;font-weight:600;color:var(--mem-view-color-text);margin:0 0 8px}
+.pg-detail-group>.pg-info{margin:0;grid-template-columns:84px minmax(0,1fr);font-size:13px;gap:6px 16px}
 .pg-detail-group .pg-dependency{border:0;padding:0;margin:0}
 .pg-detail-group .pg-dependency+.pg-dependency{margin-top:14px;padding-top:14px;border-top:1px dashed var(--mem-view-color-border)}
-.pg-detail-group h4:not(.pg-group-title){margin:16px 0 6px;font-size:12px;color:var(--mem-view-color-text-muted)}
+.pg-detail-group h4:not(.pg-group-title){margin:10px 0 4px;font-size:12px;color:var(--mem-view-color-text-muted)}
 .pg-detail-group .pg-group-title+h4{margin-top:0}
 .pg-detail-group .pg-values{margin:0;padding-left:20px;font-size:13px}
+.pg-action-details{font-size:13px;line-height:1.55}
+.pg-action-details .pg-values li+li{margin-top:4px}
+:where(.pg-action-details) .pg-rule-reference{margin:0}
+:where(.pg-action-details) .pg-rule-reference>summary{cursor:pointer;list-style:none}
+:where(.pg-action-details) .pg-rule-reference>summary::-webkit-details-marker{display:none}
+.pg-detail-group .effective-rule-section h4{margin:0 0 8px;font-size:13px;color:var(--mem-view-color-text)}
 .pg-model-definition{margin-top:16px;min-width:0}
 .pg-dialog .pg-original-definition{margin-top:18px;color:var(--mem-view-color-text-muted)}
 .pg-original-definition>summary{width:fit-content;margin-left:auto;font-size:11px}
