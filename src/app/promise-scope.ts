@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { promiseHooks } from "node:v8";
 import { setImmediate } from "node:timers/promises";
 
-interface Failure { consumed: boolean; rejected: boolean; settled: boolean; watched: boolean; error?: unknown; onObserved?: () => void }
+interface Failure { consumed: boolean; rejected: boolean; settled: boolean; watched: boolean; observing?: boolean; error?: unknown; onObserved?: () => void }
 const current = new AsyncLocalStorage<AppPromiseScope>();
 const owners = new WeakMap<Promise<unknown>, { scope: AppPromiseScope; state: Failure }>();
 let ignored = false;
@@ -17,7 +17,7 @@ export class AppPromiseScope {
 
   constructor() {
     if (users++ === 0) {
-      const disable = promiseHooks.onInit((promise, parent) => {
+      const disable = promiseHooks.createHook({ init(promise, parent) {
         if (ignored) return;
         const ancestor = parent && owners.get(parent);
         const scope = current.getStore() ?? ancestor?.scope;
@@ -26,6 +26,11 @@ export class AppPromiseScope {
         const state: Failure = { consumed: false, rejected: false, settled: false, watched: ancestor?.state.watched ?? false };
         owners.set(promise, { scope, state });
         if (state.watched) scope.pending.add(promise);
+      }, settled(promise) {
+        const owned = owners.get(promise);
+        if (!owned?.scope.open || owned.state.observing) return;
+        const { scope, state } = owned;
+        state.observing = true;
         scope.ignore(() => {
           void Promise.prototype.then.call(promise, () => { state.settled = true; scope.pending.delete(promise); }, (error: unknown) => {
             state.settled = true;
@@ -36,7 +41,7 @@ export class AppPromiseScope {
             if (state.consumed) state.onObserved?.();
           });
         });
-      });
+      } });
       stop = () => { disable(); };
     }
   }
