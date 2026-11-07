@@ -49,7 +49,11 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const graphHost = element("div", "cc-canvas-scroll");
   const graphCard = element("section", "cc-graph-card"); graphCard.setAttribute("aria-label", label("产物依赖图", "Artifact dependency graph")); const artifactCanvas=createGraphCanvas({locale,viewport:graphHost});graphCard.append(artifactCanvas.element);root.append(graphCard);
   const work = element("section", "cc-work"); root.insertBefore(work, graphCard);
-  const definitionInfo = element("section", "cc-procedure-definition");
+  const definitionInfo = element("details", "cc-procedure-definition");
+  definitionInfo.open = true;
+  definitionInfo.append(element("summary", "cc-procedure-summary", label("流程详情", "Procedure details")));
+  const definitionBody = element("div", "cc-procedure-definition-body");
+  definitionInfo.append(definitionBody);
   let definitionKey = "";
   let snapshot: Snapshot, history: ReturnType<typeof artifactHistory>, selected: string | undefined, currentId: string | undefined;
   let currentKind: "artifact" | "external" = "artifact";
@@ -358,6 +362,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       const nextKey = JSON.stringify(value);
       if (nextKey === snapshotKey) return;
       const detailChanged = !snapshot || detailFingerprint(snapshot) !== detailFingerprint(value);
+      if (snapshot && snapshot.run.id !== value.run.id) definitionInfo.open = true;
       if(value.lazy&&snapshot?.run.id===value.run.id){
         value.artifacts=snapshot.artifacts;artifactsLoaded=false;
         if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
@@ -373,15 +378,15 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
         const nextDefinitionKey = JSON.stringify([value.run.id, definition.names, definition.defines, definition.goals, definition.asserts, definition.suggests, definition.effectiveRules]);
         if (nextDefinitionKey !== definitionKey) {
         definitionKey = nextDefinitionKey;
-        definitionInfo.replaceChildren();
+        definitionBody.replaceChildren();
         for (const [title, values] of [[label("名称", "Names"), definition.names], [label("定义", "Definitions"), definition.defines], [label("目标", "Goals"), definition.goals]] as const) {
           if (!values?.length) continue;
           const section = element("section"), list = element("ul"); section.append(element("h3", "", title), list);
-          values.forEach(value => list.append(element("li", "", value))); definitionInfo.append(section);
+          values.forEach(value => list.append(element("li", "", value))); definitionBody.append(section);
         }
         for (const channel of ["asserts", "suggests"] as const) {
           const group = graphRuleGroup(channel === "asserts" ? label("总体要求", "Overall requirements") : label("总体建议", "Overall suggestions"), definition[channel], definition.effectiveRules, channel, Boolean(english));
-          if (group) definitionInfo.append(group);
+          if (group) definitionBody.append(group);
         }
         }
         artifactCanvas.setStatistics(graphStatistics(definition.actions));
