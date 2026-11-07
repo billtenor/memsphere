@@ -653,3 +653,65 @@ for (const target of ["artifact", "step", "run"] as const) test(`a payload point
     assert.equal((await g.report(run, step, { text: '{}' })).step.status, "done");
   });
 });
+
+for (const outcome of ["saved", "not_saved", "unconfirmed"] as const) test(`submission write failure reports ${outcome} intent without automatically resubmitting`, { timeout: 10000 }, async t => {
+  const { service } = await graphDomainFixture(t);
+  await service.withGraph(async g => {
+    const start = await g.start({ name: "Write outcome", procedure: procedure() });
+    const run = start.run.id, step = start.steps[0].id;
+    await g.enter(run, step); const draft = await g.enterSchema(run, step);
+    const before = await g.schemaWrite(run, step, "report", draft.position!, '{"summary":"draft"}');
+    const update = service.stores.artifact.update.bind(service.stores.artifact);
+    const get = service.stores.artifact.get.bind(service.stores.artifact);
+    const original = Error("submission write acknowledgement failed");
+    let attempts = 0, failRead = false;
+    service.stores.artifact.update = async (context, id, value, options) => {
+      if ((value as import("../src/context_control/types.js").Artifact).writing?.submission && attempts++ === 0) {
+        if (outcome !== "not_saved") await update(context, id, value, options);
+        failRead = outcome === "unconfirmed";
+        throw original;
+      }
+      return update(context, id, value, options);
+    };
+    service.stores.artifact.get = async (...args) => {
+      if (failRead) { failRead = false; throw Error("verification read failed"); }
+      return get(...args);
+    };
+    const final = '{"summary":"final"}';
+    try {
+      await assert.rejects(g.report(run, step, { text: final }), (error: any) => {
+        assert.equal(error, original);
+        assert.match(error.message, /write acknowledgement failed/);
+        if (outcome === "not_saved") assert.equal(error.details, undefined);
+        else {
+          assert.equal(error.details.runId, run); assert.equal(error.details.stepId, step);
+          assert.equal(error.details.artifactId, draft.draft!.id);
+          assert.equal(error.details.recoveryCommand, `memsphere run status --run ${run}`);
+          assert.match(error.details.message, outcome === "saved" ? /Draft submission sealed/ : /outcome could not be confirmed/);
+        }
+        return true;
+      });
+      assert.equal(attempts, 1, "report must not automatically retry a write with an uncertain result");
+    } finally {
+      service.stores.artifact.update = update; service.stores.artifact.get = get;
+    }
+    const pending = await g.schemaShow(run, step);
+    if (outcome === "not_saved") {
+      assert.equal(pending.phase, "awaiting_finalization");
+      assert.deepEqual(pending.draft, before.draft); assert.equal(pending.position, before.position);
+      assert.equal((await g.snapshot(run)).completeIds.length, 0);
+      await g.report(run, step, { text: final });
+    } else {
+      assert.equal(pending.phase, "submitting");
+      const token = pending.draft!.writing!.submission!.token;
+      assert.ok(token); await g.advance(run);
+    }
+    const recovered = await g.snapshot(run);
+    assert.equal(recovered.artifacts.length, 1); assert.equal(recovered.artifacts[0].id, draft.draft!.id);
+    assert.equal(recovered.artifacts[0].content!.payload.content, final);
+    assert.equal(recovered.reviews.length, 0); assert.deepEqual(recovered.completeIds, [draft.draft!.id]);
+    assert.equal(recovered.steps[0].validation?.status, "passed");
+    assert.equal(recovered.steps[0].validation?.sha256, createHash("sha256").update(final).digest("hex"));
+    assert.deepEqual(await g.advance(run), recovered);
+  });
+});
