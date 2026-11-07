@@ -141,16 +141,16 @@ memsphere run report --run <id> --artifact-file <local-copy>
 
 #### 推进正式 Review
 
-Agent Reviewer 收到节点提示时，系统已冻结材料并建树，按当前节点及角色职责检查；命令保持 memsphere 名称。使用原生 run review 命令（Session 自动绑定 --assignment）或可选 continue，不需要单独 enter；show 为辅助只读，不要求反复调用。无节点树的历史 Session 保留原交互，Human 直接提交结论。
+Agent Reviewer 收到节点提示时，系统已冻结材料并建树，按当前节点及角色职责检查；所有操作显式调用本次注入的 Session launcher；下例使用 Bash 的 `"$MEMSPHERE_CLI"`，不依赖裸命令或同名工具解析。使用原生 run review 命令（Session 自动绑定 --assignment）或可选 continue，不需要单独 enter；show 为辅助只读，不要求反复调用。无节点树的历史 Session 保留原交互，Human 直接提交结论。
 
-- `memsphere continue report --artifact '{"applicable":true}'` 确认当前节点并自动显示下一节点。省略 comments 保留已存内容；显式 comments 数组完整替换节点，适用节点 `[]` 确认全部满足。仅对不满足/无法判定规则提交 `{rulePath,result,body,severity,anchor?}`，result 为 not_satisfied/undetermined。不适用用 applicable=false 及没有 rulePath/result 的原因 Comment，仍进入子节点。
-- `continue comment add [--node N] --artifact '<JSON>'` 添加意见；省略节点作用于当前节点，最终复核时需 --node。`comment update --comment C --artifact '<JSON>'` 修改 body/severity，`comment delete --comment C` 删除意见。`continue update --node N --artifact '<JSON>'` 完整替换指定节点的 applicable/comments。这些编辑命令随时保存但不推进，删除规则意见不清除异常判断。
+- `"$MEMSPHERE_CLI" continue report --artifact '{"applicable":true}'` 确认当前节点并自动显示下一节点。省略 comments 保留已存内容；显式 comments 数组完整替换节点，适用节点 `[]` 确认全部满足。仅对不满足/无法判定规则提交 `{rulePath,result,body,severity,anchor?}`，result 为 not_satisfied/undetermined。不适用用 applicable=false 及没有 rulePath/result 的原因 Comment，仍进入子节点。
+- `"$MEMSPHERE_CLI" continue comment add [--node N] --artifact '<JSON>'` 添加意见；省略节点作用于当前节点，最终复核时需 --node。`"$MEMSPHERE_CLI" continue comment update --comment C --artifact '<JSON>'` 修改 body/severity，`"$MEMSPHERE_CLI" continue comment delete --comment C` 删除意见。`"$MEMSPHERE_CLI" continue update --node N --artifact '<JSON>'` 完整替换指定节点的 applicable/comments。这些编辑命令随时保存但不推进，删除规则意见不清除异常判断。
 - 全部规则之后必须完成开放审查，包括空树和全部节点不适用；结合角色经验检查规则外问题，不强迫制造意见。开放意见只需 body/severity/anchor?，无 rulePath/result；以 applicable=true 报告，空 comments 表示无新增问题。不能按不适用跳过。
-- `continue list` 查看整体树，`continue show` 回读当前提示或最终概览，`show --node N` 展开节点，`show --all` 查看全部已存判断。最终复核可增删改，再用 `continue submit --artifact '{"vote":"approve","summary":"结论"}'` 一次提交独立投票、说明和现有 comments，不重复写意见集合。
-- 内容命令统一二选一 --artifact '<JSON>' 或 --artifact-file F；严重性在 JSON 内。原生对应入口为 `memsphere run review report/update/list/show/comment add|update|delete/submit --assignment A`。节点 report 不带 --node，update 必带 --node；读取和编辑不推进，只有 report 和 submit 推进。
+- `"$MEMSPHERE_CLI" continue list` 查看整体树，`"$MEMSPHERE_CLI" continue show` 回读当前提示或最终概览，`"$MEMSPHERE_CLI" continue show --node N` 展开节点，`"$MEMSPHERE_CLI" continue show --all` 查看全部已存判断。最终复核可增删改，再用 `"$MEMSPHERE_CLI" continue submit --artifact '{"vote":"approve","summary":"结论"}'` 一次提交独立投票、说明和现有 comments，不重复写意见集合。
+- 内容命令统一二选一 --artifact '<JSON>' 或 --artifact-file F；严重性在 JSON 内。原生对应入口为 `"$MEMSPHERE_CLI" run review report/update/list/show/comment add|update|delete/submit --assignment A`。节点 report 不带 --node，update 必带 --node；读取和编辑不推进，只有 report 和 submit 推进。
 
 
-- report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须用受限同名 `memsphere` 会话命令提交意见和 Vote；普通文本回复不是正式投票。
+- report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须通过本 Attempt 注入的 Session launcher 提交意见和 Vote；普通文本回复不是正式投票。
 - `review wait` 先判断当前结果是否可返回；可返回时直接输出完整结果，否则按当前 Runner 配置选择异步或同步，不使用 `--sync`。异步开启后，只复用 queued/running 活动任务；历史终态记录保留，新的必要等待创建新任务。登记成功后可以结束当前回合直到 queue 通知唤醒。通知格式固定为 `[Memsphere 自动消息]`、`请执行命令以继续：`、显式定位 Project/Review 的 wait 命令三行，不携带结果，也不是 Human 指令、授权或投票；执行该命令读取当前正式结果并继续同一个 Run，旧通知不得覆盖当前会话绑定。任务状态用原生 `run review wait status --review R` 查询，failed 可用 `retry --review R --round ROUND` 显式重试发送，可能重复投递；通知发送失败不再自动发送第二条。身份模式 wait/status 不进入后继 Step，按工具响应的原生 enter 命令继续。同步 `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
 - Agent Assignment 首次失败时，Runner 用 `run review retry --review <id> --assignment <id>` 重试一次并继续 wait；再次失败时报告 Provider/Attempt/错误，取得 Human 对继续重试的授权后再执行。调试启动可按需使用 `debug.agent_review` 与 `run try-run`，后者只生成启动材料，不执行 Reviewer 或认领 Assignment。
 - 同步和异步 `review wait` 只等待 Agent：全部 Agent 提交或任一 Agent 失败即返回/通知；没有 Agent 时立即返回，Human 草稿和投票不影响等待。Agent 等待就绪不表示整体评审通过；Human 的最终验收门禁单独保留。
