@@ -1,9 +1,18 @@
 # 测试层级
 
-`*.unit.test.ts` 是本轮逐用例拆分后的单元入口。它们验证纯计算、解析、校验、内存状态或注入替身后的单个契约；可以读取静态 fixture，但不启动真实浏览器、服务或子进程，也不把产品的真实持久化读写归为单元测试。
+| 层级 | 文件入口 | 被测契约 |
+| --- | --- | --- |
+| 单元 | `*.unit.test.ts` | 小函数、单个类或小范围算法；可以使用 fake/mock |
+| 模块 | `*.module.test.ts` | 真实业务模块及其协作；在 Store、内容读取、时钟、进程观察等系统边界注入 fake |
+| 集成 | 其余 `*.test.ts` | 真实文件系统、锁、Git/worktree、CLI/Shell、HTTP、ACP 进程或浏览器边界 |
 
-其余 `*.test.ts` 保留集成与模块协作契约，CI 与单元作业分离。普通集成在 default 只跑 Linux、full 跑三个系统；`platform/` 内的原生系统契约在两种 profile 都跑三个系统。文件较长或名称包含某个业务模块，都不能单独决定测试层级。
+区别前两层的是被测范围，不是有没有 fake。模块测试保留真实模型 Runtime、序列化、评审与业务状态转换；静态 fixture 可以读取，产品的持久化读写、服务和进程不能作为模块测试的前置条件。
 
-混合文件的单元用例移入同目录同名 `.unit.test.ts`；原集成文件保留共享前置构造和集成断言。纯单元文件只改入口名；拆分不会删掉原有集成测试，也不会把它们用 mock 改写为更弱的单元测试。
+`test/support/` 提供可复用实现，`test/helpers/module-context.ts` 装配真实 ContextControl/GraphRuntime 与内存 Store、时钟、进程观察。各场景独立持有记录和依赖；`reopen()` 创建新句柄，共享记录但不共享测试注入的方法覆盖。模型校验器只共享不可变编译结果。
 
-`npm run test:unit` 构建后执行全部单元文件；`node scripts/ci/run-tests.mjs --suite=unit --list` 只查看选取结果。`npm test` 仍保留本地全部测试入口，浏览器等环境依赖需按对应测试准备。三系统单元通过不能替代集成结果；full 汇总需包括全部适用层级。
+混合文件按用例拆分：业务恢复、产物依赖、评审、回溯放模块层；实际落盘重开、文件损坏、跨进程锁、身份及退出证明保留集成层。保留原有产品断言，不把真实系统行为改成 fake 的证明。
+
+- `npm run test:unit`、`npm run test:module` 分别构建后运行全部对应文件。
+- `node scripts/ci/run-tests.mjs --suite=unit --list` 与 `--suite=module --list` 查看自动发现的文件。
+- `--suite=integration` 查看第三层；`npm test` 保留本地全部入口。
+- 当前探索 CI 独立执行三系统单元、模块作业。集成暂不自动执行，可手工启用 `include_integration`；快速层成功不代表 full 成功。

@@ -3,18 +3,7 @@ import test from "node:test";
 import type { MemoryEntity } from "../src/memory/ast.js";
 import { memorySchemas } from "../src/memory/schema.js";
 import { currentMemorySyntax } from "../src/memory/syntax.js";
-import {
-  serializeMemoryJson,
-  serializeMemoryListJson,
-  serializeMemoryListText,
-  serializeMemoryListYaml,
-  serializeMemoryNodeListJson,
-  serializeMemoryNodeListText,
-  serializeMemoryNodeListYaml,
-  serializeMemoryNodeReadJson,
-  serializeMemoryNodeReadYaml,
-  serializeMemoryYaml
-} from "../src/memory/serializer.js";
+import { serializeMemoryJson, serializeMemoryListJson, serializeMemoryListText, serializeMemoryListYaml, serializeMemoryNodeListJson, serializeMemoryNodeListText, serializeMemoryNodeListYaml, serializeMemoryNodeReadJson, serializeMemoryNodeReadYaml, serializeMemoryYaml } from "../src/memory/serializer.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { parse } from "yaml";
 

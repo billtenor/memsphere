@@ -16,6 +16,7 @@ export async function discoverTestFiles(directory) {
 
 export const testSuites = {
   unit: { title: "Unit tests", categories: [] },
+  module: { title: "Module tests", categories: [] },
   integration: { title: "Integration tests", categories: [] },
   "integration-model-ui": { title: "Integration · Models & Settings UI", categories: ["model-ui"] },
   "integration-review-ui": { title: "Integration · Content, Reviews & Shell UI", categories: ["review-ui"] },
@@ -48,7 +49,7 @@ export const testSuites = {
 
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
-  const name = basename(file).replace(".unit.test.ts", ".test.ts");
+  const name = basename(file).replace(/\.(unit|module)\.test\.ts$/, ".test.ts");
   if (["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"].includes(name)) return "runtime-upgrades";
   if (name === "embedded-changeset.test.ts") return "memory-core";
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
@@ -66,6 +67,8 @@ export function testCategory(file, source) {
 const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
 const key = file => (isAbsolute(file) ? relative(testDirectory, file) : file).split(sep).join("/");
 export const isUnitTest = file => file.endsWith(".unit.test.ts");
+export const isModuleTest = file => file.endsWith(".module.test.ts");
+export const isIntegrationTest = file => !isUnitTest(file) && !isModuleTest(file);
 export const isPlatformTest = file => /(?:^|\/)platform\//.test(key(file));
 
 /** Layer and native-system contracts are declared by placement, not timing or business-name guesses. */
@@ -74,10 +77,11 @@ export function selectTests(files, sources, suite = "all") {
   return files.filter(file => {
     if (suite === "all") return true;
     if (suite === "unit") return isUnitTest(file);
-    if (suite === "integration") return !isUnitTest(file);
-    if (suite === "platform") return !isUnitTest(file) && isPlatformTest(file);
-    if (suite.startsWith("platform-")) return !isUnitTest(file) && key(file).includes(`platform/${suite.slice(9)}/`);
-    if (suite.startsWith("integration-")) return !isUnitTest(file) && !isPlatformTest(file) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
+    if (suite === "module") return isModuleTest(file);
+    if (suite === "integration") return isIntegrationTest(file);
+    if (suite === "platform") return isIntegrationTest(file) && isPlatformTest(file);
+    if (suite.startsWith("platform-")) return isIntegrationTest(file) && key(file).includes(`platform/${suite.slice(9)}/`);
+    if (suite.startsWith("integration-")) return isIntegrationTest(file) && !isPlatformTest(file) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
     return testSuites[suite].categories.includes(testCategory(file, sources[file]));
   }).sort((a, b) => a.localeCompare(b, "en"));
 }

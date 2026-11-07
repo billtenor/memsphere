@@ -1,18 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { MemoryEntity } from "../src/memory/ast.js";
-import type {
-  MemoryCatalog,
-  MemoryDescriptor,
-  MemoryListPage,
-  MemoryListQuery,
-  MemoryResolveQuery
-} from "../src/memory/catalog.js";
-import {
-  memoryListCommand,
-  memoryReadCommand,
-  type MemoryCommandDependencies
-} from "../src/commands/memory.js";
+import type { MemoryCatalog, MemoryDescriptor, MemoryListPage, MemoryListQuery, MemoryResolveQuery } from "../src/memory/catalog.js";
+import { memoryListCommand, memoryReadCommand, type MemoryCommandDependencies } from "../src/commands/memory.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { parse } from "yaml";
 

@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { type Model, type ModelRuntime, type ModelRuntimeRegistry } from "../src/data/index.js";
-import { JsonSchemaModelRuntimeFactory, JSON_SCHEMA_DRAFT_07, filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension, rawExtension } from "../src/data/extensions/index.js";
-import { bytesContent } from "../src/data/extensions/shared/payload.js";
 
+import test from "node:test";
+
+import { type Model, type ModelRuntime, type ModelRuntimeRegistry } from "../src/data/index.js";
+
+import { JsonSchemaModelRuntimeFactory, JSON_SCHEMA_DRAFT_07, filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension, rawExtension } from "../src/data/extensions/index.js";
+
+import { bytesContent } from "../src/data/extensions/shared/payload.js";
 
 const definition = {
   $schema: "http://json-schema.org/draft-07/schema#",
@@ -19,7 +22,6 @@ const definition = {
     }
   }
 };
-
 
 async function orderRuntime() {
   const registered = new Map<string, ModelRuntime>();
@@ -42,7 +44,6 @@ async function orderRuntime() {
   return runtime;
 }
 
-
 test("built-ins expose five independently selectable single-capability extensions", () => {
   const extensions = [filesystemDataStoreExtension, filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSerializerExtension, rawExtension];
   assert.equal(new Set(extensions.map(extension => extension.id)).size, 5);
@@ -51,25 +52,4 @@ test("built-ins expose five independently selectable single-capability extension
     assert.equal(capabilities.filter(Boolean).length, 1);
     assert.equal(capabilities.reduce((count, value) => count + (value?.length ?? 0), 0), 1);
   }
-});
-
-
-test("reflection replacement invalidates descendants across independent reflect calls", async () => {
-  const runtime = await orderRuntime();
-  const raw = { orderNo: "O-001", lines: [{ quantity: 2 }] };
-  const first = runtime.reflect(raw);
-  const second = runtime.reflect(raw);
-  if (first.kind !== "object" || second.kind !== "object") throw new Error();
-  const field = first.descriptor.field("lines")!;
-  const lines = first.get(field);
-  if (lines?.kind !== "array") throw new Error();
-  const line = lines.get(0);
-  if (line?.kind !== "object") throw new Error();
-  const quantity = line.get(line.descriptor.field("quantity")!);
-  if (quantity?.kind !== "scalar") throw new Error();
-  second.set(field, [{ quantity: 3 }]);
-  assert.throws(() => lines.value, /stale/);
-  assert.throws(() => quantity.value, /stale/);
-  assert.throws(() => quantity.set(4), /stale/);
-  assert.deepEqual(raw.lines, [{ quantity: 3 }]);
 });

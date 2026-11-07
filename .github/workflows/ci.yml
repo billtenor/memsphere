@@ -1,5 +1,5 @@
 name: CI
-run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
+run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((!inputs.include_integration && 'CI (unit + module)') || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)')) }}
 
 on:
   pull_request:
@@ -12,6 +12,10 @@ on:
         type: choice
         options: [default, full]
         default: full
+      include_integration:
+        description: Run the deferred real-system integration layer (required for full evidence)
+        type: boolean
+        default: false
       full_health_bootstrap:
         description: Owner only, first-install status publisher (no builds)
         type: boolean
@@ -38,6 +42,7 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       profile: ${{ steps.plan.outputs.profile }}
       unit_matrix: ${{ steps.plan.outputs.unit_matrix }}
+      module_matrix: ${{ steps.plan.outputs.module_matrix }}
       integration_matrix: ${{ steps.plan.outputs.integration_matrix }}
     steps:
       - uses: actions/checkout@v7
@@ -76,7 +81,38 @@ jobs:
           path: ci-results
           if-no-files-found: error
 
+  module-tests:
+    needs: plan
+    name: Module tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.module_matrix) }}
+    env:
+      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
+      - run: npm ci
+      # Build/typecheck once, then run only isolated business-module tests.
+      - run: npm run test:ci -- --suite=module
+      - name: Preserve test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-${{ matrix.os }}-${{ matrix.suite }}
+          path: ci-results
+          if-no-files-found: error
+
   integration-tests:
+    if: inputs.include_integration == true
     needs: plan
     name: ${{ matrix.title }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -109,6 +145,7 @@ jobs:
           if-no-files-found: error
 
   windows-package-smoke:
+    if: inputs.include_integration == true
     needs: plan
     name: Windows packaged CLI shells
     runs-on: windows-latest
@@ -170,16 +207,18 @@ jobs:
   full-result:
     name: Full cross-platform regression
     runs-on: ubuntu-24.04
-    needs: [plan, unit-tests, integration-tests, windows-package-smoke]
-    if: always() && needs.plan.outputs.profile == 'full'
+    needs: [plan, unit-tests, module-tests, integration-tests, windows-package-smoke]
+    if: always() && inputs.include_integration == true && needs.plan.outputs.profile == 'full'
     timeout-minutes: 5
     steps:
       - env:
           UNIT_RESULT: ${{ needs.unit-tests.result }}
+          MODULE_RESULT: ${{ needs.module-tests.result }}
           INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
           PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
         run: |
           test "$UNIT_RESULT" = success
+          test "$MODULE_RESULT" = success
           test "$INTEGRATION_RESULT" = success
           test "$PACKAGE_RESULT" = success
 

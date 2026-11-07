@@ -28,7 +28,14 @@ export type ViewServiceStatus = {
   state?: ViewServiceState;
 };
 
+export type ViewServiceStateStore = {
+  read: typeof readViewServiceState;
+  clear: typeof clearViewServiceState;
+};
+
 export type ViewServiceDependencies = {
+  stateStore?: ViewServiceStateStore;
+  now?: () => number;
   spawnProcess?: typeof spawn;
   isProcessAlive?: (pid: number) => boolean;
   killProcess?: (pid: number, signal?: NodeJS.Signals) => void | Promise<void>;
@@ -86,9 +93,9 @@ export async function getViewServiceStatus(
   let state: ViewServiceState | undefined;
 
   try {
-    state = await readViewServiceState(statePath);
+    state = await (dependencies.stateStore?.read ?? readViewServiceState)(statePath);
   } catch {
-    await clearViewServiceState(statePath);
+    await (dependencies.stateStore?.clear ?? clearViewServiceState)(statePath);
     return { running: false };
   }
 
@@ -96,7 +103,7 @@ export async function getViewServiceStatus(
   const isAlive = dependencies.isProcessAlive ?? isProcessAlive;
   if (isAlive(state.pid)) return { running: true, state };
 
-  await clearViewServiceState(statePath, state.pid);
+  await (dependencies.stateStore?.clear ?? clearViewServiceState)(statePath, state.pid);
   return { running: false };
 }
 
@@ -135,12 +142,12 @@ export async function startViewService(
   child.unref();
 
   const wait = dependencies.sleep ?? ((milliseconds: number) => sleep(milliseconds));
-  const deadline = Date.now() + startupTimeoutMs;
-  while (Date.now() < deadline) {
-    const state = await readViewServiceState(statePath).catch(() => undefined);
+  const deadline = (dependencies.now ?? Date.now)() + startupTimeoutMs;
+  while ((dependencies.now ?? Date.now)() < deadline) {
+    const state = await (dependencies.stateStore?.read ?? readViewServiceState)(statePath).catch(() => undefined);
     if (state?.pid === child.pid) return state;
     if (childFailure) {
-      await clearViewServiceState(statePath, child.pid);
+      await (dependencies.stateStore?.clear ?? clearViewServiceState)(statePath, child.pid);
       throw new Error(
         `view service ${childFailure} before publishing state; ` +
         `check whether ${config.view.host}:${config.view.port} is already in use`
@@ -150,7 +157,7 @@ export async function startViewService(
   }
 
   await terminateAndWait(child.pid, dependencies, wait);
-  await clearViewServiceState(statePath, child.pid);
+  await (dependencies.stateStore?.clear ?? clearViewServiceState)(statePath, child.pid);
   throw new Error("view service did not start successfully; check whether the configured port is available");
 }
 
@@ -166,7 +173,7 @@ export async function stopViewService(
   await terminateAndWait(status.state.pid, dependencies, wait);
 
   if (isAlive(status.state.pid)) throw new Error(`view service ${status.state.pid} did not stop successfully`);
-  await clearViewServiceState(viewServiceStatePath(config), status.state.pid);
+  await (dependencies.stateStore?.clear ?? clearViewServiceState)(viewServiceStatePath(config), status.state.pid);
   return { running: false };
 }
 
@@ -210,13 +217,13 @@ async function terminateAndWait(
   if (!isAlive(pid)) return;
 
   await kill(pid, "SIGTERM");
-  let deadline = Date.now() + shutdownTimeoutMs;
-  while (Date.now() < deadline && isAlive(pid)) await wait(pollIntervalMs);
+  let deadline = (dependencies.now ?? Date.now)() + shutdownTimeoutMs;
+  while ((dependencies.now ?? Date.now)() < deadline && isAlive(pid)) await wait(pollIntervalMs);
   if (!isAlive(pid)) return;
 
   await kill(pid, "SIGKILL");
-  deadline = Date.now() + shutdownTimeoutMs;
-  while (Date.now() < deadline && isAlive(pid)) await wait(pollIntervalMs);
+  deadline = (dependencies.now ?? Date.now)() + shutdownTimeoutMs;
+  while ((dependencies.now ?? Date.now)() < deadline && isAlive(pid)) await wait(pollIntervalMs);
 }
 
 async function terminateProcess(pid: number, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {

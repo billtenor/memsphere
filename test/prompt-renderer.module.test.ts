@@ -1,14 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  PromptRenderError,
-  renderPrompt,
-  validatePromptAssets
-} from "../src/prompts/renderer.js";
-import {
-  listPromptTemplateIds,
-  promptDefinition
-} from "../src/prompts/registry.js";
+import { PromptRenderError, renderPrompt, validatePromptAssets } from "../src/prompts/renderer.js";
+import { listPromptTemplateIds, promptDefinition } from "../src/prompts/registry.js";
 
 const acpModel = {
   rolePrompts: ["Focus on correctness."],

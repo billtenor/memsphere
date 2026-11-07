@@ -1,39 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  analyzeMemoryDescriptors,
-  DefaultMemoryCatalog,
-  InvalidMemoryReferenceError,
-  MemoryAmbiguityError,
-  MemoryCatalogDataError,
-  MemoryNotFoundError,
-  MemoryReferenceKindError
-} from "../src/memory/catalog.js";
+import { analyzeMemoryDescriptors, DefaultMemoryCatalog, InvalidMemoryReferenceError, MemoryAmbiguityError, MemoryCatalogDataError, MemoryNotFoundError, MemoryReferenceKindError } from "../src/memory/catalog.js";
 import type { MemoryEntity } from "../src/memory/ast.js";
-import type { MemoryProvider, MemoryProviderQuery, ProviderMemoryDescriptor } from "../src/memory/provider.js";
 
-class FakeProvider implements MemoryProvider {
-  listCalls: MemoryProviderQuery[] = [];
-  readCalls: string[] = [];
 
-  constructor(
-    readonly descriptors: ProviderMemoryDescriptor[],
-    readonly entities: Record<string, MemoryEntity>
-  ) {}
-
-  async list(query: MemoryProviderQuery = {}): Promise<ProviderMemoryDescriptor[]> {
-    this.listCalls.push(query);
-    const filtered = query.kind ? this.descriptors.filter((item) => item.kind === query.kind) : this.descriptors;
-    return [...filtered].reverse();
-  }
-
-  async read(id: string): Promise<MemoryEntity> {
-    this.readCalls.push(id);
-    const entity = this.entities[id];
-    if (!entity) throw new Error(`unknown fake id ${id}`);
-    return entity;
-  }
-}
+import { FakeMemoryProvider as FakeProvider } from "./support/memory-provider.js";
 
 const concept = (name: string, ...aliases: string[]): MemoryEntity => ({
   tag: "!concept",

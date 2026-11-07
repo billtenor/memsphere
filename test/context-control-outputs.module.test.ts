@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
+
 import test from "node:test";
-import { openContextControl } from "../src/project/context-control.js";
-import { initializedContextFixture } from "./helpers/initialized-context.js";
+
+
+import { contextModuleFixture } from "./helpers/module-context.js";
+
 import { textContent } from "../src/context_control/types.js";
 
 test("outputs track parallel leaves, revisions, real dependencies and manual roots", async t => {
-  const f = await initializedContextFixture(t), s = (await openContextControl(f.root))!;
+  const f = await contextModuleFixture(t), s = f.reopen();
   const r = await s.start("roots"); const a = (await s.report(r.id, { name: "A", content: textContent("A") })).artifact;
   const b = (await s.report(r.id, { name: "B", content: textContent("B"), dependencies: [{ kind: "artifact", id: a.id }] })).artifact;
   const c = (await s.report(r.id, { name: "C", content: textContent("C") })).artifact;
@@ -24,7 +27,7 @@ test("outputs track parallel leaves, revisions, real dependencies and manual roo
 for (const read of ["snapshot", "listRuns", "findRun", "outputs"] as const) {
   const recovers = read === "snapshot" || read === "outputs";
   test(`${read} ${recovers ? "repairs the pending Step and reports broken storage" : "remains readonly with a pending Step and broken completion storage"}`, async t => {
-    const f = await initializedContextFixture(t), s = (await openContextControl(f.root))!;
+    const f = await contextModuleFixture(t), s = f.reopen();
     const r = await s.start("recovery"); const update = s.stores.step.update.bind(s.stores.step);
     s.stores.step.update = async () => { throw Error("injected completion failure"); };
     await assert.rejects(s.report(r.id, { name: "A", content: textContent("A") }), (error: any) => !!error.details.artifactId);
@@ -41,12 +44,12 @@ for (const read of ["snapshot", "listRuns", "findRun", "outputs"] as const) {
 }
 
 test("reports, revisions, read recovery and parallel producers never update the Run record", async t => {
-  const f = await initializedContextFixture(t), s = (await openContextControl(f.root))!;
+  const f = await contextModuleFixture(t), s = f.reopen();
   const run = await s.start("independent production");
   const before = await s.stores.run.get({}, run.id);
   s.stores.run.update = async () => { throw Error("unexpected Run write during production"); };
   const a = (await s.report(run.id, { name: "A", content: textContent("A") })).artifact;
-  const other = (await openContextControl(f.root))!;
+  const other = f.reopen();
   const [b, c] = await Promise.all([
     s.report(run.id, { name: "B", content: textContent("B"), dependencies: [{ kind: "artifact", id: a.id }] }),
     other.report(run.id, { name: "C", content: textContent("C") })
@@ -66,7 +69,7 @@ test("reports, revisions, read recovery and parallel producers never update the 
 });
 
 test("only explicit edits persist overrides, manual choices survive derivation, and finish freezes exact roots", async t => {
-  const f = await initializedContextFixture(t), s = (await openContextControl(f.root))!, r = await s.start("overrides");
+  const f = await contextModuleFixture(t), s = f.reopen(), r = await s.start("overrides");
   const a = (await s.report(r.id, { name: "A", content: textContent("A") })).artifact;
   const b = (await s.report(r.id, { name: "B", content: textContent("B"), dependencies: [{ kind: "artifact", id: a.id }] })).artifact;
   await s.updateOutputs(r.id, [a.id], [b.id]);

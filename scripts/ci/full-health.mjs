@@ -76,8 +76,8 @@ export async function fullEvidence(api, run) {
   if (run.workflow_id !== WORKFLOW_ID || run.repository?.full_name !== REPOSITORY) return undefined;
   if (!(run.event === "workflow_dispatch" || ((run.event === "push" || run.event === "schedule") && run.head_branch === "master"))) return undefined;
   if (bootstrapTitles.includes(run.display_title) || ["CI (default)", "CI (default · units only)"].includes(run.display_title)) return undefined;
-  // The temporary unit-only exploration cannot satisfy a full integration gate.
-  if (run.display_title?.includes("units only")) return undefined;
+  // The temporary fast-layer exploration cannot satisfy a full integration gate.
+  if (run.display_title?.includes("units only") || run.display_title?.includes("unit + module")) return undefined;
   const marked = run.display_title === "CI (full)" || run.event === "schedule";
   // Pushes only became full when the fixed profile marker was introduced.
   // Earlier master pushes were default and must not require a jobs query each.

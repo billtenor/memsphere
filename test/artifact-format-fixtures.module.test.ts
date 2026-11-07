@@ -2,12 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  compileArtifactContract,
-  createBuiltInArtifactValidatorRegistry,
-  prepareArtifactCandidate,
-  type ArtifactValidationContext
-} from "../src/artifact-validation.js";
+import { compileArtifactContract, createBuiltInArtifactValidatorRegistry, prepareArtifactCandidate, type ArtifactValidationContext } from "../src/artifact-validation.js";
 import { schemaNodeFromMemory, type SchemaNode } from "../src/memory/ast.js";
 import { artifactNodeSchema, schemaMemorySchema } from "../src/memory/schema.js";
 import { parseMemoryYaml } from "../src/memory/yaml.js";

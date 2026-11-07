@@ -10,7 +10,7 @@ test('full gate requires a full regression summary and cannot borrow unit-only e
 });
 test('a default PR run cannot be used as completed master full evidence', async () => {
   let reads = 0;
-  for (const title of ['CI (default)', 'CI (default · units only)']) {
+  for (const title of ['CI (default)', 'CI (default · units only)', 'CI (unit + module)']) {
     assert.equal(await fullEvidence({list:async()=>{reads++;return [];}},{...run,display_title:title}),undefined);
   }
   assert.equal(reads,0);
