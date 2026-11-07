@@ -1,3 +1,6 @@
+import { startSchemaWriting, writingPosition, checkWritingPosition, reportSchemaItem, skipSchemaItem, repeatSchemaItem, assembleSchemaDraft } from "./schema-writing.js";
+import { MEMSPHERE_SCHEMA_MODEL } from "../memory/schema-model.js";
+import { freezeSchemaContract, resolvedArtifact, sameModel, schemaReviewSources, type ResolvedArtifactSpec } from "./schema-contract.js";
 import { createReviewNodes, assertReviewNodes, reviewCommentId } from "../review-nodes.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -14,7 +17,7 @@ import type { ContentReader, Stores } from "./service.js";
 import type { Arrival, Artifact, Body, ContentRef, External, GraphFrame, GraphJoin, Ref, Review, ReviewRound, Run, Snapshot, Step, SubmissionFrame } from "./types.js";
 import { Records } from "./records.js";
 import { failure } from "./errors.js";
-import { graphBody, mimeType, validateGraphBody, validateGraphSpec } from "./graph-content.js";
+import { graphBody, mimeType, decodeGraphContent, validateGraphBody, validateGraphSpec } from "./graph-content.js";
 import { createGraphRound, graphPermissionConfig, graphReviewId, graphScope, pendingGraphReviews, projectGraphRound, requireGraphVote, storeGraphComments } from "./graph-review.js";
 import { deriveOutputs } from "./outputs.js";
 import { terminateProcessTree } from "../platform-process.js";
@@ -71,11 +74,11 @@ export class GraphRuntime {
     this.parsedProcedure = { reference: run.memoryRef!, content: raw.payload.content, value: p };
     return structuredClone(p);
   }
-  action(run: Run, step: Step): GraphAction {
+  action(run: Run, step: Step): GraphAction & { artifact?: ResolvedArtifactSpec } {
     if (step.runId !== run.id || step.source?.memoryRef !== run.memoryRef) throw failure("INVALID_STATE", "Step belongs to another Run/Procedure");
     const action = this.procedure(run).actions.find(a => a.id === step.source!.actionId);
     if (!action) throw failure("INVALID_STATE", `Unknown Step Action: ${step.source?.actionId}`);
-    return action;
+    return { ...action, ...(action.artifact ? { artifact: resolvedArtifact(run, action.id, action.artifact) } : {}) } as GraphAction & { artifact?: ResolvedArtifactSpec };
   }
   private authorize(run: Run, permission: PermissionId) {
     if (run.permissionConfig && !run.permissionConfig.runner.permissions.includes(permission)) throw failure("PERMISSION_DENIED", `Runner requires ${permission}`);
@@ -90,7 +93,7 @@ export class GraphRuntime {
     if (!input.name.trim()) throw failure("INVALID_ARGUMENT", "Run name must be nonblank");
     const procedure = parseMemoryEntity("procedures", input.procedure) as GraphProcedureMemory;
     if (procedure.mode !== "graph") throw failure("INVALID_ARGUMENT", "Expected a graph Procedure");
-    for (const a of procedure.actions) if (a.artifact) await validateGraphSpec(a.artifact);
+    for (const a of procedure.actions) if (a.artifact && a.artifact.model.definedBy !== MEMSPHERE_SCHEMA_MODEL) await validateGraphSpec(a.artifact);
     const cp = input.controlPlane && createControlPlaneSnapshot(input.controlPlane);
     if (cp && Object.hasOwn(cp.actors, "runner")) throw failure("INVALID_ARGUMENT", "Graph Actor id runner conflicts with the Runner permission identity; use a distinct Actor id");
     const template: RunProcedureTemplate = { memoryName: procedure.names[0], steps: procedure.actions.map(a => ({ id: `actions[${a.id}]`, instruction: a.description, artifact: a.artifact?.name, reviewSlots: a.artifact?.review })) };
@@ -103,6 +106,11 @@ export class GraphRuntime {
       ...(input.controlPlane ? { permissionConfig: graphPermissionConfig(input.controlPlane, input.language ?? "zh-CN") } : {}),
       ...(review ? { reviewConfig: { reviewPolicies: review.reviews, reviewBindings: review.slots } } : {}),
       frames: [{ id: newId("frame"), type: "graph", graphFrame: { memoryRef, triggers: [], pendingSteps: [], joins: [], processedStepIds: [], nextCompletionSequence: 1 } }] };
+    for (const [index, action] of procedure.actions.entries()) {
+      if (action.artifact?.model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
+        (run.schemaContracts ??= {})[action.id] = await freezeSchemaContract(action.artifact, snapshot.memories, { kind: "step", memoryRef, path: `actions[${index}].artifact.model.definition` });
+      }
+    }
     await this.rules(run);
     if (!isDeepStrictEqual(this.procedure(run), procedure)) throw failure("INVALID_STATE", "Procedure differs from its frozen snapshot");
     for (const action of procedure.actions) await this.rules(run, action);
@@ -192,9 +200,10 @@ export class GraphRuntime {
   private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.run(runId)).value;
     assertContextControlRecord("memsphere/context_control/run.json", run);
-    const [steps, artifacts, externals, reviews] = await Promise.all([
-      this.records.list<Step>("step", runId), this.records.list<Artifact>("artifact", runId), this.records.list<External>("external", runId), this.records.list<Review>("review", runId)
+    const [steps, artifactRows, externals, reviews] = await Promise.all([
+      this.records.list<Step>("step", runId), this.records.listRows<Artifact>("artifact", runId), this.records.list<External>("external", runId), this.records.list<Review>("review", runId)
     ]);
+    const artifacts = artifactRows.map(row => row.value);
     const historicalCompleteIds = steps.filter(s => s.status === "done" && s.artifact?.mode === "produce").map(s => (s.artifact as { id: string }).id);
     for (const id of historicalCompleteIds) if (!artifacts.some(a => a.id === id && a.status === "submitted")) throw failure("INVALID_STATE", `Completed Step has no submitted Artifact: ${id}`);
     const completeIds = historicalCompleteIds.filter(id => effectiveStep(run, artifacts.find(a => a.id === id)!.stepId));
@@ -218,7 +227,8 @@ export class GraphRuntime {
         if (ref.kind !== "artifact" || !artifact || !historicalCompleteIds.includes(ref.id) || steps.find(s => s.id === artifact.stepId)?.source?.actionId !== source) throw failure("INVALID_STATE", "Step input is not an accepted Artifact of its source Action");
       }
     }
-    return { run, steps, artifacts, externals, reviews, completeIds, historicalCompleteIds, outputArtifactIds };
+    const artifactRevisions = Object.fromEntries(artifactRows.filter(row => row.value.writing).map(row => [row.value.id, row.revision!]));
+    return { ...(Object.keys(artifactRevisions).length ? { artifactRevisions } : {}), run, steps, artifacts, externals, reviews, completeIds, historicalCompleteIds, outputArtifactIds };
   }
   private creationOrder(run: Run, steps: Step[]) {
     const order = new Map<string, number>();
@@ -282,6 +292,7 @@ export class GraphRuntime {
     const run = (await this.run(runId)).value;
     const a = (await this.records.require<Artifact>("artifact", runId, id)).value;
     const step = (await this.step(run, a.stepId)).value;
+    if (a.status === "draft" && step.writing?.draftId === a.id) return graphBody(a, this.reader);
     if (a.status !== "submitted" || !(step.artifact?.mode === "produce" && step.artifact.id === id || step.reviewRounds?.some(r => r.artifactId === id))) throw failure("INCOMPLETE_ARTIFACT", "Artifact is not a frozen graph submission");
     return graphBody(a, this.reader);
   }
@@ -389,7 +400,16 @@ export class GraphRuntime {
     const spec = this.action(run, step).artifact;
     if (!spec) throw failure("INVALID_STATE", "Collect has a submission frame");
     await validateGraphBody(stage.artifact, spec, this.reader);
-    await this.ensureArtifact(runId, stage.artifact);
+    if (stage.draft) {
+      const draft = await this.records.require<Artifact>("artifact", runId, stage.draft.id);
+      if (draft.value.status === "draft") {
+        const intent = draft.value.writing?.submission;
+        if (!intent || intent.token !== stage.draft.token || !isDeepStrictEqual(intent.frame.artifact, stage.artifact)) throw failure("RECOVERY_CONFLICT", "Sealed draft differs from its submission frame");
+        await this.productionStep(runId, stepId);
+        await this.records.update("artifact", runId, draft, { ...stage.artifact, tags: draft.value.tags });
+      } else await this.ensureArtifact(runId, stage.artifact);
+    } else await this.ensureArtifact(runId, stage.artifact);
+    await this.productionStep(runId, stepId);
     if (stage.round) for (const review of pendingGraphReviews(stage.round)) {
       const old = await this.records.get<Review>("review", runId, review.id);
       if (!old) {
@@ -401,7 +421,8 @@ export class GraphRuntime {
           Object.assign(review, createReviewNodes([
             { source: { kind: "procedure", memoryRef: run.memoryRef, path: "." }, name: procedure.names[0], defines: procedure.defines, asserts: rules.procedure },
             { source: { kind: "step", memoryRef: run.memoryRef, path: `actions[${actionIndex}]` }, name: action.description, asserts: rules.asserts, suggests: rules.suggests },
-            { source: { kind: "step", memoryRef: run.memoryRef, path: `actions[${actionIndex}].artifact` }, name: action.artifact!.name, asserts: rules.artifactAsserts, suggests: rules.artifactSuggests }
+            { source: { kind: "step", memoryRef: run.memoryRef, path: `actions[${actionIndex}].artifact` }, name: action.artifact!.name, asserts: rules.artifactAsserts, suggests: rules.artifactSuggests },
+            ...(run.schemaContracts?.[action.id] ? await schemaReviewSources(run.schemaContracts[action.id], spec.payload.contentType, (await graphBody(stage.artifact, this.reader)).bytes) : [])
           ], run.language === "en" ? "Open review" : "开放审查"));
         }
         await this.records.create("review", runId, review);
@@ -423,6 +444,7 @@ export class GraphRuntime {
     if (stage.round && !step.reviewRounds?.some(r => r.id === stage!.round!.id)) step.reviewRounds = [...(step.reviewRounds ?? []), stage.round];
     if (stage.nextStatus === "done") { step.completionSequence = stage.completionSequence; step.endedAt = stage.endedAt; }
     step.frames = step.frames!.filter(f => f.type !== "submission");
+    if (stage.draft) delete step.writing;
     await this.records.update("step", runId, row, step);
   }
   private async settle(runId: string, stepId: string) {
@@ -581,7 +603,10 @@ export class GraphRuntime {
     let run = (await this.run(runId)).value;
     if (run.status !== "running") return this.snapshotValue(runId);
     this.active(run); await this.recoverRewind(runId); await this.materialize(runId);
-    for (const step of await this.records.list<Step>("step", runId)) if (step.frames?.length && effectiveStep((await this.run(runId)).value, step.id)) await this.recoverSubmission(runId, step.id);
+    for (const step of await this.records.list<Step>("step", runId)) if ((step.frames?.length || step.writing) && effectiveStep((await this.run(runId)).value, step.id)) {
+      if (step.frames?.length) await this.recoverSubmission(runId, step.id);
+      else if (step.writing && step.status === "running") await this.recoverWriting(runId, step.id);
+    }
     await this.cancelSupersededReviews(runId);
     for (const step of await this.records.list<Step>("step", runId)) if (effectiveStep((await this.run(runId)).value, step.id) && step.status === "awaiting_review") await this.settle(runId, step.id);
     for (let automatic = 0; automatic < 1000; automatic++) {
@@ -650,6 +675,88 @@ export class GraphRuntime {
     const snapshot = await this.snapshotValue(runId); this.productionReady(snapshot.run); requireEffectiveStep(snapshot.run, stepId);
     return { snapshot, step };
   }
+  /** Select the writing path on the Step before creating its single draft. */
+  async enterSchema(runId: string, stepId: string) {
+    const run = await this.productionStep(runId, stepId); this.authorize(run, "artifact.write");
+    let row = await this.step(run, stepId), step = structuredClone(row.value);
+    const spec = this.action(run, step).artifact;
+    if (step.status !== "running" || !spec || spec.model.definedBy !== MEMSPHERE_SCHEMA_MODEL) throw failure("INVALID_ARGUMENT", "Enter a running Step with a Memsphere Schema model first");
+    if (step.frames?.length) { await this.recoverSubmission(runId, stepId); return this.schemaShow(runId, stepId); }
+    if (!step.writing) {
+      const base = step.artifact?.mode === "produce" ? step.artifact.id : undefined;
+      step.writing = { draftId: `artifact-${createHash("sha256").update(JSON.stringify([stepId, base ?? "first"])).digest("hex").slice(0, 32)}`, ...(base ? { baseSubmittedArtifactId: base } : {}) };
+      await this.productionStep(runId, stepId);
+      await this.records.update("step", runId, row, step);
+    }
+    await this.ensureSchemaDraft(run, step);
+    await this.recoverWriting(runId, stepId);
+    return this.schemaShow(runId, stepId);
+  }
+  private async ensureSchemaDraft(run: Run, step: Step) {
+    const writing = step.writing;
+    if (!writing) return;
+    const existing = await this.records.get<Artifact>("artifact", run.id, writing.draftId);
+    if (existing) return;
+    const spec = this.action(run, step).artifact!;
+    const draft: Artifact = { id: writing.draftId, stepId: step.id, name: spec.name, status: "draft", tags: ["default"], dependencies: Object.values(step.inputs ?? {}).flat(),
+      content: { model: spec.model, payload: { contentType: spec.payload.contentType, content: "" } },
+      writing: startSchemaWriting(spec.model.definition, spec.payload.contentType, spec.name),
+      ...(writing.baseSubmittedArtifactId ? { revisedFrom: writing.baseSubmittedArtifactId } : {}) };
+    await this.productionStep(run.id, step.id);
+    try { await this.records.create("artifact", run.id, draft); }
+    catch (error) { if ((error as { code?: string }).code !== "ALREADY_EXISTS") throw error; }
+  }
+  async schemaShow(runId: string, stepId: string) {
+    const run = (await this.run(runId)).value; this.authorize(run, "artifact.read");
+    const step = (await this.step(run, stepId)).value;
+    const draft = step.writing && await this.records.get<Artifact>("artifact", runId, step.writing.draftId);
+    const writing = draft?.value.writing;
+    return { runId, stepId, effective: effectiveStep(run, stepId), draft: draft?.value, position: draft && writing && !writing.submission && writing.index < writing.items.length ? writingPosition(draft.value, draft.revision!) : undefined,
+      progress: writing ? { completed: writing.index, total: writing.items.length, remaining: writing.items.length - writing.index, fields: writing.items.map((item, i) => ({ id: item.id, path: item.schemaContext?.path, status: writing.skipped.includes(item.id) ? "skipped" : i < writing.index ? "completed" : i === writing.index ? "current" : "remaining" })) } : undefined,
+      current: writing?.items[writing.index], validation: step.validation && (!draft || step.validation.artifactId === draft.value.id && step.validation.draftRevision === draft.revision) ? step.validation : undefined, phase: writing?.submission || step.frames?.length ? "submitting" : writing && writing.index === writing.items.length ? "awaiting_finalization" : writing ? "writing" : step.artifact?.mode === "produce" ? "submitted" : "not_started",
+      requirements: run.schemaContracts?.[step.source!.actionId]?.sources, rules: await this.rules(run, this.action(run, step)) };
+  }
+  async schemaWrite(runId: string, stepId: string, operation: "report" | "skip" | "repeat", position: string | undefined, value?: string | number) {
+    const run = await this.productionStep(runId, stepId); this.authorize(run, "artifact.write");
+    const stepRow = await this.step(run, stepId), step = stepRow.value;
+    if (step.status !== "running" || step.frames?.length || !step.writing) throw failure("STEP_NOT_RUNNING", "No editable Schema draft");
+    const row = await this.records.require<Artifact>("artifact", runId, step.writing.draftId), draft = structuredClone(row.value);
+    checkWritingPosition(draft, row.revision!, position);
+    if (operation === "report") {
+      const item = draft.writing!.items[draft.writing!.index];
+      try {
+        if (item.format?.name === "json" || item.format?.name === "yaml") decodeGraphContent(Buffer.from(String(value)), item.format.name === "json" ? "application/json" : "application/yaml");
+        await reportSchemaItem(draft.writing!, String(value));
+      }
+      catch (error) {
+        const validation = { artifactId: draft.id, draftRevision: row.revision!, sha256: createHash("sha256").update(String(value)).digest("hex"), checkedAt: now(), status: "failed" as const, issues: [{ message: error instanceof Error ? error.message : String(error), path: item.schemaContext?.path }] };
+        await this.productionStep(runId, stepId);
+        await this.records.update("step", runId, stepRow, { ...step, validation });
+        throw error;
+      }
+    } else if (operation === "skip") skipSchemaItem(draft.writing!);
+    else repeatSchemaItem(draft.writing!, Number(value));
+    draft.content!.payload.content = assembleSchemaDraft(draft.writing!, draft.name, draft.content!.payload.contentType);
+    await this.productionStep(runId, stepId);
+    await this.records.update("artifact", runId, row, draft);
+    await this.productionStep(runId, stepId);
+    return this.schemaShow(runId, stepId);
+  }
+  private async recoverWriting(runId: string, stepId: string) {
+    const run = await this.productionStep(runId, stepId);
+    const row = await this.step(run, stepId), step = structuredClone(row.value);
+    if (!step.writing) return;
+    await this.ensureSchemaDraft(run, step);
+    const draft = await this.records.require<Artifact>("artifact", runId, step.writing.draftId);
+    const intent = draft.value.writing?.submission;
+    if (!intent) return;
+    if (!step.frames?.length) {
+      if (step.status !== "running") throw failure("RECOVERY_CONFLICT", "Draft intent no longer belongs to a running Step");
+      step.frames = [{ id: intent.token, type: "submission", submissionFrame: intent.frame }];
+      await this.productionStep(runId, stepId); await this.records.update("step", runId, row, step);
+    } else if (step.frames[0].id !== intent.token) throw failure("RECOVERY_CONFLICT", "Different draft submission frame");
+    await this.recoverSubmission(runId, stepId);
+  }
   async report(runId: string, stepId: string, input: GraphReport) {
     const run = await this.productionStep(runId, stepId); this.authorize(run, "artifact.submit");
     const row = await this.step(run, stepId); const step = structuredClone(row.value); const action = this.action(run, step);
@@ -659,14 +766,20 @@ export class GraphRuntime {
     if (step.reviewRounds?.length && !input.revisionSummary?.trim()) throw failure("REVISION_SUMMARY_REQUIRED", "A revised Artifact requires a revision summary");
     if (!step.reviewRounds?.length && input.revisionSummary !== undefined) throw failure("INVALID_ARGUMENT", "Revision summary requires a previous Review");
     const body: Body = input.text !== undefined ? { content: { model: structuredClone(action.artifact.model), payload: { contentType: action.artifact.payload.contentType, content: input.text } } } : input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) };
-    if (body.content && (body.content.model.definedBy !== action.artifact.model.definedBy || !isDeepStrictEqual(JSON.parse(body.content.model.definition), JSON.parse(action.artifact.model.definition)))) throw failure("ARTIFACT_CONTRACT_MISMATCH", "Report cannot replace the frozen Artifact model");
+    if (body.content && (!sameModel(body.content.model, action.artifact.model))) throw failure("ARTIFACT_CONTRACT_MISMATCH", "Report cannot replace the frozen Artifact model");
+    const draft = step.writing ? await this.records.require<Artifact>("artifact", runId, step.writing.draftId) : undefined;
+    if (draft && (!draft.value.writing || draft.value.writing.index < draft.value.writing.items.length)) throw failure("SCHEMA_INCOMPLETE", "Complete all Schema fields before submitting");
+    if (draft?.value.writing?.submission) throw Object.assign(failure("RECOVERY_REQUIRED", "A draft submission is sealed; recover status before retrying"), { details: { runId, stepId } });
     let checked: Awaited<ReturnType<typeof validateGraphBody>>;
-    try { checked = await validateGraphBody(body, action.artifact, this.reader); }
+    try {
+      checked = await validateGraphBody(body, action.artifact, this.reader);
+      const mutableRecords: Array<["run" | "step" | "artifact", string]> = [["run", runId], ["step", stepId], ...(draft ? [["artifact", draft.value.id] as ["artifact", string]] : [])];
+      if (body.contentRef && mutableRecords.some(([entity, id]) => body.contentRef!.storeId === this.records.stores[entity].id && body.contentRef!.dataId === this.records.key(entity, runId, id))) throw failure("INVALID_ARGUMENT", "A submission cannot use its own mutable context record as the payload reference");
+    }
     catch (error) {
-      if (body.content) {
-        step.validation = { sha256: createHash("sha256").update(body.content.payload.content).digest("hex"), checkedAt: now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error) }] };
-        await this.records.update("step", runId, row, step);
-      }
+      step.validation = { ...(draft ? { artifactId: draft.value.id, draftRevision: draft.revision } : {}), ...(body.content ? { sha256: createHash("sha256").update(body.content.payload.content).digest("hex") } : {}), checkedAt: now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error) }] };
+      await this.productionStep(runId, stepId);
+      await this.records.update("step", runId, row, step);
       throw error;
     }
     await this.productionStep(runId, stepId);
@@ -675,12 +788,21 @@ export class GraphRuntime {
     const previousArtifact = previousStep?.artifact?.mode === "produce" ? previousStep.artifact.id : undefined;
     const dependencies = [...new Map(Object.values(step.inputs ?? {}).flat().map(r => [`${r.kind}:${r.id}`, r])).values()];
     for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
-    const artifact: Artifact = { id: newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
+    const artifact: Artifact = { id: draft?.value.id ?? newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
       ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : previousArtifact ? { revisedFrom: previousArtifact, revisedSummary: rewind!.reason } : {}) };
     const round = createGraphRound(run, this.procedure(run), action, artifact.id);
-    const submissionFrame: SubmissionFrame = { artifact, nextStatus: round ? "awaiting_review" : "done", ...(round ? { round } : {}) };
+    const token = newId("frame");
+    const submissionFrame: SubmissionFrame = { artifact, nextStatus: round ? "awaiting_review" : "done", ...(round ? { round } : {}), ...(draft ? { draft: { id: draft.value.id, token } } : {}) };
+    if (draft) {
+      const sealed = structuredClone(draft.value);
+      if (artifact.content) { sealed.content = artifact.content; delete sealed.contentRef; }
+      else { sealed.contentRef = artifact.contentRef; delete sealed.content; }
+      sealed.writing!.submission = { token, frame: submissionFrame };
+      await this.productionStep(runId, stepId);
+      await this.records.update("artifact", runId, draft, sealed);
+    }
     step.validation = { sha256: checked.sha256, artifactId: artifact.id, checkedAt: now(), status: "passed", issues: [] };
-    step.frames = [{ id: newId("frame"), type: "submission", submissionFrame }];
+    step.frames = [{ id: token, type: "submission", submissionFrame }];
     await this.productionStep(runId, stepId);
     await this.records.update("step", runId, row, step);
     try { await this.recoverSubmission(runId, stepId); const snapshot = await this.advance(runId); requireEffectiveStep(snapshot.run, stepId); return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact }; }

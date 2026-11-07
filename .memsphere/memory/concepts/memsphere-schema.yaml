@@ -11,3 +11,6 @@ defines:
   - Artifact 与 Schema 都可以声明 type 和 format；Schema 还使用 fields、item、items 和 Repeat 描述当前值内部的结构。
   - Schema 可以使用 asserts 与 suggests 补充自然语言内容约束，这些规则不会被代码 validator 根据文本自动猜测执行。
   - Schema 的合法 YAML 结构由 memsphere-schema-schema 定义。
+  - graph 产物以 model.definedBy 为 memsphere/schema.json 使用 Schema；definition 为显式 syntax 的完整 !schema YAML，或以并列 ref 引用 schemas/canonical-name，二者必须二选一。
+  - graph 的 payload.contentType 决定整体序列化格式；Schema 字段的 format 描述局部格式，根 format.layout 约束布局；layout-only 写法用于 Markdown，根格式冲突明确拒绝。
+  - graph 的 Schema 支持渐进式撰写；中间内容持续保存同一 draft Artifact，完成后同 ID 提交，提交后修改创建新的修订草稿；Schema Runtime 不提供反射。

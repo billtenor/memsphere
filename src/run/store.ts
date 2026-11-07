@@ -4349,7 +4349,7 @@ function contentTypeForFormat(format: ArtifactFormatSpec): string | undefined {
   }
 }
 
-function compileSchemaSteps(
+export function compileSchemaSteps(
   schema: SchemaNode,
   rootName: string,
   parentContract: CompiledArtifactContract,
@@ -4502,7 +4502,7 @@ function compileRepeatStep(
   };
 }
 
-function compileRepeatBody(
+export function compileRepeatBody(
   repeat: NonNullable<RunStep["repeat"]>,
   count: number,
   controlPlane?: ArtifactControlPlane,
