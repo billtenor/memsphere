@@ -20,6 +20,7 @@
 | `entrypoints.view` | `{packageKey,instanceId,path?,config?}[]`；path 是以 `/` 开头的 Module 相对页面路径，用于 show 的使用入口。 |
 | `configuration` | 配置的 JSON Schema 文件路径，安装/configure 时校验。 |
 | `stores` | `{key,model,kind,factory,config}[]`，kind 为 DataStore 或 ValueStore；复用 DataManager StoreBinding。 |
+| `projectStores` | `{key,model,kind,configKey}[]`，声明需要从当前 Project 绑定的业务 Store；`configKey` 指向 App 配置中保存 Store ID 的顶层字段。 |
 | `cliBindings` | `{cli,args?,cwd?,env?}[]`，参数或环境值可以用单字段 `{configKey:"ledgerDirectory"}` 引用安装配置。 |
 | `backend` | `{entry,operations}`；entry 是可信 ESM，operations 把操作名映射为 read 或 write。 |
 
@@ -65,7 +66,29 @@ Model Package 的必填字段为 `schemaVersion:1`、`id`、`name`、`version` �
 
 View Plugin 注入 `api` 后使用 `ctx.api.invoke(operation,input)`；只有 App 绑定的实例能取得该服务。请求固定发往 `/api/projects/<project>/apps/<app>/operations/<operation>`，宿主按 Project 解析安装和 Store，不接受调用者覆盖 App/Project 上下文。入口复用 View 的 same-origin JSON 和远程 operator token 检查，只接受 Manifest 声明的操作。可信代码不是安全沙箱。
 
-backend default export 的 operations 各项为 `{kind,execute(ctx,input)}`，必须与 Manifest 完全匹配。ctx 提供 project、app、只读 config、signal 和 `getStore(key)`；只可通过该方法取得本 App 声明的 Store。类型由公开 `memsphere/app` 导出。独立 CLI 可直接使用公开 `memsphere/data` 与 `memsphere/data/extensions`，无需调用宿主 HTTP。
+backend default export 的 operations 各项为 `{kind,execute(ctx,input)}`，必须与 Manifest 完全匹配。ctx 提供 project、app、只读 config、signal 和 `getStore(key)`；只能取得 App 声明的自有 Store 或 Project Store。类型由公开 `memsphere/app` 导出。独立 CLI 可直接使用公开 `memsphere/data` 与 `memsphere/data/extensions`，无需调用宿主 HTTP。
+
+App 可在 `projectStores` 中声明 `{ "key": "expenses", "model": "example/expense.json", "kind": "ValueStore", "configKey": "expensesStore" }`，使用者在安装或完整替换配置时提供 `{"expensesStore":"business/expenses"}`。目标必须是当前 Project 登记的同模型、同类型业务 Store；`app show` 显示绑定，`app check` 和 enable 检查可用性。App 配置 Schema 允许缺省时，可以先以停用状态安装，启用前必须完成绑定。
+
+在一次 backend operation 中，先用 `ctx.getProjectStoreBinding("expenses")` 获得 `{storeId, token}`，再用 `ctx.getStore("expenses", {expectedBinding: token})` 读取；将读取结果与 token 一起返回页面。写入时由页面传回 token 并再次传给 `getStore`。改绑或移除后旧 token 不再有效，App 应提示用户刷新；返回的共享 Store 句柄只在当前 operation 内有效。共享 operation 按 Project 串行执行；后台代码和 I/O 应响应 `ctx.signal` 并等待结束。忽略取消且无法结束的可信代码可能阻塞其他共享操作，须停止宿主进程后检查并恢复。不要在 operation 内同步调用 Project Store 登记、App 配置或模型维护命令。直接修改 Project 配置文件不受此并发保护。
+
+HTTP 客户端断连后若操作取消或失败，View 在宿主日志中记录 Project、App、操作和错误类别，不记录请求内容、配置或 token。底层写入可能已经部分完成时，使用者应检查数据后再重试。
+
+例如以下操作假设声明的 `expenses` 是 ValueStore；页面必须保留读取响应的 token，并在保存时传回：
+
+```js
+export default { operations: {
+  read: { kind: "read", async execute(ctx, { id }) {
+    const binding = await ctx.getProjectStoreBinding("expenses");
+    const store = await ctx.getStore("expenses", { expectedBinding: binding.token });
+    return { record: await store.get(ctx, id), token: binding.token };
+  } },
+  save: { kind: "write", async execute(ctx, { id, value, token }) {
+    const store = await ctx.getStore("expenses", { expectedBinding: token });
+    return store.update(ctx, id, value);
+  } }
+} };
+```
 
 enable/configure/disable 改变持久配置；View 使用固定启动组合，需要重启应用界面变更。后端请求读取当前安装配置，停用立即拒绝新请求及新的 Procedure Run，已开始的业务调用不承诺自动回滚。Memory 仍可读，既有 Run 保留冻结内容，外部程序不受宿主启停控制。
 

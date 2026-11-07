@@ -1,5 +1,9 @@
 # Create and Install an App
 
+## Connect an App to an existing Project Store
+
+For an App declaring `projectStores`, register a business Store with the required model and kind in the current Project. If its declared `configKey` is `expensesStore` and the Store ID is `business/expenses`, provide a JSON configuration such as `{"expensesStore":"business/expenses"}`. Install with `memsphere app install <directory> --config <file>`, then run `memsphere app check <id>` and `memsphere app enable <id>`. To rebind, use `memsphere app configure <id> --config <file>`; this replaces the complete App configuration, so retain other required fields. `memsphere app show <id>` displays the target. See the [App contract](./app-contract.en.md) for binding tokens and stale-page protection.
+
 [简体中文](./app-guide.md) | English
 
 This guide explains how to create an App, install it into a Project, and use it. App management and external CLI registration are implemented, and the examples have been verified through actual installation and use. See [App Design](./app-design.en.md) and the [implementation contract](./app-contract.en.md) for concepts and interfaces.

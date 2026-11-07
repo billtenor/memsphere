@@ -52,7 +52,7 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  const cleanupFailure=Error('injected first owned Job probe failure');
  const jobCleanupAttempts:number[]=[];
  const cleanupJob=async(job:string|undefined,i:number)=>{
-  if(failCleanupJob){jobCleanupAttempts.push(i);if(i===0)throw cleanupFailure;}
+  if(failCleanupJob){jobCleanupAttempts.push(i);if(jobCleanupAttempts.length===1)throw cleanupFailure;}
   if(process.platform==='win32'&&job)await stopFixtureJob(job);
  };
  const alive=async(pid:number)=>(await observed.alive(pid))[0];
@@ -338,15 +338,15 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  verifiedCleanup=true;
  if(failOnce&&submitted&&!completed)await t.test('ACP teardown still cleans the second original execution after the first Job probe rejects',async()=>{
   // Exercise the actual registered ACP cleanup chain, not just the aggregator.
-  // The related execution is retired; its Job probe fails before cleanup of the
-  // still-live unrelated execution, whose original worker/provider/child must exit.
+  // Fail whichever Job probe runs first; the other cleanup must still be
+  // attempted and all original worker/provider/child processes must exit.
   const pids=[...new Set(processes.flatMap(p=>[p.workerPid,p.providerPid,p.childPid]).filter(Number.isInteger))];
   const verification=fixtureProcesses();
   verification.rememberSnapshot(...pids.map(pid=>observed.original(pid)!));
   failCleanupJob=true;verifiedCleanup=false;
   const includesOriginal=(error:unknown):boolean=>error===cleanupFailure||error instanceof AggregateError&&error.errors.some(includesOriginal);
   await assert.rejects(resources.close(),includesOriginal);
-  assert.deepEqual(jobCleanupAttempts,[0,1],'the second owned Job is attempted after the first fails');
+  assert.deepEqual([...jobCleanupAttempts].sort(),[0,1],'both owned Jobs are attempted even after the first fails');
   await untilFixture(async()=>!(await verification.alive(...pids)).some(Boolean),'all original ACP executions exit after a cleanup probe failure');
  });
 

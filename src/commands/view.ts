@@ -416,11 +416,27 @@ async function handleRequest(
       if (!project) throw new AppError("APP_PROJECT_NOT_FOUND", "Project is unavailable");
       project.name = projectScope!.projectId;
       const controller = new AbortController();
-      request.once("aborted", () => controller.abort());
-      const result = await invokeAppOperation(project, decodeURIComponent(appOperation[1]!), decodeURIComponent(appOperation[2]!), body.input, controller.signal);
-      sendJson(response, 200, { result });
+      const abort = () => { if (!response.writableFinished) controller.abort(); };
+      request.once("aborted", abort);
+      response.once("close", abort);
+      if (response.destroyed) controller.abort();
+      try {
+        const result = await invokeAppOperation(project, decodeURIComponent(appOperation[1]!), decodeURIComponent(appOperation[2]!), body.input, controller.signal);
+        if (!response.destroyed) sendJson(response, 200, { result });
+      } finally {
+        request.removeListener("aborted", abort);
+        response.removeListener("close", abort);
+      }
     } catch (error) {
-      sendJson(response, error instanceof AppError ? 409 : 400, { code: error instanceof AppError ? error.code : "APP_OPERATION_FAILED", error: error instanceof Error ? error.message : String(error) });
+      if (!response.destroyed) sendJson(response, error instanceof AppError ? 409 : 400, { code: error instanceof AppError ? error.code : "APP_OPERATION_FAILED", error: error instanceof Error ? error.message : String(error) });
+      else {
+        const systemCode = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+        const code = error instanceof AppError && /^APP_[A-Z0-9_]{1,80}$/.test(error.code) ? error.code
+          : error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name) ? error.name
+          : typeof systemCode === "string" && ["EACCES", "ENOSPC", "EIO", "EROFS", "EEXIST", "ENOENT"].includes(systemCode) ? systemCode : "APP_OPERATION_FAILED";
+        console.error(JSON.stringify({ event: "app_operation_disconnected", project: projectScope?.projectId,
+          app: appOperation[1], operation: appOperation[2], code }));
+      }
     }
     return;
   }

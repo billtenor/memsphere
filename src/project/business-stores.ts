@@ -1,4 +1,6 @@
 import { withConfigFileLock } from "../config-file-lock.js";
+import { randomUUID } from "node:crypto";
+import { withSharedStoreLock } from "./shared-store-lock.js";
 import { mkdir, readFile, readdir, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Config } from "../data/api/config.js";
@@ -150,7 +152,7 @@ export async function createBusinessStore(context: Context, root: string, id: st
     await readModelOperationStamp(root);
     const project = await readBusinessProject(root);
     if (project.dataStores && Object.hasOwn(project.dataStores, id)) throw serviceError("ALREADY_EXISTS", `Store already exists: ${id}`);
-    const next = { ...project, dataStores: { ...project.dataStores, [id]: binding } };
+    const next = { ...project, dataStores: { ...project.dataStores, [id]: { ...binding, registrationId: randomUUID() } } };
     const directories = await validateBusinessBindings(root, next);
     const directory = directories.get(id)!;
     const host = await createProjectModelHost(context, { root, ...project });
@@ -184,7 +186,7 @@ export async function createBusinessStore(context: Context, root: string, id: st
     }
     return { operation: "data.store.create", storeId: id, binding, directory };
   };
-  return dryRun ? execute() : withConfigFileLock(join(root, "config.json"), execute, context.signal);
+  return dryRun ? execute() : withSharedStoreLock(root, () => withConfigFileLock(join(root, "config.json"), execute, context.signal), context.signal);
 }
 export async function removeBusinessStore(context: Context, root: string, id: string, dryRun = false) {
   const execute = async () => {
@@ -195,5 +197,5 @@ export async function removeBusinessStore(context: Context, root: string, id: st
     }
     return { operation: "data.store.remove", storeId: id, dataRetained: true, directory: state.directory, ...(dryRun ? { dryRun: true } : {}) };
   };
-  return dryRun ? execute() : withConfigFileLock(join(root, "config.json"), execute, context.signal);
+  return dryRun ? execute() : withSharedStoreLock(root, () => withConfigFileLock(join(root, "config.json"), execute, context.signal), context.signal);
 }

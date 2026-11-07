@@ -44,9 +44,9 @@ export const modelRegistrationConfigSchema = z.object({
 
 const businessDirectorySchema = modelStorePathSchema;
 export const businessStoreBindingSchema = z.discriminatedUnion("kind", [
-  z.object({ model: z.string().min(1), kind: z.literal("value"), factory: z.literal("memsphere/filesystem-json"),
+  z.object({ model: z.string().min(1), kind: z.literal("value"), factory: z.literal("memsphere/filesystem-json"), registrationId: z.string().uuid().optional(),
     config: z.object({ directory: businessDirectorySchema }).strict() }).strict(),
-  z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/filesystem"),
+  z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/filesystem"), registrationId: z.string().uuid().optional(),
     config: z.object({ directory: businessDirectorySchema, contentTypeExtensions: z.record(z.array(z.string())).optional() }).strict() }).strict()
 ]);
 export type BusinessStoreBinding = z.infer<typeof businessStoreBindingSchema>;

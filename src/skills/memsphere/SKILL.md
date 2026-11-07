@@ -198,6 +198,8 @@ View 的记忆市场提供精选 Memory 的显式导入；未导入内容不在 
 
 App 自带工具描述自动登记，独立工具用 `cli register <descriptor-file>`；程序按作者说明独立安装，再 `cli bind <id> --binding <file> [--app <id>]` 配置本机入口、固定参数和工作目录。用 `cli list/show` 读取结构化调用信息后直接执行工具；`cli check` 仅执行声明探测，不猜协议。envFrom 引用环境变量名，凭据不写清单。
 
+App 声明 projectStores 时，按作者提供的 configKey 在 App 配置中指定当前 Project 已登记业务 Store ID；app show 查看目标，app check 检查模型和类型，旧来源 token 失效时重新读取。
+
 App disable 保留 Memory 阅读、数据与历史，但拒绝新流程涉及停用 App。Managed 安装走 ChangeSet，Embedded 应用当前 worktree，不自动 Git 提交；未完成安装的 Memory 被隐藏，按原发行目录重试。Mounted 来源只读；当前没有 App 升级、卸载或已有 Memory 自动认领。
 
 ## 管理模型与业务数据
