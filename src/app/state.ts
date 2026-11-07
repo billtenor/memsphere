@@ -11,7 +11,8 @@ export const installationSchema = z.object({
   installedAt: z.string(), enabled: z.boolean(), config: z.record(z.unknown()),
   memories: z.array(memoryAsset), descriptors: z.array(cliDescriptorSchema),
   bindings: z.record(cliBindingSchema), operationId: z.string(), memoryRevision: z.string().optional(), changeId: z.string().optional(),
-  bindingOverrides: z.record(cliBindingSchema).optional()
+  bindingOverrides: z.record(cliBindingSchema).optional(),
+  projectStoreGenerations: z.record(z.string().uuid()).optional()
 }).strict();
 export const appStateSchema = z.object({
   schemaVersion: z.literal(1), revision: z.number().int().nonnegative(), memoryRoot: z.string(),

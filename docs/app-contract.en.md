@@ -20,6 +20,7 @@ This contract describes local App integration. See [App Design](./app-design.en.
 | `entrypoints.view` | `{packageKey,instanceId,path?,config?}[]`; path is a Module-relative route beginning with `/`, used by show. |
 | `configuration` | Configuration JSON Schema file, validated on install/configure. |
 | `stores` | `{key,model,kind,factory,config}[]`; kind is DataStore or ValueStore, using existing StoreBinding contracts. |
+| `projectStores` | `{key,model,kind,configKey}[]`; declares a Project business Store requirement whose ID is supplied by the named top-level App configuration field. |
 | `cliBindings` | `{cli,args?,cwd?,env?}[]`; values may reference installation configuration with `{configKey:"ledgerDirectory"}`. |
 | `backend` | `{entry,operations}`; trusted ESM entry and operation-name-to-read/write mapping. |
 
@@ -66,6 +67,10 @@ Enabled Apps add View instances to their Project's boot composition, preserving 
 An App-bound View Plugin injects api and calls `ctx.api.invoke(operation,input)`. Requests go to `/api/projects/<project>/apps/<app>/operations/<operation>`. The host resolves the Project, installation, and Stores, rejects undeclared operations, and reuses same-origin JSON and remote operator-token checks. Trusted plugins are not sandboxed.
 
 The backend default export has operations containing `{kind,execute(ctx,input)}`, exactly matching the Manifest. ctx provides project, app, readonly config, signal, and `getStore(key)` restricted to declared App Store keys. Types are exported from `memsphere/app`. Independent CLIs may use public `memsphere/data` and `memsphere/data/extensions` directly without host HTTP.
+
+An App may declare `{ "key": "expenses", "model": "example/expense.json", "kind": "ValueStore", "configKey": "expensesStore" }` in `projectStores`; the Project user supplies `{"expensesStore":"business/expenses"}` at installation or when replacing its configuration. The target must be a registered business Store in the current Project with the specified model and kind. `app show` displays bindings; `app check` and enable validate them. An unbound App may be installed disabled if its configuration schema allows it, but must be configured before enabling.
+
+Within a backend operation, obtain `{storeId, token}` using `ctx.getProjectStoreBinding("expenses")`, then read using `ctx.getStore("expenses", {expectedBinding: token})`. Return the token with the data and pass it back to `getStore` for writes. After rebinding or removal, stale tokens fail and the App should ask the user to refresh. Shared Store handles are valid only during the current operation. Shared operations are serialized per Project; backend code and I/O should respect `ctx.signal` and finish before returning. Trusted code that ignores cancellation and cannot finish can block shared operations until its host is stopped and the data inspected. Do not invoke Project Store registration, App configuration, or model maintenance synchronously inside an operation. Direct edits to Project configuration bypass this coordination.
 
 Enable/configure/disable update persistent configuration. View uses a fixed boot composition and requires restart for interface changes. Backend requests read current installation configuration. Disablement immediately blocks new App requests and Procedure Runs; in-flight operations are not automatically rolled back. Memory remains readable, existing Runs retain frozen content, and standalone executables remain independent.
 

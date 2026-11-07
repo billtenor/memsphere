@@ -35,6 +35,8 @@ export const appManifestSchema = z.object({
   configuration: relativePath.optional(),
   stores: z.array(z.object({ key: appId, model: text, kind: z.enum(["DataStore", "ValueStore"]),
     factory: text, config: z.record(z.unknown()) }).strict()).default([]),
+  projectStores: z.array(z.object({ key: appId, model: text, kind: z.enum(["DataStore", "ValueStore"]),
+    configKey: text }).strict()).default([]),
   cliBindings: z.array(z.object({ cli: appId, args: z.array(configValue).optional(),
     cwd: configValue.optional(), env: z.record(configValue).optional() }).strict()).default([]),
   backend: z.object({ entry: relativePath, operations: z.record(appId, z.enum(["read", "write"])) }).strict().optional()
@@ -47,7 +49,7 @@ export const appManifestSchema = z.object({
   for (const entry of app.entrypoints.view) if (!viewKeys.has(entry.packageKey))
     context.addIssue({ code: "custom", path: ["entrypoints", "view"], message: `unknown packageKey: ${entry.packageKey}` });
   for (const [name, ids] of [["view instances", app.entrypoints.view.map(v => v.instanceId)],
-    ["stores", app.stores.map(s => s.key)], ["CLI bindings", app.cliBindings.map(b => b.cli)]] as const)
+    ["stores", [...app.stores, ...app.projectStores].map(s => s.key)], ["CLI bindings", app.cliBindings.map(b => b.cli)]] as const)
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: `duplicate ${name}` });
 });
 export const modelPackageSchema = z.object({

@@ -1,4 +1,5 @@
 import { withConfigFileLock } from "./config-file-lock.js";
+import { withSharedStoreLock } from "./project/shared-store-lock.js";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -290,7 +291,7 @@ export async function writeProjectConfigDraft(input: {
   migrateModelRegistrations?: boolean;
 }): Promise<ProjectConfigDocument> {
   // Registration migration is performed after the operator has stopped writes.
-  return withConfigFileLock(input.globalConfigPath, () => withConfigFileLock(input.document.configPath, async () => {
+  return withSharedStoreLock(input.document.scopeRoot, () => withConfigFileLock(input.globalConfigPath, () => withConfigFileLock(input.document.configPath, async () => {
     await readModelOperationStamp(input.document.scopeRoot);
     const [latest, global] = await Promise.all([
       readProjectConfigDocument(input.document.configPath, input.document.resolved),
@@ -308,7 +309,7 @@ export async function writeProjectConfigDraft(input: {
     if (migration.migrated) validation.candidate.modelRegistration = { ...(validation.candidate.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG)), excludedDirectories: migration.excludedDirectories };
     await atomicWriteJson(latest.configPath, validation.candidate);
     return readProjectConfigDocument(latest.configPath, latest.resolved);
-  }));
+  })));
 }
 
 export function configRevision(source: string | Buffer): string {

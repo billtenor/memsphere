@@ -49,6 +49,7 @@ export function registerAppCommands(program: Command): void {
     return { id, name: app.manifest.name, version: app.manifest.version, enabled: app.enabled,
       description: app.manifest.description, assets: app.manifest.assets, memories,
       configuration: app.manifest.configuration, entrypoints: app.manifest.entrypoints,
+      projectStores: app.manifest.projectStores.map(store => ({ key: store.key, model: store.model, kind: store.kind, storeId: app.config[store.configKey] ?? null })),
       usage: { agent, view: app.manifest.entrypoints.view.map(entry => ({ instanceId: entry.instanceId,
         path: entry.path ? `/projects/${encodeURIComponent(project.name)}/modules/${encodeURIComponent(entry.instanceId)}${entry.path}` : undefined,
         instruction: entry.path ? "Open this path in the Memsphere View service" : "Select the Module in the Project navigation" })) },

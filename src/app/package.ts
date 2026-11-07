@@ -12,6 +12,7 @@ import type { AppInstallation } from "./state.js";
 export async function readAppPackage(directory: string) {
   const root = await realpath(directory);
   const manifest = appManifestSchema.parse(await readJson(await packagePath(root, "app.json")));
+  for (const store of manifest.projectStores) assertModelRef(store.model);
   const memories: Array<AppInstallation["memories"][number] & { source: Buffer }> = [];
   for (const asset of manifest.assets.memories) {
     const source = await readFile(await packagePath(root, asset.path));

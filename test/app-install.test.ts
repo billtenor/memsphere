@@ -300,3 +300,104 @@ test("App show and check find renamed entrypoints beyond the first Memory page",
   assert.equal(shown.usage.agent[0].reference, "concepts/zzz-app-intro");
   assert.equal((await checkApp(context.primary, "example.app")).items.find(item => item.name === "entrypoint:concepts/app-intro")?.available, true);
 }, true));
+
+test("closing a View HTTP response aborts the running App operation", async () => fixture(async (root, context, app) => {
+  const http = await import("node:http");
+  const manifest = JSON.parse(await readFile(join(app, "app.json"), "utf8"));
+  manifest.backend = { entry: "backend.mjs", operations: { wait: "read" } };
+  await writeFile(join(app, "app.json"), JSON.stringify(manifest));
+  await writeFile(join(app, "backend.mjs"), `export default {operations:{wait:{kind:'read',execute: async ctx => { globalThis.__issue137Started(); await new Promise(resolve => ctx.signal.addEventListener('abort',resolve,{once:true})); globalThis.__issue137Aborted(); }}}};`);
+  await installApp(context, app);
+  await setAppEnabled(context, "example.app", true);
+  let started!: () => void, aborted!: () => void;
+  const start = new Promise<void>(resolve => { started = resolve; });
+  const abort = new Promise<void>(resolve => { aborted = resolve; });
+  Object.assign(globalThis, { __issue137Started: started, __issue137Aborted: aborted });
+  const config = await readConfig(); config.view = { host: "127.0.0.1", port: 0 };
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const request = http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`, { method: "POST", headers: { "content-type": "application/json", origin } });
+  request.on("error", () => undefined);
+  try {
+    request.end(JSON.stringify({ input: {} }));
+    await Promise.race([start, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("operation did not start")), 5000))]);
+    request.destroy();
+    await Promise.race([abort, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("abort did not reach operation")), 5000))]);
+  } finally {
+    delete (globalThis as Record<string, unknown>).__issue137Started;
+    delete (globalThis as Record<string, unknown>).__issue137Aborted;
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}));
+
+test("App installation binds a Project Store and shares records through the View API", async t => fixture(async (root, context, app) => {
+  const { createBusinessStore } = await import("../src/project/business-stores.js");
+  const { writeData } = await import("../src/project/data-service.js");
+  await mutateModel({}, context.primary.paths.root, "create", "expense.json", { source: JSON.stringify({ type: "object", properties: { amount: { type: "number" } }, required: ["amount"], additionalProperties: false }) });
+  await createBusinessStore({}, context.primary.paths.root, "expenses", { model: "expense.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: "data/expenses" } });
+  await writeData({}, context.primary.paths.root, "expenses", "first", "create", { kind: "value", value: { amount: 3 } });
+  const manifest = JSON.parse(await readFile(join(app, "app.json"), "utf8"));
+  manifest.projectStores = [{ key: "expenses", model: "expense.json", kind: "ValueStore", configKey: "store" }];
+  manifest.backend = { entry: "backend.mjs", operations: { read: "read", write: "write", wait: "read" } };
+  await writeFile(join(app, "app.json"), JSON.stringify(manifest));
+  await writeFile(join(app, "backend.mjs"), `export default {operations:{
+    read:{kind:'read',execute:async ctx=>{const binding=await ctx.getProjectStoreBinding('expenses');const store=await ctx.getStore('expenses',{expectedBinding:binding.token});return {token:binding.token,record:await store.get({},'first')};}},
+    write:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});return store.update({},'first',input.value);}},
+    wait:{kind:'read',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.update({},'first',{amount:99});globalThis.__issue137SharedStarted();await new Promise(resolve=>ctx.signal.addEventListener('abort',resolve,{once:true}));globalThis.__issue137SharedAborted();}}
+  }};`);
+  await installApp(context, app, { store: "expenses" });
+  assert.equal((await checkApp(context.primary, "example.app")).status, "available");
+  await setAppEnabled(context, "example.app", true);
+  const config = await readConfig(); config.view = { host: "127.0.0.1", port: 0 };
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const invoke = async (operation: string, input: unknown) => {
+    const response = await fetch(`${origin}/api/projects/test/apps/example.app/operations/${operation}`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ input }) });
+    assert.equal(response.status, 200);
+    return (await response.json()).result;
+  };
+  try {
+    const current = await invoke("read", {});
+    assert.deepEqual(current.record.value, { amount: 3 });
+    await invoke("write", { token: current.token, value: { amount: 8 } });
+    const result = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "data", "read", "first", "--store", "expenses", "--output", "json"], { cwd: root, encoding: "utf8" }));
+    assert.deepEqual(result.value, { amount: 8 });
+    const http = await import("node:http");
+    const { FilesystemJsonValueStoreFactory } = await import("../src/data/extensions/filesystem-json-valuestore/index.js");
+    let releaseWrite!: () => void, writeStarted!: () => void;
+    const writeBarrier = new Promise<void>(resolve => { releaseWrite = resolve; });
+    const writeEntered = new Promise<void>(resolve => { writeStarted = resolve; });
+    const originalOpen = FilesystemJsonValueStoreFactory.prototype.openExisting;
+    t.mock.method(FilesystemJsonValueStoreFactory.prototype, "openExisting", async function (...args: Parameters<typeof originalOpen>) {
+      const store = await originalOpen.apply(this, args);
+      const update = store.update.bind(store);
+      store.update = async (...writeArgs) => { writeStarted(); await writeBarrier; return update(...writeArgs); };
+      return store;
+    });
+    let started!: () => void, aborted!: () => void;
+    const start = new Promise<void>(resolve => { started = resolve; });
+    const abort = new Promise<void>(resolve => { aborted = resolve; });
+    Object.assign(globalThis, { __issue137SharedStarted: started, __issue137SharedAborted: aborted });
+    const request = http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`, { method: "POST", headers: { "content-type": "application/json", origin } });
+    request.on("error", () => undefined);
+    try {
+      request.end(JSON.stringify({ input: { token: current.token } }));
+      await Promise.race([start, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("shared operation did not start")), 5000))]);
+      await Promise.race([writeEntered, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("shared write did not start")), 5000))]);
+      request.destroy();
+      await Promise.race([abort, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("shared operation was not cancelled")), 5000))]);
+      const { configureApp } = await import("../src/app/install.js");
+      const configured = configureApp(context, "example.app", { store: "expenses" });
+      releaseWrite();
+      await configured;
+      const afterAbort = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "data", "read", "first", "--store", "expenses", "--output", "json"], { cwd: root, encoding: "utf8" }));
+      assert.deepEqual(afterAbort.value, { amount: 8 });
+    } finally {
+      releaseWrite();
+      delete (globalThis as Record<string, unknown>).__issue137SharedStarted;
+      delete (globalThis as Record<string, unknown>).__issue137SharedAborted;
+    }
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+}));
