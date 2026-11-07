@@ -12,6 +12,9 @@ export interface ModelRuntime {
    * 不转换值、不补默认值；不符合时抛错。
    */
   reflect(value: unknown): Value;
+
+  /** Optional validation for document models which deliberately expose no reflection. */
+  validatePayload?(bytes: Uint8Array, contentType: string): Promise<void>;
 }
 
 /** 当前数据空间内已创建的 Runtime；查询不触发加载或创建。 */

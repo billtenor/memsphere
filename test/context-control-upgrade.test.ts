@@ -211,10 +211,35 @@ for(const entity of ["run","review"] as const)test(`Tracked Job name upgrade pre
  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!,run=await service.start("enrolled job model");
  const before=await service.stores.run.get({},run.id),path=join(f.root,"data/context_control/runs",`${run.id}.json`),bytes=await readFile(path,"utf8");
  const model=JSON.parse(await readFile(new URL(`../reserved-models/context-control/${entity}.json`,import.meta.url),"utf8"));
+ // Reconstruct the enrolled-Job release, which predates Schema contracts.
+ if(entity==="run")delete model.properties.schemaContracts;
  const restore=(v:any)=>{if(v&&typeof v==="object"){if(typeof v.pattern==="string"&&v.pattern.includes("Reviewer"))v.pattern="^(Global|Local)\\\\Memsphere\\.Reviewer\\.[0-9a-f-]{36}$";Object.values(v).forEach(restore);}};restore(model);
  const {definitionHash}=await import("../src/context_control/model-assets.js");
  assert.equal(definitionHash(model),entity==="run"?"edc72333e9994d3af34efb5c214c94cccaadf868bd25cc6fc243d3b7901696c3":"099b094d127fcfa7966ae78965c4f481fa1de837d2f888cbad4a8d7ea286173d");
  await publishFixtureDefinition(f.root,`memsphere/context_control/${entity}.json`,JSON.stringify(model));
  assert.equal((await withModelMaintenance(f.root,()=>upgradeContextControlOutputs(f.root)))?.records,0);
  const reopened=(await openContextControl(f.root))!;assert.deepEqual(await reopened.stores.run.get({},run.id),before);assert.equal(await readFile(path,"utf8"),bytes);
+});
+
+test("explicit Schema model upgrade preserves existing records and rejects implicit upgrades", async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const run = await service.start("before Schema support");
+  const reported = await service.report(run.id, { name: "Existing", content: textContent("Keep exact history") });
+  const { readContextControlModels, definitionHash } = await import("../src/context_control/model-assets.js");
+  const previous = { run: "5b99d424f1e60d2ecc6e49c0c85cf175166d2561ceb0fd40e66ec69ece51fdfc", step: "521778e1ee71afeccb41eaa5f07e3b11479baaf676b6a745f70119e463be4b12", artifact: "875e20287dd6cdfb151b9acc569990c0b7da9bd0a3472a05c08fb71de9fabc20" };
+  const before = { run: await service.stores.run.get({}, run.id), step: await service.stores.step.get({}, `${run.id}/${reported.step.id}`), artifact: await service.stores.artifact.get({}, `${run.id}/${reported.artifact.id}`) };
+  for (const asset of readContextControlModels()) {
+    if (!(asset.entity in previous)) continue;
+    const model = structuredClone(asset.definition) as any;
+    if (asset.entity === "run") delete model.properties.schemaContracts;
+    else { delete model.properties.writing; if (asset.entity === "step") { delete model.definitions.SubmissionFrame.properties.draft; delete model.definitions.Validation.properties.draftRevision; } }
+    assert.equal(definitionHash(model), previous[asset.entity as keyof typeof previous]);
+    await publishFixtureDefinition(f.root, asset.id, JSON.stringify(model));
+  }
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
+  assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.records, 0);
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.stores.run.get({}, run.id), before.run);
+  assert.deepEqual(await reopened.stores.step.get({}, `${run.id}/${reported.step.id}`), before.step);
+  assert.deepEqual(await reopened.stores.artifact.get({}, `${run.id}/${reported.artifact.id}`), before.artifact);
 });

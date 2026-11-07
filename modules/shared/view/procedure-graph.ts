@@ -203,14 +203,18 @@ export function createProcedureGraph(initial: ProcedureDefinition, options: {
             requirements!.append(modelGroup);
             const details = el('div');
             details.className = 'pg-model-definition';
-            let source = model.definition;
+            let source = model.frozenDefinition ?? model.definition;
             try {
                 if (typeof source === 'string')
                     source = JSON.parse(source);
             }
             catch {
             }
-            if (options.ui) {
+            if (model.definedBy === 'memsphere/schema.json') {
+                if (model.ref) field(details, t('Schema 引用', 'Schema reference'), model.ref);
+                if (typeof source === 'string') { const pre = el('pre', source); pre.className = 'pg-schema-definition'; details.append(pre); }
+            }
+            else if (options.ui) {
                 const modelSnapshot = { id: a.artifact.name, metaModel: String(model.definedBy ?? ''), builtin: false, definition: source, source: typeof model.definition === 'string' ? model.definition : JSON.stringify(source, null, 2) };
                 details.append(options.ui.modelDefinition({ model: modelSnapshot, view: 'structure' }));
             }

@@ -1,3 +1,4 @@
+import { exportArtifactBytes } from "./run.js";
 import { currentIdentity } from "../runner/identity.js";
 import { readFile } from "node:fs/promises";
 import { readConfig } from "../config.js";
@@ -64,6 +65,11 @@ async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
     const round = step.reviewRounds!.at(-1)!;
     return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.language === "en" ? `Step ${step.id} is awaiting review (${round.id}). Execute review wait and wait for the result; do not invent additional work while waiting.` : `Step ${step.id} 正在等待评审（${round.id}）。执行 review wait 并等待结果，不要在等待期间自行增加工作。`, command: c ? `memsphere continue review wait` : `memsphere --project ${quote(project)} run review wait --review ${graphReviewHandle(run.id, step.id)}` });
   }
+  if (a.artifact?.model.definedBy === "memsphere/schema.json" && step.status === "running") {
+    const state = await g.schemaShow(run.id, step.id);
+    const command = c ? `memsphere continue enter-schema` : `memsphere --project ${quote(project)} run enter-schema --run ${run.id} --step ${step.id}`;
+    return `${a.description}\n\nSchema requirements:\n${JSON.stringify(state.requirements, null, 2)}\n\nSchema writing: ${state.phase}\nNext: ${command}`;
+  }
   const rules = await g.rules(run, a);
   const labels = run.language === "en" ? { procedure: "Procedure rules", asserts: "Step rules", suggests: "Step suggestions", artifactAsserts: "Artifact rules", artifactSuggests: "Artifact suggestions" } : { procedure: "流程规则", asserts: "Step 规则", suggests: "Step 建议", artifactAsserts: "产物规则", artifactSuggests: "产物建议" };
   const ruleText = (Object.keys(rules) as Array<keyof typeof rules>).flatMap(key => {
@@ -121,7 +127,7 @@ export async function printGraphReviewOutput(review: ArtifactReview<import("../r
   return true;
 }
 export async function graphCommand(operation: string, input: object): Promise<boolean> {
-  const options = input as Options & { slot?: string; skip?: boolean; dryRun?: boolean; reason?: string; reasonFile?: string };
+  const options = input as Options & { position?: string; count?: string; schemaName?: string; force?: boolean; slot?: string; skip?: boolean; dryRun?: boolean; reason?: string; reasonFile?: string };
   if (!options.run) return false;
   const config = await readConfig(); const service = await openContextControl(config.scopeRoot);
   const run = service && await service.findRun(options.run);
@@ -147,6 +153,14 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const projectStep = (s: Step) => ({ ...s, effective: effectiveStep(snapshot.run, s.id), ...(supersedingRewind(snapshot.run, s.id) ? { supersededBy: supersedingRewind(snapshot.run, s.id) } : {}) });
       emitCommandResult(step ? { runId: run.id, step: projectStep(step), action: g.action(run, step) } : { ...snapshot, steps: snapshot.steps.map(projectStep) }, options.output ?? "text"); return true;
     }
+    if (operation === "contract-show" || operation === "artifact-show" && options.step) {
+      const stepId = needed(options.step, "--step"), snapshot = await g.snapshot(run.id);
+      const step = snapshot.steps.find(s => s.id === stepId);
+      if (!step) throw failure("NOT_FOUND", "Step not found");
+      if (operation === "contract-show") emitCommandResult({ runId: run.id, stepId, action: g.action(run, step), schema: snapshot.run.schemaContracts?.[step.source!.actionId] }, options.output ?? "text");
+      else emitCommandResult({ runId: run.id, stepId, artifacts: snapshot.artifacts.filter(a => a.stepId === stepId), schemaWriting: await g.schemaShow(run.id, stepId) }, options.output ?? "text");
+      return true;
+    }
     if (operation === "rewind") {
       const stepId = needed(options.step, "--step");
       if (options.reason !== undefined && options.reasonFile !== undefined) throw failure("INVALID_ARGUMENT", "Choose --reason or --reason-file");
@@ -162,6 +176,38 @@ export async function graphCommand(operation: string, input: object): Promise<bo
     }
     if (operation === "enter") { const entered = await g.enter(run.id, needed(options.step, "--step")); await createCommandState(project, run.id, entered.step.id); console.log(await stepPrompt(g, entered.snapshot, entered.step, project)); return true; }
     if (operation === "status") { const snapshot = await g.advance(run.id); const prompt = await graphNext(g, snapshot, project, !await currentIdentity()); if (options.output === "json") emitCommandResult({ snapshot: await g.snapshot(run.id), prompt }, "json"); else console.log(prompt); return true; }
+    if (["schema-enter", "schema-show", "schema-report", "schema-skip", "schema-repeat", "schema-export"].includes(operation)) {
+      const stepId = needed(options.step, "--step");
+      if (operation !== "schema-show" && operation !== "schema-export") { await assertSessionTarget(project, run.id, stepId); await assertReportExecutionCapability(); }
+      if (options.schemaName) throw failure("INVALID_ARGUMENT", "graph uses its frozen model Schema; do not pass a Schema name");
+      if (operation === "schema-export") {
+        const state = await g.schemaShow(run.id, stepId);
+        const snapshot = !state.draft ? await g.snapshot(run.id) : undefined;
+        const current = snapshot?.steps.find(s => s.id === stepId)?.artifact;
+        const id = state.draft?.id ?? (current?.mode === "produce" ? current.id : undefined);
+        if (!id) throw failure("NOT_FOUND", "No Artifact to export");
+        const content = await g.readArtifact(run.id, id);
+        await exportArtifactBytes(content.bytes, needed(options.file, "--file"), Boolean(options.force), [config.runsRoot, join(config.archiveRoot, "runs"), join(config.scopeRoot, "data", "context_control")]);
+        emitCommandResult({ runId: run.id, stepId, exported: options.file, artifactId: id }, options.output ?? "text"); return true;
+      }
+      let result;
+      if (operation === "schema-enter") { result = await g.enterSchema(run.id, stepId); await createCommandState(project, run.id, stepId); }
+      else if (operation === "schema-show") result = await g.schemaShow(run.id, stepId);
+      else {
+        let value: string | number | undefined;
+        if (operation === "schema-report") {
+          if ([options.artifact, options.artifactFile].filter(v => v !== undefined).length !== 1) throw failure("INVALID_ARGUMENT", "Choose --artifact or --artifact-file");
+          value = typeof options.artifact === "string" ? options.artifact : await readFile(options.artifactFile!, "utf8");
+        } else if (operation === "schema-repeat") {
+          if (!/^\d+$/.test(options.count ?? "")) throw failure("INVALID_ARGUMENT", "Repeat count must be a non-negative integer");
+          value = Number(options.count);
+        }
+        result = await g.schemaWrite(run.id, stepId, operation === "schema-report" ? "report" : operation === "schema-repeat" ? "repeat" : "skip", options.position, value);
+      }
+      const prefix = `memsphere --project ${quote(project)} run`;
+      const nextCommand = result.phase === "awaiting_finalization" ? `${prefix} artifact export --run ${run.id} --step ${stepId} --file <local-copy>` : result.position ? `${prefix} ${result.current?.kind === "repeat" ? "repeat <count>" : "schema report"} --run ${run.id} --step ${stepId} --position ${result.position}${result.current?.kind === "repeat" ? "" : " --artifact-file <field-content>"}` : `${prefix} status --run ${run.id}`;
+      emitCommandResult({ ...result, nextCommand }, options.output ?? "text"); return true;
+    }
     if (operation !== "report") return false;
     const stepId = needed(options.step, "--step");
     await assertSessionTarget(project, run.id, stepId);

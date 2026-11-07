@@ -1410,3 +1410,30 @@ function isValidationResult(value: unknown): value is ArtifactValidationResult {
     Array.isArray((value as ArtifactValidationResult).issues)
   );
 }
+
+/** Read-only projection using exactly the same section/field matching as validation. */
+export async function projectSchemaContent(schema: SchemaNode, contract: CompiledArtifactContract, candidate: PreparedArtifactCandidate): Promise<Array<{ contractPath: string; fieldPath: string; text: string }>> {
+  const result: Array<{ contractPath: string; fieldPath: string; text: string }> = [];
+  async function walk(node: SchemaNode, current: CompiledArtifactContract, value: PreparedArtifactCandidate, contractPath: string, fieldPath: string) {
+    result.push({ contractPath, fieldPath, text: new TextDecoder("utf-8", { fatal: true }).decode(value.raw) });
+    for (const child of deriveSchemaChildren(node, current, value, contractPath, fieldPath)) {
+      if (typeof child.field === "object" && child.field.tag === "!schema") await walk(child.field, schemaContract(child.field, current), child.candidate, child.contractPath, child.fieldPath);
+    }
+    if (Array.isArray(value.representation.value)) for (const [index, element] of value.representation.value.entries()) {
+      for (const [j, item] of (node.item ? [node.item] : node.items ?? []).entries()) {
+        if (item.tag !== "!schema") continue;
+        const itemContract = schemaContract(item, current), itemCandidate = candidateFromStructuredValue(value, element, itemContract, item.format !== undefined);
+        if (node.items) {
+          const registry = createBuiltInArtifactValidatorRegistry();
+          const itemSchemaContract = { ...itemContract, schema: item };
+          const checked = await registry.execute(registry.resolvePlan(itemSchemaContract), { contract: itemSchemaContract, candidate: itemCandidate, context: { runId: "projection", stepId: "projection", artifactPath: fieldPath, attemptId: "projection" } });
+          if (checked.status !== "passed") continue;
+        }
+        await walk(item, itemContract, itemCandidate, node.item ? `${contractPath}.item` : `${contractPath}.items[${j}]`, `${fieldPath}[${index}]`);
+        break;
+      }
+    }
+  }
+  await walk(schema, contract, candidate, "schema", "");
+  return result;
+}

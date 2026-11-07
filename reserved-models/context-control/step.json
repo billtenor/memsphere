@@ -258,6 +258,10 @@
       "type": "integer",
       "minimum": 1,
       "description": "graph Step 的持久完成顺序；与 done 原子提交，不能用时间戳或随机 ID 推断。"
+    },
+    "writing": {
+      "type": "object",
+      "description": "当前渐进撰写的内部状态。"
     }
   },
   "required": [
@@ -366,6 +370,10 @@
             ],
             "additionalProperties": false
           }
+        },
+        "draftRevision": {
+          "type": "integer",
+          "minimum": 1
         }
       },
       "required": [
@@ -1029,6 +1037,9 @@
         },
         "endedAt": {
           "$ref": "#/definitions/Timestamp"
+        },
+        "draft": {
+          "type": "object"
         }
       },
       "required": [

@@ -6,8 +6,8 @@ import { renderArtifactValue } from "./run-detail.js";
 import { contextControlStyles } from "./context-control-styles.js";
 import { layoutGraph } from "./graph-layout.js";
 
-type Artifact = { id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
-type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
+type Artifact = { writingProgress?: { index: number; items: Array<{ path?: string }>; skipped: string[]; validation?: {issues: Array<{message: string}>}; submitting?: boolean }; id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
+type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ writing?: unknown; id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag); node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
@@ -178,6 +178,17 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     }else content.append(bar);
     const deps = element("div", "cc-related");if(a.dependencies.length)deps.append(element("span","",label("依赖产物","Dependencies"))); a.dependencies.forEach(r => deps.append(r.kind === "artifact" ? button(snapshot.artifacts.find(a => a.id === r.id)?.name ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});choose(r.id);void open(r.id); }, "cc-text-button") : button(snapshot.externals?.find(e => e.id === r.id)?.source ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});void openExternal(r.id); }, "cc-text-button"))); if(!graphSelection)content.append(deps);
     const body = element("article", "cc-document", a.status === "draft" ? label("未提交", "Not submitted") : label("加载中…", "Loading…")); content.append(body);
+    if (a.writingProgress) {
+      const writing = a.writingProgress, progress = element("section", "cc-schema-writing");
+      progress.setAttribute("aria-label", label("Schema 撰写进度", "Schema writing progress"));
+      progress.append(element("p", "", `${label("进度", "Progress")} ${writing.index}/${writing.items.length}`));
+      const current = writing.items[writing.index]?.path;
+      if (current) progress.append(element("p", "", `${label("当前项", "Current field")}: ${current}`));
+      else progress.append(element("p", "", writing.submitting ? label("提交处理中", "Submitting") : label("待完整检查与提交", "Ready for final inspection and submission")));
+      progress.append(element("p", "", `${label("已跳过", "Skipped")}: ${writing.skipped.length}`));
+      for (const issue of writing.validation?.issues ?? []) progress.append(element("p", "cc-schema-issue", issue.message));
+      content.insertBefore(progress, body);
+    }
     const reviewStep=snapshot.graph?.work.find(step=>step.id===a.stepId);
     const reviewRound=reviewStep?.reviewRounds?.filter(round=>round.artifactId===id).at(-1);
     const inline=Boolean(mountReview&&reviewStep?.reviewHandle&&reviewRound);
@@ -209,7 +220,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       void mountReview!(snapshot.run.id,reviewStep!.reviewHandle!,reviewRound!.id,dialog,material,panel).catch(error=>{if(!disposed&&currentId===id)panel.textContent=error instanceof Error?error.message:String(error);});
       body.hidden=Boolean(material.querySelector(".artifact-review-material-heading"));
     }
-    if (!body.hidden && (inline || a.status !== "draft")) try {
+    if (!body.hidden) try {
       const value = await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}/artifacts/${encodeURIComponent(id)}/content`);
       if (!disposed && generation === currentGeneration && currentId === id) {
         if (value.previewable === false) {
@@ -354,7 +365,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
         value.artifacts=snapshot.artifacts;artifactsLoaded=false;
         if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
           const old=snapshot.graph!.work.find(s=>s.id===step.id);
-          if(old?.status===step.status&&JSON.stringify(old.artifact)===JSON.stringify(step.artifact))return {...old,...step};
+          if(old?.status===step.status&&JSON.stringify(old.artifact)===JSON.stringify(step.artifact)&&JSON.stringify(old.writing)===JSON.stringify(step.writing))return {...old,...step};
           if(step.source)loadedActions.delete(step.source.actionId);return step;
         });
       }else{loadedActions.clear();actionDefinitions.clear();artifactsLoaded=false;}
