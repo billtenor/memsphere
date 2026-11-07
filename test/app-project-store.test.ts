@@ -317,13 +317,14 @@ async function dataFixture(t: import("node:test").TestContext) {
   await fixture.createStore("files", "record.json", "data");
   await writeData({}, fixture.root, "files", "one.json", "create", { kind: "value", value: { name: "first", count: 1 } });
   const root = join(fixture.directory, "data-app"); await mkdir(root);
-  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read" } } });
+  const manifest = appManifestSchema.parse({ schemaVersion: 1, id: "example.data", name: "Example", version: "1.0.0", description: "Example", projectStores: [{ key: "files", model: "record.json", kind: "DataStore", configKey: "store" }], backend: { entry: "backend.mjs", operations: { read: "read", write: "write", broken: "write", appendfail: "write", streamunhandled:"read", streamcaught:"read", streamresponse:"read", streammode:"read" } } });
   await writeFile(join(root, "app.json"), JSON.stringify(manifest));
   await writeFile(join(root, "backend.mjs"), `export default {operations:{
     read:{kind:'read',execute:async ctx=>{const binding=await ctx.getProjectStoreBinding('files');const store=await ctx.getStore('files',{expectedBinding:binding.token});const item=await store.get({},'one.json');const text=await new Response(item.data.payload.content.stream()).text();return {token:binding.token,value:JSON.parse(text)};}},
     streamunhandled:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');item.data.payload.content.stream();return 'started';}},
     streamcaught:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');try {await item.data.payload.content.stream().getReader().read();} catch(e) {if(e.message!=='read failure')throw e;return 'recovered';}}},
     streamresponse:{kind:'read',execute:async ctx=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');try {await new Response(item.data.payload.content.stream()).text();} catch(e) {if(e.message!=='read failure')throw e;return 'recovered';}}},
+    streammode:{kind:'read',execute:async(ctx,input)=>{const b=await ctx.getProjectStoreBinding('files');const s=await ctx.getStore('files',{expectedBinding:b.token});const item=await s.get({},'one.json');let stream=item.data.payload.content.stream();try {if(input.mode==='tee')stream=stream.tee()[0];if(input.mode==='through')stream=stream.pipeThrough(new TransformStream());if(input.mode==='pipe')await stream.pipeTo(new WritableStream({write(){}}));else if(input.mode==='values')for await(const _ of stream.values()){}else for await(const _ of stream){}return 'complete';} catch(e){if(!input.recover)throw e;if(e.message!=='read failure')throw e;return 'recovered';}}},
     write:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});const bytes=new TextEncoder().encode(JSON.stringify(input.value));await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({start(c){c.enqueue(bytes);c.close();}})}}});}},
     broken:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.update({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>new ReadableStream({pull(c){c.error(new Error('input failure'));}})}}});}},
     appendfail:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('files',{expectedBinding:input.token});await store.append({}, {id:'one.json',model:'record.json',payload:{contentType:'application/json',content:{stream:()=>{globalThis.__issue137Streams++;let count=0;return new ReadableStream({pull(c){if(count++===0)c.enqueue(new TextEncoder().encode('x'));else c.error(new Error('append input failure'));}});}}}});}}
@@ -357,6 +358,19 @@ for (const operation of ["streamunhandled", "streamcaught", "streamresponse"] as
   });
   if(operation==="streamunhandled") await assert.rejects(invokeAppOperation(project,"example.data",operation,{}),/read failure/);
   else assert.equal(await invokeAppOperation(project,"example.data",operation,{}),"recovered");
+});
+
+for(const mode of ["pipe","iterator","values","tee","through"] as const) test(`DataStore ${mode} consumption preserves success and error recovery`,{timeout:30000},async t=>{
+  const {project,invokeAppOperation}=await dataFixture(t);
+  assert.equal(await invokeAppOperation(project,"example.data","streammode",{mode,recover:false}),"complete");
+  const {FilesystemDataStoreFactory}=await import("../src/data/extensions/filesystem-datastore/index.js");
+  const original=FilesystemDataStoreFactory.prototype.openExisting;
+  t.mock.method(FilesystemDataStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){
+    const store=await original.apply(this,args);if(args[1]!=="files")return store;const get=store.get.bind(store);
+    store.get=async(...a)=>{const item=await get(...a);if(item)item.data.payload.content.stream=()=>new ReadableStream({pull(c){c.error(new Error("read failure"));}});return item;};return store;
+  });
+  assert.equal(await invokeAppOperation(project,"example.data","streammode",{mode,recover:true}),"recovered");
+  await assert.rejects(invokeAppOperation(project,"example.data","streammode",{mode,recover:false}),/read failure/);
 });
 
 test("an unfinished output stream keeps reconfiguration waiting until it settles",{timeout:30000},async t=>{

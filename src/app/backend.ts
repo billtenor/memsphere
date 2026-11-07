@@ -83,6 +83,11 @@ async function invoke(project: AppProject, id: string, operation: string, input:
     inFlight.add(task);
     void task.then(() => inFlight.delete(task), () => inFlight.delete(task));
   };
+  const observable = <T>(task: Promise<T>, observed: () => void): Promise<T> => {
+    const result = new ObservablePromise(task, observed, follow);
+    void Promise.prototype.then.call(result, undefined, () => undefined);
+    return result;
+  };
   const track = <T>(task: Promise<T>, exposeObserver?: (observe: () => void) => void): Promise<T> => {
     const state = { error: undefined as unknown, observed: false };
     const observe = () => { state.observed = true; };
@@ -91,9 +96,7 @@ async function invoke(project: AppProject, id: string, operation: string, input:
     void task.then(() => inFlight.delete(task), error => { inFlight.delete(task); state.error = error; failures.push(state); });
     // Awaiting a Promise subclass calls its then method, unlike an ordinary
     // native Promise. This records when the App observes an expected error.
-    const result = new ObservablePromise(task, observe, follow);
-    void Promise.prototype.then.call(result, undefined, () => undefined);
-    return result;
+    return observable(task, observe);
   };
   const wrapDataStream = (record: StoredData | undefined): StoredData | undefined => {
     if (!record) return record;
@@ -125,21 +128,40 @@ async function invoke(project: AppProject, id: string, operation: string, input:
           },
           async cancel(reason) { try { await reader.cancel(reason); finish(); } catch (error) { finish(error, true); throw error; } }
         });
-        const getReader = stream.getReader.bind(stream);
-        Object.defineProperty(stream, "getReader", { value: (...args: unknown[]) => {
-          const output = (getReader as (...args: unknown[]) => ReadableStreamDefaultReader<Uint8Array>)(...args);
-          return new Proxy(output, { get(target, property) {
-            if (property === "read") return (...readArgs: unknown[]) => {
-              const task = (target.read as (...args: unknown[]) => Promise<ReadableStreamReadResult<Uint8Array>>).apply(target, readArgs);
-              const result = new ObservablePromise(task, observeStream, follow);
-              void Promise.prototype.then.call(result, undefined, () => undefined);
-              return result;
+        const instrument = (output: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> => {
+          const getReader = output.getReader.bind(output);
+          const pipeTo = output.pipeTo.bind(output);
+          const pipeThrough = output.pipeThrough.bind(output);
+          const tee = output.tee.bind(output);
+          const values = (output as unknown as { values(options?: { preventCancel?: boolean }): AsyncIterableIterator<Uint8Array> }).values.bind(output);
+          const iterator = (options?: { preventCancel?: boolean }) => {
+            const source = values(options);
+            return {
+              next: (...args: [] | [undefined]) => observable(source.next(...args), observeStream),
+              return: (value?: unknown) => observable(source.return!(value as never), observeStream),
+              [Symbol.asyncIterator]() { return this; }
             };
-            const value = Reflect.get(target, property, target);
-            return typeof value === "function" ? value.bind(target) : value;
-          } });
-        } });
-        return stream;
+          };
+          Object.defineProperties(output, {
+            getReader: { value: (...args: unknown[]) => {
+              const reader = (getReader as (...args: unknown[]) => ReadableStreamDefaultReader<Uint8Array>)(...args);
+              return new Proxy(reader, { get(target, property) {
+                if (property === "read") return (...readArgs: unknown[]) => observable(
+                  (target.read as (...args: unknown[]) => Promise<ReadableStreamReadResult<Uint8Array>>).apply(target, readArgs), observeStream);
+                if (property === "closed") return observable(target.closed, observeStream);
+                const value = Reflect.get(target, property, target);
+                return typeof value === "function" ? value.bind(target) : value;
+              } });
+            } },
+            pipeTo: { value: (destination: WritableStream<Uint8Array>, options?: StreamPipeOptions) => observable(pipeTo(destination, options), observeStream) },
+            pipeThrough: { value: (transform: ReadableWritablePair<Uint8Array, Uint8Array>, options?: StreamPipeOptions) => instrument(pipeThrough(transform, options)) },
+            tee: { value: () => { const [left, right] = tee(); return [instrument(left), instrument(right)]; } },
+            values: { value: iterator },
+            [Symbol.asyncIterator]: { value: iterator }
+          });
+          return output;
+        };
+        return instrument(stream);
       }
     } } } };
   };
