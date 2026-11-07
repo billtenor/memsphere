@@ -72,17 +72,12 @@ export function agentReviewCliSource(descriptor: CliRuntimeDescriptor): "install
 }
 
 function buildGuard(descriptor: CliRuntimeDescriptor): string {
-  return `import { spawnSync } from "node:child_process";
-const args = process.argv.slice(2);
-const fail = (message) => { console.error("error: " + message); process.exit(1); };
-const result = spawnSync(${JSON.stringify(descriptor.nodeExecutable)}, [${JSON.stringify(descriptor.cliEntrypoint)}, ...args], {
-  stdio: "inherit",
-  env: process.env
-});
-if (result.error) {
-  fail(result.error.message, "CLI_LAUNCH_FAILED", 1);
-}
-process.exit(result.status ?? 1);
+  // Authorization belongs to the real CLI. Keep its argv identity and module
+  // location while avoiding a second Node process for every Reviewer command.
+  return `import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+process.argv[1] = resolve(${JSON.stringify(descriptor.cliEntrypoint)});
+await import(pathToFileURL(process.argv[1]).href);
 `;
 }
 

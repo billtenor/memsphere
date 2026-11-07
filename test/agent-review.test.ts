@@ -512,6 +512,29 @@ test("Agent Review launcher preserves CLI arguments without injecting a second p
   } finally { await runtime.cleanup(); }
 });
 
+test("Agent Review launcher runs the fixed CLI in one Node process and preserves its identity and exit code", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "memsphere-cli identity % # -"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const entrypoint = join(directory, "fixed cli.mjs");
+  await writeFile(entrypoint, `if (!process.argv.includes("--version")) {
+    console.log(JSON.stringify({ pid: process.pid, parent: process.ppid, entrypoint: process.argv[1], module: import.meta.url, args: process.argv.slice(2), cwd: process.cwd(), token: process.env.MEMSPHERE_TEST_LAUNCH_TOKEN }));
+    process.exitCode = 23;
+  }`);
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: entrypoint });
+  t.after(() => runtime.cleanup());
+  const args = ["--project", "bound", "run", "artifact", "show", "--", "literal argument"];
+  const result = crossSpawn.sync(runtime.launcherPath, args, { cwd: directory, encoding: "utf8", env: launcherEnv({ MEMSPHERE_TEST_LAUNCH_TOKEN: "kept" }) });
+  assert.ifError(result.error);
+  assert.equal(result.status, 23, result.stderr);
+  const actual = JSON.parse(result.stdout);
+  assert.equal(process.platform === "win32" ? actual.parent : actual.pid, result.pid);
+  assert.equal(await realpath(actual.entrypoint), await realpath(entrypoint));
+  assert.equal(await realpath(fileURLToPath(actual.module)), await realpath(entrypoint));
+  assert.equal(await realpath(actual.cwd), await realpath(directory));
+  assert.deepEqual(actual.args, args);
+  assert.equal(actual.token, "kept");
+});
+
 test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, and vote commands", {
   skip: process.platform !== "win32"
 }, async () => {

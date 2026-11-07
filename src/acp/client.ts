@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { access, readFile, realpath, open, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
-import * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk";
 import type { AgentReviewProviderLaunch } from "./provider.js";
 import { spawnCommand, terminateProcessTree } from "../platform-process.js";
 
@@ -28,6 +28,7 @@ export async function runAgentReviewAcpSession(input: {
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }, dependencies: { spawn?: typeof spawnAgent } = {}): Promise<AgentReviewAcpSession> {
+  const acp = await import("@agentclientprotocol/sdk");
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
   await input.assertLaunchValid?.();
   const process = (dependencies.spawn ?? spawnAgent)(input.launch);
@@ -398,6 +399,7 @@ async function readWorkspaceTextFile(
   workspaceRoot: string,
   request: acp.ReadTextFileRequest
 ): Promise<acp.ReadTextFileResponse> {
+  const acp = await import("@agentclientprotocol/sdk");
   const path = resolve(request.path);
   if (!isAbsolute(request.path) || !isWithin(workspaceRoot, path)) {
     throw new acp.RequestError(-32000, `agent_fs_denied: path is outside the workspace: ${request.path}`, { code: "REVIEW_RESOURCE_DENIED" });
