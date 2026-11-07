@@ -87,6 +87,13 @@ test("All supported legacy reviewer prompts describe explicit Run reads and equi
     assert.match(prompt, /memory change show/);
     assert.match(prompt, locale === "en" ? /no --run is added automatically/ : /不会自动添加 --run/);
     assert.doesNotMatch(prompt, /automatically bind their frozen|会自动绑定其冻结/);
+    assert.match(prompt, locale === "en"
+      ? /restricted Run summary containing only steps allowed in this round/
+      : /本轮允许步骤的受限 Run 摘要/);
+    assert.match(prompt, locale === "en"
+      ? /legal context Artifact fixed to this round/
+      : /本轮固定绑定的合法上下文产物/);
+    assert.doesNotMatch(prompt, /including every step|prior Artifact from the outline/);
   }
 });
 

@@ -5,11 +5,11 @@
   "$MEMSPHERE_CLI" run artifact contract show --output json
 - Check this review's status, permissions, and your own comments:
   "$MEMSPHERE_CLI" run review assignment show --output json
-- View the Run outline, including every step, its Artifact summary, and the current step:
+- View the restricted Run summary containing only steps allowed in this round:
   "$MEMSPHERE_CLI" run show --output json
-- Inspect one step from that outline:
+- Inspect one allowed step from that summary:
   "$MEMSPHERE_CLI" run step show --step "<step-ref>" --output json
-- Read a prior Artifact from the outline when it is relevant:
+- Read a legal context Artifact fixed to this round:
   "$MEMSPHERE_CLI" run artifact show --step "<step-ref>" --output json
 - Discover and read project Memory (current Project by default):
   "$MEMSPHERE_CLI" memory list --output json
