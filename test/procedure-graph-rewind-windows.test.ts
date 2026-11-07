@@ -1,4 +1,3 @@
-import { processGates } from './fixtures/process-gates.mjs';
 import assert from "node:assert/strict";
 import { fork } from "node:child_process";
 import { once } from "node:events";
@@ -6,22 +5,24 @@ import { release as osRelease } from "node:os";
 import test from "node:test";
 import { captureProcessGroup, captureProcessIdentity, stopRewindWorker, queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
-import { terminateProcessTree } from "../src/platform-process.js";
+import {cleanupFixtureResources, rewindFixtureResources, stopFixtureChild, stopFixtureJob, verifyFixtureTreeExit} from "./helpers/fixture-process.js";
+import {pinWindowsProcess} from "./helpers/windows-process-handle.js";
+import type {ProcessIdentity} from "../src/context_control/review-process.js";
 
 for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late-descendant", "host-loss"] as const) test(`Windows native rewind process safety: ${scenario}`, {
   skip: process.platform !== "win32", timeout: 120000
 }, async t => {
-  t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM, kernel Job Objects; taskkill /T fixture cleanup`);
-  const gates = await processGates(t.signal);
+  t.diagnostic(`Windows ${osRelease()}, Node ${process.version}; native PowerShell/CIM, kernel Job Objects; owned ChildProcess/immutable Job fixture cleanup`);
+  const resources = await rewindFixtureResources(t);
+  const { gates, observed } = resources;
   const workers: Array<ReturnType<typeof fork>> = [];
-  t.after(async () => {
-    gates.publish("release");
-    for (const worker of workers) {
-      await terminateProcessTree(worker.pid!).catch(() => undefined);
-      if (worker.connected) worker.disconnect();
-    }
-    await gates.close();
-  });
+  const jobs: string[] = [];
+  const alive=async(pid:number)=>(await observed.alive(pid))[0];
+  resources.defer(() => cleanupFixtureResources([
+    () => gates.publish("release"),
+    ...jobs.map(job => () => stopFixtureJob(job)),
+    ...workers.map(worker => () => stopFixtureChild(worker))
+  ]));
   const start = async () => {
     const worker = fork(new URL("./fixtures/rewind-process-tree.mjs", import.meta.url), [String(gates.endpoint), scenario], {
       detached: true, execArgv: [], stdio: ["ignore", "ignore", "inherit", "ipc"]
@@ -35,21 +36,27 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     const waiting = once(worker, "message");
     worker.send(identity);
     const [ready] = await Promise.race([waiting, exitedEarly]);
+    jobs.push(ready.job);
     const members = await captureProcessGroup(worker.pid!);
     const child = members.find(p => p.pid === ready.childPid);
     assert.ok(child, "CIM observes the real child creation identity");
-    return { worker, child, hostPid:ready.hostPid as number|undefined, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
+    observed.rememberSnapshot(...members);
+    return { worker, child, host:ready.host as ProcessIdentity|undefined, rewind: { pid: worker.pid!, identity, members, job: ready.job, reviewId: "review", attemptId: "attempt" } };
   };
   const [related, unrelated] = await Promise.all([start(), start()]);
+  t.diagnostic(JSON.stringify({ workload: [related.worker.pid, related.child.pid], recorded: related.rewind.members }));
   if (scenario === "identity") {
     await assert.rejects(stopRewindWorker({ ...related.rewind, identity: { ...related.rewind.identity, started: "recycled PID" } }), { code: "PROCESS_IDENTITY_CHANGED" });
     assert.deepEqual(await captureProcessIdentity(related.worker.pid!), related.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(related.child.pid), related.child);
   } else if(scenario === "host-loss"){
-    assert.ok(related.hostPid);
-    process.kill(related.hostPid,"SIGKILL"); // Kill only the host, not its tree.
+    assert.ok(related.host);
+    const controller=await pinWindowsProcess(related.host,t.signal);
+    resources.defer(()=>controller.close());
+    // armed proves identity on the retained handle before host-loss injection.
+    await controller.terminate();
     const deadline=Date.now()+20000;
-    for(const member of related.rewind.members)while(await captureProcessIdentity(member.pid))assert.ok(Date.now()<deadline,`Job member ${member.pid} exits after host loss`);
+    for(const member of related.rewind.members)while(await alive(member.pid))assert.ok(Date.now()<deadline,`Original Job member ${member.pid} exits after host loss: ${observed.diagnostic(member.pid)}`);
     assert.deepEqual(await captureProcessIdentity(unrelated.worker.pid!),unrelated.rewind.identity);
     assert.deepEqual(await captureProcessIdentity(unrelated.child.pid),unrelated.child);
   } else if (scenario === "late-descendant") {
@@ -57,16 +64,17 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     related.worker.send("late-orphan");
     const [late] = await message;
     await exited;
-    assert.equal(await captureProcessIdentity(related.worker.pid!), undefined);
+    assert.equal(await alive(related.worker.pid!), false);
+    await observed.remember(late.latePid);
     const exitedDeadline = Date.now() + 20000;
-    while (await captureProcessIdentity(related.child.pid)) assert.ok(Date.now() < exitedDeadline, "recorded parent exits");
-    assert.ok(await captureProcessIdentity(late.latePid), "late descendant survives all recorded ancestors");
+    while (await alive(related.child.pid)) assert.ok(Date.now() < exitedDeadline, "recorded parent exits");
+    assert.ok(await alive(late.latePid), "late descendant survives all recorded ancestors");
     assert.equal(related.rewind.members.some(p => p.pid === late.latePid), false, "late PID is not in the original snapshot");
     await assert.rejects(stopRewindWorker(related.rewind), {code:"PROCESS_TERMINATION_PENDING"});
-    assert.ok(await captureProcessIdentity(late.latePid), "pending cleanup never mistakes missing old PIDs for complete exit");
+    assert.ok(await alive(late.latePid), "pending cleanup never mistakes missing old PIDs for complete exit");
     gates.publish("release");
     const deadline = Date.now() + 20000;
-    while (await captureProcessIdentity(late.latePid)) assert.ok(Date.now() < deadline, "late descendant exits");
+    while (await alive(late.latePid)) assert.ok(Date.now() < deadline, "late descendant exits");
     await stopRewindWorker(related.rewind);
   } else if (scenario === "orphan" || scenario === "unrecorded-orphan") {
     const exited = once(related.worker, "exit");
@@ -79,18 +87,23 @@ for (const scenario of ["tree", "identity", "orphan", "unrecorded-orphan", "late
     gates.publish("release");
     // Retry the actual OS probe until descendants have received their release message.
     const deadline = Date.now() + 20000;
-    while (await captureProcessIdentity(related.child.pid)) {
+    while (await alive(related.child.pid)) {
       assert.ok(Date.now() < deadline, "orphan child exits");
     }
     await stopRewindWorker(related.rewind);
   } else {
     await t.test("terminates the owned worker tree", async () => {
       await stopRewindWorker(related.rewind);
-      for (const member of related.rewind.members) assert.equal(await captureProcessIdentity(member.pid), undefined);
+      // The only workload processes in this native fixture are the worker and
+      // child. Keeper hosts were launched before enrollment, outside its Job;
+      // they observe zero membership and then close/exit asynchronously.
+      const workload = [related.worker.pid!, related.child.pid];
+      await verifyFixtureTreeExit(observed, workload, related.rewind.members.filter(member=>!workload.includes(member.pid)).map(member=>member.pid));
     });
     await t.test("an empty retired Job tolerates PID reuse without harming the new process", async () => {
       // Simulate reuse of a historical PID with a real unrelated live process.
       // The retired Job is empty; neither the replacement nor its child may die.
+      await stopFixtureJob(related.rewind.job);
       await stopRewindWorker({
         ...related.rewind, pid: unrelated.worker.pid!,
         identity: { pid: unrelated.worker.pid!, group: unrelated.worker.pid!, started: "1" }
