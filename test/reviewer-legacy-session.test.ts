@@ -8,8 +8,8 @@ import { reviewNodeFixture } from "./helpers/review-nodes.js";
 import * as reviews from "../src/context_control/review-repository.js";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
 
-async function legacyFixture(t: test.TestContext, context=false) {
- const f=await reviewNodeFixture(t,false,false,{flowContext:context}), state=await reviews.readRun(f.input.runsRoot,f.runId);
+async function legacyFixture(t: test.TestContext, context=false, tail=false) {
+ const f=await reviewNodeFixture(t,false,false,{flowContext:context,flowTail:tail}), state=await reviews.readRun(f.input.runsRoot,f.runId);
  // Construct a historical persistence fixture; production commands never rewrite history.
  const assignment=state.artifactReviews![0].rounds[0].assignments.find(a=>a.actorId==='agent')!;
  delete assignment.nodeTree;delete assignment.nodeStates;delete assignment.id;
@@ -97,4 +97,18 @@ test('legacy Step reads preserve the pinned revision summary after later revisio
  const f=await revisedLegacyFixture(t),before=JSON.parse(f.cli(['run','artifact','show','--step',f.state.artifactReviews![0].stepId,'--output','json']).stdout);assert.equal(before.revisionSummary.body,'Second fixed revision');assert.match(before.revisionSummary.digest,/^sha256:[a-f0-9]{64}$/);
  assert.equal(f.cli(['run','review','submit','--vote','approve','--output','json']).status,0);await reviews.submitArtifactReviewRunnerVote({...f.input,vote:'request_changes',comment:'Third'});await reviews.reportRun({runsRoot:f.input.runsRoot,runId:f.runId,artifact:{kind:'inline',value:'Third candidate'},revisionSummary:'Third revision'});
  const r=f.cli(['run','artifact','show','--step',f.state.artifactReviews![0].stepId,'--output','json']);assert.equal(r.status,0,r.stderr);const history=JSON.parse(r.stdout);assert.deepEqual(history.artifact,before.artifact);assert.deepEqual(history.revisionSummary,before.revisionSummary);assert.equal(history.artifact.value,'Second fixed candidate');
+});
+
+for(const completed of [false,true])test(`legacy accepted contract remains pinned after ${completed?'Run completion':'advancing to the next Step'}`,async t=>{
+ const f=await legacyFixture(t,false,true),args=['run','artifact','contract','show','--output','json'],initial=f.cli(args);assert.equal(initial.status,0,initial.stderr);const expected=JSON.parse(initial.stdout);assert.equal(expected.action.instruction,'Make result');assert.ok(expected.action.asserts.length);
+ assert.equal(f.cli(['run','review','submit','--vote','approve','--output','json']).status,0);
+ await reviews.submitArtifactReviewHumanAssignmentForRunner({...f.input,runId:f.runId,assignmentId:'human',vote:'approve',comments:[],authorizationNote:'Fixture Human approves first Step.'});
+ const accepted=await reviews.submitArtifactReviewRunnerVote({...f.input,vote:'approve'});assert.equal(accepted.run.status,'running');
+ if(completed){const done=await reviews.reportRun({runsRoot:f.input.runsRoot,runId:f.runId,artifact:{kind:'inline',value:'Later result'}});assert.equal(done.status,'done');}
+ for(const target of [[],['--assignment','agent'],['--step',f.state.artifactReviews![0].stepId],['--run',f.runId,'--step',f.state.artifactReviews![0].stepId]]){const r=f.cli([...args,...target]);assert.equal(r.status,0,r.stderr);assert.deepEqual(JSON.parse(r.stdout),expected);}
+});
+
+test('legacy context contract targets fail explicitly instead of reading the current Run contract',async t=>{
+ const f=await legacyFixture(t,true),context=JSON.parse(f.cli(['run','artifact','show','--output','json']).stdout).contextArtifacts[0];
+ const r=f.cli(['run','artifact','contract','show','--run',f.runId,'--step',context.stepId,'--output','json']);assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/INVALID_ARGUMENT/);assert.match(r.stderr,/pinned candidate contract only/);
 });

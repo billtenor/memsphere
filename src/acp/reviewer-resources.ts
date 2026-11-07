@@ -96,6 +96,10 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
       emitCommandResult({ id: context.run.id, name: context.run.name, status: context.run.status, stepIds: o.step ? [o.step] : allowedSteps }, o.output); return true;
     }
     if (operation === "external-show" || o.review || o.artifact) throw failure("INVALID_ARGUMENT", "Fixed Artifact/External/confirmation targets require a graph Review; this historical Session supports its candidate and context via --assignment or --step");
+    if (operation === "artifact-contract") {
+      if (o.step && o.step !== context.review.stepId) throw failure("INVALID_ARGUMENT", "Historical flow supports the pinned candidate contract only; context Artifact snapshots do not retain their owning procedure contract");
+      emitCommandResult(await (await import("./review-session.js")).agentReviewArtifactContractPayload(), o.output); return true;
+    }
     // Legacy candidate/context payload and contracts retain the existing protocol.
     // Explicit Step reads must still use the pinned submission rather than latest Run state.
     if (operation === "artifact-show" && (o.step || o.out)) {

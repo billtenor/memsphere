@@ -3,8 +3,10 @@ import {
   currentFrame,
   currentStep,
   type ArtifactReviewContext,
+  type RunStep,
   type RunSchemaContract
 } from "../run/store.js";
+import { failure } from "../context_control/errors.js";
 import type { EffectiveRuleTree } from "../memory/rules.js";
 import {
   toEffectiveRuleDisplayEntries,
@@ -36,10 +38,12 @@ export type AgentReviewContract = {
 
 export function buildAgentReviewContract(context: ArtifactReviewContext): AgentReviewContract {
   const step = currentStep(context.run);
-  if (!step || step.id !== context.review.stepId) {
-    throw new Error(`Artifact Review current Step is unavailable: ${context.review.stepId}`);
-  }
   const frame = currentFrame(context.run);
+  const scope = (context.round.controlPlane ?? context.review.controlPlane).artifactScope;
+  const wrongProcedure = !context.review.id.startsWith("graph-review-") && frame?.type === "procedure" && scope !== `${frame.memoryName}#${step?.id}`;
+  if (!step || step.id !== context.review.stepId || wrongProcedure) {
+    return buildHistoricalFlowReviewContract(context);
+  }
   const submission = step.store
     ? context.review.submissions.find(item => item.id === context.round.submissionId)
     : undefined;
@@ -51,6 +55,46 @@ export function buildAgentReviewContract(context: ArtifactReviewContext): AgentR
   contract.artifact.modelTarget = step.store && context.run.modelTargets?.[step.store]
     ? { storeId: step.store, modelRef: context.run.modelTargets[step.store].modelRef, dataId: submission?.artifact.modelTarget?.dataId ?? `${context.run.id}--${step.stepExecutionId}` }
     : undefined;
+  return contract;
+}
+
+/** Historical flow frames have already been popped. Resolve their immutable
+ * definition and procedure ancestry, never the current Project or next Step. */
+function buildHistoricalFlowReviewContract(context: ArtifactReviewContext): AgentReviewContract {
+  const { run, review, round } = context;
+  const scope = (round.controlPlane ?? review.controlPlane).artifactScope;
+  const suffix = `#${review.stepId}`;
+  if (!scope.endsWith(suffix)) throw failure("REVIEW_CONTEXT_INVALID", `Artifact Review frozen Step scope is invalid: ${scope}`);
+  const name = scope.slice(0, -suffix.length);
+  const templates = run.procedureSnapshots ?? {};
+  const steps = name === run.procedureName ? run.plan : templates[name]?.steps;
+  function flatten(items: readonly RunStep[]): RunStep[] {
+    return items.flatMap(item => [item, ...flatten(item.branches?.truthy ?? []), ...flatten(item.branches?.falsy ?? []), ...flatten(item.loop?.body ?? [])]);
+  }
+  const matches = flatten(steps ?? []).filter(item => item.id === review.stepId);
+  if (matches.length !== 1) throw failure("REVIEW_CONTEXT_INVALID", `Artifact Review frozen Step is unavailable: ${scope}`);
+  const paths: EffectiveRuleTree[][] = [];
+  function visit(procedure: string, ancestors: string[], rules: EffectiveRuleTree[]) {
+    if (ancestors.includes(procedure)) return;
+    const template = templates[procedure];
+    const next = template?.assertTree ? [...rules, template.assertTree] : rules;
+    if (procedure === name) { paths.push(next); return; }
+    for (const target of new Set(flatten(procedure === run.procedureName ? run.plan ?? [] : template?.steps ?? []).filter(s => s.kind === "call").map(s => s.target).filter((s): s is string => Boolean(s)))) {
+      visit(target, [...ancestors, procedure], next);
+    }
+  }
+  visit(run.procedureName, [], run.assertTree ? [run.assertTree] : []);
+  const unique = new Map(paths.map(path => {
+    const deduped = [...new Map(path.map(tree => [JSON.stringify(tree), tree])).values()];
+    return [JSON.stringify(deduped), deduped] as const;
+  }));
+  // Old persistence has no execution ancestry after frame removal. If frozen
+  // callers disagree, fail explicitly rather than merge or guess their rules.
+  if (unique.size !== 1) throw failure("REVIEW_CONTEXT_INVALID", `Artifact Review frozen procedure ancestry is unavailable or ambiguous: ${scope}`);
+  const step = matches[0]!;
+  const contract = buildReviewContract({ procedureName: name, procedureRules: [...unique.values()][0]!, step: { ...step, reviewPolicy: review.policyId }, artifactName: review.artifactName });
+  const target = review.submissions.find(item => item.id === round.submissionId)?.artifact.modelTarget;
+  contract.artifact.modelTarget = target ? { storeId: target.storeId, modelRef: target.modelRef, dataId: target.dataId } : undefined;
   return contract;
 }
 

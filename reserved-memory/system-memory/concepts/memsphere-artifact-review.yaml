@@ -33,3 +33,4 @@ defines:
   - "本人 Session 绑定与读取只加载所选轮次的本人 Review、Attempt、候选及授权上下文；不以前后其他轮次的候选记录、同轮其他参与者的草稿或锚点正文作为前置依赖。Runner/View 的完整评审投影保持独立用途。"
   - "命令能力描述须标明 Session 协议适用性，并用于提示、帮助和处理层。graph 支持固定 Artifact/External 及原接纳确认查询；历史 flow 通过 assignment/step 读取固定候选和上下文，不支持的固定对象查询须明确说明，不能作为可执行指引。"
   - "历史 flow 的 assignment 与显式 Step 读取共用固定 Submission 的完整 Artifact 展示字段；类型、格式、存储、文件与模型元信息随正文保留，当前候选的 revisionSummary 也固定到原轮次，上下文不得借最新 Submission 补全。缺少协议提示的旧 Session 帮助列出协议并集并说明适用边界，assignment show 返回实际绑定协议；授权仍以绑定身份为准。"
+  - "历史 flow 当前候选的契约按绑定 Review 的 Procedure/Step 定位；原步骤接纳、进入其他步骤或 Run 结束后仍从冻结 plan 与 Procedure 快照读取，保留原策略及模型目标。默认、assignment 和候选 step 入口一致；上下文快照缺少所属契约时明确拒绝 contract 查询。旧记录的调用祖先规则存在歧义时返回 REVIEW_CONTEXT_INVALID，不拼合或猜测规则。"

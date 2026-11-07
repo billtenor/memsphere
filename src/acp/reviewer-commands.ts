@@ -16,7 +16,7 @@ export function reviewerCapabilities(protocol: ReviewerProtocol) {
   return {
     protocol,
     commands: reviewerCommands.filter(command => protocol === "graph" || command !== "run external show"),
-    targets: protocol === "graph" ? "candidate, fixed Artifact/External and submitted upstream confirmations" : "candidate and pinned context via assignment/step; fixed Artifact/External/confirmation targets are unsupported"
+    targets: protocol === "graph" ? "candidate, fixed Artifact/External and submitted upstream confirmations" : "candidate and pinned context via assignment/step; contract reads target the candidate only; fixed Artifact/External/confirmation targets are unsupported"
   };
 }
 export const inReviewerSession = () => Boolean(process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
