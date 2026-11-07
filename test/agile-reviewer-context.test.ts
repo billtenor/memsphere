@@ -66,7 +66,8 @@ for (const source of [
   '.memsphere/memory/procedures/memsphere-agile-requirement-development.yaml',
   'reserved-memory/official-memory/procedures/generic-agile-requirement-development.yaml'])
   test(`${source}: formal technical/product Sessions pin actual workflow inputs through loops and rewind`, {
-    timeout: 180000
+    // Each workflow has six bounded phases; the aggregate spans many Reviews.
+    timeout: 540000
   }, async (t) => {
     const f = await initializedContextFixture(t);
     const service = (await openContextControl(f.root))!;
@@ -177,6 +178,15 @@ for (const source of [
       MEMSPHERE_HOME: f.home,
       MEMSPHERE_CONFIG_PATH: join(f.root, 'config.json')
     });
+    async function phase<T>(name: string, operation: () => Promise<T>): Promise<T> {
+      let result: { value: T } | undefined;
+      await t.test(name, { timeout: 180000 }, async () => {
+        result = { value: await operation() };
+      });
+      // A failed subtest must stop dependent phases using its incomplete state.
+      assert.ok(result, `Workflow phase did not complete: ${name}`);
+      return result.value;
+    }
     function runner(args: string[], json = true) {
       const r = crossSpawn.sync(process.execPath, [
         entrypoint,
@@ -203,15 +213,8 @@ for (const source of [
     async function produce(id: string, body: string, dependencies: Produced[] = [], native = false): Promise<Produced> {
       const step = await active(id);
       if (native) {
-        runner([
-          'run',
-          'step',
-          'enter',
-          '--run',
-          runId,
-          '--step',
-          step.id
-        ], false);
+        // Enter is fixture setup; the operation under test is the real CLI report.
+        await service.withGraph(g => g.enter(runId, step.id));
         const args = [
           'run',
           'report',
@@ -453,56 +456,65 @@ for (const source of [
         review
       };
     }
-    const firstInputs = await setup('v1');
-    const first = await acceptance('v1', firstInputs);
-    await gate('product-only', 'product_acceptance');
-    const productOnly = await produce('delivery', 'Product via gate', [
-      firstInputs.requirements,
-      firstInputs.plan,
-      first.technical
-    ], true);
-    const productOnlyReview = await session(productOnly);
-    await productOnlyReview.verify([
-      firstInputs.requirements,
-      firstInputs.plan,
-      first.technical
-    ]);
-    await productOnlyReview.confirmation(first.technical);
-    await productOnlyReview.accept();
-    const second = await acceptance('v2', firstInputs);
-    await first.review.read(first.technical);
-    first.review.cli([
-      'run',
-      'artifact',
-      'show',
-      '--artifact',
-      second.technical.artifactId
-    ], false);
-    await second.review.read(second.technical);
-    runner([
-      'run',
-      'step',
-      'rewind',
-      '--run',
-      runId,
-      '--step',
-      firstInputs.requirements.stepId,
-      '--reason',
-      'Replace confirmed requirements in fixture',
-      '--output',
-      'json'
-    ]);
-    const replacement = await setup('after-rewind');
-    const third = await acceptance('after-rewind', replacement);
-    third.review.cli([
-      'run',
-      'artifact',
-      'show',
-      '--artifact',
-      firstInputs.requirements.artifactId
-    ], false);
-    const history = await service.withGraph(g => g.reviewSnapshot(runId, first.product.stepId, first.review.roundId));
-    assert.ok(history.artifacts.some(a => a.id === firstInputs.requirements.artifactId));
-    assert.ok(history.artifacts.some(a => a.id === first.technical.artifactId));
-    assert.ok(!history.artifacts.some(a => a.id === replacement.requirements.artifactId || a.id === third.technical.artifactId));
+    const firstInputs = await phase('confirm initial requirements and plan', () => setup('v1'));
+    const first = await phase('first technical and product acceptance', () => acceptance('v1', firstInputs));
+    await phase('direct product gate retains the accepted technical version', async () => {
+      await gate('product-only', 'product_acceptance');
+      const productOnly = await produce('delivery', 'Product via gate', [
+        firstInputs.requirements,
+        firstInputs.plan,
+        first.technical
+      ], true);
+      const productOnlyReview = await session(productOnly);
+      await productOnlyReview.verify([
+        firstInputs.requirements,
+        firstInputs.plan,
+        first.technical
+      ]);
+      await productOnlyReview.confirmation(first.technical);
+      await productOnlyReview.accept();
+    });
+    await phase('loop acceptance keeps earlier Review versions isolated', async () => {
+      const accepted = await acceptance('v2', firstInputs);
+      await first.review.read(first.technical);
+      first.review.cli([
+        'run',
+        'artifact',
+        'show',
+        '--artifact',
+        accepted.technical.artifactId
+      ], false);
+      await accepted.review.read(accepted.technical);
+      return accepted;
+    });
+    const replacement = await phase('rewind and confirm replacement requirements and plan', async () => {
+      runner([
+        'run',
+        'step',
+        'rewind',
+        '--run',
+        runId,
+        '--step',
+        firstInputs.requirements.stepId,
+        '--reason',
+        'Replace confirmed requirements in fixture',
+        '--output',
+        'json'
+      ]);
+      return setup('after-rewind');
+    });
+    await phase('post-rewind acceptance and historical snapshots retain exact versions', async () => {
+      const third = await acceptance('after-rewind', replacement);
+      third.review.cli([
+        'run',
+        'artifact',
+        'show',
+        '--artifact',
+        firstInputs.requirements.artifactId
+      ], false);
+      const history = await service.withGraph(g => g.reviewSnapshot(runId, first.product.stepId, first.review.roundId));
+      assert.ok(history.artifacts.some(a => a.id === firstInputs.requirements.artifactId));
+      assert.ok(history.artifacts.some(a => a.id === first.technical.artifactId));
+      assert.ok(!history.artifacts.some(a => a.id === replacement.requirements.artifactId || a.id === third.technical.artifactId));
+    });
   });
