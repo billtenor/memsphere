@@ -1,5 +1,5 @@
 name: CI
-run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full · units only)' || 'CI (default · units only)') }}
+run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)') }}
 
 on:
   pull_request:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Unit-only CI profile (integration tests temporarily paused)
+        description: "Default: portable integration on Linux; full: all integration on every OS"
         type: choice
         options: [default, full]
         default: full
@@ -37,6 +37,8 @@ jobs:
     outputs:
       matrix: ${{ steps.plan.outputs.matrix }}
       profile: ${{ steps.plan.outputs.profile }}
+      unit_matrix: ${{ steps.plan.outputs.unit_matrix }}
+      integration_matrix: ${{ steps.plan.outputs.integration_matrix }}
     steps:
       - uses: actions/checkout@v7
       - id: plan
@@ -44,14 +46,14 @@ jobs:
           CI_PROFILE: ${{ inputs.profile || 'default' }}
         run: node scripts/ci/ci-plan.mjs >> "$GITHUB_OUTPUT"
 
-  test:
+  unit-tests:
     needs: plan
-    name: Test (${{ matrix.os }}, ${{ matrix.title }})
+    name: Unit tests (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.unit_matrix) }}
     env:
       CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
     steps:
@@ -74,17 +76,112 @@ jobs:
           path: ci-results
           if-no-files-found: error
 
+  integration-tests:
+    needs: plan
+    name: ${{ matrix.title }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.integration_matrix) }}
+    env:
+      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Install Playwright Chromium
+        if: matrix.browser
+        run: npx playwright install chromium
+      - run: npm run test:ci -- --suite=${{ matrix.suite }}
+      - name: Preserve test timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: timings-${{ matrix.os }}-${{ matrix.suite }}
+          path: ci-results
+          if-no-files-found: error
+
+  windows-package-smoke:
+    needs: plan
+    name: Windows packaged CLI shells
+    runs-on: windows-latest
+    timeout-minutes: 5
+    env:
+      MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
+      - name: Pack and install
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force .ci-pack, .ci-install | Out-Null
+          npm pack --ignore-scripts --pack-destination .ci-pack
+          $package = (Get-ChildItem .ci-pack\*.tgz | Select-Object -First 1).FullName
+          npm install --prefix .ci-install $package
+      - name: Packaged core Run and View lifecycle
+        shell: pwsh
+        run: node scripts/ci/windows-package-smoke.mjs
+      - name: Windows PowerShell 5.1 smoke
+        shell: powershell
+        run: |
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
+          Push-Location ".ci windows project"
+          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
+          Pop-Location
+      - name: PowerShell 7 smoke
+        shell: pwsh
+        run: |
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
+          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
+          Push-Location ".ci windows project"
+          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
+          Pop-Location
+      - name: CMD smoke
+        shell: cmd
+        run: |
+          .ci-install\node_modules\.bin\memsphere.cmd --version
+          .ci-install\node_modules\.bin\memsphere.cmd --help
+          cd /d ".ci windows project"
+          ..\.ci-install\node_modules\.bin\memsphere.cmd view status
+      - name: Git Bash smoke
+        shell: bash
+        run: |
+          ./.ci-install/node_modules/.bin/memsphere --version
+          ./.ci-install/node_modules/.bin/memsphere --help
+          cd ".ci windows project"
+          ../.ci-install/node_modules/.bin/memsphere view status
+
   full-result:
-    name: Cross-platform unit tests
+    name: Full cross-platform regression
     runs-on: ubuntu-24.04
-    needs: [plan, test]
+    needs: [plan, unit-tests, integration-tests, windows-package-smoke]
     if: always() && needs.plan.outputs.profile == 'full'
     timeout-minutes: 5
     steps:
       - env:
-          TEST_RESULT: ${{ needs.test.result }}
+          UNIT_RESULT: ${{ needs.unit-tests.result }}
+          INTEGRATION_RESULT: ${{ needs.integration-tests.result }}
+          PACKAGE_RESULT: ${{ needs.windows-package-smoke.result }}
         run: |
-          test "$TEST_RESULT" = success
+          test "$UNIT_RESULT" = success
+          test "$INTEGRATION_RESULT" = success
+          test "$PACKAGE_RESULT" = success
 
   full-health-bootstrap:
     name: First-install merge gate publisher

@@ -15,6 +15,16 @@ asserts:
 sections:
   - !statement
     names:
+      - CI 测试层级与平台覆盖
+    defines:
+      - 按被测边界区分单元与集成执行任务，并按操作系统差异风险分配 CI 覆盖。
+    asserts:
+      - 单元用例使用 .unit.test.ts 明确入口，在 Linux、macOS、Windows 上全部执行；单元和集成用例不得混在同一个 CI 作业中。混合文件须先按实际边界拆分，不能只靠命名将真实服务、浏览器或进程行为归为单元测试。
+      - 普通集成及模块协作测试在非 full CI 只运行 Linux，在 full CI 运行三个操作系统；存在原生进程、文件系统、权限、路径或 Git/worktree 差异契约的集成测试在两种 profile 都运行三个系统。平台专有分支只在适用系统执行，不把跳过解释为该系统上的验证通过。
+      - 系统差异风险须来自被测产品契约，不能仅因测试通过 Git 准备数据或使用浏览器就要求三系统重复运行；test/platform 与 test/ci/platform 通过文件位置明确这类契约，并按进程、回溯、文件系统及 Git 责任分组。
+      - 不维护预计耗时表或按预计耗时排序，不以延长测试时限取得通过；独立测试默认按执行机器可用 CPU 数并发。full 汇总须同时覆盖全部适用单元、集成和平台打包作业，不能用单元测试结果代替集成验证。
+  - !statement
+    names:
       - 测试意图与职责边界
     defines:
       - 规定测试的存在理由、独立保护契约和职责边界。
@@ -74,7 +84,7 @@ sections:
     names:
       - System 与 Reserved Memory
     asserts:
-      - 仅修改 reserved-memory 的正文时，检查解析、引用及发行源与项目副本的一致性；修改 manifest 或安装行为时，运行 test/reserved-store.test.ts，验证安装清单与受影响的安装、更新契约。
+      - 仅修改 reserved-memory 的正文时，检查解析、引用及发行源与项目副本的一致性；修改 manifest 或安装行为时，运行 test/platform/filesystem/reserved-store.test.ts，验证安装清单与受影响的安装、更新契约。
       - 修改 System Memory 后必须同步当前开发 Project 的 Memory 副本，再运行 memsphere validate 和 memsphere memory change validate [change-id]；源文件与安装副本不得出现非预期差异，ChangeSet 证据必须匹配最终内容。
   - !statement
     names:

@@ -1,12 +1,20 @@
 # CI 执行入口
 
-当前为 Human 明确要求的单元测试探索阶段：default 与 full 均只派发 Linux、macOS、Windows 三个单元作业，每个作业的时限为五分钟。浏览器、CLI 子进程、真实服务、文件系统协作与打包冒烟等集成测试保留在仓库，暂不进入 CI。安全扫描与 CI 文件授权保护继续运行。
+单元测试与集成测试使用不同的 CI job，所有测试文件仍由目录自动发现，不维护耗时表或逐文件运行名单。
 
-- `*.unit.test.ts` 表示已经检查依赖和行为的单元测试，CI 用 `--suite=unit` 自动递归发现；命名是入口约定，不代替对测试边界的审查。
-- 混合文件中的纯逻辑用例移入同目录的 `.unit.test.ts`，其集成用例保留在原文件。静态输入 fixture 可以读取；产品实际读写持久化、网络、浏览器或进程行为不属于单元测试。
-- `npm run test:unit` 构建后运行全部单元文件；`npm test` 仍可在本地运行保留的全部测试。CI 不调用后者，也不调用打包冒烟。
-- 不维护预计耗时，不读取 `test-durations.json`。文件按稳定顺序发现，独立文件的并发度默认取 `os.availableParallelism()`，本地可用 `--test-concurrency=N` 显式限制。
-- `run-tests.mjs` 只保留独立测试进程的 Home 隔离、输出、取消及归属进程清理。实际耗时仍作为执行结果输出，供诊断使用，不参与调度。
-- full 是历史触发/profile 名称，当前不代表集成测试覆盖。新的运行标题和汇总明确标为 units only；合入门禁的既有 status context 名称暂保留，以兼容已安装的规则，描述与材料必须说明只验证了单元测试。
+| 测试范围 | default | full |
+| --- | --- | --- |
+| `*.unit.test.ts` 单元测试 | Linux、macOS、Windows | Linux、macOS、Windows |
+| `test/platform/`、`test/ci/platform/` 原生集成契约 | Linux、macOS、Windows | Linux、macOS、Windows |
+| 其他集成/模块协作测试 | Linux | Linux、macOS、Windows |
 
-整个目录、`.github/workflows/` 和 `test/ci/` 受 CI change guard 保护。探索提交不代表完成正式流程或验收；恢复集成 CI 时需重新明确覆盖策略。
+`platform` 目录明确表示被测契约有操作系统差异风险。进程生命周期、回溯进程归属、文件系统与 Git/worktree 分别分组，每个文件在适用系统上只分配一次。普通浏览器或 HTTP 业务契约不会只因使用浏览器或通过 Git 准备 fixture 就归为原生测试。Windows 专有 API 用例保留适用平台限制，不把其他系统跳过说成验证通过。
+
+- `npm run test:unit` 构建后运行全部单元文件；`npm test` 保留本地全部测试入口。
+- `node scripts/ci/run-tests.mjs --suite=unit --list` 查看单元选取；`--suite=integration` 查看全部非单元测试；`--suite=platform` 查看原生契约。CI 的业务分组由 `ci-plan.mjs` 组合相应子集。
+- 每个测试和打包冒烟作业保持五分钟时限，独立文件的并发度默认取 `os.availableParallelism()`，可用 `--test-concurrency=N` 显式限制。不维护或读取 `test-durations.json`，实际耗时只是诊断结果，不参与排序。
+- `run-tests.mjs` 保留每个测试进程的 Home 隔离、输出与归属进程清理。
+- Windows 包安装与 PowerShell/CMD/Git Bash 冒烟属于 Windows 专用集成作业，独立于单元测试；其他系统的原生启动器由对应平台集成契约覆盖。
+- full 汇总必须同时确认三系统单元、全部集成及 Windows 打包作业成功；不能沿用先前 unit-only 探索结果证明集成覆盖。
+
+整个目录、`.github/workflows/` 和 `test/ci/` 受 CI change guard 保护。探索提交不代表正式流程或验收已经完成。

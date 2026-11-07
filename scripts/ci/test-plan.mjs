@@ -16,11 +16,16 @@ export async function discoverTestFiles(directory) {
 
 export const testSuites = {
   unit: { title: "Unit tests", categories: [] },
-  "package-platform": { title: "Packaged Job Platform Contracts", categories: [] },
-  "platform-core": { title: "Platform Core Contracts", categories: [] },
-  "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
-  platform: { title: "Platform Contracts", categories: [] },
-  "platform-and-upgrades": { title: "Platform & Upgrade Contracts", categories: [] },
+  integration: { title: "Integration tests", categories: [] },
+  "integration-browser": { title: "Integration · Browser UI", categories: ["model-ui", "review-ui"] },
+  "integration-cli": { title: "Integration · CLI contracts", categories: ["memory-cli", "app-cli"] },
+  "integration-memory-and-projects": { title: "Integration · Memory & Projects", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core"] },
+  "integration-runtime-core": { title: "Integration · Run, Data & SDK", categories: ["runtime-core"] },
+  "platform-process": { title: "Platform integration · Processes & launchers", categories: [] },
+  "platform-rewind": { title: "Platform integration · Rewind & process ownership", categories: [] },
+  "platform-filesystem": { title: "Platform integration · Filesystem & paths", categories: [] },
+  "platform-git": { title: "Platform integration · Git & worktrees", categories: [] },
+  platform: { title: "Platform integration", categories: [] },
   "model-ui": { title: "Models & Settings UI", categories: ["model-ui"] },
   "review-ui": { title: "Review & Shell UI", categories: ["review-ui"] },
   "memory-cli": { title: "Memory & Project CLI", categories: ["memory-cli"] },
@@ -52,12 +57,21 @@ export function testCategory(file, source) {
   return "runtime-core";
 }
 
-/** Unit files are explicitly split and reviewed, never inferred from filenames of product domains. */
+const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
+const key = file => (isAbsolute(file) ? relative(testDirectory, file) : file).split(sep).join("/");
+export const isUnitTest = file => file.endsWith(".unit.test.ts");
+export const isPlatformTest = file => /(?:^|\/)platform\//.test(key(file));
+
+/** Layer and native-system contracts are declared by placement, not timing or business-name guesses. */
 export function selectTests(files, sources, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
-    if (suite === "unit") return file.endsWith(".unit.test.ts");
+    if (suite === "unit") return isUnitTest(file);
+    if (suite === "integration") return !isUnitTest(file);
+    if (suite === "platform") return !isUnitTest(file) && isPlatformTest(file);
+    if (suite.startsWith("platform-")) return !isUnitTest(file) && key(file).includes(`platform/${suite.slice(9)}/`);
+    if (suite.startsWith("integration-")) return !isUnitTest(file) && !isPlatformTest(file) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
     return testSuites[suite].categories.includes(testCategory(file, sources[file]));
   }).sort((a, b) => a.localeCompare(b, "en"));
 }
