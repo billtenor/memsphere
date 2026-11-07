@@ -12,32 +12,25 @@ import { readBusinessProject } from "../project/business-stores.js";
 
 class ObservablePromise<T> extends Promise<T> {
   static get [Symbol.species]() { return Promise; }
-  constructor(task: Promise<T>, private readonly observed: () => void, private readonly follow: (task: Promise<unknown>) => void) {
+  constructor(task: Promise<T>, private readonly observed: () => void, private readonly branch: <U>(task: Promise<U>) => Promise<U>) {
     super((resolve, reject) => { void task.then(resolve, reject); });
   }
   override then<TResult1 = T, TResult2 = never>(
     onFulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | null,
     onRejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
   ): Promise<TResult1 | TResult2> {
-    const handleRejection = typeof onRejected === "function" ? (reason: unknown) => {
-      return Promise.resolve(onRejected(reason)).then(value => { this.observed(); return value; });
-    } : onRejected;
-    const task = super.then(onFulfilled, handleRejection);
-    this.follow(task);
-    const next = new ObservablePromise(task, this.observed, this.follow);
-    void Promise.prototype.then.call(next, undefined, () => undefined);
-    return next;
+    // Responsibility moves to this particular child; siblings stay independent.
+    this.observed();
+    return this.branch(super.then(onFulfilled, onRejected));
   }
   override finally(onFinally?: (() => void) | null): Promise<T> {
     if (typeof onFinally !== "function") return this.then();
+    this.observed();
     const task = super.then(
       value => Promise.resolve(onFinally()).then(() => value),
       error => Promise.resolve(onFinally()).then(() => { throw error; })
     );
-    this.follow(task);
-    const next = new ObservablePromise(task, this.observed, this.follow);
-    void Promise.prototype.then.call(next, undefined, () => undefined);
-    return next;
+    return this.branch(task);
   }
 }
 
@@ -79,25 +72,19 @@ async function invoke(project: AppProject, id: string, operation: string, input:
   const deadline = app.manifest.projectStores.length ? setTimeout(() => controller.abort(new Error("App operation deadline exceeded")), 300_000) : undefined;
   deadline?.unref();
   const writes = new Set(["create", "update", "upsert", "delete", "append"]);
-  const follow = (task: Promise<unknown>) => {
-    inFlight.add(task);
-    void task.then(() => inFlight.delete(task), () => inFlight.delete(task));
-  };
-  const observable = <T>(task: Promise<T>, observed: () => void): Promise<T> => {
-    const result = new ObservablePromise(task, observed, follow);
-    void Promise.prototype.then.call(result, undefined, () => undefined);
-    return result;
-  };
-  const track = <T>(task: Promise<T>, exposeObserver?: (observe: () => void) => void): Promise<T> => {
+  const track = <T>(task: Promise<T>, exposeObserver?: (observe: () => void) => void, onObserved?: () => void): Promise<T> => {
     const state = { error: undefined as unknown, observed: false };
-    const observe = () => { state.observed = true; };
+    const observe = () => { state.observed = true; onObserved?.(); };
     exposeObserver?.(observe);
     inFlight.add(task);
     void task.then(() => inFlight.delete(task), error => { inFlight.delete(task); state.error = error; failures.push(state); });
-    // Awaiting a Promise subclass calls its then method, unlike an ordinary
-    // native Promise. This records when the App observes an expected error.
-    return observable(task, observe);
+    // Awaiting a Promise subclass calls its then method, unlike a native Promise.
+    // Each child gets its own failure state, including rethrows and sibling branches.
+    const result = new ObservablePromise(task, observe, branch => track(branch));
+    void Promise.prototype.then.call(result, undefined, () => undefined);
+    return result;
   };
+  const observable = <T>(task: Promise<T>, observed: () => void): Promise<T> => track(task, undefined, observed);
   const wrapDataStream = (record: StoredData | undefined): StoredData | undefined => {
     if (!record) return record;
     const content = record.data.payload.content;

@@ -28,6 +28,10 @@ if (mode === "hold") {
   const project = { name: "test-project", paths: projectPaths(root), memoryRoot: join(root, "memory"), config: await readBusinessProject(root) } as AppProject;
   try { await invokeAppOperation(project, "example.app", "hold", { token: argument }); process.send?.({ event: "finished" }); }
   catch (error) { process.send?.({ event: "failed", code: (error as { code?: string }).code }); }
+} else if (mode === "replay") {
+  const project = { name: "test-project", paths: projectPaths(root), memoryRoot: join(root, "memory"), config: await readBusinessProject(root) } as AppProject;
+  try { await invokeAppOperation(project, "example.app", "write", { token: argument, value: { name: "stale", count: 9 } }); process.send?.({ event: "finished" }); }
+  catch (error) { process.send?.({ event: "failed", code: (error as { code?: string }).code }); }
 } else if (mode === "model") {
   process.send?.({ event: "started" });
   try {
