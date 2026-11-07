@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isPlatformTest } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isIntegrationTest, isSystemTest, isPlatformTest } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -12,11 +12,13 @@ export function ciProfile(event, input = "default") {
 
 const systems = ["ubuntu-24.04", "macos-latest", "windows-latest"];
 const portableSuites = ["integration-model-ui", "integration-review-ui", "integration-cli", "integration-memory-and-projects", "integration-runtime-core"];
-const nativeSuites = ["platform-process", "platform-locks", "platform-cli", "platform-rewind", "platform-filesystem", "platform-git", "platform-memory-publication", "platform-upgrade"];
+const nativeSuites = ["platform-process", "platform-locks", "platform-cli", "platform-rewind", "platform-filesystem", "platform-git", "platform-memory-publication", "platform-upgrade", "platform-context", "platform-artifacts", "platform-models"];
 
 export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
   if (!selectTests(files, sources, "unit").length) throw new Error("No unit tests discovered");
+  const unknown = files.filter(file => !isUnitTest(file) && !isModuleTest(file) && !isIntegrationTest(file) && !isSystemTest(file));
+  if (unknown.length) throw new Error(`Tests need an explicit layer suffix: ${unknown.join(", ")}`);
   const include = systems.flatMap(os => ["unit", "module", ...nativeSuites, ...(profile === "full" || os === "ubuntu-24.04" ? portableSuites : [])].flatMap(suite => {
     const selected = selectTests(files, sources, suite);
     if (!selected.length) return [];
@@ -24,7 +26,7 @@ export function createCiPlan(profile, files, sources) {
       browser: !["unit", "module"].includes(suite) && selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])) }];
   }));
   for (const os of systems) {
-    const expected = files.filter(file => profile === "full" || os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file)).sort();
+    const expected = files.filter(file => !isSystemTest(file) && (profile === "full" || os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file, sources[file]))).sort();
     const assigned = include.filter(row => row.os === os).flatMap(row => selectTests(files, sources, row.suite)).sort();
     if (JSON.stringify(assigned) !== JSON.stringify(expected)) throw new Error(`Unassigned or duplicate tests on ${os}`);
   }

@@ -78,7 +78,7 @@ test("workflow CI entrypoints and CI-policy tests remain protected", async () =>
   for (const source of workflowSources) {
     for (const match of source.matchAll(/scripts\/ci\/[a-zA-Z0-9_/-]+\.(?:mjs|sh|json)/g)) assert(isProtected(match[0]), `Unprotected CI entrypoint ${match[0]}`);
   }
-  for (const file of ["test/ci/ci-workflow.test.ts", "test/ci/test-plan.test.ts", "test/ci/full-health.test.ts", "test/ci/ci-change-guard.test.ts"]) assert(isProtected(file));
+  for (const file of ["test/ci/ci-workflow.test.ts", "test/ci/test-plan.integration.test.ts", "test/ci/full-health.integration.test.ts", "test/ci/ci-change-guard.integration.test.ts"]) assert(isProtected(file));
 });
 
 

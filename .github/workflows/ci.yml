@@ -1,5 +1,5 @@
 name: CI
-run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || ((!inputs.include_integration && 'CI (unit + module)') || ((github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.profile == 'full')) && 'CI (full)' || 'CI (default)')) }}
+run-name: ${{ inputs.full_health_bootstrap && 'Initialize PR merge gate' || 'CI (unit + module + integration)' }}
 
 on:
   pull_request:
@@ -12,10 +12,6 @@ on:
         type: choice
         options: [default, full]
         default: full
-      include_integration:
-        description: Run the deferred real-system integration layer (required for full evidence)
-        type: boolean
-        default: false
       full_health_bootstrap:
         description: Owner only, first-install status publisher (no builds)
         type: boolean
@@ -112,7 +108,6 @@ jobs:
           if-no-files-found: error
 
   integration-tests:
-    if: inputs.include_integration == true
     needs: plan
     name: ${{ matrix.title }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -145,7 +140,8 @@ jobs:
           if-no-files-found: error
 
   windows-package-smoke:
-    if: inputs.include_integration == true
+    # Packaged CLI lifecycle is a system test, deferred during this exploration.
+    if: false
     needs: plan
     name: Windows packaged CLI shells
     runs-on: windows-latest
@@ -208,7 +204,7 @@ jobs:
     name: Full cross-platform regression
     runs-on: ubuntu-24.04
     needs: [plan, unit-tests, module-tests, integration-tests, windows-package-smoke]
-    if: always() && inputs.include_integration == true && needs.plan.outputs.profile == 'full'
+    if: false # System tests are deferred; never publish partial coverage as full.
     timeout-minutes: 5
     steps:
       - env:

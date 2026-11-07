@@ -11,7 +11,7 @@ const files = (await discoverTestFiles(testDirectory)).map(name => resolve(testD
 const testName = file => relative(testDirectory, file).split(sep).join("/");
 const nodeArguments = [];
 let concurrency = availableParallelism();
-let suite = "all";
+let suite = "regression";
 let listOnly = false;
 let resultsPath = process.env.CI_TEST_RESULTS;
 for (const argument of process.argv.slice(2)) {
