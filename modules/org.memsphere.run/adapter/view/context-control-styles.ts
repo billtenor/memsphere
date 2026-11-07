@@ -22,6 +22,11 @@ export const contextControlStyles = `
 .cc-action-definition .pg-detail-group > .pg-info { margin:0; gap:6px 16px; }
 .cc-action-definition .pg-detail-group h4:not(.pg-group-title) { margin:10px 0 4px; }
 .cc-action-definition .pg-values li + li { margin-top:4px; }
+.cc-exploration .pg-dialog .pg-detail-group { padding:12px 0; }
+.cc-exploration .pg-dialog .pg-group-title { margin:0 0 8px; }
+.cc-exploration .pg-dialog .pg-detail-group > .pg-info { gap:6px 16px; }
+.cc-exploration .pg-dialog .pg-detail-group h4:not(.pg-group-title) { margin:10px 0 4px; }
+.cc-exploration .pg-dialog .pg-values li + li { margin-top:4px; }
 .cc-action-definition pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
