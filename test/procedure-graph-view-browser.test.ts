@@ -168,3 +168,24 @@ test('two executions and a reviewed revision retain exact artifacts and reading 
   await page.getByRole('button',{name:'刷新',exact:true}).dispatchEvent('click');await dialog.locator('.cc-execution-select option').filter({hasText:'第2次执行 · 执行中'}).waitFor({state:'attached'});assert.equal(await dialog.locator('.cc-execution-info').evaluate(el=>(el as HTMLDetailsElement).open),true);assert.equal(await dialog.locator('.cc-pane-content').evaluate(el=>el.scrollTop),before);assert.equal(await dialog.getAttribute('data-artifact-id'),state.revisedId);
  }finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
 });
+
+test('English Run shows frozen procedure and action rules beside an execution', {timeout:60000}, async t => {
+ const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['english-run'],defines:['Frozen definition'],goals:['Frozen goal'],asserts:['Overall rule'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Prepare',asserts:['Action rule'],dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Document',asserts:['Artifact rule'],model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const start=await service.withGraph(g=>g.start({name:'English run',procedure}));
+ const config=await readProjectConfig('test-project',f.home);config.language='en';
+ const server=createViewServer(config);await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const browser=await browserScope();
+ try{const page=await browser.newPage({viewport:{width:390,height:844}});await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${start.run.id}`);
+  await page.getByText('Overall rule',{exact:true}).waitFor();await page.locator('.pg-node[data-action-id=A]').click();const dialog=page.locator('.cc-dialog[open]');await dialog.locator('.cc-action-definition > summary').click();
+  assert.match(await dialog.locator('.cc-action-definition').innerText(),/Action rules[\s\S]*Action rule[\s\S]*Artifact rules[\s\S]*Artifact rule/);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth),true);
+ }finally{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
+});
+
+test('closing a loading action prevents its late response from reopening the dialog', {timeout:60000}, async t => {
+ const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!;
+ const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,names:['delayed-run'],defines:['Delayed'],mode:'graph',actions:[{tag:'!action',id:'A',description:'Prepare',dependencies:[{tag:'!dependency',from:'START'}],artifact:{name:'Document',model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'}}}]};
+ const start=await service.withGraph(g=>g.start({name:'Delayed run',procedure}));const server=createViewServer(await readProjectConfig('test-project',f.home));await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));const browser=await browserScope();
+ let release!:()=>void,arrive!:()=>void;const gate=new Promise<void>(r=>{release=r;}),entered=new Promise<void>(r=>{arrive=r;});
+ try{const page=await browser.newPage();await page.route('**/runs/*?representation=action&action=A',async route=>{arrive();await gate;await route.continue();});await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${start.run.id}`);await page.locator('.pg-node[data-action-id=A]').click();await entered;await page.locator('.cc-dialog').getByRole('button',{name:'关闭',exact:true}).click();const response=page.waitForResponse(r=>r.url().includes('representation=action'));release();await response;await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));assert.equal(await page.locator('.cc-dialog[open]').count(),0);
+ }finally{release();await browser.close();await new Promise<void>(r=>server.close(()=>r()));}
+});
