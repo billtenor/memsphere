@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverTestFiles, selectTests, testSuites } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, selectTestShard, testSuites } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -23,17 +23,25 @@ const fullRows = [...linux,
   ["windows-latest", "memory-core", 2], ["windows-latest", "runtime-core", 3]
 ];
 
-export function createCiPlan(profile, files, sources) {
+export function createCiPlan(profile, files, sources, durationsByPlatform = {}) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
   return { include: fullRows.flatMap(([os, categorySuite, workers]) => {
     const suite = profile === "default" && os !== "ubuntu-24.04" ? `native-${categorySuite}` : categorySuite;
-    const selected = selectTests(files, sources, {}, suite);
+    const platform = os === "ubuntu-24.04" ? "linux" : os === "macos-latest" ? "darwin" : "win32";
+    const durations = durationsByPlatform[platform] ?? {};
+    const selected = selectTests(files, sources, durations, suite);
     if (!selected.length) {
       if (profile === "full") throw new Error(`Empty CI suite: ${suite}`);
       return [];
     }
-    const browser = selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));
-    return [{ os, suite, title: testSuites[suite].title, workers, browser }];
+    const split = profile === "default" && categorySuite === "runtime-core" && os !== "macos-latest" && selected.length > 1;
+    return (split ? ["1/2", "2/2"] : [""]).map(shard => {
+      const assigned = selectTestShard(selected, durations, shard);
+      const browser = assigned.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));
+      const title = testSuites[suite].title;
+      return { os, suite, title, label: title + (shard ? ` [${shard}]` : ""), workers, browser,
+        shard, shardArgs: shard ? `--shard=${shard}` : "", shardSuffix: shard ? `-shard-${shard.replace("/", "-of-")}` : "" };
+    });
   }) };
 }
 
@@ -42,6 +50,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const files = await discoverTestFiles(directory);
   const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(directory, file), "utf8")])));
   const profile = ciProfile(process.env.GITHUB_EVENT_NAME, process.env.CI_PROFILE);
+  const durations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
   console.log(`profile=${profile}`);
-  console.log(`matrix=${JSON.stringify(createCiPlan(profile, files, sources))}`);
+  console.log(`matrix=${JSON.stringify(createCiPlan(profile, files, sources, durations))}`);
 }

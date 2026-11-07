@@ -46,14 +46,14 @@ jobs:
 
   test:
     needs: plan
-    name: Test (${{ matrix.os }}, ${{ matrix.title }})
+    name: Test (${{ matrix.os }}, ${{ matrix.label }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: ${{ needs.plan.outputs.profile == 'full' && 20 || 5 }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
-      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}.json
+      CI_TEST_RESULTS: ci-results/${{ matrix.os }}-${{ matrix.suite }}${{ matrix.shardSuffix }}.json
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -68,14 +68,14 @@ jobs:
         if: matrix.browser
         run: npx playwright install chromium
       # pretest:ci builds and typechecks both core and View Modules once.
-      - run: npm run test:ci -- --suite=${{ matrix.suite }} --test-concurrency=${{ matrix.workers }}
+      - run: npm run test:ci -- --suite=${{ matrix.suite }} --test-concurrency=${{ matrix.workers }} ${{ matrix.shardArgs }}
       - if: matrix.suite == 'cli' || matrix.suite == 'app-cli'
         run: npm run smoke:project
       - name: Preserve test timings
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: timings-${{ matrix.os }}-${{ matrix.suite }}
+          name: timings-${{ matrix.os }}-${{ matrix.suite }}${{ matrix.shardSuffix }}
           path: ci-results
           if-no-files-found: error
 

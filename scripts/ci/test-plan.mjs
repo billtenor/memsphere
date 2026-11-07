@@ -237,3 +237,26 @@ export function selectTests(files, sources, durations, suite = "all") {
   })
     .sort((a, b) => (durations[basename(b)] ?? 2) - (durations[basename(a)] ?? 2) || a.localeCompare(b, "en"));
 }
+
+/** Partition whole files, keeping every eligible test in exactly one shard. */
+export function selectTestShard(files, durations, shard) {
+  if (!shard) return files;
+  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(shard);
+  const index = Number(match?.[1]), count = Number(match?.[2]);
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || index > count || count > files.length) {
+    throw new Error("Shard must be index/count with 1 <= index <= count <= eligible file count");
+  }
+  const groups = Array.from({ length: count }, () => ({ files: [], seconds: 0 }));
+  // The Linux planner sees relative POSIX names; Windows workers see absolute
+  // native paths. Both must assign exactly the same logical files to each shard.
+  const key = file => testKey(file).replaceAll("\\", "/");
+  const seconds = file => durations[basename(key(file))] ?? 2;
+  const ordered = [...files].sort((a, b) => seconds(b) - seconds(a) || key(a).localeCompare(key(b), "en"));
+  for (const [position, file] of ordered.entries()) {
+    const group = position < count ? groups[position]
+      : groups.reduce((least, candidate) => candidate.seconds < least.seconds ? candidate : least);
+    group.files.push(file);
+    group.seconds += seconds(file);
+  }
+  return groups[index - 1].files;
+}

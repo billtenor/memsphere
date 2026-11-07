@@ -3,11 +3,17 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parse } from "yaml";
 import { ciProfile, createCiPlan } from "../../scripts/ci/ci-plan.mjs";
-import { defaultTestExclusions, discoverTestFiles, selectTests, testSuites } from "../../scripts/ci/test-plan.mjs";
+import { defaultTestExclusions, discoverTestFiles, selectTests, selectTestShard, testSuites } from "../../scripts/ci/test-plan.mjs";
 
 const workflow = parse(await readFile(".github/workflows/ci.yml", "utf8"));
 const files = await discoverTestFiles("test");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(`test/${file}`, "utf8")])));
+const durations = JSON.parse(await readFile("scripts/ci/test-durations.json", "utf8"));
+const estimates = (os: string) => durations[os === "ubuntu-24.04" ? "linux" : os === "macos-latest" ? "darwin" : "win32"];
+function assignedFiles(row: { os: string; suite: string; shard: string }, files: string[], sources: Record<string, string>) {
+  const measured = estimates(row.os);
+  return selectTestShard(selectTests(files, sources, measured, row.suite), measured, row.shard);
+}
 
 test("exclusion-based selection preserves every prior default suite", async () => {
   const baseline = JSON.parse(await readFile("test/ci/fixtures/selection-before-exclusions.json", "utf8"));
@@ -18,25 +24,54 @@ test("exclusion-based selection preserves every prior default suite", async () =
 });
 
 function assertDefaultGroups(files: string[], sources: Record<string, string>) {
-  const full = createCiPlan("full", files, sources).include;
-  const defaults = createCiPlan("default", files, sources).include;
+  const full = createCiPlan("full", files, sources, durations).include;
+  const defaults = createCiPlan("default", files, sources, durations).include;
   for (const row of defaults) {
-    assert.ok(selectTests(files, sources, {}, row.suite).length > 0, "only nonempty categories become jobs");
+    assert.ok(assignedFiles(row, files, sources).length > 0, "only nonempty shards become jobs");
     const suite = row.suite.replace(/^native-/, "");
     const previous = full.find(candidate => candidate.os === row.os && candidate.suite === suite);
     assert(previous);
     assert.equal(row.workers, previous.workers);
     assert.equal(row.title, previous.title);
     const expected = selectTests(files, sources, {}, suite).filter(file => row.os === "ubuntu-24.04" || !defaultTestExclusions.includes(file));
-    assert.deepEqual(selectTests(files, sources, {}, row.suite), expected);
+    const assigned = assignedFiles(row, files, sources);
+    assert(assigned.every(file => expected.includes(file)));
+    if (!row.shard) assert.deepEqual([...assigned].sort(), [...expected].sort());
   }
   for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
-    const assigned = defaults.filter(row => row.os === os).flatMap(row => selectTests(files, sources, {}, row.suite)).sort();
+    const assigned = defaults.filter(row => row.os === os).flatMap(row => assignedFiles(row, files, sources)).sort();
     assert.deepEqual(assigned, (os === "ubuntu-24.04" ? files : files.filter(file => !defaultTestExclusions.includes(file))).slice().sort(), `${os}: every eligible file runs exactly once`);
   }
 }
 
 test("default preserves native coverage while using full's category groups and workers", () => assertDefaultGroups(files, sources));
+
+test("only default Linux and Windows runtime groups shard, retaining workers and unique artifacts", () => {
+  const defaults = createCiPlan("default", files, sources, durations).include;
+  const full = createCiPlan("full", files, sources, durations).include;
+  assert.equal(defaults.length, new Set(defaults.map(row => `${row.os}/${row.suite}`)).size + 2);
+  assert.equal(full.length, new Set(full.map(row => `${row.os}/${row.suite}`)).size);
+  assert.deepEqual(defaults.filter(row => row.shard).map(row => [row.os, row.suite, row.workers, row.shard]), [
+    ["ubuntu-24.04", "runtime-core", 2, "1/2"], ["ubuntu-24.04", "runtime-core", 2, "2/2"],
+    ["windows-latest", "native-runtime-core", 3, "1/2"], ["windows-latest", "native-runtime-core", 3, "2/2"]
+  ]);
+  assert(full.every(row => !row.shard));
+  for (const rows of [defaults, full]) {
+    assert.equal(new Set(rows.map(row => `${row.os}-${row.suite}${row.shardSuffix}`)).size, rows.length);
+    for (const row of rows) {
+      assert.equal(row.label, row.title + (row.shard ? ` [${row.shard}]` : ""));
+      assert.equal(row.shardArgs, row.shard ? `--shard=${row.shard}` : "");
+      assert.equal(row.shardSuffix, row.shard ? `-shard-${row.shard.replace("/", "-of-")}` : "");
+    }
+  }
+  assert.equal(workflow.jobs.test.name, "Test (${{ matrix.os }}, ${{ matrix.label }})");
+  assert.equal(workflow.jobs.test.env.CI_TEST_RESULTS, "ci-results/${{ matrix.os }}-${{ matrix.suite }}${{ matrix.shardSuffix }}.json");
+  const steps = workflow.jobs.test.steps;
+  assert.equal(steps.find(step => step.run?.startsWith("npm run test:ci")).run,
+    "npm run test:ci -- --suite=${{ matrix.suite }} --test-concurrency=${{ matrix.workers }} ${{ matrix.shardArgs }}");
+  assert.equal(steps.find(step => step.name === "Preserve test timings").with.name,
+    "timings-${{ matrix.os }}-${{ matrix.suite }}${{ matrix.shardSuffix }}");
+});
 
 test("default excludes only fixed paths; all future files run once and full remains exhaustive", async () => {
   const future = {
@@ -54,10 +89,10 @@ test("default excludes only fixed paths; all future files run once and full rema
   const allSources = { ...sources, ...future };
   assertDefaultGroups(allFiles, allSources);
   for (const profile of ["default", "full"]) {
-    const rows = createCiPlan(profile, allFiles, allSources).include;
-    for (const os of ["macos-latest", "windows-latest"]) assert.ok(rows.some(row => row.os === os && selectTests(allFiles, allSources, {}, row.suite).includes("model-future-browser.test.ts")), "future browser tests activate native UI jobs");
+    const rows = createCiPlan(profile, allFiles, allSources, durations).include;
+    for (const os of ["macos-latest", "windows-latest"]) assert.ok(rows.some(row => row.os === os && assignedFiles(row, allFiles, allSources).includes("model-future-browser.test.ts")), "future browser tests activate native UI jobs");
     for (const os of ["ubuntu-24.04", "macos-latest", "windows-latest"]) {
-      const assigned = rows.filter(row => row.os === os).flatMap(row => selectTests(allFiles, allSources, {}, row.suite));
+      const assigned = rows.filter(row => row.os === os).flatMap(row => assignedFiles(row, allFiles, allSources));
 
       const expected = profile === "default" && os !== "ubuntu-24.04" ? allFiles.filter(file => !exclusions.includes(file)) : allFiles;
       assert.deepEqual([...assigned].sort(), [...expected].sort(), `${profile}/${os}: no missing or duplicate files`);
@@ -66,7 +101,7 @@ test("default excludes only fixed paths; all future files run once and full rema
     for (const row of rows) {
       assert.equal(row.title, testSuites[row.suite].title);
       assert(row.workers > 0);
-      const selected = selectTests(allFiles, allSources, {}, row.suite);
+      const selected = assignedFiles(row, allFiles, allSources);
       assert.equal(row.browser, selected.some(file => allSources[file].includes("helpers/browser") || /from ["']playwright["']/.test(allSources[file])));
     }
   }
