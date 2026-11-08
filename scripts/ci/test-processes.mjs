@@ -39,17 +39,6 @@ function ownedTree(table, roots) {
   }
 }
 
-// Darwin can return EPERM for a group containing only exited/zombie members.
-// Recheck the recorded identities rather than suppressing permission failures.
-export async function signalRecordedGroup(group, signal, survivors, kill = (pid, requested) => process.kill(pid, requested)) {
-  try { kill(-group, signal); }
-  catch (error) {
-    if (error.code === "ESRCH") return;
-    if (error.code === "EPERM" && !(await survivors()).some(row => row.group === group)) return;
-    throw error;
-  }
-}
-
 export async function terminateTestProcesses(children, signal, options = {}) {
   const roots = [...children].map(child => child.pid).filter(Boolean);
   if (!roots.length) return;
@@ -58,18 +47,21 @@ export async function terminateTestProcesses(children, signal, options = {}) {
   // A recorded group leader can already have exited while its children live.
   // Only groups led by recorded roots or their descendants are eligible.
   const groups = new Set(tree.filter(row => owned.has(row.group)).map(row => row.group));
+  const send = (requested, targets = groups) => {
+    for (const group of targets) {
+      try { process.kill(-group, requested); }
+      catch (error) { if (error.code !== "ESRCH") throw error; }
+    }
+  };
   const identities = new Map(tree.map(row => [row.pid, row.started]));
   const survivors = async () => (await processTable(options)).filter(row => identities.get(row.pid) === row.started && owned.has(row.pid) && !row.zombie);
-  const send = async (requested, targets = groups) => {
-    for (const group of targets) await signalRecordedGroup(group, requested, survivors);
-  };
   let killFailure;
   if (process.platform === "win32") {
     // Windows has no POSIX signals/process groups. Snapshot first so already
     // orphaned children remain known even when taskkill removes their parent.
     if (owned.size) await processCommand("taskkill.exe", [...[...owned].flatMap(pid => ["/PID", String(pid)]), "/T", "/F"], options).catch(error => { killFailure = error; });
   } else {
-    await send(signal);
+    send(signal);
     const gracefulDeadline = performance.now() + 2000;
     // Non-child descendants have no ChildProcess exit event in this process.
     // Observe the OS table with a bounded cleanup grace period, never a test's
@@ -77,7 +69,7 @@ export async function terminateTestProcesses(children, signal, options = {}) {
     while ((await survivors()).length && performance.now() < gracefulDeadline) await delay(50, undefined, options);
     const remaining = await survivors();
     if (!remaining.length) return;
-    await send("SIGKILL", new Set(remaining.map(row => row.group).filter(group => groups.has(group))));
+    send("SIGKILL", new Set(remaining.map(row => row.group).filter(group => groups.has(group))));
   }
   const forcedDeadline = performance.now() + 5000;
   let remaining;
