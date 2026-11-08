@@ -12,6 +12,10 @@ on:
         type: choice
         options: [default, full]
         default: full
+      system_diagnostics:
+        description: Run isolated and representative-load Windows timeout diagnostics only
+        type: boolean
+        default: false
       full_health_bootstrap:
         description: Owner only, first-install status publisher (no builds)
         type: boolean
@@ -30,7 +34,7 @@ concurrency:
 
 jobs:
   plan:
-    if: ${{ !inputs.full_health_bootstrap }}
+    if: ${{ !inputs.full_health_bootstrap && !inputs.system_diagnostics }}
     name: Select CI profile
     runs-on: ubuntu-24.04
     timeout-minutes: 1
@@ -251,6 +255,42 @@ jobs:
           test "$INTEGRATION_RESULT" = success
           test "$SYSTEM_RESULT" = success
           test "$PACKAGE_RESULT" = success
+
+  system-timeout-diagnostics:
+    if: github.event_name == 'workflow_dispatch' && inputs.system_diagnostics
+    name: Windows timeout diagnostics (${{ matrix.mode }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [isolated, parallel]
+    env:
+      MEMSPHERE_TEST_TRACE: "1"
+      MEMSPHERE_TEST_PROFILE_DIR: ${{ runner.temp }}/system-cli-profiles
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm run build
+      - if: matrix.mode == 'parallel'
+        run: npx playwright install chromium
+      - name: Trace original scenarios without changing assertions or deadlines
+        shell: bash
+        run: node scripts/ci/windows-timeout-diagnostics.mjs ${{ matrix.mode }} 2>&1 | tee system-diagnostics-${{ matrix.mode }}.log
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-system-diagnostics-${{ matrix.mode }}
+          path: |
+            system-diagnostics-${{ matrix.mode }}.log
+            ${{ runner.temp }}/system-cli-profiles
+          if-no-files-found: error
 
   full-health-bootstrap:
     name: First-install merge gate publisher

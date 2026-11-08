@@ -1,3 +1,4 @@
+import { measured, cpuProfileArguments } from "./support/diagnostic-steps.js";
 import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -18,9 +19,9 @@ const exec = promisify(execFile);
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 
 async function fixture(t: test.TestContext, multiple = false, prepared = true, processBoundary = false, embedded = false) {
-  const f = prepared ? await initializedContextFixture(t) : await businessFixture(t, {});
+  const f = await measured(t, "fixture/base", () => prepared ? initializedContextFixture(t) : businessFixture(t, {}));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
-  await exec("git", ["init", "-b", "master"], { cwd: f.root });
+  await measured(t, "git/init-project", () => exec("git", ["init", "-b", "master"], { cwd: f.root }));
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
   if (embedded) config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
   else {
@@ -28,8 +29,8 @@ async function fixture(t: test.TestContext, multiple = false, prepared = true, p
     // Give Managed Memory a real committed baseline rather than paying for
     // unrelated Embedded worktree enumeration on every Store read.
     const cwd = join(f.root, "memory");
-    await exec("git", ["init", "-b", "master"], { cwd });
-    await exec("git", ["-c", "user.name=Graph Test", "-c", "user.email=graph@example.invalid", "commit", "--allow-empty", "-m", "Fixture baseline"], { cwd });
+    await measured(t, "git/init-memory", () => exec("git", ["init", "-b", "master"], { cwd }));
+    await measured(t, "git/commit-memory", () => exec("git", ["-c", "user.name=Graph Test", "-c", "user.email=graph@example.invalid", "commit", "--allow-empty", "-m", "Fixture baseline"], { cwd }));
     config.store = { type: "managed", branch: "master", published_revision: (await exec("git", ["rev-parse", "HEAD"], { cwd })).stdout.trim() };
   }
   await writeFile(join(f.root, "config.json"), JSON.stringify(config));
@@ -38,10 +39,12 @@ async function fixture(t: test.TestContext, multiple = false, prepared = true, p
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
   const invoke = (...args: string[]) => {
     const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" };
-    const result = processBoundary
-      ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
-      : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
-    return result.catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+    return measured(t, `${processBoundary ? "native" : "module"} CLI ${args.slice(0, 3).join(" ")}`, async () => {
+      const result = processBoundary
+        ? exec(process.execPath, [...cpuProfileArguments(), cli, "--project", "test-project", ...args], { cwd: f.root, env })
+        : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
+      return result.catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+    });
   };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   return { ...f, procedure, invoke, call };
@@ -200,9 +203,9 @@ test('CLI rewind preview is read only, preserves Continue, and requires explicit
  const show=await f.call('run','show','--run',start.runId);
  const target=show.steps[0].id;
  const {snapshotTree}=await import('./helpers/business-data.js');
- const before=await snapshotTree(f.root);
+ const before=await measured(t, "snapshot/project", () => snapshotTree(f.root));
  const preview=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--dry-run');
- assert.equal(preview.dryRun,true); assert.deepEqual(await snapshotTree(f.root),before);
+ assert.equal(preview.dryRun,true); assert.deepEqual(await measured(t, "snapshot/project", () => snapshotTree(f.root)),before);
  await assert.rejects(f.invoke('run','step','rewind','--run',start.runId,'--step',target,'--reason',' '),/reason is required/);
  const reason=join(f.directory,'reason.md');await writeFile(reason,'Product needs revision');
  await assert.rejects(f.invoke('run','step','rewind','--run',start.runId,'--step',target,'--reason','x','--reason-file',reason),/Choose/);

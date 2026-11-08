@@ -1,3 +1,4 @@
+import { measured, note, cpuProfileArguments } from "../../support/diagnostic-steps.js";
 import assert from "node:assert/strict";
 import { fork, spawn } from "node:child_process";
 import fs from "node:fs/promises";
@@ -15,10 +16,12 @@ type Fixture = Awaited<ReturnType<typeof businessFixture>>;
 type Result = { code: number | null; stdout: string; stderr: string; bytes: Buffer };
 
 function cli(t: TestContext, fixture: Fixture, args: string[], input?: string | Uint8Array, keepStdin = false): Promise<Result> {
-  const child = spawn(process.execPath, [cliPath, "--project", "test-project", ...args], {
+  return measured(t, `native CLI ${args.slice(0, 3).join(" ")}`, async () => {
+  const child = spawn(process.execPath, [...cpuProfileArguments(), cliPath, "--project", "test-project", ...args], {
     cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["pipe", "pipe", "pipe"]
   });
   t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  child.once("spawn", () => note(t, "child-spawned", { command: args.slice(0, 3).join(" ") }));
   const stdout: Buffer[] = []; const stderr: Buffer[] = [];
   child.stdout.on("data", chunk => stdout.push(chunk)); child.stderr.on("data", chunk => stderr.push(chunk));
   if (!keepStdin) child.stdin.end(input);
@@ -26,7 +29,9 @@ function cli(t: TestContext, fixture: Fixture, args: string[], input?: string | 
     child.once("error", reject);
     child.once("close", code => { const bytes = Buffer.concat(stdout); resolve({ code, stdout: bytes.toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), bytes }); });
   });
+  });
 }
+
 function success(result: Result): any {
   assert.equal(result.code, 0, result.stderr); assert.equal(result.stderr, ""); assert.notEqual(result.stdout.trim(), "");
   return JSON.parse(result.stdout);
@@ -111,7 +116,7 @@ test("CLI Store configuration paths are relative to selected Project and remove 
 });
 
 test("CLI uses external absolute directories for both Store kinds and retains records across re-registration", { timeout: 30_000 }, async (t) => {
-  const fixture = await businessFixture(t);
+  const fixture = await measured(t, "fixture/business", () => businessFixture(t));
   for (const kind of ["value", "data"] as const) {
     const storeId = `outside-${kind}`; const directory = join(fixture.directory, "external-cli", kind);
     const factory = kind === "value" ? "memsphere/filesystem-json" : "memsphere/filesystem";
@@ -123,13 +128,13 @@ test("CLI uses external absolute directories for both Store kinds and retains re
     const loaded = success(await cli(t, fixture, ["data", "store", "read", storeId, "--output", "json"]));
     assert.equal(loaded.directory, directory); assert.equal(loaded.config.directory, directory); assert.equal(loaded.status, "available");
     assert.deepEqual(success(await cli(t, fixture, ["data", "read", id, "--store", storeId, "--output", "json"])).value, value);
-    const dataBefore = await snapshotTree(directory);
+    const dataBefore = await measured(t, `snapshot/${kind}`, () => snapshotTree(directory));
     const removed = success(await cli(t, fixture, ["data", "store", "remove", storeId, "--output", "json"]));
     assert.equal(removed.dataRetained, true); assert.equal(removed.directory, directory);
-    assert.deepEqual(await snapshotTree(directory), dataBefore);
+    assert.deepEqual(await measured(t, `snapshot/${kind}`, () => snapshotTree(directory)), dataBefore);
     success(await cli(t, fixture, args, config));
     assert.deepEqual(success(await cli(t, fixture, ["data", "read", id, "--store", storeId, "--output", "json"])).value, value);
-    assert.deepEqual(await snapshotTree(directory), dataBefore);
+    assert.deepEqual(await measured(t, `snapshot/${kind}`, () => snapshotTree(directory)), dataBefore);
   }
 });
 
