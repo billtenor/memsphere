@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
+import type { Page } from "playwright";
 import { readFile } from "node:fs/promises";
 import { build } from "esbuild";
 import { ModuleKind, ScriptTarget, transpileModule } from "typescript";
@@ -1214,7 +1215,7 @@ test('flow Memory expands referenced rules using shared nested section presentat
  const origin=await listen(server),browser=await browserScope();try{const page=await browser.newPage();await page.goto(`${origin}/memories/procedures/flow-rules`);const panel=page.locator('details.action-contracts').first();await panel.locator(':scope > summary').click();const rule=panel.locator('.rule-reference');await rule.locator('.rule-reference-toggle').click();const body=rule.locator('.effective-rule-inline');await body.getByText('Nested rule',{exact:true}).waitFor();assert.equal(await body.locator('.effective-rule-section').count(),2);assert.equal(await body.locator('.effective-rule-section .effective-rule-section').count(),1);assert.equal(await body.evaluate(el=>getComputedStyle(el).borderLeftWidth),'2px');}finally{await browser.close();await close(server);}
 });
 
-async function graphRulesFixture() {
+async function graphRulesFixture(t: TestContext, prepare?: (page: Page, origin: string, server: Server) => Promise<void>) {
  const [bundle,sdk,runtime]=await Promise.all([buildMemoryBundle(),browserModule('../src/view/view-sdk.ts'),browserRuntimeBundle()]);
  const engine=await build({entryPoints:[fileURLToPath(new URL('../modules/shared/view/graph-layout.ts',import.meta.url))],bundle:true,format:'esm',write:false});
  const compare=await build({stdin:{contents:`import {createProcedureGraph} from './modules/shared/view/procedure-graph.ts'; import {contextControlStyles} from './modules/org.memsphere.run/adapter/view/context-control-styles.ts'; import {effectiveRuleStyles} from './modules/shared/view/effective-rules.ts'; export function mount(graph){const host=document.createElement('div');host.className='cc-exploration';const style=document.createElement('style');style.textContent=contextControlStyles+effectiveRuleStyles;host.append(style);const canvas=createProcedureGraph(graph,{locale:'en'});host.append(canvas.element);document.body.append(host);canvas.show('Compare',canvas.actionBody(graph.actions[0]));}`,resolveDir:process.cwd(),loader:'ts'},bundle:true,format:'esm',write:false});
@@ -1224,13 +1225,38 @@ async function graphRulesFixture() {
  const graph={names:['rules-graph'],mode:'graph',actions:[action('A'),action('B'),{id:'missing',description:'Missing source',asserts:[{tag:'!ref',target:'statements/missing'}],dependencies:[{from:'START'}]}]};
  const instance:ViewHostBootInstance={pluginPath:memoryBundlePath,routeBasePath:'/',module:{projectId:'demo',moduleId:'org.memsphere.memory',moduleVersion:'0.1.5',instanceId:'memory'}};
  const server=createServer((request,response)=>{const url=new URL(request.url??'/','http://local');if(url.pathname===memoryBundlePath)return send(response,200,'text/javascript',bundle);if(url.pathname===viewSdkBundlePath)return send(response,200,'text/javascript',sdk);if(url.pathname===viewRuntimeBundlePath)return send(response,200,'text/javascript',runtime);if(url.pathname==='/compare-run.js')return send(response,200,'text/javascript',compare.outputFiles[0].text);if(url.pathname==='/assets/procedure-graph-layout.js')return send(response,200,'text/javascript',engine.outputFiles[0].text);if(url.pathname==='/api/projects')return json(response,{current:'demo',projects:[{name:'demo'}]});if(url.pathname==='/api/changes')return json(response,{changes:[]});if(url.pathname==='/api/memories')return json(response,{memories:[{id:'procedures/rules-graph',kind:'procedures',names:['rules-graph']},{id:'statements/shared',kind:'statements',names:['shared']}]});if(url.pathname==='/api/memories/procedures/rules-graph')return json(response,{memory:{id:'procedures/rules-graph',kind:'procedures',entity:graph}});if(url.pathname==='/api/memories/statements/shared')return json(response,{memory:{id:'statements/shared',kind:'statements',entity:{names:['shared'],defines:['Navigation destination']}}});return send(response,200,'text/html',renderViewHostHtml('en',[instance]));});
- const origin=await listen(server),browser=await browserScope(),page=await browser.newPage({viewport:{width:900,height:800}});
- await page.goto(`${origin}/memories/procedures/rules-graph`);await page.locator('.pg-node[data-action-id=A]').click();await page.locator('.pg-dialog[open]').waitFor();
- return {page,graph,close:async()=>{await browser.close();await new Promise<void>(r=>server.close(()=>r()));}};
+ let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
+ let closing: Promise<void> | undefined;
+ const dispose = () => closing ??= (async () => {
+   try { await browser?.close(); }
+   finally {
+     if (server.listening) await new Promise<void>((resolve, reject) => {
+       server.close(error => error ? reject(error) : resolve());
+       server.closeAllConnections();
+     });
+   }
+ })();
+ // Register ownership before acquisition, including failures during setup.
+ t.after(dispose);
+ try {
+   const origin = await listen(server);
+   browser = await browserScope();
+   const page = await browser.newPage({ viewport: { width: 900, height: 800 } });
+   if (prepare) await prepare(page, origin, server);
+   else {
+     await page.goto(`${origin}/memories/procedures/rules-graph`);
+     await page.locator('.pg-node[data-action-id=A]').click();
+     await page.locator('.pg-dialog[open]').waitFor();
+   }
+   return { page, graph, close: dispose };
+ } catch (error) {
+   await dispose();
+   throw error;
+ }
 }
 
-test('graph Memory and Run share rule grouping and computed chapter styles, including user overrides',async()=>{
- const f=await graphRulesFixture(),{page}=f;
+test('graph Memory and Run share rule grouping and computed chapter styles, including user overrides',async t=>{
+ const f=await graphRulesFixture(t),{page}=f;
  try{
   const dialog=page.locator('.pg-dialog[open]');
   assert.match(await dialog.innerText(),/Action rules/);assert.match(await dialog.innerText(),/Artifact rules/);
@@ -1249,8 +1275,8 @@ test('graph Memory and Run share rule grouping and computed chapter styles, incl
  }finally{await f.close();}
 });
 
-test('graph Memory keeps same-reference reading choices separate by action and rule scope',async()=>{
- const f=await graphRulesFixture(),{page}=f;
+test('graph Memory keeps same-reference reading choices separate by action and rule scope',async t=>{
+ const f=await graphRulesFixture(t),{page}=f;
  try{
   await page.locator('.pg-dialog[open] .pg-rule-reference').first().locator('summary').click();
   await page.keyboard.press('Escape');await page.locator('.pg-node[data-action-id=B]').click();
@@ -1267,8 +1293,8 @@ test('graph Memory keeps same-reference reading choices separate by action and r
  }finally{await f.close();}
 });
 
-test('graph Memory source navigation and missing-source feedback remain usable on a narrow screen',async()=>{
- const f=await graphRulesFixture(),{page}=f;
+test('graph Memory source navigation and missing-source feedback remain usable on a narrow screen',async t=>{
+ const f=await graphRulesFixture(t),{page}=f;
  try{
   await page.setViewportSize({width:390,height:844});
   const ref=page.locator('.pg-dialog[open] .pg-rule-reference').first();await ref.locator('summary').click();
@@ -1279,4 +1305,19 @@ test('graph Memory source navigation and missing-source feedback remain usable o
   await page.locator('.pg-dialog[open] .pg-rule-reference > summary').click();
   assert.match(await page.locator('.pg-dialog[open] .effective-rule-inline').innerText(),/not found|unavailable/i);
  }finally{await f.close();}
+});
+
+
+test("graph rules fixture releases its page and HTTP listener when preparation fails", async t => {
+  let acquired: { page: Page; origin: string; server: Server } | undefined;
+  const failure = new Error("controlled graph preparation failure");
+  await assert.rejects(graphRulesFixture(t, async (page, origin, server) => {
+    acquired = { page, origin, server };
+    await page.goto(`${origin}/memories/procedures/rules-graph`);
+    throw failure;
+  }), error => error === failure);
+  assert.ok(acquired);
+  assert.equal(acquired.page.isClosed(), true);
+  assert.equal(acquired.server.listening, false);
+  await assert.rejects(fetch(acquired.origin, { signal: AbortSignal.timeout(2000) }));
 });

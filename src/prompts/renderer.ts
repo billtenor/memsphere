@@ -24,123 +24,135 @@ export class PromptRenderError extends Error {
 }
 
 const templateRoot = fileURLToPath(new URL("./templates", import.meta.url));
-const engines = new Map<PromptLocale, typeof Handlebars>();
-const compiled = new Map<string, Handlebars.TemplateDelegate>();
-
-export function renderPrompt<K extends PromptTemplateId>(
-  id: K,
-  locale: PromptLocale,
-  input: PromptInputMap[K]
-): string {
-  const definition = promptDefinition(id);
-  let parsed: PromptInputMap[K];
-  try {
-    parsed = definition.schema.parse(input);
-  } catch (error) {
-    throw new PromptRenderError(id, locale, "input", error);
-  }
-
-  const key = `${locale}:${id}`;
-  let template = compiled.get(key);
-  if (!template) {
-    const engine = engineFor(locale);
-    const path = join(templateRoot, locale, definition.path);
-    let source: string;
-    try {
-      source = readFileSync(path, "utf8");
-    } catch (error) {
-      throw new PromptRenderError(id, locale, "asset", error);
-    }
-    try {
-      template = engine.compile(source, {
-        strict: true,
-        noEscape: true,
-        preventIndent: true
-      });
-      compiled.set(key, template);
-    } catch (error) {
-      throw new PromptRenderError(id, locale, "compile", error);
-    }
-  }
-
-  try {
-    return template(parsed).replace(/\s+$/, "");
-  } catch (error) {
-    throw new PromptRenderError(id, locale, "render", error);
-  }
+export interface PromptAssets {
+  read(locale: PromptLocale, path: string): string;
+  partials(locale: PromptLocale): Array<{ name: string; source: string }>;
 }
 
-export function validatePromptAssets(): void {
-  for (const locale of promptLocales) {
-    engineFor(locale);
-    for (const id of listPromptTemplateIds()) {
-      const definition = promptDefinition(id);
+/** Each renderer owns its template cache and reads assets through one boundary. */
+export function createPromptRenderer(assets: PromptAssets) {
+  const engines = new Map<PromptLocale, typeof Handlebars>();
+  const compiled = new Map<string, Handlebars.TemplateDelegate>();
+
+  function renderPrompt<K extends PromptTemplateId>(
+    id: K,
+    locale: PromptLocale,
+    input: PromptInputMap[K]
+  ): string {
+    const definition = promptDefinition(id);
+    let parsed: PromptInputMap[K];
+    try {
+      parsed = definition.schema.parse(input);
+    } catch (error) {
+      throw new PromptRenderError(id, locale, "input", error);
+    }
+
+    const key = `${locale}:${id}`;
+    let template = compiled.get(key);
+    if (!template) {
+      const engine = engineFor(locale);
+      let source: string;
       try {
-        readFileSync(join(templateRoot, locale, definition.path), "utf8");
+        source = assets.read(locale, definition.path);
       } catch (error) {
         throw new PromptRenderError(id, locale, "asset", error);
       }
+      try {
+        template = engine.compile(source, {
+          strict: true,
+          noEscape: true,
+          preventIndent: true
+        });
+        compiled.set(key, template);
+      } catch (error) {
+        throw new PromptRenderError(id, locale, "compile", error);
+      }
+    }
+
+    try {
+      return template(parsed).replace(/\s+$/, "");
+    } catch (error) {
+      throw new PromptRenderError(id, locale, "render", error);
     }
   }
-}
 
-function engineFor(locale: PromptLocale): typeof Handlebars {
-  const cached = engines.get(locale);
-  if (cached) return cached;
-  const engine = Handlebars.create() as typeof Handlebars;
-  engine.registerHelper("unlessNil", function (
-    this: unknown,
-    value: unknown,
-    options: Handlebars.HelperOptions
-  ) {
-    return value === undefined || value === null ? options.inverse(this) : options.fn(this);
-  });
-  engine.registerHelper(
-    "ifDecision",
-    function (
+  function validatePromptAssets(): void {
+    for (const locale of promptLocales) {
+      engineFor(locale);
+      for (const id of listPromptTemplateIds()) {
+        const definition = promptDefinition(id);
+        try {
+          assets.read(locale, definition.path);
+        } catch (error) {
+          throw new PromptRenderError(id, locale, "asset", error);
+        }
+      }
+    }
+  }
+
+  function engineFor(locale: PromptLocale): typeof Handlebars {
+    const cached = engines.get(locale);
+    if (cached) return cached;
+    const engine = Handlebars.create() as typeof Handlebars;
+    engine.registerHelper("unlessNil", function (
       this: unknown,
-      decision: { kind?: string } | undefined,
-      kind: string,
+      value: unknown,
       options: Handlebars.HelperOptions
     ) {
-      return decision?.kind === kind ? options.fn(this) : options.inverse(this);
-    }
-  );
-  engine.registerHelper("ifOne", function (
-    this: unknown,
-    value: number,
-    options: Handlebars.HelperOptions
-  ) {
-    return value === 1 ? options.fn(this) : options.inverse(this);
-  });
-  engine.registerHelper("unlessOne", function (
-    this: unknown,
-    value: number,
-    options: Handlebars.HelperOptions
-  ) {
-    return value === 1 ? options.inverse(this) : options.fn(this);
-  });
-  engine.registerHelper("ifEq", function (
-    this: unknown,
-    left: unknown,
-    right: unknown,
-    options: Handlebars.HelperOptions
-  ) {
-    return left === right ? options.fn(this) : options.inverse(this);
-  });
-  registerPartials(engine, join(templateRoot, locale));
-  engines.set(locale, engine);
-  return engine;
+      return value === undefined || value === null ? options.inverse(this) : options.fn(this);
+    });
+    engine.registerHelper(
+      "ifDecision",
+      function (
+        this: unknown,
+        decision: { kind?: string } | undefined,
+        kind: string,
+        options: Handlebars.HelperOptions
+      ) {
+        return decision?.kind === kind ? options.fn(this) : options.inverse(this);
+      }
+    );
+    engine.registerHelper("ifOne", function (
+      this: unknown,
+      value: number,
+      options: Handlebars.HelperOptions
+    ) {
+      return value === 1 ? options.fn(this) : options.inverse(this);
+    });
+    engine.registerHelper("unlessOne", function (
+      this: unknown,
+      value: number,
+      options: Handlebars.HelperOptions
+    ) {
+      return value === 1 ? options.inverse(this) : options.fn(this);
+    });
+    engine.registerHelper("ifEq", function (
+      this: unknown,
+      left: unknown,
+      right: unknown,
+      options: Handlebars.HelperOptions
+    ) {
+      return left === right ? options.fn(this) : options.inverse(this);
+    });
+    for (const partial of assets.partials(locale)) engine.registerPartial(partial.name, partial.source);
+    engines.set(locale, engine);
+    return engine;
+  }
+
+  return { renderPrompt, validatePromptAssets };
 }
 
-function registerPartials(engine: typeof Handlebars, localeRoot: string): void {
-  for (const path of walkTemplates(localeRoot)) {
-    const relativePath = relative(localeRoot, path).split(sep).join("/");
-    if (!relativePath.includes("/partials/")) continue;
-    const name = relativePath.replace("/partials/", "/").replace(/\.hbs$/, "");
-    engine.registerPartial(name, readFileSync(path, "utf8"));
-  }
-}
+const defaultRenderer = createPromptRenderer({
+  read: (locale, path) => readFileSync(join(templateRoot, locale, path), "utf8"),
+  partials: locale => walkTemplates(join(templateRoot, locale)).flatMap(path => {
+    const relativePath = relative(join(templateRoot, locale), path).split(sep).join("/");
+    return relativePath.includes("/partials/")
+      ? [{ name: relativePath.replace("/partials/", "/").replace(/\.hbs$/, ""), source: readFileSync(path, "utf8") }]
+      : [];
+  })
+});
+export const renderPrompt = defaultRenderer.renderPrompt;
+export const validatePromptAssets = defaultRenderer.validatePromptAssets;
 
 function walkTemplates(directory: string): string[] {
   const paths: string[] = [];

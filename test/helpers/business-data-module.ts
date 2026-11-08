@@ -34,5 +34,11 @@ export async function businessDataModule(definition: unknown, kind: "value" | "d
       exported.set(out, Uint8Array.from(bytes)); return out === "-" ? undefined : out;
     }
   });
-  return { root, modelRef, service, exported, changeModel: () => { stamp = "changed"; } };
+  return { root, modelRef, service, exported,
+    async seedValue(id: string, value: unknown) {
+      const store = stores.get("records");
+      assert.ok(store instanceof MemoryValueStore, "seedValue requires a ValueStore fixture");
+      return store.create({}, id, value);
+    },
+    changeModel: () => { stamp = "changed"; } };
 }
