@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { access, readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import test from "node:test";
-import { readAllMemoryFiles } from "../src/memory/store.js";
-import { currentMemorySyntax } from "../src/memory/syntax.js";
-import { bundledReservedMemoryRoot, bundledOfficialMemoryRoot, bundledSystemMemoryRoot, readBundledSystemMemories, readBundledMarketMemories, readReservedMemoryManifest, reservedSystemMemoryRemovalTombstones } from "../src/reserved/store.js";
+import { readAllMemoryFiles } from "../../../src/memory/store.js";
+import { currentMemorySyntax } from "../../../src/memory/syntax.js";
+import { bundledReservedMemoryRoot, bundledOfficialMemoryRoot, bundledSystemMemoryRoot, readBundledSystemMemories, readBundledMarketMemories, readReservedMemoryManifest, reservedSystemMemoryRemovalTombstones } from "../../../src/reserved/store.js";
 
 
 test("bundled memory contains a valid self-bootstrap chain and manifest", async () => {

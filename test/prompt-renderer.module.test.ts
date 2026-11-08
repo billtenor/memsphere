@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PromptRenderError, renderPrompt, validatePromptAssets } from "../src/prompts/renderer.js";
+import { PromptRenderError, createPromptRenderer } from "../src/prompts/renderer.js";
 import { listPromptTemplateIds, promptDefinition } from "../src/prompts/registry.js";
+
+import { promptAssetFixture } from "./support/prompt-assets.js";
+const { renderPrompt, validatePromptAssets } = createPromptRenderer(promptAssetFixture());
 
 const acpModel = {
   rolePrompts: ["Focus on correctness."],
@@ -210,4 +213,18 @@ test("permission descriptions remain localized Prompt assets", () => {
     renderPrompt("control-plane.permission-description", "zh-CN", { id: "artifact.submit" }),
     "你可以通过 run report 提交当前 Artifact。"
   );
+});
+
+test("renderer reports missing injected assets and keeps fixture caches independent", () => {
+  const renderer = createPromptRenderer({
+    read() { throw new Error("fixture asset unavailable"); },
+    partials: () => []
+  });
+  assert.throws(() => renderer.renderPrompt("run.review-configuration-required", "en", { preflightJson: "{}" }), (error: unknown) => {
+    assert(error instanceof PromptRenderError);
+    assert.equal(error.stage, "asset");
+    assert.match(error.message, /fixture asset unavailable/);
+    return true;
+  });
+  assert.match(renderPrompt("run.review-configuration-required", "en", { preflightJson: "{}" }), /run start/);
 });
