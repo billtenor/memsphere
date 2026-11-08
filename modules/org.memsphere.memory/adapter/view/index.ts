@@ -966,6 +966,7 @@ class MemoryApplication {
   #fatalError: unknown = null;
   readonly #expandedRelated = new Set<string>();
   readonly #disclosures = new DisclosureState();
+  readonly #graphRuleDisclosures = new DisclosureState();
   readonly #disclosureShapes = new Map<string, { signature: string; version: number }>();
   #nextDisclosureShape = 0;
 
@@ -1214,6 +1215,7 @@ class MemoryApplication {
 
   private render(): void {
     this.#disclosures.capture();
+    this.#graphRuleDisclosures.capture();
     this.syncHeaderActions();
     this.#onListChange();
     if (this.#detailRoot) {
@@ -2234,6 +2236,11 @@ class MemoryApplication {
       structuralGraph: Boolean(parseLocation(this.#location).changeId) && this.#changeContentMode !== "candidate",
       ui: this.#ui,
       knownReferences: new Set(this.#referenceMemories.map(memoryReference)),
+      bindGraphRules: (body, actionId) => {
+        this.#graphRuleDisclosures.capture();
+        const scope = JSON.stringify([projectFromLocation(this.#location) || this.#currentProject, this.#location.pathname, this.#selectedId, this.#changeContentMode, actionId]);
+        this.#graphRuleDisclosures.restore(scope, [...body.querySelectorAll<HTMLDetailsElement>("details[data-rule-key]")].map(node => nativeDisclosure(node, node.dataset.ruleKey!)));
+      },
       openReference: target => {
         const memory = this.#referenceMemories.find(candidate => memoryReference(candidate) === target || candidate.names?.[0] === target);
         if (!memory) return;
@@ -2348,6 +2355,7 @@ type RenderOptions = {
   ui?: ViewUi;
   knownReferences?: ReadonlySet<string>;
   openReference?: (target: string) => void;
+  bindGraphRules?: (body: HTMLElement, actionId: string) => void;
 };
 
 function freezePresentationValue<T>(value: T): T {
@@ -2727,11 +2735,20 @@ function renderProcedure(node: JsonRecord, path: string, t: (key: string) => str
   const overallRuleTitle = (key: string) => key === "asserts" ? (globalThis.document.documentElement.lang.startsWith("en") ? "Overall requirements" : "总体要求") : key === "suggests" ? (globalThis.document.documentElement.lang.startsWith("en") ? "Overall suggestions" : "总体建议") : t(key);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, overallRuleTitle, comment, options);
   if (node.mode === "graph" && !options.structuralGraph) {
-    const canvas = createProcedureGraph(node as unknown as ProcedureDefinition, { locale: globalThis.document.documentElement.lang, ui: options.ui, rulesBody: action => {
-      const holder=el("div","memory-graph-rules"),record=action as unknown as JsonRecord,index=array(node.actions).indexOf(record),actionPath=`${path}.actions[${index+1}]`,artifact=record.artifact as JsonRecord|undefined;
-      for(const [source,sourcePath] of [[record,actionPath],[artifact,`${actionPath}.artifact`]] as const)if(source)for(const key of ["asserts","suggests"]as const)appendRuleList(holder,key,array(source[key]),source.effectiveRules as JsonRecord|undefined,sourcePath,t,undefined,options);
-      holder.querySelectorAll<HTMLDetailsElement>("details.memory-collapsible-list").forEach(detail=>{detail.open=true;});return holder;
-    } });
+    const canvas = createProcedureGraph(node as unknown as ProcedureDefinition, {
+      locale: globalThis.document.documentElement.lang, ui: options.ui,
+      ruleUnavailableText: t("referenceNotFound"),
+      ruleReferenceLabel: target => {
+        const link = renderMemoryReference({ target }, options, t);
+        link.addEventListener("click", event => event.stopPropagation());
+        return link;
+      },
+      definitionBody: action => {
+        const body = canvas.actionBody(action);
+        options.bindGraphRules?.(body, action.id);
+        return body;
+      }
+    });
     document.append(canvas.element); return document;
   }
   if (node.mode === "graph") {

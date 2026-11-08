@@ -16,23 +16,7 @@ export const contextControlStyles = `
 .cc-procedure-definition-body h3, .cc-procedure-definition-body h4 { margin:0 0 6px; font-size:13px; }
 .cc-procedure-definition-body ul { margin:0; padding-left:20px; }
 .cc-action-definition > summary, .cc-execution-info > summary { cursor:pointer; font-size:12px; font-weight:500; color:var(--mem-view-color-text-muted); }
-.cc-action-definition .pg-action-details { font-size:13px; line-height:1.55; }
-.cc-action-definition .pg-detail-group { padding:12px 0; }
-.cc-action-definition .pg-group-title { margin:0 0 8px; font-size:13px; }
-.cc-action-definition .pg-detail-group > .pg-info { margin:0; gap:6px 16px; }
-.cc-action-definition .pg-detail-group h4:not(.pg-group-title) { margin:10px 0 4px; }
-.cc-action-definition .pg-values li + li { margin-top:4px; }
-.cc-exploration .pg-dialog .pg-detail-group { padding:12px 0; }
-.cc-exploration .pg-dialog .pg-group-title { margin:0 0 8px; }
-.cc-exploration .pg-dialog .pg-detail-group > .pg-info { gap:6px 16px; }
-.cc-exploration .pg-dialog .pg-detail-group h4:not(.pg-group-title) { margin:10px 0 4px; }
-.cc-exploration .pg-dialog .pg-values li + li { margin-top:4px; }
 .cc-action-definition pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
-.cc-exploration .pg-rule-reference { margin:0; }
-.cc-exploration .pg-rule-reference > summary { cursor:pointer; list-style:none; }
-.cc-exploration .pg-rule-reference > summary::-webkit-details-marker { display:none; }
-.cc-exploration .effective-rule-section h4 { margin:0 0 8px; font-size:13px; color:var(--mem-view-color-text); }
-.cc-exploration .pg-detail-group .effective-rule-section h4 { margin:0 0 8px; font-size:13px; color:var(--mem-view-color-text); }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
 
