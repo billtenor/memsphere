@@ -16,20 +16,15 @@ function run(id: number, head = master, overrides = {}) {
 }
 
 
-test("PR full remains authoritative; master pending only blocks when a failure is unresolved", () => {
+test("PR repair proof wins; pending and failed full never borrow an older green result", () => {
   for (const state of ["success", "pending", "failure"]) {
     for (const current of [undefined, proof("success"), proof("pending"), proof("failure")]) {
-      assert.equal(decideHealth(current, proof(state), proof("failure")).state, state);
+      assert.equal(decideHealth(current, proof(state)).state, state);
     }
+    assert.equal(decideHealth(proof(state), undefined).state, state);
   }
-  for (const current of [undefined, proof("pending")]) {
-    assert.equal(decideHealth(current, undefined).state, "success");
-    assert.equal(decideHealth(current, undefined, proof("success")).state, "success");
-    assert.equal(decideHealth(current, undefined, proof("failure")).state, "failure");
-    assert.match(decideHealth(current, undefined).description, /No known master full failure/);
-  }
-  assert.equal(decideHealth(proof("success"), undefined, proof("failure")).state, "success");
-  assert.equal(decideHealth(proof("failure"), undefined, proof("success")).state, "failure");
+  assert.equal(decideHealth(undefined, undefined, true).state, "pending");
+  assert.equal(decideHealth(undefined, undefined, false).state, "failure");
 });
 
 

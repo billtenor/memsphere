@@ -75,19 +75,12 @@ test("CLI dry run reads real HTTP facts without writes; normal publisher refuses
   assert.equal(JSON.parse(published.stdout)[0].state, "success");
   assert.equal(posts.at(-1).state, "success");
   // Event A queued; checkout/live master is now B. It must revoke the old green
-  // and publish B's nonblocking health rather than wait for full completion.
+  // and publish B's pending full rather than reject event/checkout SHA mismatch.
   runs.push(run(2, master, { status: "in_progress", conclusion: null }));
   const before = posts.length;
   const lateEvent = await execute(process.execPath, ["scripts/ci/full-health.mjs", "--publish"], {
     env: { ...env, GITHUB_REF: "refs/heads/master", GITHUB_SHA: old, CHECKED_OUT_SHA: master }
   });
-  assert.equal(JSON.parse(lateEvent.stdout)[0].state, "success");
-  assert.equal(posts.slice(before).at(-1).state, "success");
-  // A completed master failure must revoke the green status on the same PR head.
-  runs[1] = run(2, master, { conclusion: "failure" });
-  const failed = await execute(process.execPath, ["scripts/ci/full-health.mjs", "--publish"], {
-    env: { ...env, GITHUB_REF: "refs/heads/master", CHECKED_OUT_SHA: master }
-  });
-  assert.equal(JSON.parse(failed.stdout)[0].state, "failure");
-  assert.equal(posts.at(-1).state, "failure");
+  assert.equal(JSON.parse(lateEvent.stdout)[0].state, "pending");
+  assert(posts.slice(before).every(p => p.state === "pending"));
 });

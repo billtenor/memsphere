@@ -89,12 +89,12 @@ test("Queued and rerun full wait, retaining previous failed-attempt evidence", a
   assert(paths.some(p => p === "/actions/runs/2/attempts/1"));
 });
 
-test("Master full does not need to finish; completed failure and explicit PR full still block", async t => {
+test("Latest master SHA and latest current-head full determine the gate, including run-ID ties", async t => {
   for (const [runs, expected] of [
-    [[run(1, old, { head_branch: "master" })], "success"],
-    [[], "success"],
+    [[run(1, old, { head_branch: "master" })], "pending"],
+    [[], "failure"],
     [[run(1)], "success"],
-    [[run(1), run(2, master, { status: "queued", conclusion: null })], "success"],
+    [[run(1), run(2, master, { status: "queued", conclusion: null })], "pending"],
     [[run(1), run(2, master, { conclusion: "failure" })], "failure"],
     [[run(1, master, { conclusion: "failure" }), run(2, sha)], "success"],
     [[run(1), run(2, sha, { conclusion: "cancelled" })], "failure"],
@@ -120,35 +120,6 @@ test("History and jobs pagination cannot hide a newer failed full or duplicate s
   assert.equal((await fullEvidence(api, run(1000))).state, "failure");
 });
 
-test("Master failure survives a new commit, queued full and repeated reruns until validated recovery", async t => {
-  const failed = run(1, old, { head_branch: "master", conclusion: "failure" });
-  const pending = run(2, master, { status: "in_progress", conclusion: null });
-  for (const runs of [[failed], [failed, pending], [failed, run(3, master, { display_title: "CI (default)" })]]) {
-    const { api } = await fixture(t, { runs });
-    assert.equal((await computeHealth(api, sha, master)).state, "failure");
-  }
-  const retry = await fixture(t, { runs: [run(2, master, { ...pending, run_attempt: 3 })],
-    reply: (path: string) => {
-      if (path.endsWith("/attempts/2")) return { value: { status: "in_progress", conclusion: null } };
-      if (path.endsWith("/attempts/1")) return { value: { status: "completed", conclusion: "failure" } };
-    } });
-  assert.equal((await computeHealth(retry.api, sha, master)).state, "failure");
-  assert(retry.paths.some(path => path === "/actions/runs/2/attempts/1"));
-  const recovered = await fixture(t, { runs: [failed, run(2)] });
-  assert.equal((await computeHealth(recovered.api, sha, master)).state, "success");
-});
-
-test("Pending rerun may use a completed success only with its own full summary", async t => {
-  for (const conclusion of ["success", "failure", "skipped"]) {
-    const { api } = await fixture(t, { runs: [run(2, master, { status: "queued", conclusion: null, run_attempt: 2 })],
-      reply: (path: string) => {
-        if (path.endsWith("/attempts/1")) return { value: { status: "completed", conclusion: "success" } };
-        if (path.endsWith("/attempts/1/jobs")) return { value: { jobs: [summary(conclusion)] } };
-      } });
-    assert.equal((await computeHealth(api, sha, master)).state, conclusion === "success" ? "success" : "failure");
-  }
-});
-
 test("Refresh revokes all stale greens and updates all open PRs using live facts", async t => {
   const pulls = [108, 109].map(number => ({ number, state: "open", base: { ref: "master" }, head: { sha: number === 108 ? sha : old } }));
   const { api, posts } = await fixture(t, { pulls, runs: [run(1, master, { status: "in_progress", conclusion: null })] });
@@ -156,7 +127,7 @@ test("Refresh revokes all stale greens and updates all open PRs using live facts
   assert.equal(reports.length, 2);
   assert(posts.slice(0, 2).every(p => p.state === "pending"));
   assert(posts.every(p => p.context === CONTEXT));
-  for (const head of [sha, old]) assert.equal(posts.filter(p => p.sha === head).at(-1).state, "success");
+  for (const head of [sha, old]) assert.equal(posts.filter(p => p.sha === head).at(-1).state, "pending");
 });
 
 test("Head/master changes during lookup are recomputed before success is published", async t => {
@@ -168,8 +139,8 @@ test("Head/master changes during lookup are recomputed before success is publish
   } });
   const reports = await refreshHealth(api, { publish: true });
   assert.equal(reports[0].sha, old);
-  assert.equal(reports[0].state, "success");
-  assert(posts.filter(p => p.state === "success").every(p => p.sha === old));
+  assert.equal(reports[0].state, "pending");
+  assert.equal(posts.some(p => p.state === "success"), false);
 });
 
 test("API/identity failures produce error statuses, never stale success; dry run does not write", async t => {
@@ -196,7 +167,7 @@ test("Renamed merge gate publishes only its new status unless the temporary roll
       assert.equal(posts[i].context, LEGACY_CONTEXT, "revoke the still-required old gate first");
       assert.deepEqual(posts[i + 1], { ...posts[i], context: CONTEXT });
     }
-    assert.equal(posts.at(-1).state, state === "pending" ? "success" : state);
+    assert.equal(posts.at(-1).state, state);
     for (const value of [undefined, "", "false", "TRUE"]) {
       const start = posts.length;
       await refreshHealth(api, { publish: true, env: { FULL_HEALTH_PUBLISH_LEGACY: value } });

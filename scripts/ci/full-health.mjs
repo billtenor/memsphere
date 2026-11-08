@@ -11,15 +11,13 @@ export const ACTIONS_APP_ID = 15368;
 const target = `https://github.com/${REPOSITORY}/actions/workflows/ci.yml`;
 const result = (state, description, run) => ({ state, description, target_url: run?.html_url || target });
 
-// Explicit PR full runs retain their own checks and repair escape hatch. Master
-// health only vetoes a merge on a known failure; a running full is not a prerequisite.
-export function decideHealth(master, own, settledMaster) {
+// A PR's own latest full is an explicit repair escape hatch, including while master is waiting.
+export function decideHealth(master, own, hasMasterHistory = true) {
   if (own) return result(own.state, `PR full: ${own.reason}`, own.run);
-  if (master && master.state !== "pending") return result(master.state, `master full: ${master.reason}`, master.run);
-  if (settledMaster?.state === "failure") {
-    return result("failure", `master full still blocked: ${settledMaster.reason}`, settledMaster.run);
-  }
-  return result("success", "No known master full failure; full completion is not required", master?.run || settledMaster?.run);
+  if (master) return result(master.state, `master full: ${master.reason}`, master.run);
+  return hasMasterHistory
+    ? result("pending", "Waiting for full on the latest master commit")
+    : result("failure", "No master full history; run full manually on master or this PR head");
 }
 
 export function requiredCheckRules(rules, remove = false) {
@@ -110,23 +108,6 @@ async function latestFull(api, runs) {
   }
 }
 
-// A new commit or rerun must not erase an unresolved failure. Examine completed
-// attempts as well as older runs, validating their full summary before clearing it.
-async function latestSettledFull(api, runs) {
-  const sorted = [...runs].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at) || b.id - a.id);
-  for (const run of sorted) {
-    if (!Number.isFinite(Date.parse(run.created_at))) throw new Error("Invalid CI creation timestamp");
-    const evidence = await fullEvidence(api, run);
-    if (!evidence) continue;
-    if (evidence.state !== "pending") return evidence;
-    for (let attempt = (run.run_attempt || 1) - 1; attempt >= 1; attempt--) {
-      const previous = await api.request(`/actions/runs/${run.id}/attempts/${attempt}`);
-      const settled = await fullEvidence(api, { ...run, ...previous, run_attempt: attempt });
-      if (settled && settled.state !== "pending") return settled;
-    }
-  }
-}
-
 async function masterSha(api) {
   const ref = await api.request("/git/ref/heads/master");
   if (!/^[0-9a-f]{40}$/.test(ref.object?.sha)) throw new Error("Invalid master SHA");
@@ -138,13 +119,13 @@ export async function computeHealth(api, sha, master) {
   const ownRuns = await api.list(`${path}?head_sha=${sha}`, "workflow_runs");
   const own = await latestFull(api, ownRuns.filter(run => run.head_sha === sha));
   if (own) return { ...decideHealth(undefined, own), masterSha: master, own };
-  // Prefer the current master commit. While it is running (or not registered),
-  // preserve the last completed result across master commits and rerun attempts.
+  // Restrict the common path to the current SHA; complete history is only needed
+  // to distinguish first installation from a new master commit awaiting its run.
   const masterRuns = await api.list(`${path}?branch=master&head_sha=${master}`, "workflow_runs");
   const current = await latestFull(api, masterRuns.filter(run => run.head_sha === master && run.head_branch === "master"));
-  const settled = current && current.state !== "pending" ? current : await latestSettledFull(api,
+  const history = current || await latestFull(api,
     (await api.list(`${path}?branch=master`, "workflow_runs")).filter(run => run.head_branch === "master"));
-  return { ...decideHealth(current, undefined, settled), masterSha: master, master: current, settledMaster: settled };
+  return { ...decideHealth(current, undefined, Boolean(history)), masterSha: master, master: current };
 }
 
 export async function verifyBootstrap(api, env) {
