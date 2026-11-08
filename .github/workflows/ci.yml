@@ -266,7 +266,7 @@ jobs:
         mode: [isolated, parallel]
     env:
       MEMSPHERE_TEST_TRACE: "1"
-      MEMSPHERE_TEST_PROFILE_DIR: ${{ runner.temp }}/system-cli-profiles
+      MEMSPHERE_TEST_PROFILE_DIR: ${{ github.workspace }}/.ci-system-profiles
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -289,7 +289,7 @@ jobs:
           name: windows-system-diagnostics-${{ matrix.mode }}
           path: |
             system-diagnostics-${{ matrix.mode }}.log
-            ${{ runner.temp }}/system-cli-profiles
+            ${{ github.workspace }}/.ci-system-profiles
           if-no-files-found: error
 
   full-health-bootstrap:
