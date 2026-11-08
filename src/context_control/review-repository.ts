@@ -19,7 +19,6 @@ import { failure } from "./errors.js";
 import { effectiveStep } from "./graph-rewind.js";
 import type { ContextControl } from "./service.js";
 export * from "../run/store.js";
-const stamp = () => new Date().toISOString();
 const digest = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex");
 export const graphReviewHandle = (run: string, step: string) => `graph-review-${run}__${step}`;
 function identity(reviewId: string) {
@@ -145,7 +144,7 @@ export async function submitArtifactReviewRunnerVote(input: Parameters<typeof le
   await use(input, (g, id) => g.submitReview(id.runId, id.stepId, input.roundId, "runner", input.vote, [], input.comment));
   return readArtifactReviewForRunner(input);
 }
-function comments(input: legacy.ArtifactReviewDraftInput["comments"]): ArtifactReviewComment[] {
+function comments(input: legacy.ArtifactReviewDraftInput["comments"], stamp: () => string): ArtifactReviewComment[] {
   return input.map(c => ({ ...c, commentId: c.commentId ?? c.id ?? `comment-${randomUUID()}`, id: undefined, createdAt: stamp(), updatedAt: stamp() }));
 }
 export async function submitArtifactReviewHumanAssignmentForRunner(input: Parameters<typeof legacy.submitArtifactReviewHumanAssignmentForRunner>[0]) {
@@ -155,7 +154,7 @@ export async function submitArtifactReviewHumanAssignmentForRunner(input: Parame
   const round = context.review.rounds.find(r => r.id === input.roundId);
   const actor = round?.assignments.find(a => a.actorId === input.assignmentId || artifactReviewAssignmentId(a) === input.assignmentId)?.actorId;
   if (!actor) throw failure("NOT_FOUND", "Review Assignment not found");
-  await use(input, (g, id) => g.submitReview(id.runId, id.stepId, input.roundId, actor, input.vote, comments(input.comments), input.summary, input.authorizationNote));
+  await use(input, (g, id) => g.submitReview(id.runId, id.stepId, input.roundId, actor, input.vote, comments(input.comments, g.runtime.now), input.summary, input.authorizationNote));
   return readArtifactReviewForActor({ ...input, actorId: actor });
 }
 type AttemptInput = { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string };
@@ -175,13 +174,13 @@ export async function assertArtifactReviewAgentAttemptRunning(input: AttemptInpu
     throw failure("REVIEW_CONFLICT", "Review attempt is no longer current and running");
   }
 }
-async function mutateAttempt(input: AttemptInput, change: (review: Review, attempt: NonNullable<Review["attempts"]>[number]) => void) {
+async function mutateAttempt(input: AttemptInput, change: (review: Review, attempt: NonNullable<Review["attempts"]>[number], now: () => string) => void) {
   await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
     const round = step.reviewRounds!.at(-1)!;
     if (round.reviewConfig.reviewers[input.actorId]?.kind !== "agent") throw failure("INVALID_ARGUMENT", "Expected Agent Reviewer");
     const attempt = review.attempts?.at(-1);
     if (review.status !== "running" || !attempt || attempt.id !== input.attemptId || attempt.completion) throw failure("REVIEW_CONFLICT", "Review attempt is not current and running");
-    change(review, attempt);
+    change(review, attempt, g.runtime.now);
   }));
   return agentContext(input);
 }
@@ -199,9 +198,9 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
     if (step.reviewRounds!.at(-1)!.reviewConfig.reviewers[input.actorId]?.kind !== "agent") throw failure("INVALID_ARGUMENT", "Expected Agent Reviewer");
     if (review.status !== "pending") return;
     let attempt = review.attempts?.at(-1);
-    if (!attempt) { attempt = { id: `attempt-${randomUUID()}`, createdAt: stamp() }; review.attempts = [attempt]; }
+    if (!attempt) { attempt = { id: `attempt-${randomUUID()}`, createdAt: g.runtime.now() }; review.attempts = [attempt]; }
     if (attempt.startedAt || attempt.completion) throw failure("REVIEW_CONFLICT", "Queued Agent attempt is not available");
-    attempt.startedAt = stamp();
+    attempt.startedAt = g.runtime.now();
     if (input.workerPid !== undefined) {
       attempt.workerPid = input.workerPid;
       const identity = await g.runtime.workers.captureIdentity(input.workerPid);
@@ -218,7 +217,7 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
 }
 export async function markArtifactReviewAgentCliReady(input: Parameters<typeof legacy.markArtifactReviewAgentCliReady>[0] & { service?: ContextControl }) {
   if (!identity(input.reviewId)) return legacy.markArtifactReviewAgentCliReady(input);
-  return mutateAttempt(input, (_r, a) => { a.cliReadyAt ??= stamp(); a.session = { ...a.session, ...(input.protocolVersion !== undefined ? { protocolVersion: input.protocolVersion } : {}), ...(input.sessionId ? { id: input.sessionId } : {}), ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
+  return mutateAttempt(input, (_r, a, now) => { a.cliReadyAt ??= now(); a.session = { ...a.session, ...(input.protocolVersion !== undefined ? { protocolVersion: input.protocolVersion } : {}), ...(input.sessionId ? { id: input.sessionId } : {}), ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
 }
 export async function recordArtifactReviewAgentSession(input: Parameters<typeof legacy.recordArtifactReviewAgentSession>[0]) {
   if (!identity(input.reviewId)) return legacy.recordArtifactReviewAgentSession(input);
@@ -236,15 +235,15 @@ export async function recordArtifactReviewAgentStop(input: Parameters<typeof leg
     await use(input, (g, id) => g.recordReviewStop(id.runId, id.stepId, input.roundId, input.actorId, input.attemptId, input.stopReason));
     return agentContext(input);
   }
-  return mutateAttempt(input, (_r, a) => { a.completion = { kind: "failed", at: stamp(), stopReason: input.stopReason, failure: { stage: "prompt", code: "stopped_before_submit", message: "Agent stopped without submitting its Review" } }; });
+  return mutateAttempt(input, (_r, a, now) => { a.completion = { kind: "failed", at: now(), stopReason: input.stopReason, failure: { stage: "prompt", code: "stopped_before_submit", message: "Agent stopped without submitting its Review" } }; });
 }
 export async function failArtifactReviewAgentAssignment(input: Parameters<typeof legacy.failArtifactReviewAgentAssignment>[0]) {
   if (!identity(input.reviewId)) return legacy.failArtifactReviewAgentAssignment(input);
   const context = await agentContext(input);
   if (context.assignment.status === "submitted") return context;
-  return mutateAttempt(input, (_r, a) => {
+  return mutateAttempt(input, (_r, a, now) => {
     if (input.failure.code === "worker_spawn_failed") { delete a.workerPid; delete a.workerIdentity; delete a.workerJob; }
-    a.completion = { kind: "failed", at: stamp(), failure: input.failure, ...(input.stopReason ? { stopReason: input.stopReason } : {}) };
+    a.completion = { kind: "failed", at: now(), failure: input.failure, ...(input.stopReason ? { stopReason: input.stopReason } : {}) };
   });
 }
 export async function retryArtifactReviewAgentAssignment(input: Parameters<typeof legacy.retryArtifactReviewAgentAssignment>[0]) {
@@ -256,7 +255,7 @@ export async function retryArtifactReviewAgentAssignment(input: Parameters<typeo
   await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
     if (step.reviewRounds!.at(-1)!.reviewConfig.reviewers[input.actorId]?.kind !== "agent" || review.attempts?.at(-1)?.completion?.kind !== "failed") throw failure("INVALID_ARGUMENT", "Only a failed Agent assignment may be retried");
     review.status = "pending"; if (!review.nodeTree) review.comments = []; delete review.vote;
-    review.attempts = [...(review.attempts ?? []), { id: `attempt-${randomUUID()}`, createdAt: stamp() }];
+    review.attempts = [...(review.attempts ?? []), { id: `attempt-${randomUUID()}`, createdAt: g.runtime.now() }];
   }));
   const context = await readArtifactReviewForActor(input);
   return { ...context, attempt: context.assignment.attempts!.at(-1)! };
@@ -266,8 +265,10 @@ export async function appendArtifactReviewAgentComment(input: Parameters<typeof 
   if (!input.body.trim() || !["blocking", "risk", "suggestion"].includes(input.severity)) throw failure("INVALID_ARGUMENT", "Comment body and severity required");
   const context = await readArtifactReviewForActor(input);
   const submission = context.review.submissions.find(s => s.id === context.round.submissionId)!;
-  const stored = storeGraphComments([{ id: `comment-${randomUUID()}`, body: input.body, severity: input.severity, createdAt: stamp(), updatedAt: stamp(), ...(input.anchor ? { anchor: { ...input.anchor, submissionId: input.anchor.submissionId ?? submission.id } } : {}) }], submission.id, submission.digest);
-  return mutateAttempt(input, review => { review.comments.push(...stored); });
+  return mutateAttempt(input, (review, _attempt, now) => {
+    const stored = storeGraphComments([{ id: `comment-${randomUUID()}`, body: input.body, severity: input.severity, createdAt: now(), updatedAt: now(), ...(input.anchor ? { anchor: { ...input.anchor, submissionId: input.anchor.submissionId ?? submission.id } } : {}) }], submission.id, submission.digest);
+    review.comments.push(...stored);
+  });
 }
 export async function submitArtifactReviewAgentAssignment(input: Parameters<typeof legacy.submitArtifactReviewAgentAssignment>[0]) {
   if (!identity(input.reviewId)) return legacy.submitArtifactReviewAgentAssignment(input);
@@ -289,7 +290,7 @@ export async function updateArtifactReviewDraft(input: Parameters<typeof legacy.
     const artifact = (await g.records.require<Artifact>("artifact", run.id, round.artifactId)).value;
     const hash = digest((await service.body(artifact)).bytes);
     if (!permissions.includes("decision.decide") && input.draft.comments.some(c => !c.severity)) throw failure("INVALID_ARGUMENT", "Advisory comment requires severity");
-    review.comments = storeGraphComments(comments(input.draft.comments).map(comment => ({ ...comment, createdAt: review.comments.find(old => reviewCommentId(old) === reviewCommentId(comment))?.createdAt ?? comment.createdAt })), round.artifactId, hash);
+    review.comments = storeGraphComments(comments(input.draft.comments, g.runtime.now).map(comment => ({ ...comment, createdAt: review.comments.find(old => reviewCommentId(old) === reviewCommentId(comment))?.createdAt ?? comment.createdAt })), round.artifactId, hash);
     if (input.draft.vote) review.vote = { value: input.draft.vote }; else delete review.vote;
   }));
   return readArtifactReviewForActor(input);
@@ -321,7 +322,7 @@ export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation
     ...submission.contextArtifacts.flatMap(a => a.artifactId ? [`artifact:${a.artifactId}`] : []),
     ...(submission.contextExternals ?? []).map(e => `external:${e.externalId}`)
   ];
-  return mutateAttempt(input, review => {
+  return mutateAttempt(input, (review, _attempt, now) => {
     if (!review.nodeTree || !review.nodeStates) throw failure("INVALID_STATE", "Review nodes are not enabled");
     review.comments = mutateReviewNode({ nodeTree: review.nodeTree, nodeStates: review.nodeStates }, review.comments, input.mutation, item => {
       const native = item.anchor;
@@ -330,7 +331,7 @@ export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation
         const ref = native.targetRef as { kind?: string; id?: string } | undefined;
         if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || !["artifact", "external"].includes(ref.kind!) || !materialIds.includes(`${ref.kind}:${ref.id}`))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
       }
-      return { commentId: `comment-${randomUUID()}`, body: item.body, severity: item.severity, createdAt: stamp(), ...(native ? { anchor: native as NonNullable<Review["comments"][number]["anchor"]> } : {}) };
+      return { commentId: `comment-${randomUUID()}`, body: item.body, severity: item.severity, createdAt: now(), ...(native ? { anchor: native as NonNullable<Review["comments"][number]["anchor"]> } : {}) };
     });
   });
 }
