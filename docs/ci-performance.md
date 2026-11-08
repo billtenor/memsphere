@@ -144,13 +144,17 @@ gh workflow run full-health.yml --ref master
 
 API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通 PR 由三平台按默认选集运行的 default 检查保护；Linux default 和三平台 full 覆盖全部测试文件。
 
-### 敏捷流程与合入门禁的边界
+### 敏捷流程中的 CI 跟进与合入
 
-`Merge gate / full regression` 是合入条件，不属于验证当前 PR 候选版本的 CI 集合。master full 排队、运行中或尚未登记时，GitHub 的 pending 状态仍阻止实际合入；失败时也保持阻断。不能为了让 Agent 继续推进流程而提前发布 success。PR 自身显式 full 的既有修复解锁机制不变。
+`Merge gate / full regression` 是 master 分支健康门禁，不是本轮 PR 的测试。master full 排队、运行中或尚未登记时，该门禁保持 pending，GitHub 禁止合入；失败时也禁止合入。PR 自身显式 full 的既有修复解锁机制不变。
 
-敏捷流程只等待实际验证当前 PR 候选的适用检查。目标分支健康门禁 pending 或失败时，继续完成技术与产品验收；最终交接单独报告门禁状态和证据。master full 未完成时交接为“本轮验收完成，等待合入门禁放行”，不得声称“已经可以合入”，也不持续轮询 master full、不进入本分支修复循环、不重复验收。Human 在 GitHub 合入门禁满足后操作合入，Agent 再核验合入结果并清理本地分支。`check_ci` 明确排除 master full 及其派生健康门禁；`cleanup` 不查询、等待或重跑合入后的 master full，其状态不作为结果核验或分支清理条件。
+`check_ci` 只判断实际验证当前 PR 的检查，不因 master full 或 master 分支健康门禁未通过而返回 true。PR 自身适用的 full 检查仍须跟进。
 
-这里区分的是“Agent 是否继续完成验收和交接”与“GitHub 是否允许合入”。CI 判断中看到挂在 PR head 上的 pending，须按其实际职责分类，不能把全部 PR 状态都当作本分支测试。已启动 Run 的冻结 Memory 不随本次流程修改自动迁移。
+PR 自身检查通过后，继续完成技术与产品验收。交接报告单独说明 master full 和合入门禁状态：master full 未完成时注明“本轮验收完成，等待 master full 通过后合入”；失败或查询异常时说明不能合入的原因。Agent 不持续轮询 master full，不因此修复本分支或重复验收；Human 在 GitHub 合入门禁满足后操作合入。
+
+合入后，Agent 核验 PR 已合入 master、本轮改动完整纳入，再清理本地分支。`cleanup` 不查询、等待或重跑合入后的 master full，也不以其状态决定核验是否通过或是否清理分支。
+
+已启动 Run 的冻结 Memory 不随本次流程修改自动更新。
 
 ### 首次安装与回滚
 
