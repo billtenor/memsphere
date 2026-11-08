@@ -298,7 +298,7 @@ for (const source of [
       };
     }
     let sessionIndex = 0;
-    async function session(candidate: Produced, preparingInput = false): Promise<ReviewerSession> {
+    async function session(candidate: Produced): Promise<ReviewerSession> {
       const step = (await checked(() => service.withGraph(g => g.reviewSnapshot(runId, candidate.stepId)))).steps.find(s => s.id === candidate.stepId)!;
       const roundId = step.reviewRounds!.at(-1)!.id;
       candidate.reviewRoundId = roundId;
@@ -404,42 +404,25 @@ for (const source of [
         return view;
       }
       async function accept(): Promise<void> {
-        if (preparingInput) {
-          // Prepare the accepted input using the real node algorithm and one
-          // public CAS write. Final submission still checks every node. These
-          // source reviews are preconditions, not the Sessions under test.
-          await checked(() => service.withGraph(g => g.mutateReview(runId, step.id, roundId, 'reader', async review => {
-            const nodes = { nodeTree: review.nodeTree!, nodeStates: review.nodeStates! };
-            let node;
-            while ((node = currentReviewNode(nodes)))
-              review.comments = mutateReviewNode(nodes, review.comments, {
-                operation: 'report', expectedNodeId: node.nodeId, artifact: { applicable: true }
-              }, () => { throw new Error('Input fixture has no findings'); });
-          })));
-        } else {
-          let context = await checked(() => reviews.readArtifactReviewForActor(input));
-          while (currentReviewNode(context.assignment))
-            context = await checked(() => reviews.mutateArtifactReviewNodes({
-              ...bound,
-              mutation: {
-                operation: 'report',
-                expectedNodeId: currentReviewNode(context.assignment)!.nodeId,
-                artifact: {
-                  applicable: true
-                }
-              }
-            }));
-        }
+        // Node command authorization/order is exercised by
+        // reviewer-session-integration.system and review-node-graph-paths.system.
+        // This scenario targets fixed-context reads and workflow versions. Use
+        // the real node algorithm in one public CAS to prepare completion; final
+        // Agent submission still enforces the handshake and every required node.
+        await checked(() => service.withGraph(g => g.mutateReview(runId, step.id, roundId, 'reader', async review => {
+          const nodes = { nodeTree: review.nodeTree!, nodeStates: review.nodeStates! };
+          let node;
+          while ((node = currentReviewNode(nodes)))
+            review.comments = mutateReviewNode(nodes, review.comments, {
+              operation: 'report', expectedNodeId: node.nodeId, artifact: { applicable: true }
+            }, () => { throw new Error('Acceptance fixture has no findings'); });
+        })));
         await checked(() => reviews.submitArtifactReviewAgentAssignment({
           ...bound,
           vote: 'approve'
         }));
         await checked(() => service.withGraph(g => g.submitReview(runId, step.id, roundId, 'human', 'approve', [], 'Fixture Human confirms this fixed version.')));
-        await checked(() => reviews.submitArtifactReviewRunnerVote({
-          ...input,
-          vote: 'approve'
-        }));
-        currentSnapshot = await checked(() => service.snapshot(runId));
+        currentSnapshot = await checked(() => service.withGraph(g => g.submitReview(runId, step.id, roundId, 'runner', 'approve')));
       }
       return {
         read,
@@ -453,7 +436,7 @@ for (const source of [
     }
     async function confirmed(id: string, body: string): Promise<Produced> {
       const produced = await produce(id, body);
-      await (await session(produced, true)).accept();
+      await (await session(produced)).accept();
       return produced;
     }
     async function setup(version: string): Promise<WorkflowInputs> {
