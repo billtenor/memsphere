@@ -191,6 +191,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   if (includeAgent) {
     // Most cases test wait/queue behavior, not ACP dispatch. Keep a controlled
     // pending assignment instead of repeating an entire Reviewer/tool process.
+    // The Reviewer is a logical fixture, not an OS worker owned by this test.
     const claimed = await api.claimArtifactReviewAgentAssignment({ ...agentInput });
     assert.ok(claimed);
     await api.markArtifactReviewAgentCliReady({ ...agentInput, attemptId: claimed.attempt.id });
