@@ -28,14 +28,14 @@ const builtCli = resolve("dist/cli.js");
 const projectStoreExample = resolve("examples/apps/project-store");
 const expenseExample = resolve("examples/apps/expense");
 type FixtureAction = (root: string, context: Awaited<ReturnType<typeof resolveProjectContext>>, app: string) => Promise<void>;
-function fixture(action: FixtureAction, embedded = false, owner?: import("node:test").TestContext) {
+function fixture(action: FixtureAction, embedded = false, owner?: import("node:test").TestContext, minimal = false) {
   // node:test can start the next test after timeout while its body is still
   // finishing. Wait for this fixture to restore cwd/env before another owns them.
-  const completed = runFixture(action, embedded, owner?.signal);
+  const completed = runFixture(action, embedded, owner?.signal, minimal);
   owner?.after(() => completed.catch(() => undefined));
   return completed;
 }
-async function runFixture(action: FixtureAction, embedded: boolean, signal?: AbortSignal) {
+async function runFixture(action: FixtureAction, embedded: boolean, signal: AbortSignal | undefined, minimal: boolean) {
   const root = await mkdtemp(join(tmpdir(), "memsphere-app-test-"));
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT, gitConfig: process.env.GIT_CONFIG_GLOBAL,
     author: process.env.GIT_AUTHOR_NAME, authorEmail: process.env.GIT_AUTHOR_EMAIL, committer: process.env.GIT_COMMITTER_NAME, committerEmail: process.env.GIT_COMMITTER_EMAIL };
@@ -54,11 +54,12 @@ async function runFixture(action: FixtureAction, embedded: boolean, signal?: Abo
       execFileSync("git", ["init", "-b", "master"], { cwd: root });
       execFileSync("git", ["commit", "--allow-empty", "-m", "initial"], { cwd: root });
     }
-    await projectCreateCommand("test", embedded ? { embedded: ".memsphere/memory" } : {});
+    if (minimal) await prepareStoreProject(process.env.MEMSPHERE_HOME);
+    else await projectCreateCommand("test", embedded ? { embedded: ".memsphere/memory" } : {});
     const context = await resolveProjectContext({ project: "test" });
     const app = join(root, "app"); await mkdir(join(app, "memories"), { recursive: true });
     await writeFile(join(app, "app.json"), JSON.stringify({ schemaVersion: 1, id: "example.app", name: "Example", version: "1.0.0", description: "Example",
-      assets: { memories: [{ key: "intro", path: "memories/intro.yaml" }] }, entrypoints: { agent: ["concepts/app-intro"] } }));
+      assets: { memories: minimal ? [] : [{ key: "intro", path: "memories/intro.yaml" }] }, entrypoints: minimal ? {} : { agent: ["concepts/app-intro"] } }));
     await writeFile(join(app, "memories/intro.yaml"), "!concept\nsyntax: memsphere-20260721-stable\nnames: [app-intro]\ndefines: [App introduction]\n");
     signal?.throwIfAborted();
     await action(root, context, app);
@@ -70,6 +71,22 @@ async function runFixture(action: FixtureAction, embedded: boolean, signal?: Abo
     }
     await rm(root, { recursive: true, force: true });
   }
+}
+
+// Project creation/System Memory installation is covered separately. Shared
+// Store system tests need a registered Project, model storage and empty Memory.
+async function prepareStoreProject(home: string) {
+  const project = join(home, "projects/test");
+  await Promise.all(["concepts", "statements", "procedures", "schemas"].map(kind =>
+    mkdir(join(project, "memory", kind), {recursive:true})));
+  await mkdir(join(project, "models/json-schema/draft-07"), {recursive:true});
+  await writeFile(join(project, "project.json"), JSON.stringify({format_version:1,name:"test",created_at:"2026-11-08T00:00:00.000Z"}));
+  const memory = join(project, "memory");
+  execFileSync("git", ["init", "-b", "master"], {cwd:memory});
+  execFileSync("git", ["commit", "--allow-empty", "-m", "store fixture"], {cwd:memory});
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], {cwd:memory,encoding:"utf8"}).trim();
+  await writeFile(join(project, "config.json"), JSON.stringify({store:{type:"managed",branch:"master",published_revision:revision}}));
+  await writeFile(join(home, "registry.json"), JSON.stringify({format_version:1,projects:{test:{root:project}},workspaces:{}}));
 }
 
 test("Non-loopback App operations reject missing or invalid tokens and accept the operator token", async () => fixture(async (root, context) => {
@@ -200,7 +217,7 @@ async function sharedHttpFixture(owner: import("node:test").TestContext, action:
   };
   try { await action({root,context,origin,invoke}); }
   finally { await new Promise<void>(resolve => server.close(() => resolve())); }
-  }, false, owner);
+  }, false, owner, true);
 }
 
 test("unbound Project Store allows install but prevents check, enable and invoke",{timeout:30000},async t=>fixture(async(_root,context,app)=>{
@@ -214,7 +231,7 @@ test("unbound Project Store allows install but prevents check, enable and invoke
   assert.equal(check.items.find(item=>item.name==="project-store:expenses")?.available,false);
   await assert.rejects(setAppEnabled(context,"example.app",true),{code:"APP_NOT_READY"});
   await assert.rejects(invokeAppOperation(context.primary,"example.app","read",{}),{code:"APP_DISABLED"});
-}, false, t));
+}, false, t, true));
 
 test("App installation shares a Project Store between View API and CLI",{timeout:30000},async t=>sharedHttpFixture(t,async({root,origin,invoke})=>{
   const current=await invoke("read",{});assert.deepEqual(current.record.value,{amount:3});
@@ -274,7 +291,7 @@ for (const operation of ["save", "remove"] as const) {
       else await assert.rejects(readData({},context.primary.paths.root,"expenses-b","first"),{code:"NOT_FOUND"});
       if (operation === "save") await verifyTerminalCaller(context, baseUrl);
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
-  }, false, t));
+  }, false, t, true));
 }
 
 async function verifyTerminalCaller(context: Awaited<ReturnType<typeof resolveProjectContext>>, baseUrl: string) {
