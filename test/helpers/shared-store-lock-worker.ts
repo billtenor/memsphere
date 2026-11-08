@@ -10,38 +10,43 @@ import { withModelMaintenance } from "../../src/project/model-operation.js";
 
 const [mode, root, argument] = process.argv.slice(2);
 if (!root) throw new Error("missing Project root");
-if (mode === "hold") {
+// Short deadlines only probe cancellation while another process holds the lock.
+// Successful operations get an independent bound within the parent's IPC wait.
+const cancellationProbe = mode?.endsWith("-blocked") ?? false;
+const operation = cancellationProbe ? mode!.slice(0, -"-blocked".length) : mode;
+const operationSignal = () => AbortSignal.timeout(cancellationProbe ? 300 : 10000);
+if (operation === "hold") {
   await withSharedStoreLock(root, async () => {
     process.send?.({ event: "locked" });
     await new Promise<void>(resolve => process.once("message", () => resolve()));
   });
   process.send?.({ event: "released" });
-} else if (mode === "remove") {
+} else if (operation === "remove") {
   process.send?.({ event: "started" });
   try {
-    await removeBusinessStore({ signal: AbortSignal.timeout(300) }, root, argument ?? "records");
+    await removeBusinessStore({ signal: operationSignal() }, root, argument ?? "records");
     process.send?.({ event: "removed" });
   } catch (error) {
     process.send?.({ event: "failed", name: (error as Error).name });
   }
-} else if (mode === "invoke") {
+} else if (operation === "invoke") {
   const project = { name: "test-project", paths: projectPaths(root), memoryRoot: join(root, "memory"), config: await readBusinessProject(root) } as AppProject;
   try { await invokeAppOperation(project, "example.app", "hold", { token: argument }); process.send?.({ event: "finished" }); }
   catch (error) { process.send?.({ event: "failed", code: (error as { code?: string }).code }); }
-} else if (mode === "replay") {
+} else if (operation === "replay") {
   const project = { name: "test-project", paths: projectPaths(root), memoryRoot: join(root, "memory"), config: await readBusinessProject(root) } as AppProject;
   try { await invokeAppOperation(project, "example.app", "write", { token: argument, value: { name: "stale", count: 9 } }); process.send?.({ event: "finished" }); }
   catch (error) { process.send?.({ event: "failed", code: (error as { code?: string }).code }); }
-} else if (mode === "model") {
+} else if (operation === "model") {
   process.send?.({ event: "started" });
   try {
-    await mutateModel({ signal: AbortSignal.timeout(300) }, root, "update", "record.json", { fields: { description: "updated" } });
+    await mutateModel({ signal: operationSignal() }, root, "update", "record.json", { fields: { description: "updated" } });
     process.send?.({ event: "updated" });
   } catch (error) { process.send?.({ event: "failed", name: (error as Error).name }); }
-} else if (mode === "recovery") {
+} else if (operation === "recovery") {
   process.send?.({ event: "started" });
   try {
-    await withModelMaintenance(root, async () => undefined, AbortSignal.timeout(300));
+    await withModelMaintenance(root, async () => undefined, operationSignal());
     process.send?.({ event: "recovered" });
   } catch (error) { process.send?.({ event: "failed", name: (error as Error).name }); }
 }

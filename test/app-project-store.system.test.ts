@@ -333,7 +333,7 @@ for(const mode of ["fire","firethrow","cancel"] as const) test(`in-flight Store 
 
 for(const [mode,arg] of [["remove","first"],["model",undefined],["recovery",undefined]] as const) test(`shared App operation excludes ${mode} across processes`,{timeout:45000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;const child=await launchWorker(t,f.fixture.root,"invoke",token,f.fixture.beforeCleanup);assert.equal((await child.next()).event,"locked");
-  const w=await launchWorker(t,f.fixture.root,mode,arg,f.fixture.beforeCleanup);assert.equal((await w.next()).event,"started");assert.deepEqual(await w.next(),{event:"failed",name:"TimeoutError"});
+  const w=await launchWorker(t,f.fixture.root,`${mode}-blocked`,arg,f.fixture.beforeCleanup);assert.equal((await w.next()).event,"started");assert.deepEqual(await w.next(),{event:"failed",name:"TimeoutError"});
   child.child.send("release");assert.equal((await child.next()).event,"finished");
   if(mode==="recovery"){const recovery=await launchWorker(t,f.fixture.root,"recovery",undefined,f.fixture.beforeCleanup);assert.equal((await recovery.next()).event,"started");assert.equal((await recovery.next()).event,"recovered");}
   assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"child",count:7});
@@ -356,7 +356,7 @@ test("a new host rejects an old token after same-ID re-registration without inte
 
 test("terminating a stuck shared App releases the Project lock",{timeout:45000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;const stuck=await launchWorker(t,f.fixture.root,"invoke",token,f.fixture.beforeCleanup);assert.equal((await stuck.next()).event,"locked");
-  const blocked=await launchWorker(t,f.fixture.root,"remove","first",f.fixture.beforeCleanup);assert.equal((await blocked.next()).event,"started");assert.deepEqual(await blocked.next(),{event:"failed",name:"TimeoutError"});
+  const blocked=await launchWorker(t,f.fixture.root,"remove-blocked","first",f.fixture.beforeCleanup);assert.equal((await blocked.next()).event,"started");assert.deepEqual(await blocked.next(),{event:"failed",name:"TimeoutError"});
   const exited=new Promise<void>(resolve=>stuck.child.once("exit",()=>resolve()));stuck.child.kill("SIGKILL");await exited;
   const removal=await launchWorker(t,f.fixture.root,"remove","first",f.fixture.beforeCleanup);assert.equal((await removal.next()).event,"started");assert.equal((await removal.next()).event,"removed");
   await f.fixture.createStore("first");
@@ -365,7 +365,7 @@ test("terminating a stuck shared App releases the Project lock",{timeout:45000},
 
 test("Project Store removal in another process waits for a shared lock",{timeout:30000},async t=>{
   const f=await businessFixture(t);await f.createStore();const holder=await launchWorker(t,f.root,"hold",undefined,f.beforeCleanup);assert.equal((await holder.next()).event,"locked");
-  const blocked=await launchWorker(t,f.root,"remove",undefined,f.beforeCleanup);assert.equal((await blocked.next()).event,"started");assert.deepEqual(await blocked.next(),{event:"failed",name:"TimeoutError"});
+  const blocked=await launchWorker(t,f.root,"remove-blocked",undefined,f.beforeCleanup);assert.equal((await blocked.next()).event,"started");assert.deepEqual(await blocked.next(),{event:"failed",name:"TimeoutError"});
   holder.child.send("release");assert.equal((await holder.next()).event,"released");const next=await launchWorker(t,f.root,"remove",undefined,f.beforeCleanup);assert.equal((await next.next()).event,"started");assert.equal((await next.next()).event,"removed");
 });
 
