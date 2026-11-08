@@ -70,7 +70,8 @@ for (const vote of ["approve", "request_changes"] as const) test(`Agent processi
   await new Promise<void>(resolve => setImmediate(resolve));
   assert.equal(returned, false, "Human activity must not release an unfinished Agent wait");
   await assert.rejects(reviews.submitArtifactReviewRunnerVote({ ...f.input, vote }), /Agent opinions/);
-  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+  // This scenario has no OS Worker; it verifies persisted wait/vote semantics.
+  const claimed = (await reviews.claimArtifactReviewAgentAssignment(f.input))!;
   const agent = { ...f.input, attemptId: claimed.attempt.id };
   await reviews.markArtifactReviewAgentCliReady(agent);
   let pending = await reviews.readArtifactReviewForActor(agent);

@@ -59,7 +59,7 @@ async function evidenceFixture(t: test.TestContext) {
   const c = await produce("C", "candidate", [{ kind: "artifact", id: a.artifact.id }, { kind: "external", id: e.id }, { kind: "external", id: eRef.id }]);
   assert.equal(c.artifact.dependencies.filter(r => r.kind === "artifact").length, 2, "mandatory B and explicit A both remain fixed");
   const input = { service, runsRoot: join(f.root, "runs"), reviewId: reviews.graphReviewHandle(runId, c.step.id), roundId: c.step.reviewRounds![0].id, actorId: "tester" };
-  const first = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
+  const first = (await reviews.claimArtifactReviewAgentAssignment({ ...input }))!;
   const attempt = join(f.directory, "attempt"); await mkdir(attempt);
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: entrypoint }); t.after(() => runtime.cleanup());
   const env: NodeJS.ProcessEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("MEMSPHERE_")));
@@ -184,7 +184,7 @@ test('failed, queued and replaced Attempts cannot read while a claimed retry can
   await reviews.retryArtifactReviewAgentAssignment(input);
   const queued = (await reviews.readArtifactReviewForActor(input)).assignment.attempts!.at(-1)!;
   const queuedRead = await cli(["run","artifact","show","--output","json"],{MEMSPHERE_REVIEW_ATTEMPT_ID:queued.id});assert.notEqual(queuedRead.status,0);assert.equal(queuedRead.stdout,"");
-  const second = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
+  const second = (await reviews.claimArtifactReviewAgentAssignment({ ...input }))!;
   const stale = await cli(["run", "artifact", "show", "--output", "json"]); assert.notEqual(stale.status, 0); assert.equal(stale.stdout, "");
   env.MEMSPHERE_REVIEW_ATTEMPT_ID = second.attempt.id;
   const current = await cli(["run", "artifact", "show", "--output", "json"]); assert.equal(current.status, 0, current.stderr);
@@ -254,7 +254,7 @@ async function revisedJsonFixture(t: test.TestContext) {
  await reviews.submitArtifactReviewAgentAssignment({...input,vote:'approve'});
  await reviews.submitArtifactReviewRunnerVote({...input,vote:'request_changes',comment:'Revise JSON'});
  const revised=await service.withGraph(g=>g.report(runId,step.id,{text:'{"version":2}',revisionSummary:'Updated JSON evidence'}));
- const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input,roundId:revised.step.reviewRounds!.at(-1)!.id,workerPid:process.pid}))!;
+ const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input,roundId:revised.step.reviewRounds!.at(-1)!.id}))!;
  const env={...process.env,...session,MEMSPHERE_REVIEW_ASSIGNMENT_ID:claimed.assignment.id!,MEMSPHERE_REVIEW_ATTEMPT_ID:claimed.attempt.id};
  const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:entrypoint});t.after(()=>runtime.cleanup());
  return {f,step,env,runtime};
@@ -281,7 +281,7 @@ async function reviseEvidence(f: Awaited<ReturnType<typeof evidenceFixture>>) {
   await reviews.submitArtifactReviewAgentAssignment({ ...input, attemptId: first.attempt.id, vote: 'approve' });
   await reviews.submitArtifactReviewRunnerVote({ ...input, vote: 'request_changes', comment: 'Revise evidence' });
   const next = await service.withGraph(g => g.report(runId, c.step.id, { text: 'revised candidate', revisionSummary: 'New fixed candidate' }));
-  const claim = (await reviews.claimArtifactReviewAgentAssignment({ ...input, roundId: next.step.reviewRounds!.at(-1)!.id, workerPid: process.pid }))!;
+  const claim = (await reviews.claimArtifactReviewAgentAssignment({ ...input, roundId: next.step.reviewRounds!.at(-1)!.id }))!;
   return { next, changes: { MEMSPHERE_REVIEW_ASSIGNMENT_ID: claim.assignment.id!, MEMSPHERE_REVIEW_ATTEMPT_ID: claim.attempt.id } };
 }
 

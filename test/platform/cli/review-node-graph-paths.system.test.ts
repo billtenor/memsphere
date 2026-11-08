@@ -25,7 +25,7 @@ for (const index of [0, 1]) test(`graph actual Action ${index} and Artifact path
   });
   for(const roundNumber of [0,1]) {
     const input={runsRoot:f.input.runsRoot,reviewId:reviews.graphReviewHandle(result.snapshot.run.id,result.step.id),roundId:result.step.reviewRounds!.at(-1)!.id,actorId:"agent"};
-    const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input,workerPid:process.pid}))!;
+    const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input}))!;
     const bound={...input,attemptId:claimed.attempt.id};await reviews.markArtifactReviewAgentCliReady(bound);
     Object.assign(f.env,{MEMSPHERE_REVIEW_RUN_ID:result.snapshot.run.id,MEMSPHERE_REVIEW_ASSIGNMENT_ID:claimed.assignment.id!,MEMSPHERE_REVIEW_ATTEMPT_ID:bound.attemptId});
     const read=await reviews.readArtifactReviewForActor(input), nodes=allReviewNodes(read.assignment.nodeTree!);

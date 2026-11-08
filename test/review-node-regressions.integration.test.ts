@@ -48,7 +48,7 @@ for (const target of ["previous", "unrelated", "arbitrary"] as const) test(`grap
   });
   const next = await f.service.withGraph(g => g.report(f.runId, f.stepId, { text: "# New Candidate", revisionSummary: "Revision" }));
   const input = { ...f.input, roundId: next.step.reviewRounds!.at(-1)!.id };
-  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
+  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...input }))!;
   const bound = { ...input, attemptId: claimed.attempt.id }; await reviews.markArtifactReviewAgentCliReady(bound);
   const before = (await reviews.readArtifactReviewForActor(input)).assignment;
   const id = target === "previous" ? f.result.artifact!.id : target === "unrelated" ? f.result.materials.unrelated : "artifact-does-not-exist";
