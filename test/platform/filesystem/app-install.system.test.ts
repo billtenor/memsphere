@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { ownHttpTestServer, waitForHttpState } from "../../helpers/http-test-state.js";
 import type { AddressInfo } from "node:net";
 import { createViewServer } from "../../../src/commands/view.js";
 import { projectCreateCommand } from "../../../src/commands/project.js";
@@ -157,37 +158,69 @@ test("Real View API and independently launched CLI share records, revisions and 
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 }));
 
-test("closing a View HTTP response aborts the running App operation", async () => fixture(async (root, context, app) => {
+type HttpCleanup = {destroyed:boolean;listening:boolean;handlers:number;requests:number;aborted:boolean};
+async function verifyResponseAbort(t: import("node:test").TestContext, root: string, context: Awaited<ReturnType<typeof resolveProjectContext>>, app: string,
+  options: {omitStarted?:boolean;cancelStarted?:boolean;cleanup?:(state:HttpCleanup)=>void} = {}) {
   const http = await import("node:http");
   const manifest = JSON.parse(await readFile(join(app, "app.json"), "utf8"));
   manifest.backend = { entry: "backend.mjs", operations: { wait: "read" } };
   await writeFile(join(app, "app.json"), JSON.stringify(manifest));
-  await writeFile(join(app, "backend.mjs"), `export default {operations:{wait:{kind:'read',execute: async ctx => { globalThis.__issue137Started(); await new Promise(resolve => ctx.signal.addEventListener('abort',resolve,{once:true})); globalThis.__issue137Aborted(); }}}};`);
+  await writeFile(join(app, "backend.mjs"), `export default {operations:{wait:{kind:'read',execute: async ctx => { globalThis.__issue137Started(); await Promise.race([new Promise(resolve => ctx.signal.addEventListener('abort',resolve,{once:true})),globalThis.__issue137Cleanup]); if(ctx.signal.aborted)globalThis.__issue137Aborted(); }}}};`);
   await installApp(context, app);
   await setAppEnabled(context, "example.app", true);
-  let started!: () => void, aborted!: () => void;
-  const start = new Promise<void>(resolve => { started = resolve; });
-  const abort = new Promise<void>(resolve => { aborted = resolve; });
-  Object.assign(globalThis, { __issue137Started: started, __issue137Aborted: aborted });
-  const config = await readConfig(); config.view = { host: "127.0.0.1", port: 0 };
-  const server = createViewServer(config);
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const request = http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`, { method: "POST", headers: { "content-type": "application/json", origin } });
-  request.on("error", () => undefined);
+  let entered!:()=>void,started!:()=>void,aborted!:()=>void,release!:()=>void;
+  const reached = new Promise<void>(resolve=>{entered=resolve});
+  const start = new Promise<void>(resolve=>{started=resolve});
+  const abort = new Promise<void>(resolve=>{aborted=resolve});
+  const cleanup = new Promise<void>(resolve=>{release=resolve});
+  let didAbort = false;
+  const cancellation = new AbortController();
+  const stateSignal = AbortSignal.any([t.signal,cancellation.signal]);
+  const config = await readConfig(); config.view = {host:"127.0.0.1",port:0};
+  const server = createViewServer(config), scope = ownHttpTestServer(server);
+  Object.assign(globalThis,{__issue137Started:()=>{entered();if(options.cancelStarted)cancellation.abort(new Error("controlled App state cancellation"));if(!options.omitStarted)started();},__issue137Aborted:()=>{didAbort=true;aborted();},__issue137Cleanup:cleanup});
+  let request: import("node:http").ClientRequest | undefined;
   try {
-    request.end(JSON.stringify({ input: {} }));
-    await Promise.race([start, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("operation did not start")), 5000))]);
+    await waitForHttpState(new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve)),"View listening",stateSignal);
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    request = scope.own(http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`,{method:"POST",headers:{"content-type":"application/json",origin},signal:t.signal}));
+    request.on("error",()=>undefined);
+    request.end(JSON.stringify({input:{}}));
+    if(options.omitStarted) await waitForHttpState(reached,"backend entered",stateSignal);
+    await waitForHttpState(start,"App started",stateSignal,options.omitStarted?20:5000);
     request.destroy();
-    await Promise.race([abort, new Promise<never>((_, reject) => setTimeout(() => reject(new Error("abort did not reach operation")), 5000))]);
+    await waitForHttpState(abort,"App aborted",stateSignal);
   } finally {
-    delete (globalThis as Record<string, unknown>).__issue137Started;
-    delete (globalThis as Record<string, unknown>).__issue137Aborted;
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    // The fixture can release its backend even if production abort delivery regresses.
+    request?.destroy(); release();
+    try {
+      await scope.close();
+      options.cleanup?.({destroyed:request?.destroyed??true,listening:server.listening,handlers:scope.activeHandlers,requests:scope.activeRequests,aborted:didAbort});
+    } finally {
+      delete (globalThis as Record<string,unknown>).__issue137Started;
+      delete (globalThis as Record<string,unknown>).__issue137Aborted;
+      delete (globalThis as Record<string,unknown>).__issue137Cleanup;
+    }
   }
-}));
+}
 
-async function sharedHttpFixture(owner: import("node:test").TestContext, action: (fixture: { root: string; context: Awaited<ReturnType<typeof resolveProjectContext>>; origin: string; invoke: (operation: string, input: unknown) => Promise<any> }) => Promise<void>) {
+test("closing a View HTTP response aborts the running App operation",{timeout:30000},async t=>fixture(
+  (root,context,app)=>verifyResponseAbort(t,root,context,app),false,t,true));
+
+for (const cancelStarted of [false,true]) test(cancelStarted?"cancelled App state wait cleans the request, handler and fixture":"missing App started event fails finitely and cleans the request, handler and fixture",{timeout:30000},async t=>{
+  const previous={cwd:process.cwd(),home:process.env.MEMSPHERE_HOME};
+  let directory="",cleaned:HttpCleanup|undefined;
+  await assert.rejects(fixture(async(root,context,app)=>{
+    directory=root;
+    await verifyResponseAbort(t,root,context,app,{omitStarted:true,cancelStarted,cleanup:state=>{cleaned=state}});
+  },false,t,true),error=>cancelStarted?String(error).includes("controlled App state cancellation"):(error as {code?:string}).code==="TEST_STATE_TIMEOUT"&&String(error).includes("App started"));
+  assert.equal(cleaned?.destroyed,true);assert.equal(cleaned?.listening,false);
+  assert.equal(cleaned?.handlers,0);assert.equal(cleaned?.requests,0);
+  assert.equal(process.cwd(),previous.cwd);assert.equal(process.env.MEMSPHERE_HOME,previous.home);
+  await assert.rejects(stat(directory),{code:"ENOENT"});
+});
+
+async function sharedHttpFixture(owner: import("node:test").TestContext, action: (fixture: { root: string; context: Awaited<ReturnType<typeof resolveProjectContext>>; origin: string; server: ReturnType<typeof createViewServer>; scope: ReturnType<typeof ownHttpTestServer>; invoke: (operation: string, input: unknown) => Promise<any> }) => Promise<void>) {
   return fixture(async (root, context, app) => {
   const { createBusinessStore } = await import("../../../src/project/business-stores.js");
   const { writeData } = await import("../../../src/project/data-service.js");
@@ -201,22 +234,23 @@ async function sharedHttpFixture(owner: import("node:test").TestContext, action:
   await writeFile(join(app, "backend.mjs"), `export default {operations:{
     read:{kind:'read',execute:async ctx=>{const binding=await ctx.getProjectStoreBinding('expenses');const store=await ctx.getStore('expenses',{expectedBinding:binding.token});return {token:binding.token,record:await store.get({},'first')};}},
     write:{kind:'write',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});return store.update({},'first',input.value);}},
-    wait:{kind:'read',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.update({},'first',{amount:99});globalThis.__issue137SharedStarted();await new Promise(resolve=>ctx.signal.addEventListener('abort',resolve,{once:true}));globalThis.__issue137SharedAborted();}}
+    wait:{kind:'read',execute:async(ctx,input)=>{const store=await ctx.getStore('expenses',{expectedBinding:input.token});void store.update({},'first',{amount:99});globalThis.__issue137SharedStarted();await Promise.race([new Promise(resolve=>ctx.signal.addEventListener('abort',resolve,{once:true})),globalThis.__issue137SharedCleanup]);if(ctx.signal.aborted)globalThis.__issue137SharedAborted();}}
   }};`);
   await installApp(context, app, { store: "expenses" });
   assert.equal((await checkApp(context.primary, "example.app")).status, "available");
   await setAppEnabled(context, "example.app", true);
   const config = await readConfig(); config.view = { host: "127.0.0.1", port: 0 };
-  const server = createViewServer(config);
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const server = createViewServer(config), scope = ownHttpTestServer(server);
+  try {
+  await waitForHttpState(new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve)),"View listening",owner.signal);
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const invoke = async (operation: string, input: unknown) => {
     const response = await fetch(`${origin}/api/projects/test/apps/example.app/operations/${operation}`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ input }), signal: owner.signal });
     assert.equal(response.status, 200);
     return (await response.json()).result;
   };
-  try { await action({root,context,origin,invoke}); }
-  finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  await action({root,context,origin,server,scope,invoke});
+  } finally { await scope.close(); }
   }, false, owner, true);
 }
 
@@ -358,29 +392,69 @@ async function verifyTerminalCaller(context: Awaited<ReturnType<typeof resolvePr
   }
 }
 
-test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>sharedHttpFixture(t,async({root,context,origin,invoke})=>{
-  const current=await invoke("read",{});const http=await import("node:http");
+async function verifySharedDisconnect(t: import("node:test").TestContext, state: Parameters<Parameters<typeof sharedHttpFixture>[1]>[0],
+  options:{omitLog?:boolean;cleanup?:(state:HttpCleanup)=>void}={}) {
+  const {root,context,origin,invoke,server,scope}=state;
+  const current=await invoke("read",{}),http=await import("node:http");
   const {FilesystemJsonValueStoreFactory}=await import("../../../src/data/extensions/filesystem-json-valuestore/index.js");
   const {withSharedStoreLock}=await import("../../../src/project/shared-store-lock.js");
-  let releaseWrite!:()=>void,writeStarted!:()=>void,started!:()=>void,aborted!:()=>void,logged!:(value:Record<string,unknown>)=>void;
-  const writeBarrier=new Promise<void>(resolve=>{releaseWrite=resolve});const writeEntered=new Promise<void>(resolve=>{writeStarted=resolve});
-  const start=new Promise<void>(resolve=>{started=resolve});const abort=new Promise<void>(resolve=>{aborted=resolve});const log=new Promise<Record<string,unknown>>(resolve=>{logged=resolve});
+  let releaseWrite!:()=>void,writeStarted!:()=>void,started!:()=>void,aborted!:()=>void,releaseBackend!:()=>void;
+  let logged!:(value:Record<string,unknown>)=>void,emitted!:()=>void;
+  const writeBarrier=new Promise<void>(resolve=>{releaseWrite=resolve}),writeEntered=new Promise<void>(resolve=>{writeStarted=resolve});
+  const start=new Promise<void>(resolve=>{started=resolve}),abort=new Promise<void>(resolve=>{aborted=resolve});
+  const cleanup=new Promise<void>(resolve=>{releaseBackend=resolve});
+  const log=new Promise<Record<string,unknown>>(resolve=>{logged=resolve}),logEmitted=new Promise<void>(resolve=>{emitted=resolve});
   const original=FilesystemJsonValueStoreFactory.prototype.openExisting;
   t.mock.method(FilesystemJsonValueStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){const store=await original.apply(this,args);store.update=async()=>{writeStarted();await writeBarrier;throw Object.assign(new Error("sensitive input must not be logged"),{code:"EIO"})};return store;});
-  t.mock.method(console,"error",(message?:unknown)=>{try {const record=JSON.parse(String(message));if(record.event==="app_operation_disconnected")logged(record);} catch { /* Ignore unrelated diagnostics. */ }});
-  Object.assign(globalThis,{__issue137SharedStarted:started,__issue137SharedAborted:aborted});
-  const request=http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`,{method:"POST",headers:{"content-type":"application/json",origin}});request.on("error",()=>undefined);
+  t.mock.method(console,"error",(message?:unknown)=>{try{const record=JSON.parse(String(message));if(record.event==="app_operation_disconnected"){emitted();if(!options.omitLog)logged(record);}}catch{/* Ignore unrelated diagnostics. */}});
+  let didAbort=false;
+  Object.assign(globalThis,{__issue137SharedStarted:started,__issue137SharedAborted:()=>{didAbort=true;aborted();},__issue137SharedCleanup:cleanup});
+  const request=scope.own(http.request(`${origin}/api/projects/test/apps/example.app/operations/wait`,{method:"POST",headers:{"content-type":"application/json",origin},signal:t.signal}));
+  request.on("error",()=>undefined);
+  let configuring:Promise<unknown>|undefined;
   try {
-    request.end(JSON.stringify({input:{token:current.token}}));await start;await writeEntered;request.destroy();await abort;
-    const {configureApp}=await import("../../../src/app/install.js");
-    let configured=false;const configuring=configureApp(context,"example.app",{store:"expenses"}).then(()=>{configured=true;});
+    request.end(JSON.stringify({input:{token:current.token}}));
+    await waitForHttpState(start,"App started",t.signal);
+    await waitForHttpState(writeEntered,"Store write entered",t.signal);
+    request.destroy();await waitForHttpState(abort,"App aborted",t.signal);
+    let configured=false;
+    configuring=configureApp(context,"example.app",{store:"expenses"}).then(()=>{configured=true;},error=>error);
     await assert.rejects(withSharedStoreLock(context.primary.paths.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
     assert.equal(configured,false,"configure must wait for the in-flight write");
-    releaseWrite();const record=await log;
+    releaseWrite();
+    if(options.omitLog)await waitForHttpState(logEmitted,"actual disconnect log emitted",t.signal);
+    const record=await waitForHttpState(log,"disconnect log",t.signal,options.omitLog?20:5000);
     assert.equal(record.project,"test");assert.equal(record.app,"example.app");assert.equal(record.operation,"wait");assert.equal(record.code,"EIO");
     assert(!JSON.stringify(record).includes(current.token));assert(!JSON.stringify(record).includes("sensitive input"));
-    await configuring;assert.equal(configured,true);
+    const result=await waitForHttpState(configuring,"configuration after write",t.signal);if(result!==undefined)throw result;
+    assert.equal(configured,true);
     const after=JSON.parse(execFileSync(process.execPath,[builtCli,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8",timeout:10000}));
     assert.deepEqual(after.value,{amount:3});
-  } finally {releaseWrite();delete (globalThis as Record<string,unknown>).__issue137SharedStarted;delete (globalThis as Record<string,unknown>).__issue137SharedAborted;}
-}));
+  } finally {
+    request.destroy();releaseWrite();releaseBackend();
+    try {
+      await scope.close();
+      if(configuring){const result=await waitForHttpState(configuring,"configuration cleanup");if(result!==undefined)throw result;}
+      options.cleanup?.({destroyed:request.destroyed,listening:server.listening,handlers:scope.activeHandlers,requests:scope.activeRequests,aborted:didAbort});
+    } finally {
+      delete (globalThis as Record<string,unknown>).__issue137SharedStarted;
+      delete (globalThis as Record<string,unknown>).__issue137SharedAborted;
+      delete (globalThis as Record<string,unknown>).__issue137SharedCleanup;
+    }
+  }
+}
+
+test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>
+  sharedHttpFixture(t,state=>verifySharedDisconnect(t,state)));
+
+test("missing disconnect log fails finitely and cleans barriers, handlers and fixture",{timeout:30000},async t=>{
+  const previous={cwd:process.cwd(),home:process.env.MEMSPHERE_HOME};
+  let directory="",cleaned:HttpCleanup|undefined;
+  await assert.rejects(sharedHttpFixture(t,async state=>{
+    directory=state.root;
+    await verifySharedDisconnect(t,state,{omitLog:true,cleanup:value=>{cleaned=value}});
+  }),error=>(error as {code?:string}).code==="TEST_STATE_TIMEOUT"&&String(error).includes("disconnect log"));
+  assert.deepEqual(cleaned,{destroyed:true,listening:false,handlers:0,requests:0,aborted:true});
+  assert.equal(process.cwd(),previous.cwd);assert.equal(process.env.MEMSPHERE_HOME,previous.home);
+  await assert.rejects(stat(directory),{code:"ENOENT"});
+});
