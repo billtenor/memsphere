@@ -24,9 +24,18 @@ import { invokeAppOperation } from "../../../src/app/backend.js";
 // Keep recovery subprocesses independent of concurrent builds replacing dist.
 // The packed CLI is checked separately by the guide acceptance workflow.
 const cliArguments = ["--import", import.meta.resolve("tsx"), resolve("src/cli.ts")];
+const builtCli = resolve("dist/cli.js");
 const projectStoreExample = resolve("examples/apps/project-store");
 const expenseExample = resolve("examples/apps/expense");
-async function fixture(action: (root: string, context: Awaited<ReturnType<typeof resolveProjectContext>>, app: string) => Promise<void>, embedded = false) {
+type FixtureAction = (root: string, context: Awaited<ReturnType<typeof resolveProjectContext>>, app: string) => Promise<void>;
+function fixture(action: FixtureAction, embedded = false, owner?: import("node:test").TestContext) {
+  // node:test can start the next test after timeout while its body is still
+  // finishing. Wait for this fixture to restore cwd/env before another owns them.
+  const completed = runFixture(action, embedded, owner?.signal);
+  owner?.after(() => completed.catch(() => undefined));
+  return completed;
+}
+async function runFixture(action: FixtureAction, embedded: boolean, signal?: AbortSignal) {
   const root = await mkdtemp(join(tmpdir(), "memsphere-app-test-"));
   const previous = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT, gitConfig: process.env.GIT_CONFIG_GLOBAL,
     author: process.env.GIT_AUTHOR_NAME, authorEmail: process.env.GIT_AUTHOR_EMAIL, committer: process.env.GIT_COMMITTER_NAME, committerEmail: process.env.GIT_COMMITTER_EMAIL };
@@ -51,6 +60,7 @@ async function fixture(action: (root: string, context: Awaited<ReturnType<typeof
     await writeFile(join(app, "app.json"), JSON.stringify({ schemaVersion: 1, id: "example.app", name: "Example", version: "1.0.0", description: "Example",
       assets: { memories: [{ key: "intro", path: "memories/intro.yaml" }] }, entrypoints: { agent: ["concepts/app-intro"] } }));
     await writeFile(join(app, "memories/intro.yaml"), "!concept\nsyntax: memsphere-20260721-stable\nnames: [app-intro]\ndefines: [App introduction]\n");
+    signal?.throwIfAborted();
     await action(root, context, app);
   } finally {
     process.chdir(previous.cwd);
@@ -160,7 +170,7 @@ test("closing a View HTTP response aborts the running App operation", async () =
   }
 }));
 
-async function sharedHttpFixture(action: (fixture: { root: string; context: Awaited<ReturnType<typeof resolveProjectContext>>; origin: string; invoke: (operation: string, input: unknown) => Promise<any> }) => Promise<void>) {
+async function sharedHttpFixture(owner: import("node:test").TestContext, action: (fixture: { root: string; context: Awaited<ReturnType<typeof resolveProjectContext>>; origin: string; invoke: (operation: string, input: unknown) => Promise<any> }) => Promise<void>) {
   return fixture(async (root, context, app) => {
   const { createBusinessStore } = await import("../../../src/project/business-stores.js");
   const { writeData } = await import("../../../src/project/data-service.js");
@@ -184,16 +194,16 @@ async function sharedHttpFixture(action: (fixture: { root: string; context: Awai
   await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   const invoke = async (operation: string, input: unknown) => {
-    const response = await fetch(`${origin}/api/projects/test/apps/example.app/operations/${operation}`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ input }) });
+    const response = await fetch(`${origin}/api/projects/test/apps/example.app/operations/${operation}`, { method: "POST", headers: { "content-type": "application/json", origin }, body: JSON.stringify({ input }), signal: owner.signal });
     assert.equal(response.status, 200);
     return (await response.json()).result;
   };
   try { await action({root,context,origin,invoke}); }
   finally { await new Promise<void>(resolve => server.close(() => resolve())); }
-  });
+  }, false, owner);
 }
 
-test("unbound Project Store allows install but prevents check, enable and invoke",{timeout:30000},async()=>fixture(async(_root,context,app)=>{
+test("unbound Project Store allows install but prevents check, enable and invoke",{timeout:30000},async t=>fixture(async(_root,context,app)=>{
   const manifest=JSON.parse(await readFile(join(app,"app.json"),"utf8"));
   manifest.projectStores=[{key:"expenses",model:"expense.json",kind:"ValueStore",configKey:"store"}];
   manifest.backend={entry:"backend.mjs",operations:{read:"read"}};
@@ -204,19 +214,19 @@ test("unbound Project Store allows install but prevents check, enable and invoke
   assert.equal(check.items.find(item=>item.name==="project-store:expenses")?.available,false);
   await assert.rejects(setAppEnabled(context,"example.app",true),{code:"APP_NOT_READY"});
   await assert.rejects(invokeAppOperation(context.primary,"example.app","read",{}),{code:"APP_DISABLED"});
-}));
+}, false, t));
 
-test("App installation shares a Project Store between View API and CLI",{timeout:30000},async()=>sharedHttpFixture(async({root,origin,invoke})=>{
+test("App installation shares a Project Store between View API and CLI",{timeout:30000},async t=>sharedHttpFixture(t,async({root,origin,invoke})=>{
   const current=await invoke("read",{});assert.deepEqual(current.record.value,{amount:3});
   await invoke("write",{token:current.token,value:{amount:8}});
-  const result=JSON.parse(execFileSync(process.execPath,[...cliArguments,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8"}));
+  const result=JSON.parse(execFileSync(process.execPath,[builtCli,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8",timeout:10000}));
   assert.deepEqual(result.value,{amount:8});
-  execFileSync(process.execPath,[...cliArguments,"--project","test","data","update","first","--store","expenses","--value",'{"amount":11}',"--output","json"],{cwd:root,encoding:"utf8"});
+  execFileSync(process.execPath,[builtCli,"--project","test","data","update","first","--store","expenses","--value",'{"amount":11}',"--output","json"],{cwd:root,encoding:"utf8",timeout:10000});
   assert.deepEqual((await invoke("read",{})).record.value,{amount:11});
 }));
 
 for (const operation of ["save", "remove"] as const) {
-  test(`example caller displays refresh and confirmation after a stale ${operation}`, {timeout:30000}, async () => fixture(async (_root, context) => {
+  test(`example caller displays refresh and confirmation after a stale ${operation}`, {timeout:30000}, async t => fixture(async (_root, context) => {
     const {createBusinessStore} = await import("../../../src/project/business-stores.js");
     const {writeData, readData} = await import("../../../src/project/data-service.js");
     const {createRecordEditor, createHttpInvoker} = await import(new URL("../../../examples/apps/project-store/record-editor.mjs", import.meta.url).href);
@@ -264,7 +274,7 @@ for (const operation of ["save", "remove"] as const) {
       else await assert.rejects(readData({},context.primary.paths.root,"expenses-b","first"),{code:"NOT_FOUND"});
       if (operation === "save") await verifyTerminalCaller(context, baseUrl);
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
-  }));
+  }, false, t));
 }
 
 async function verifyTerminalCaller(context: Awaited<ReturnType<typeof resolveProjectContext>>, baseUrl: string) {
@@ -331,7 +341,7 @@ async function verifyTerminalCaller(context: Awaited<ReturnType<typeof resolvePr
   }
 }
 
-test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>sharedHttpFixture(async({root,context,origin,invoke})=>{
+test("HTTP disconnect keeps the binding locked until in-flight write ends and logs the failure",{timeout:30000},async t=>sharedHttpFixture(t,async({root,context,origin,invoke})=>{
   const current=await invoke("read",{});const http=await import("node:http");
   const {FilesystemJsonValueStoreFactory}=await import("../../../src/data/extensions/filesystem-json-valuestore/index.js");
   const {withSharedStoreLock}=await import("../../../src/project/shared-store-lock.js");
@@ -353,7 +363,7 @@ test("HTTP disconnect keeps the binding locked until in-flight write ends and lo
     assert.equal(record.project,"test");assert.equal(record.app,"example.app");assert.equal(record.operation,"wait");assert.equal(record.code,"EIO");
     assert(!JSON.stringify(record).includes(current.token));assert(!JSON.stringify(record).includes("sensitive input"));
     await configuring;assert.equal(configured,true);
-    const after=JSON.parse(execFileSync(process.execPath,[...cliArguments,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8"}));
+    const after=JSON.parse(execFileSync(process.execPath,[builtCli,"--project","test","data","read","first","--store","expenses","--output","json"],{cwd:root,encoding:"utf8",timeout:10000}));
     assert.deepEqual(after.value,{amount:3});
   } finally {releaseWrite();delete (globalThis as Record<string,unknown>).__issue137SharedStarted;delete (globalThis as Record<string,unknown>).__issue137SharedAborted;}
 }));
