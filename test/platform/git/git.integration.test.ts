@@ -1,0 +1,35 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
+import { gitHashObject, runGit } from "../../../src/git.js";
+
+test("gitHashObject hashes the exact bytes supplied on stdin", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-git-hash-"));
+  const path = join(root, "bytes.bin");
+  const source = Buffer.from([0x4c, 0x46, 0x0a, 0x43, 0x52, 0x4c, 0x46, 0x0d, 0x0a, 0x00, 0xff]);
+  try {
+    await writeFile(path, source);
+    const expected = (await runGit(["hash-object", "--", "bytes.bin"], { cwd: root })).stdout;
+    assert.equal(await gitHashObject(source, root), expected);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("gitHashObject applies Git path filters without asking Git to open the source path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "memsphere-git-filtered-hash-"));
+  const path = join(root, "memory.txt");
+  const source = Buffer.from("first\r\nsecond\r\n");
+  try {
+    await writeFile(join(root, ".gitattributes"), "*.txt text\n");
+    await writeFile(path, source);
+    await runGit(["init", "-b", "master"], { cwd: root });
+    const expected = (await runGit(["hash-object", "--", "memory.txt"], { cwd: root })).stdout;
+    await rm(path);
+    assert.equal(await gitHashObject(source, root, "memory.txt"), expected);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
