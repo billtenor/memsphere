@@ -1,3 +1,4 @@
+import { appendEffectiveRules, countEffectiveRules, effectiveRuleStyles } from "../../../shared/view/effective-rules.js";
 import { createProcedureGraph, type ProcedureDefinition } from "../../../shared/view/procedure-graph.js";
 import {
   defineViewPlugin,
@@ -876,7 +877,7 @@ function createMemoryPageMounts(
     async mount({ element, portal: mountPortal }, context) {
       const style = document.createElement("style");
       style.dataset.memsphereMemoryStyles = "true";
-      style.textContent = memoryStyles + contentFlowStyles + defaultContentStyles + pageLayoutStyles;
+      style.textContent = memoryStyles + effectiveRuleStyles + contentFlowStyles + defaultContentStyles + pageLayoutStyles;
       element.append(style);
       element.classList.add("memory-surface", `memory-${surface}-surface`);
       await ensure(context.route);
@@ -965,6 +966,7 @@ class MemoryApplication {
   #fatalError: unknown = null;
   readonly #expandedRelated = new Set<string>();
   readonly #disclosures = new DisclosureState();
+  readonly #graphRuleDisclosures = new DisclosureState();
   readonly #disclosureShapes = new Map<string, { signature: string; version: number }>();
   #nextDisclosureShape = 0;
 
@@ -1213,6 +1215,7 @@ class MemoryApplication {
 
   private render(): void {
     this.#disclosures.capture();
+    this.#graphRuleDisclosures.capture();
     this.syncHeaderActions();
     this.#onListChange();
     if (this.#detailRoot) {
@@ -2233,6 +2236,11 @@ class MemoryApplication {
       structuralGraph: Boolean(parseLocation(this.#location).changeId) && this.#changeContentMode !== "candidate",
       ui: this.#ui,
       knownReferences: new Set(this.#referenceMemories.map(memoryReference)),
+      bindGraphRules: (body, actionId) => {
+        this.#graphRuleDisclosures.capture();
+        const scope = JSON.stringify([projectFromLocation(this.#location) || this.#currentProject, this.#location.pathname, this.#selectedId, this.#changeContentMode, actionId]);
+        this.#graphRuleDisclosures.restore(scope, [...body.querySelectorAll<HTMLDetailsElement>("details[data-rule-key]")].map(node => nativeDisclosure(node, node.dataset.ruleKey!)));
+      },
       openReference: target => {
         const memory = this.#referenceMemories.find(candidate => memoryReference(candidate) === target || candidate.names?.[0] === target);
         if (!memory) return;
@@ -2347,6 +2355,7 @@ type RenderOptions = {
   ui?: ViewUi;
   knownReferences?: ReadonlySet<string>;
   openReference?: (target: string) => void;
+  bindGraphRules?: (body: HTMLElement, actionId: string) => void;
 };
 
 function freezePresentationValue<T>(value: T): T {
@@ -2726,11 +2735,20 @@ function renderProcedure(node: JsonRecord, path: string, t: (key: string) => str
   const overallRuleTitle = (key: string) => key === "asserts" ? (globalThis.document.documentElement.lang.startsWith("en") ? "Overall requirements" : "总体要求") : key === "suggests" ? (globalThis.document.documentElement.lang.startsWith("en") ? "Overall suggestions" : "总体建议") : t(key);
   for (const key of ["asserts", "suggests"] as const) appendRuleList(document, key, array(node[key]), node.effectiveRules as JsonRecord | undefined, path, overallRuleTitle, comment, options);
   if (node.mode === "graph" && !options.structuralGraph) {
-    const canvas = createProcedureGraph(node as unknown as ProcedureDefinition, { locale: globalThis.document.documentElement.lang, ui: options.ui, rulesBody: action => {
-      const holder=el("div","memory-graph-rules"),record=action as unknown as JsonRecord,index=array(node.actions).indexOf(record),actionPath=`${path}.actions[${index+1}]`,artifact=record.artifact as JsonRecord|undefined;
-      for(const [source,sourcePath] of [[record,actionPath],[artifact,`${actionPath}.artifact`]] as const)if(source)for(const key of ["asserts","suggests"]as const)appendRuleList(holder,key,array(source[key]),source.effectiveRules as JsonRecord|undefined,sourcePath,t,undefined,options);
-      holder.querySelectorAll<HTMLDetailsElement>("details.memory-collapsible-list").forEach(detail=>{detail.open=true;});return holder;
-    } });
+    const canvas = createProcedureGraph(node as unknown as ProcedureDefinition, {
+      locale: globalThis.document.documentElement.lang, ui: options.ui,
+      ruleUnavailableText: t("referenceNotFound"),
+      ruleReferenceLabel: target => {
+        const link = renderMemoryReference({ target }, options, t);
+        link.addEventListener("click", event => event.stopPropagation());
+        return link;
+      },
+      definitionBody: action => {
+        const body = canvas.actionBody(action);
+        options.bindGraphRules?.(body, action.id);
+        return body;
+      }
+    });
     document.append(canvas.element); return document;
   }
   if (node.mode === "graph") {
@@ -3066,45 +3084,6 @@ function renderRuleReference(ref: JsonRecord, effective: JsonRecord | undefined,
   return wrap;
 }
 
-function effectiveEntries(node: JsonRecord, channel: "asserts" | "suggests"): unknown[] {
-  const direct = node[channel];
-  if (Array.isArray(direct)) return direct;
-  if (Array.isArray(node.entries)) return node.entries;
-  return [];
-}
-
-function countEffectiveRules(node: JsonRecord): number {
-  let count = 0;
-  for (const value of [...effectiveEntries(node, "asserts"), ...effectiveEntries(node, "suggests")]) {
-    if (typeof value === "string" || (value && typeof value === "object" && (value as JsonRecord).kind === "rule")) count += 1;
-    else if (value && typeof value === "object") count += countEffectiveRules(value as JsonRecord);
-  }
-  for (const section of array(node.sections)) count += countEffectiveRules(section);
-  return count;
-}
-
-function appendEffectiveRules(parent: HTMLElement, node: JsonRecord, channel: "asserts" | "suggests"): void {
-  const entries = effectiveEntries(node, channel);
-  if (entries.length) {
-    const list = document.createElement("ul"); list.className = "effective-rule-list";
-    for (const entry of entries) {
-      if (typeof entry === "string") list.append(el("li", "", entry));
-      else if (entry && typeof entry === "object") {
-        const record = entry as JsonRecord;
-        if (record.kind === "rule") list.append(el("li", "", String(record.text ?? "")));
-        else appendEffectiveRules(list, record, channel);
-      }
-    }
-    parent.append(list);
-  }
-  for (const section of array(node.sections)) {
-    const block = el("section", "memory-node");
-    block.append(el("h4", "", String(section.name ?? "")));
-    for (const definition of array(section.defines)) block.append(el("p", "", scalar(definition)));
-    appendEffectiveRules(block, section, channel);
-    parent.append(block);
-  }
-}
 function appendStringList(parent: HTMLElement, key: string, values: unknown[], path: string, comment?: CommentCallback, t: (key: string) => string = value => value, ui?: ViewUi): void {
   if (!values.length) return;
   const { block, body: listBody } = collapsibleList(translatedKey(key, t), values.length, "memory-list-block", ui);
