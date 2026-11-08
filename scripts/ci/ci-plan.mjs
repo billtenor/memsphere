@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isIntegrationTest, isSystemTest, isPlatformTest } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isIntegrationTest, isSystemTest, isE2ETest, isPlatformTest } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -17,16 +17,19 @@ const nativeSuites = ["platform-process", "platform-locks", "platform-cli", "pla
 export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
   if (!selectTests(files, sources, "unit").length) throw new Error("No unit tests discovered");
-  const unknown = files.filter(file => !isUnitTest(file) && !isModuleTest(file) && !isIntegrationTest(file) && !isSystemTest(file));
+  const unknown = files.filter(file => !isUnitTest(file) && !isModuleTest(file) && !isIntegrationTest(file) && !isSystemTest(file) && !isE2ETest(file));
   if (unknown.length) throw new Error(`Tests need an explicit layer suffix: ${unknown.join(", ")}`);
-  const include = systems.flatMap(os => ["unit", "module", "system", ...nativeSuites, ...(profile === "full" || os === "ubuntu-24.04" ? portableSuites : [])].flatMap(suite => {
+  const include = systems.flatMap(os => ["unit", "module", ...(profile === "full" ? ["system", "e2e"] : []), ...nativeSuites, ...(profile === "full" || os === "ubuntu-24.04" ? portableSuites : [])].flatMap(suite => {
     const selected = selectTests(files, sources, suite);
     if (!selected.length) return [];
-    return [{ os, suite, layer: ["unit", "module", "system"].includes(suite) ? suite : "integration", title: testSuites[suite].title,
+    const runsInDefault = ["unit", "module"].includes(suite) || nativeSuites.includes(suite)
+      || (os === "ubuntu-24.04" && portableSuites.includes(suite));
+    return [{ os, suite, layer: ["unit", "module", "system", "e2e"].includes(suite) ? suite : "integration", title: testSuites[suite].title,
+      timeoutMinutes: runsInDefault ? 5 : 30,
       browser: !["unit", "module"].includes(suite) && selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])) }];
   }));
   for (const os of systems) {
-    const expected = files.filter(file => profile === "full" || os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isSystemTest(file) || isPlatformTest(file, sources[file])).sort();
+    const expected = files.filter(file => profile === "full" || (!isSystemTest(file) && !isE2ETest(file) && (os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file, sources[file])))).sort();
     const assigned = include.filter(row => row.os === os).flatMap(row => selectTests(files, sources, row.suite)).sort();
     if (JSON.stringify(assigned) !== JSON.stringify(expected)) throw new Error(`Unassigned or duplicate tests on ${os}`);
   }
@@ -43,6 +46,6 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   console.log(`matrix=${JSON.stringify(plan)}`);
   console.log(`unit_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "unit")})}`);
   console.log(`module_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "module")})}`);
-  console.log(`system_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "system")})}`);
+  console.log(`system_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "system" || row.layer === "e2e")})}`);
   console.log(`integration_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "integration")})}`);
 }

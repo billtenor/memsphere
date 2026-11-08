@@ -19,6 +19,7 @@ export const testSuites = {
   unit: { title: "Unit tests", categories: [] },
   module: { title: "Module tests", categories: [] },
   system: { title: "System tests", categories: [] },
+  e2e: { title: "End-to-end tests", categories: [] },
   integration: { title: "Integration tests", categories: [] },
   "integration-model-ui": { title: "Integration · Models & Settings UI", categories: ["model-ui"] },
   "integration-review-ui": { title: "Integration · Content, Reviews & Shell UI", categories: ["review-ui"] },
@@ -54,7 +55,7 @@ export const testSuites = {
 
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
-  const name = basename(file).replace(/\.(unit|module|integration|system)\.test\.ts$/, ".test.ts");
+  const name = basename(file).replace(/\.(unit|module|integration|system|e2e)\.test\.ts$/, ".test.ts");
   if (["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"].includes(name)) return "runtime-upgrades";
   if (name === "embedded-changeset.test.ts") return "memory-core";
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
@@ -75,6 +76,7 @@ export const isUnitTest = file => file.endsWith(".unit.test.ts");
 export const isModuleTest = file => file.endsWith(".module.test.ts");
 export const isIntegrationTest = file => file.endsWith(".integration.test.ts");
 export const isSystemTest = file => file.endsWith(".system.test.ts");
+export const isE2ETest = file => file.endsWith(".e2e.test.ts");
 export const isPlatformTest = (file, source = "") => /(?:^|\/)platform\//.test(key(file)) || source.includes("// @integration-platform: native");
 export function platformGroup(file, source = "") {
   const declared = key(file).match(/(?:^|\/)platform\/([^/]+)\//)?.[1];
@@ -94,10 +96,11 @@ export function selectTests(files, sources, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
-    if (suite === "regression") return !isSystemTest(file);
+    if (suite === "regression") return !isSystemTest(file) && !isE2ETest(file);
     if (suite === "unit") return isUnitTest(file);
     if (suite === "module") return isModuleTest(file);
     if (suite === "system") return isSystemTest(file);
+    if (suite === "e2e") return isE2ETest(file);
     if (suite === "integration") return isIntegrationTest(file);
     if (suite === "platform") return isIntegrationTest(file) && isPlatformTest(file, sources[file]);
     if (suite.startsWith("platform-")) return isIntegrationTest(file) && platformGroup(file, sources[file]) === suite.slice(9);

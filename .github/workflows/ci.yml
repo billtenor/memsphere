@@ -8,10 +8,10 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: "Default: portable integration on Linux; full: all integration on every OS"
+        description: "Default: unit/module/integration only; full: all test layers on every OS"
         type: choice
         options: [default, full]
-        default: full
+        default: default
       full_health_bootstrap:
         description: Owner only, first-install status publisher (no builds)
         type: boolean
@@ -110,9 +110,10 @@ jobs:
 
   system-tests:
     needs: plan
-    name: System tests (${{ matrix.os }})
+    if: needs.plan.outputs.profile == 'full'
+    name: ${{ matrix.title }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # No custom job timeout during the Human-authorized system benchmark.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.system_matrix) }}
@@ -131,8 +132,8 @@ jobs:
       - name: Install Playwright Chromium
         if: matrix.browser
         run: npx playwright install chromium
-      # Build/typecheck once, then run only complete subsystem system tests.
-      - run: npm run test:ci -- --suite=system
+      # Each matrix row runs one complete system or end-to-end suite.
+      - run: npm run test:ci -- --suite=${{ matrix.suite }}
       - name: Preserve test timings
         if: always()
         uses: actions/upload-artifact@v4
@@ -145,7 +146,7 @@ jobs:
     needs: plan
     name: ${{ matrix.title }} (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 5
+    timeout-minutes: ${{ matrix.timeoutMinutes }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.integration_matrix) }}
@@ -176,8 +177,10 @@ jobs:
   windows-package-smoke:
     # Packaged CLI lifecycle is measured separately from the file-based system suite.
     needs: plan
+    if: needs.plan.outputs.profile == 'full'
     name: Windows packaged CLI shells
     runs-on: windows-latest
+    timeout-minutes: 30
     env:
       MEMSPHERE_HOME: ${{ github.workspace }}\.ci-memsphere-home
     steps:
