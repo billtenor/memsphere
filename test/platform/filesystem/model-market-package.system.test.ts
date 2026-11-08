@@ -40,7 +40,10 @@ test("Packed distribution creates canonical persistent system models and rejects
     assert.equal([...shipped].some(path => /^(src|examples|changes)\//.test(path)), false);
     assert.equal([...shipped].filter(path => path.startsWith("reserved-models/system-models/") && path.endsWith(".json")).length, 5);
     assert.equal([...shipped].filter(path => path.startsWith("reserved-models/market-models/") && path.endsWith(".json")).length, 8);
-    await execute("tar", ["-xzf", join(temporary, packed[0]!.filename), "-C", temporary]);
+    // Git Bash's GNU tar interprets a Windows drive prefix as a remote host.
+    // Windows ships bsdtar; choose it explicitly regardless of the CI shell.
+    const tar = process.platform === "win32" ? join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tar.exe") : "tar";
+    await execute(tar, ["-xzf", join(temporary, packed[0]!.filename), "-C", temporary]);
     // ESM resolves symlinks; macOS temp paths can spell /private/var as /var.
     const packageRoot = await realpath(join(temporary, "package"));
     // Offline dependency linkage; all application modules, scripts and assets come from this tarball.

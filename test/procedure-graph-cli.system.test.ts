@@ -12,6 +12,7 @@ import { serializeMemoryYaml } from "../src/memory/serializer.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
 
 import { requireCommandState } from "../src/home/command-state-store.js";
+import { ownTestProcess } from "./helpers/owned-process.js";
 
 
 const exec = promisify(execFile);
@@ -36,15 +37,21 @@ async function fixture(t: test.TestContext, multiple = false, prepared = true, p
   const procedure = join(f.directory, "graph.yaml");
   const action = (id: string) => `  - !action\n    id: ${id}\n    description: Produce ${id}\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: ${id} output\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n`;
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
-  const invoke = (...args: string[]) => {
+  const invokeUsing = (native: boolean, args: string[]) => {
+    t.signal.throwIfAborted();
     const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" };
-    const result = processBoundary
+    const result = native
       ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
       : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
-    return result.catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
+    if ("child" in result) ownTestProcess(result.child, t.signal, f.beforeCleanup);
+    return result.then(value => { t.signal.throwIfAborted(); return value; })
+      .catch(error => { throw new Error(`${error.message}\nstdout: ${error.stdout}\nstderr: ${error.stderr}`); });
   };
+  const invoke = (...args: string[]) => invokeUsing(processBoundary, args);
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
-  return { ...f, procedure, invoke, call };
+  const invokeInProcess = (...args: string[]) => invokeUsing(false, args);
+  const callInProcess = async (...args: string[]) => JSON.parse((await invokeInProcess(...args, "--output", "json")).stdout);
+  return { ...f, procedure, invoke, call, invokeInProcess, callInProcess };
 }
 
 for (const language of ["zh-CN", "en"] as const) test(`graph CLI module ${language} Step prompts provide executable fixed-material reads for direct and collected inputs`, { timeout: 90000 }, async t => {
@@ -195,26 +202,29 @@ test("CLI module failed auxiliary Continue store preserves the running Step and 
 
 test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
  const f=await fixture(t, false, true, true);
- const start=await f.call('run','start','--file',f.procedure,'--name','rewind CLI');
- const completed=await f.call('continue','report','--artifact','old body');
- const show=await f.call('run','show','--run',start.runId);
+ // Prepare and inspect through the real command tree in process. The preview,
+ // rewind, stale Continue, explicit enter and fresh report still cross native
+ // process boundaries to protect persisted bindings and replacement behavior.
+ const start=await f.callInProcess('run','start','--file',f.procedure,'--name','rewind CLI');
+ const completed=await f.callInProcess('continue','report','--artifact','old body');
+ const show=await f.callInProcess('run','show','--run',start.runId);
  const target=show.steps[0].id;
  const {snapshotTree}=await import('./helpers/business-data.js');
  const before=await snapshotTree(f.root);
  const preview=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--dry-run');
  assert.equal(preview.dryRun,true); assert.deepEqual(await snapshotTree(f.root),before);
- await assert.rejects(f.invoke('run','step','rewind','--run',start.runId,'--step',target,'--reason',' '),/reason is required/);
+ await assert.rejects(f.invokeInProcess('run','step','rewind','--run',start.runId,'--step',target,'--reason',' '),/reason is required/);
  const reason=join(f.directory,'reason.md');await writeFile(reason,'Product needs revision');
- await assert.rejects(f.invoke('run','step','rewind','--run',start.runId,'--step',target,'--reason','x','--reason-file',reason),/Choose/);
+ await assert.rejects(f.invokeInProcess('run','step','rewind','--run',start.runId,'--step',target,'--reason','x','--reason-file',reason),/Choose/);
  const result=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--reason-file',reason);
  assert.match(result.command,/run step enter/);
- const next=await f.call('run','show','--run',start.runId);
+ const next=await f.callInProcess('run','show','--run',start.runId);
  assert.equal(next.steps.find((s:any)=>s.id===result.replacementStepId).status,'pending');
  assert.equal(next.steps.find((s:any)=>s.id===target).effective,false);
  await assert.rejects(f.invoke('continue','report','--artifact','late body'),/superseded/);
  await f.invoke('run','step','enter','--run',start.runId,'--step',result.replacementStepId);
  const fresh=await f.call('continue','report','--artifact','new body');
- const final=await f.call('run','show','--run',start.runId);
+ const final=await f.callInProcess('run','show','--run',start.runId);
  assert.equal(final.artifacts.find((a:any)=>a.id===fresh.artifactId).revisedFrom,completed.artifactId);
 });
 

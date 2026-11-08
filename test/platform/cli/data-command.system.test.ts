@@ -8,6 +8,8 @@ import { writeData, readData } from "../../../src/project/data-service.js";
 import { businessFixture, snapshotTree } from "../../helpers/business-data.js";
 import { filesystemWorker } from "../../helpers/filesystem-process.js";
 import { initializeProjectModelRegistrations } from "../../../src/project/model-registration.js";
+import { invokeCliModule } from "../../helpers/cli-module.js";
+import { ownTestProcess } from "../../helpers/owned-process.js";
 
 const cliPath = fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
 const loader = new URL("../../../node_modules/tsx/dist/loader.mjs", import.meta.url).href;
@@ -15,16 +17,20 @@ type Fixture = Awaited<ReturnType<typeof businessFixture>>;
 type Result = { code: number | null; stdout: string; stderr: string; bytes: Buffer };
 
 function cli(t: TestContext, fixture: Fixture, args: string[], input?: string | Uint8Array, keepStdin = false): Promise<Result> {
+  t.signal.throwIfAborted();
   const child = spawn(process.execPath, [cliPath, "--project", "test-project", ...args], {
     cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["pipe", "pipe", "pipe"]
   });
-  t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  ownTestProcess(child, t.signal, fixture.beforeCleanup);
   const stdout: Buffer[] = []; const stderr: Buffer[] = [];
   child.stdout.on("data", chunk => stdout.push(chunk)); child.stderr.on("data", chunk => stderr.push(chunk));
   if (!keepStdin) child.stdin.end(input);
   return new Promise((resolve, reject) => {
     child.once("error", reject);
-    child.once("close", code => { const bytes = Buffer.concat(stdout); resolve({ code, stdout: bytes.toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), bytes }); });
+    child.once("close", code => {
+      if (t.signal.aborted) { reject(t.signal.reason); return; }
+      const bytes = Buffer.concat(stdout); resolve({ code, stdout: bytes.toString("utf8"), stderr: Buffer.concat(stderr).toString("utf8"), bytes });
+    });
   });
 }
 function success(result: Result): any {
@@ -119,10 +125,15 @@ test("CLI uses external absolute directories for both Store kinds and retains re
     const config = JSON.stringify({ directory });
     assert.equal(success(await cli(t, fixture, args, config)).directory, directory);
     const id = kind === "value" ? "item" : "item.json"; const value = { name: storeId, count: 1 };
-    success(await cli(t, fixture, ["data", "create", id, "--store", storeId, "--value", JSON.stringify(value), "--output", "json"]));
-    const loaded = success(await cli(t, fixture, ["data", "store", "read", storeId, "--output", "json"]));
+    // Record creation is setup for the re-registration contract. Keep the
+    // registration/removal/re-registration/read sequence in separate processes.
+    await writeData({}, fixture.root, storeId, id, "create", { kind: "value", value });
+    const receipt = await invokeCliModule(["--project", "test-project", "data", "store", "read", storeId, "--output", "json"], fixture.cwd,
+      { ...process.env, MEMSPHERE_HOME: fixture.home }, cliPath);
+    assert.equal(receipt.stderr, "");
+    const loaded = JSON.parse(receipt.stdout);
     assert.equal(loaded.directory, directory); assert.equal(loaded.config.directory, directory); assert.equal(loaded.status, "available");
-    assert.deepEqual(success(await cli(t, fixture, ["data", "read", id, "--store", storeId, "--output", "json"])).value, value);
+    assert.deepEqual((await readData({}, fixture.root, storeId, id)).value, value);
     const dataBefore = await snapshotTree(directory);
     const removed = success(await cli(t, fixture, ["data", "store", "remove", storeId, "--output", "json"]));
     assert.equal(removed.dataRetained, true); assert.equal(removed.directory, directory);
