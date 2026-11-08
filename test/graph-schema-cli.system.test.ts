@@ -64,47 +64,59 @@ test("Schema native entry and Continue retain all rule scopes, input links and H
   }
 });
 
-test("CLI and Continue keep concurrent Schema Step drafts and their positions isolated", { timeout: 90000 }, async t => {
-  const { f, call, raw } = await schemaCliFixture(t);
-  const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
-  const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["schema-parallel"], defines: ["Independent reports"], actions: ["a", "b"].map(id => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: id, model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nfields: [summary]\n" }, payload: { contentType: "application/json" } } })) };
-  const file = join(f.directory, "parallel.yaml"); await writeFile(file, serializeMemoryYaml(source as import("../src/memory/ast.js").GraphProcedureMemory));
-  const started = await call("run", "start", "--file", file, "--name", "Parallel drafts");
-  const snapshot = await call("run", "show", "--run", started.runId);
-  const a = snapshot.steps.find((s: any) => s.source.actionId === "a").id, b = snapshot.steps.find((s: any) => s.source.actionId === "b").id;
-  await raw("run", "step", "enter", "--run", started.runId, "--step", a); const first = await call("continue", "enter-schema");
-  await raw("run", "step", "enter", "--run", started.runId, "--step", b); const second = await call("continue", "enter-schema");
-  assert.notEqual(first.draft.id, second.draft.id);
-  await call("continue", "schema", "report", "--position", second.position, "--artifact", '{"summary":"B"}');
-  await assert.rejects(call("run", "schema", "report", "--run", started.runId, "--step", a, "--position", first.position, "--artifact", '{"summary":"wrong target"}'), /bound to another target/);
-  await raw("run", "step", "enter", "--run", started.runId, "--step", a);
-  const resumed = await call("continue", "schema", "show"); assert.equal(resumed.position, first.position); assert.equal(resumed.draft.content.payload.content, "");
-  await call("continue", "schema", "report", "--position", first.position, "--artifact", '{"summary":"A"}');
-  const untouched = await call("run", "schema", "show", "--run", started.runId, "--step", b); assert.equal(untouched.draft.content.payload.content, '{"summary":"B"}');
+async function parallelDraftFixture(t: test.TestContext, content?: { a: string; b: string }) {
+  const fixture = await schemaCliFixture(t);
+  const { openContextControl } = await import("../src/project/context-control.js");
+  const service = (await openContextControl(fixture.f.root))!;
+  // Public API setup keeps CLI assertions focused on target isolation or submission,
+  // rather than paying for repeated CLI startup while preparing unrelated state.
+  const state = await service.withGraph(async g => {
+    const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["parallel-drafts"], defines: ["Independent reports"], actions: ["a", "b"].map(id => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: id, model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nfields: [summary]\n" }, payload: { contentType: "application/json" } } })) };
+    const started = await g.start({ name: "Parallel drafts", procedure: source as import("../src/memory/ast.js").GraphProcedureMemory });
+    const run = started.run.id, a = started.steps.find(s => s.source?.actionId === "a")!.id, b = started.steps.find(s => s.source?.actionId === "b")!.id;
+    await g.enter(run, a); const first = await g.enterSchema(run, a);
+    if (content) await g.schemaWrite(run, a, "report", first.position!, JSON.stringify({ summary: content.a }));
+    await g.enter(run, b); const second = await g.enterSchema(run, b);
+    if (content) await g.schemaWrite(run, b, "report", second.position!, JSON.stringify({ summary: content.b }));
+    return { run, a, b, first, second };
+  });
+  return { ...fixture, service, ...state };
+}
+
+test("native Schema writes reject a Step outside the current Continue binding without mutating either draft", { timeout: 90000 }, async t => {
+  const { call, raw, service, run, a, b, first, second } = await parallelDraftFixture(t);
+  await raw("run", "step", "enter", "--run", run, "--step", b);
+  await assert.rejects(call("run", "schema", "report", "--run", run, "--step", a, "--position", first.position!, "--artifact", '{"summary":"wrong target"}'), /bound to another target/);
+  await service.withGraph(async g => {
+    const unchangedA = await g.schemaShow(run, a), unchangedB = await g.schemaShow(run, b);
+    assert.equal(unchangedA.position, first.position); assert.equal(unchangedB.position, second.position);
+    assert.equal(unchangedA.draft!.content!.payload.content, ""); assert.equal(unchangedB.draft!.content!.payload.content, "");
+  });
+});
+
+test("Continue saves preserve independent concurrent draft identities content and positions", { timeout: 90000 }, async t => {
+  const { call, raw, service, run, a, b, first, second } = await parallelDraftFixture(t);
+  assert.notEqual(first.draft!.id, second.draft!.id);
+  await raw("run", "step", "enter", "--run", run, "--step", b);
+  const savedB = await call("continue", "schema", "report", "--position", second.position!, "--artifact", '{"summary":"B"}');
+  assert.equal(savedB.draft.id, second.draft!.id);
+  await raw("run", "step", "enter", "--run", run, "--step", a);
+  const resumed = await call("continue", "schema", "show");
+  assert.equal(resumed.draft.id, first.draft!.id); assert.equal(resumed.position, first.position); assert.equal(resumed.draft.content.payload.content, "");
+  const savedA = await call("continue", "schema", "report", "--position", first.position!, "--artifact", '{"summary":"A"}');
+  assert.equal(savedA.draft.id, first.draft!.id);
+  const untouched = await service.withGraph(g => g.schemaShow(run, b));
+  assert.equal(untouched.draft!.id, second.draft!.id); assert.equal(untouched.draft!.content!.payload.content, '{"summary":"B"}');
 });
 
 test("Continue submits each concurrent Schema draft once and preserves both completed identities", { timeout: 90000 }, async t => {
-  const { f, call, raw } = await schemaCliFixture(t);
-  const { openContextControl } = await import("../src/project/context-control.js");
-  const service = (await openContextControl(f.root))!;
-  // This scenario exercises CLI finalization. Prepare persisted positioned drafts
-  // through the public API; the preceding scenario independently checks CLI saves.
-  const { run, a, first, second } = await service.withGraph(async g => {
-    const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["parallel-finalization"], defines: ["Independent reports"], actions: ["a", "b"].map(id => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: id, model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nfields: [summary]\n" }, payload: { contentType: "application/json" } } })) };
-    const started = await g.start({ name: "Parallel finalization", procedure: source as import("../src/memory/ast.js").GraphProcedureMemory });
-    const run = started.run.id, a = started.steps.find(s => s.source?.actionId === "a")!.id, b = started.steps.find(s => s.source?.actionId === "b")!.id;
-    await g.enter(run, a); const first = await g.enterSchema(run, a);
-    await g.schemaWrite(run, a, "report", first.position!, '{"summary":"A"}');
-    await g.enter(run, b); const second = await g.enterSchema(run, b);
-    await g.schemaWrite(run, b, "report", second.position!, '{"summary":"B"}');
-    return { run, a, first, second };
-  });
+  const { call, raw, run, a, first, second } = await parallelDraftFixture(t, { a: "A", b: "B" });
   await raw("run", "step", "enter", "--run", run, "--step", a);
-  const aDone = await call("continue", "report", "--artifact", '{"summary":"A"}'); assert.equal(aDone.artifactId, first.draft.id);
-  const bDraft = await call("continue", "schema", "show"); assert.equal(bDraft.draft.id, second.draft.id);
-  const bDone = await call("continue", "report", "--artifact", '{"summary":"B"}'); assert.equal(bDone.artifactId, second.draft.id);
+  const aDone = await call("continue", "report", "--artifact", '{"summary":"A"}'); assert.equal(aDone.artifactId, first.draft!.id);
+  const bDraft = await call("continue", "schema", "show"); assert.equal(bDraft.draft.id, second.draft!.id);
+  const bDone = await call("continue", "report", "--artifact", '{"summary":"B"}'); assert.equal(bDone.artifactId, second.draft!.id);
   const completed = await call("run", "show", "--run", run);
-  assert.deepEqual(new Set(completed.completeIds), new Set([first.draft.id, second.draft.id]));
+  assert.deepEqual(new Set(completed.completeIds), new Set([first.draft!.id, second.draft!.id]));
 });
 
 test("CLI status recovery replaces a previous failed diagnostic with the sealed submission hash", { timeout: 90000 }, async t => {
