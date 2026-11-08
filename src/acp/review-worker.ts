@@ -2,6 +2,8 @@ import { delimiter, join, resolve } from "node:path";
 import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { artifactReviewAssignmentId, type ArtifactReviewAgentFailure } from "../artifact-review.js";
 import { readConfig } from "../config.js";
+import { resolveMemsphereHome } from "../home.js";
+import { resolveWorkspaceIdentity } from "../project/workspace.js";
 import {
   assertArtifactReviewAgentAttemptRunning,
   claimArtifactReviewAgentAssignment,
@@ -23,6 +25,7 @@ import { captureProcessIdentity } from "../context_control/review-process.js";
 import { startWindowsReviewJob } from "../context_control/windows-review-job.js";
 
 export type AgentReviewWorkerOptions = {
+  signal?: AbortSignal;
   config?: string;
   review?: string;
   round?: string;
@@ -35,12 +38,14 @@ export type AgentReviewWorkerOptions = {
 };
 
 export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const reviewId = requiredOption(options.review, "--review");
   const roundId = requiredOption(options.round, "--round");
   const assignmentId = requiredOption(options.assignment, "--assignment");
   const nodeExecutable = requiredOption(options.nodeExecutable, "--node-executable");
   const cliEntrypoint = requiredOption(options.cliEntrypoint, "--cli-entrypoint");
   const config = await readConfig(requiredOption(options.config, "--config"));
+  options.signal?.throwIfAborted();
   let workerJob: string | undefined;
   let enrollmentFailure: unknown;
   if (process.platform === "win32" && reviewId.startsWith("graph-review-")) {
@@ -71,6 +76,8 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     attemptId: claimed.attempt.id
   };
   const callerDirectory = resolve(options.workspaceRoot ?? process.cwd());
+  let sourceWorkspace = callerDirectory;
+
   let workspaceRoot = callerDirectory;
   let attemptDirectory: string | undefined;
   const activity = new AgentActivityRecorder({
@@ -86,7 +93,15 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
+    options.signal?.throwIfAborted();
     if (enrollmentFailure) throw enrollmentFailure;
+    if (config.project?.store?.type === "embedded") {
+      const canonical = await resolveWorkspaceIdentity(config.memoryRoot);
+      const caller = await resolveWorkspaceIdentity(callerDirectory);
+      // View/server launches can have a cwd in a different repository. Keep an
+      // actual source worktree when present; otherwise use this verified Project.
+      if (caller.kind !== "git" || caller.key !== canonical.key) sourceWorkspace = canonical.path;
+    }
     const temporaryRoot = join(callerDirectory, "tmp");
     await mkdir(temporaryRoot, { recursive: true });
     attemptDirectory = await mkdtemp(join(temporaryRoot, "memsphere-review-"));
@@ -105,6 +120,10 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
         TMP: workspaceRoot,
         TEMP: workspaceRoot,
         MEMSPHERE_CLI: cliRuntime.launcherPath,
+        MEMSPHERE_HOME: resolveMemsphereHome(),
+        MEMSPHERE_REVIEW_SOURCE_WORKSPACE: sourceWorkspace,
+        MEMSPHERE_REVIEW_HANDLE: reviewId,
+        MEMSPHERE_REVIEW_ROUND_ID: roundId,
         MEMSPHERE_REVIEW_RUN_ID: claimed.run.id,
         ...((claimed.run.memorySnapshot || claimed.run.frozenMemoryRunId) ? { MEMSPHERE_REVIEW_MEMORY_RUN_ID: claimed.run.id } : {}),
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: artifactReviewAssignmentId(claimed.assignment),
@@ -121,6 +140,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     });
     const result = await (options.runSession ?? runAgentReviewAcpSession)({
       launch,
+      signal: options.signal,
       assertLaunchValid: () => assertArtifactReviewAgentAttemptRunning(common),
       onBeforeStop: providerPid => recordArtifactReviewAgentProcesses({ ...common, workerPid: process.pid, providerPid }),
       prompt: `${prompt}\n\n${claimed.run.language === "en"

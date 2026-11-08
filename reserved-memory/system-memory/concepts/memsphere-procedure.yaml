@@ -4,6 +4,7 @@ names:
   - memsphere-procedure
   - Procedure
 defines:
+  - "graph 的调度来源与验收依据分开：Action.dependencies 和 Step.inputs 决定执行实例；Runner 可在 report 中为候选 Artifact 显式声明本实例合法祖先 Artifact 及 External，供后续固定评审读取。该声明不新增调度边，也不默认递归公开全部上游。修订与回溯后的新候选固定新依赖，历史轮次继续按旧候选引用读取。"
   - "Continue 仅在开启 Agent 身份并识别当前会话时可用，命令为 memsphere continue report 或 review wait，不接收独立 context ID；状态通过 agentType-sessionId 定位，保留具体 Run/Step 绑定。"
   - "身份模式下 review wait 与 status 不 enter 后继或修改会话绑定，前台 report/vote 接纳后可正式进入唯一后继；后台通知只说明结果及显式下一步。"
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。

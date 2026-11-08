@@ -1,3 +1,4 @@
+import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { Command, Option } from "commander";
 import { readFile } from "node:fs/promises";
 import { boundReviewNodeContext, boundReviewNodeView, mutateBoundReviewNode, submitBoundReviewNodes } from "../acp/review-session.js";
@@ -61,11 +62,12 @@ export function registerReviewNodeCommands(run: Command) {
   for (const op of ["list", "show"]) {
     const command = review.commands.find(c => c.name() === op)!;
     command.options.forEach(o => { if (["run", "review", "artifact"].includes(o.attributeName())) o.mandatory = false; });
-    command.option("--assignment <id>");
+    command.option("--assignment <id>").option("--round <id>", "fixed acceptance Round for an authorized context Artifact");
     if (op === "show") command.option("--node <id>").option("--all");
     command.action(async o => {
       if (o.assignment || process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID) {
-        if (o.run || o.review || o.artifact) throw new Error("review_query_target_conflict");
+        if (await tryReviewerResource(`review-${op}`, o)) return;
+        if (o.review || o.artifact) throw new Error("review_query_target_conflict");
         await reviewNodeCommand(op, o);
       } else await contextOnlyCommand(`review-${op}`, o as Options);
     });
@@ -82,5 +84,5 @@ export async function reviewerContinue(nativeRun: Command, tail: string[]) {
     }
     route.action(o => reviewNodeCommand(path.join("-"), o));
   }
-  await router.parseAsync(tail.length ? tail : ["--help"], { from: "user" });
+  await (await import("./cli-errors.js")).parseCli(router, [process.execPath, "continue", ...(tail.length ? tail : ["--help"])], { rethrow: true });
 }

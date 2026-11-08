@@ -5,7 +5,8 @@ import type { DataExtension } from "../../api/extension.js";
 import type { ModelRuntime } from "../../api/model-runtime.js";
 import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "../../api/store.js";
 import type { StoredValue, ValueStore, ValueStoreFactory } from "../../api/value-store.js";
-import { JsonPayloadSerializer } from "../json-serializer/index.js";
+import { assertJsonDescriptor, assertJsonValue, JsonPayloadSerializer } from "../json-serializer/index.js";
+import { assertPlainValue } from "../shared/reflection.js";
 import {
   atomicPublish, cleanupCreatedDirectories, deleteFile, findFile, listRelativeFilenames, openExistingDirectory, paginate, prepareDirectory,
   readFileSnapshot, requirePositiveInteger, requireString, resolveFileParent, validateRelativeFilePath, withRecordLock
@@ -167,9 +168,14 @@ class FilesystemJsonValueStore implements ValueStore {
     if (file === undefined) return undefined;
     const record: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(file.bytes));
     assertRecord(record, id);
-    // Validate before JSON.stringify can normalize -0 or unsafe integers in a
-    // manually edited record. The same strict round trip is used for writes.
-    record.value = await this.prepare(context, record.value);
+    // JSON.parse already owns a detached value. Check the full JSON graph,
+    // descriptor and runtime without encoding and parsing another copy. Writes
+    // still snapshot caller-owned values before their first asynchronous wait.
+    assertJsonDescriptor(this.runtime.descriptor.root);
+    assertJsonValue(record.value);
+    assertPlainValue(this.runtime.descriptor.root, record.value);
+    this.runtime.reflect(record.value);
+    context.signal?.throwIfAborted();
     return record;
   }
 

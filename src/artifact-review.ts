@@ -163,6 +163,8 @@ export type ArtifactReviewSubmission<TArtifact = unknown> = {
   createdAt: string;
   artifact: TArtifact;
   contextArtifacts: ArtifactReviewContextArtifact<TArtifact>[];
+  /** Transient graph evidence references, never a new persisted domain entity. */
+  contextExternals?: Array<{ externalId: string; source: string; capturedAt: string }>;
   revisionSummary?: ArtifactReviewRevisionSummary;
 };
 

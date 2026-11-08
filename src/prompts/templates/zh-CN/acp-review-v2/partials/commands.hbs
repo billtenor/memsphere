@@ -1,31 +1,31 @@
 ## 可用的 Memsphere 命令
 - 读取完整候选产物：
-  memsphere run artifact show --output json
+  "$MEMSPHERE_CLI" run artifact show --output json
 - 读取完整评审契约，包括完整 Schema 快照：
-  memsphere run artifact contract show --output json
+  "$MEMSPHERE_CLI" run artifact contract show --output json
 - 查看本次评审的状态、权限和自己的意见：
-  memsphere run review assignment show --output json
-- 查看 Run 大纲，包括所有步骤、产物摘要和当前步骤：
-  memsphere run show --output json
-- 查看大纲中的某个步骤：
-  memsphere run step show --step "<step-ref>" --output json
-- 在相关时读取某个前序产物：
-  memsphere run artifact show --step "<step-ref>" --output json
+  "$MEMSPHERE_CLI" run review assignment show --output json
+- 查看本轮允许步骤的受限 Run 摘要：
+  "$MEMSPHERE_CLI" run show --output json
+- 查看摘要中允许的某个步骤：
+  "$MEMSPHERE_CLI" run step show --step "<step-ref>" --output json
+- 读取本轮固定绑定的合法上下文产物：
+  "$MEMSPHERE_CLI" run artifact show --step "<step-ref>" --output json
 - 发现和读取项目 Memory（默认读取当前 Project）：
-  memsphere memory list --output json
-  memsphere memory read <reference> --output json
-- Memory list 返回 items 和可选 nextCursor，默认只取 100 条。需要完整结果时用 memsphere memory list --cursor <nextCursor> --output json 持续翻页，保持筛选条件不变；没有 nextCursor 才表示结束。
+  "$MEMSPHERE_CLI" memory list --output json
+  "$MEMSPHERE_CLI" memory read <reference> --output json
+- Memory list 返回 items 和可选 nextCursor，默认只取 100 条。需要完整结果时用 "$MEMSPHERE_CLI" memory list --cursor <nextCursor> --output json 持续翻页，保持筛选条件不变；没有 nextCursor 才表示结束。
 - 添加具体评审意见。Comment 正文使用 Markdown：
   - 必须选择明确的严重程度：`blocking`、`risk` 或 `suggestion`。
   - 单行意见：
-    memsphere run review comment --severity <blocking|risk|suggestion> --body <text> --output json
+    "$MEMSPHERE_CLI" run review comment --severity <blocking|risk|suggestion> --body <text> --output json
   - 多行意见先写入 Markdown 文件：
-    memsphere run review comment --severity <blocking|risk|suggestion> --body-file <path> --output json
+    "$MEMSPHERE_CLI" run review comment --severity <blocking|risk|suggestion> --body-file <path> --output json
   - 不要把换行编码为字面量 `\n`。
 - 提交最终投票和总结：
-  memsphere run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json
+  "$MEMSPHERE_CLI" run review submit --vote <approve|request_changes|abstain> --summary-file <path> --output json
 
-Memory 默认读取当前 Project，不会自动添加 --run。需要 Run 冻结快照时，显式使用 `memsphere memory list --run <run-id> --output json` 或 `memsphere memory read <reference> --run <run-id> --output json`（须有可用快照）。正式评审规则与契约始终采用冻结版本，当前 Project Memory 仅作为辅助证据。
-ChangeSet 证据通过 `memsphere memory change show <change-id> --checkpoint <digest> --part summary|diff|validation` 读取；Memory 正文使用 `--part memory --reference <reference> --side before|after`，不存在的一侧返回 null。digest 过期时拒绝读取。评审材料应注明 ChangeSet ID、checkpoint digest、相关逻辑引用及这些读取命令，不应将 Memory 全文复制进 Artifact 或依赖内部存储路径。此入口只读，Reviewer 仍不得 validate/edit/publish/claim。
+Memory 默认读取当前 Project，不会自动添加 --run。需要 Run 冻结快照时，显式使用 `"$MEMSPHERE_CLI" memory list --run <run-id> --output json` 或 `"$MEMSPHERE_CLI" memory read <reference> --run <run-id> --output json`（须有可用快照）。正式评审规则与契约始终采用冻结版本，当前 Project Memory 仅作为辅助证据。
+ChangeSet 证据通过 `"$MEMSPHERE_CLI" memory change show <change-id> --checkpoint <digest> --part summary|diff|validation` 读取；Memory 正文使用 `--part memory --reference <reference> --side before|after`，不存在的一侧返回 null。digest 过期时拒绝读取。评审材料应注明 ChangeSet ID、checkpoint digest、相关逻辑引用及这些读取命令，不应将 Memory 全文复制进 Artifact 或依赖内部存储路径。此入口只读，Reviewer 仍不得 validate/edit/publish/claim。
 
 省略 --part 与显式 --part summary 等价；正文读取省略 --side 与显式 --side after 等价。显式选项均保留，--reference 只筛选。checkpoint 同时固定范围、基线、正文和校验结果，未校验的候选编辑不改变这些材料。旧 checkpoint 缺少冻结材料描述时须由 Runner 显式重新校验，Reviewer 不得执行 validate。

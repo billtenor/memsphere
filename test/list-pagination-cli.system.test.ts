@@ -1,3 +1,5 @@
+import { reviewerSessionEnvironment } from "./helpers/reviewer-session.js";
+import { openContextControl } from "../src/project/context-control.js";
 import { invokeCliModule } from "./helpers/cli-module.js";
 import { mutateModel } from "../src/project/model-service.js";
 import { createBusinessStore } from "../src/project/business-stores.js";
@@ -263,34 +265,33 @@ test("Reviewer Memory pagination stays on the frozen Run and rejects another Ses
   const f = await fixture();
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: cliPath });
   try {
-    const runId = "run-frozen";
-    const directory = join(f.project, "runs", runId);
-    await mkdir(join(directory, "memory", "concepts"), { recursive: true });
-    const files = ["alpha", "zed"].map((name) => `${runId}/memory/concepts/${name}.yaml`);
-    for (const name of ["alpha", "zed"]) await writeFile(join(directory, "memory", "concepts", `${name}.yaml`), `!concept\nsyntax: ${currentMemorySyntax}\nnames: [${name}]\ndefines: [frozen]\n`);
-    await writeFile(join(directory, `${runId}.json`), json({
-      contractVersion: 3, id: runId, name: "Frozen", status: "running", procedureName: "probe", memoryRoot: f.memory,
-      memorySource: { kind: "changeset", project: "main", changeId: "change-test", checkpointDigest: "frozen", baseRevision: "base" },
-      memorySnapshot: { path: "memory", files }, createdAt: "2026-01-01", updatedAt: "2026-01-01", stack: [], events: [], procedureSnapshots: {}
-    }));
-    const env = { ...f.env, MEMSPHERE_CONFIG_PATH: join(f.project, "config.json"), MEMSPHERE_REVIEW_MEMORY_RUN_ID: runId };
+    const session = await reviewerSessionEnvironment(f.project, f.env.MEMSPHERE_HOME!, f.workspace);
+    const runId = session.MEMSPHERE_REVIEW_RUN_ID;
+    const service = (await openContextControl(f.project))!;
+    await service.withGraph(async g => {
+      const row = await g.records.require<import("../src/context_control/types.js").Run>("run", runId, runId);
+      for (const name of ["alpha", "zed"]) row.value.memorySnapshot!.memories[`concepts/${name}`] = { memoryRef: `concepts/${name}`, payload: { contentType: "application/yaml", content: `!concept\nsyntax: ${currentMemorySyntax}\nnames: [${name}]\ndefines: [frozen]\n` } };
+      await g.records.update("run", runId, row, row.value);
+    });
+    const env = { ...f.env, ...session };
     const review = (args: string[]) => crossSpawn.sync(runtime.launcherPath, args, { cwd: f.workspace, env, encoding: "utf8", timeout: 20_000 });
-    const first = result(review(["memory", "list", "--run", runId, "--limit", "1", "--output=json"]));
+    const first = result(review(["memory", "list", "--kind", "concepts", "--run", runId, "--limit", "1", "--output=json"]));
     assert.equal(first.items[0].reference, "concepts/alpha");
     await f.writeMemory("new-live-memory");
-    const last = result(review(["memory", "list", "--run", runId, "--cursor", first.nextCursor, "--limit", "1000", "--output=json"]));
+    const last = result(review(["memory", "list", "--kind", "concepts", "--run", runId, "--cursor", first.nextCursor, "--limit", "1000", "--output=json"]));
     assert.deepEqual(last.items.map((item: { reference: string }) => item.reference), ["concepts/zed"]);
     assert.equal(last.nextCursor, undefined);
     for (const option of [["--run", "other"], ["--project", "other"]]) {
       const denied = review(["memory", "list", ...option, "--output=json"]);
       assert.equal(denied.status, 1);
       assert.equal(denied.stdout, "");
-      assert.equal(JSON.parse(denied.stderr).error.code, "REVIEW_SESSION_DENIED");
+      assert.equal(JSON.parse(denied.stderr).error.code, "REVIEW_IDENTITY_CONFLICT");
     }
-    const liveCursor = await f.run(["memory", "list", "--cursor", first.nextCursor, "--output=json"]);
+    const liveCursor = await f.run(["memory", "list", "--kind", "concepts", "--cursor", first.nextCursor, "--output=json"]);
     assert.equal(liveCursor.status, 1);
     assert.equal(JSON.parse(liveCursor.stderr).error.code, "INVALID_CURSOR");
-    assert.deepEqual((await readdir(join(directory, "memory", "concepts"))).sort(), ["alpha.yaml", "zed.yaml"]);
-    assert.match(await readFile(join(directory, "memory", "concepts", "zed.yaml"), "utf8"), /defines: \[frozen\]/);
+    const preserved = (await service.snapshot(runId)).run.memorySnapshot!.memories;
+    assert.deepEqual(Object.keys(preserved).filter(r => r.startsWith("concepts/")).sort(), ["concepts/alpha", "concepts/zed"]);
+    assert.match(preserved["concepts/zed"].payload.content, /defines: \[frozen\]/);
   } finally { await runtime.cleanup(); await f.cleanup(); }
 });

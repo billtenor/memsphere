@@ -33,7 +33,7 @@ export class JsonPayloadSerializer implements PayloadSerializer {
     const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
     // Inspect the complete value, including properties outside the reflection
     // descriptor, before checking the descriptor's structural and enum rules.
-    encodeJsonValue(value);
+    assertJsonValue(value);
     assertPlainValue(descriptor.root, value);
     throwIfAborted(context);
     return value;
@@ -104,18 +104,28 @@ export function assertJsonDescriptor(root: TypeDescriptor): void {
  * would invoke hooks and silently omit unsupported properties and array keys.
  */
 export function encodeJsonValue(value: unknown, path = "$", ancestors = new Set<object>()): string {
+  return jsonValue(value, path, ancestors, true);
+}
+
+export function assertJsonValue(value: unknown): void {
+  jsonValue(value, "$", new Set(), false);
+}
+
+// Deserialization needs all the same checks, but no encoded copy of the input.
+// In particular, frozen Run Memory can contain large strings on every read.
+function jsonValue(value: unknown, path: string, ancestors: Set<object>, encode: boolean): string {
   if (value === null) return "null";
   switch (typeof value) {
     case "string":
     case "boolean":
-      return JSON.stringify(value);
+      return encode ? JSON.stringify(value) : "";
     case "number":
       if (!Number.isFinite(value)) throw new TypeError(`JSON requires a finite number at ${path}`);
       if (Object.is(value, -0)) throw new TypeError(`JSON does not support negative zero at ${path}`);
       if (Number.isInteger(value) && !Number.isSafeInteger(value)) {
         throw new TypeError(`JSON does not support unsafe integers at ${path}`);
       }
-      return JSON.stringify(value);
+      return encode ? JSON.stringify(value) : "";
     case "object":
       break;
     default:
@@ -150,14 +160,16 @@ export function encodeJsonValue(value: unknown, path = "$", ancestors = new Set<
           throw new TypeError(`JSON does not support sparse arrays at ${path}[${index}]`);
         }
         const property = properties[String(index)];
-        items.push(encodeJsonValue(property.value, `${path}[${index}]`, ancestors));
+        const item = jsonValue(property.value, `${path}[${index}]`, ancestors, encode);
+        if (encode) items.push(item);
       }
       return `[${items.join(",")}]`;
     }
 
     const fields: string[] = [];
     for (const key of Object.keys(properties)) {
-      fields.push(`${JSON.stringify(key)}:${encodeJsonValue(properties[key].value, `${path}.${key}`, ancestors)}`);
+      const field = jsonValue(properties[key].value, `${path}.${key}`, ancestors, encode);
+      if (encode) fields.push(`${JSON.stringify(key)}:${field}`);
     }
     return `{${fields.join(",")}}`;
   } finally {

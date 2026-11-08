@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { getAgentReviewProvider } from "../src/acp/provider.js";
-import { approveAgentPermission } from "../src/acp/client.js";
+import { approveAgentPermission, runAgentReviewAcpSession } from "../src/acp/client.js";
 import type { ControlPlaneActor } from "../src/control-plane/index.js";
 
 
@@ -156,3 +156,16 @@ function agentIdentity(
     }
   };
 }
+
+
+test("an already canceled ACP operation cannot spawn a Provider", async () => {
+  const controller = new AbortController();
+  controller.abort(new Error("canceled before launch"));
+  const launch = getAgentReviewProvider("traex").buildLaunch({
+    actor: agentIdentity("traex", [], {}), workspaceRoot: "/workspace", sessionEnv: {}
+  });
+  await assert.rejects(runAgentReviewAcpSession({
+    launch, signal: controller.signal, prompt: "Review", reminder: "Submit", workspaceRoot: "/workspace",
+    isSubmitted: async () => false, onSession: async () => undefined
+  }, { spawn: () => { throw new Error("must not spawn"); } }), /canceled before launch/);
+});

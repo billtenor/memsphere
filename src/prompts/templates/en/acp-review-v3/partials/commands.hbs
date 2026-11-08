@@ -1,17 +1,17 @@
-memsphere continue report --artifact '{"applicable":true}'
-memsphere run review report --assignment A --artifact '{"applicable":true,"comments":[]}'
+"$MEMSPHERE_CLI" continue report --artifact '{"applicable":true}'
+"$MEMSPHERE_CLI" run review report --assignment A --artifact '{"applicable":true,"comments":[]}'
 Omit comments to retain saved content/IDs; an explicit array replaces it. [] confirms all rules satisfied, or no extra open-review issues.
-memsphere continue comment add --artifact '{"body":"Issue","severity":"risk"}'
-memsphere continue comment update --comment C --artifact '{"body":"Updated issue"}'
-memsphere continue comment delete --comment C
-memsphere continue update --node N --artifact '{"applicable":true,"comments":[]}'
+"$MEMSPHERE_CLI" continue comment add --artifact '{"body":"Issue","severity":"risk"}'
+"$MEMSPHERE_CLI" continue comment update --comment C --artifact '{"body":"Updated issue"}'
+"$MEMSPHERE_CLI" continue comment delete --comment C
+"$MEMSPHERE_CLI" continue update --node N --artifact '{"applicable":true,"comments":[]}'
 Rule exceptions also require rulePath/result. Without a current node, add requires --node. All content commands accept --artifact-file F instead of --artifact. Editing does not advance. Repeated show is optional.
-memsphere continue list
-memsphere continue show
-memsphere continue show --node N
-memsphere continue show --all
+"$MEMSPHERE_CLI" continue list
+"$MEMSPHERE_CLI" continue show
+"$MEMSPHERE_CLI" continue show --node N
+"$MEMSPHERE_CLI" continue show --all
 
-Memory reads use the current Project by default; no --run is added automatically. To inspect this Run's frozen snapshot, explicitly use `memsphere memory list --run <run-id> --output json` or `memsphere memory read <reference> --run <run-id> --output json` (when a snapshot is available). Formal review rules and contracts always use the frozen version; current Project Memory is supporting evidence.
-Read ChangeSet evidence through `memsphere memory change show <change-id> --checkpoint <digest> --part summary|diff|validation`. For Memory source use `--part memory --reference <reference> --side before|after`; a missing side is null. A stale digest is rejected. Review materials must identify the ChangeSet ID, checkpoint digest, relevant references and these commands, rather than copy full Memory text into an Artifact or depend on internal storage paths. This entrypoint is read-only; validate/edit/publish/claim remain unavailable to reviewers.
+Memory reads use the current Project by default; no --run is added automatically. To inspect this Run's frozen snapshot, explicitly use `"$MEMSPHERE_CLI" memory list --run <run-id> --output json` or `"$MEMSPHERE_CLI" memory read <reference> --run <run-id> --output json` (when a snapshot is available). Formal review rules and contracts always use the frozen version; current Project Memory is supporting evidence.
+Read ChangeSet evidence through `"$MEMSPHERE_CLI" memory change show <change-id> --checkpoint <digest> --part summary|diff|validation`. For Memory source use `--part memory --reference <reference> --side before|after`; a missing side is null. A stale digest is rejected. Review materials must identify the ChangeSet ID, checkpoint digest, relevant references and these commands, rather than copy full Memory text into an Artifact or depend on internal storage paths. This entrypoint is read-only; validate/edit/publish/claim remain unavailable to reviewers.
 
 Omitting --part is equivalent to --part summary. For --part memory, omitting --side is equivalent to --side after. All explicit options remain available; --reference only filters. Checkpoints pin scope, baseline and validation as well as content. Unvalidated candidate edits cannot change these materials. An old checkpoint without a frozen material description requires explicit revalidation by the Runner; reviewers cannot validate it.

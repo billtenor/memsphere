@@ -5,14 +5,15 @@ import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { Command } from "commander";
+import { GraphRuntime } from "../src/context_control/graph-runtime.js";
 import { registerReviewNodeCommands, reviewerContinue } from "../src/commands/review-nodes.js";
 import { reviewNodeFixture } from "./helpers/review-nodes.js";
 import * as reviews from "../src/context_control/review-repository.js";
 import { currentReviewNode, reviewCommentId, reviewNodeProgress } from "../src/review-nodes.js";
 
 // Use the actual native and Continue routers with the bound Session and stores.
-// The filesystem barrier only inserts another valid report before the edit's
-// repository read, after the Session has already resolved its default target.
+// The controlled barrier inserts another valid report at the personal save
+// boundary, after the Session has already resolved its default target.
 function nativeRouter() {
   const run = new Command("run"), review = run.command("review");
   review.command("comment");
@@ -45,26 +46,38 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
         syncBuiltinESMExports();
       });
       let inserted = false, afterReport: unknown, receipt: any;
-      const readFile = fsPromises.readFile;
-      t.mock.method(fsPromises, "readFile", async function(...args: Parameters<typeof readFile>) {
-        const inMutation = new Error().stack?.includes("mutateArtifactReviewNodes");
-        const bytes = await readFile.apply(fsPromises, args);
-        if (!inserted && inMutation) {
-          inserted = true;
-          await reviews.mutateArtifactReviewNodes({
-            ...f.bound,
-            mutation: {
-              operation: "report", expectedNodeId: node.nodeId,
-              artifact: scenario === "conflict"
-                ? { applicable: false, comments: [{ body: "Existing skip reason", severity: "suggestion" }] }
-                : { applicable: true, comments: [] }
-            }
-          });
-          afterReport = structuredClone((await reviews.readArtifactReviewForActor(f.input)).assignment);
-        }
-        return bytes;
-      });
-      syncBuiltinESMExports();
+      const insertReport = async () => {
+        inserted = true;
+        await reviews.mutateArtifactReviewNodes({
+          ...f.bound,
+          mutation: { operation: "report", expectedNodeId: node.nodeId,
+            artifact: scenario === "conflict"
+              ? { applicable: false, comments: [{ body: "Existing skip reason", severity: "suggestion" }] }
+              : { applicable: true, comments: [] } }
+        });
+        afterReport = structuredClone((await reviews.readArtifactReviewForActor(f.input)).assignment);
+      };
+      if (graph) {
+        // Pause at the actual personal save boundary, independent of how many
+        // async reads the scoped context selector performs or its stack depth.
+        const mutate = GraphRuntime.prototype.mutateReview;
+        let mutations = 0;
+        t.mock.method(GraphRuntime.prototype, "mutateReview", async function(...args: Parameters<typeof mutate>) {
+          // The first mutation is the mandatory CLI-ready handshake; the
+          // following mutation saves the edit whose default node is now fixed.
+          if (++mutations === 2 && !inserted) await insertReport();
+          return mutate.apply(this, args);
+        });
+      } else {
+        const readFile = fsPromises.readFile;
+        t.mock.method(fsPromises, "readFile", async function(...args: Parameters<typeof readFile>) {
+          const inMutation = new Error().stack?.includes("mutateArtifactReviewNodes");
+          const bytes = await readFile.apply(fsPromises, args);
+          if (!inserted && inMutation) await insertReport();
+          return bytes;
+        });
+        syncBuiltinESMExports();
+      }
       t.mock.method(console, "log", (text: string) => { receipt = JSON.parse(text); });
       const body = scenario === "rule"
         ? { rulePath: node.asserts[0].rulePath, result: "undetermined", body: "Need evidence", severity: "risk" }

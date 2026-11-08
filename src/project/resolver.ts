@@ -31,7 +31,7 @@ export async function resolveProjectContext(options: {
   memoryScope?: "workspace" | "canonical";
 } = {}): Promise<ProjectContext> {
   const paths = homePaths(options.home);
-  const workspace = await resolveWorkspaceIdentity(options.cwd);
+  const workspace = await resolveWorkspaceIdentity(options.cwd ?? (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID ? process.env.MEMSPHERE_REVIEW_SOURCE_WORKSPACE : undefined));
   const registry = await readProjectRegistry(paths.home);
   const binding = registry.workspaces[workspace.key];
   const target = options.project?.trim() || binding?.primary;

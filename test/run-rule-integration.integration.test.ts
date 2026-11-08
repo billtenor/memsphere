@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { buildAgentReviewContract } from "../src/acp/review-contract.js";
 import { buildRunStepDetail } from "../src/commands/run.js";
 import { renderRunOutput } from "../src/prompts/run-output.js";
 import { buildSchemaWritingSnapshot, currentStep, enterSchema, readRun, startRun } from "../src/run/store.js";
@@ -105,18 +104,8 @@ flow:
       "statements/shared-rules"
     );
 
-    const reviewContract = buildAgentReviewContract({
-      run: started,
-      review: { stepId: "flow[1]", artifactName: "report" },
-      round: {},
-      assignment: {}
-    } as never);
-    assert.equal((reviewContract.procedure.asserts[0] as { reference: string }).reference, "statements/shared-rules");
-    assert.equal((reviewContract.action.asserts[1] as { reference: string }).reference, "statements/shared-rules");
-    assert.equal((reviewContract.action.suggests[0] as { reference: string }).reference, "statements/shared-rules");
-    assert.doesNotMatch(JSON.stringify(reviewContract), /"entries"|"sections":\[\]|"defines":\[\]/);
+    // Persisted Review contract coverage lives in run-review-contract.integration.test.ts.
     assert.doesNotMatch(JSON.stringify(detail), /ruleId|source_path|imported_at/);
-    assert.doesNotMatch(JSON.stringify(reviewContract), /ruleId|source_path|imported_at/);
 
     const output = renderRunOutput({ kind: "start", run: started, runsRoot }, "zh-CN");
     assert.match(output, /来自 statements\/shared-rules/);

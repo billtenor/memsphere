@@ -31,7 +31,7 @@ for (const graph of [false, true]) {
     const f = await fixture(t, graph), n = currentReviewNode(f.claimed.assignment)!;
     const c = await reviews.mutateArtifactReviewNodes({ ...f.bound, mutation: { operation: "report", expectedNodeId: n.nodeId, artifact: { applicable: true, comments: [{ rulePath: n.asserts[0].rulePath, result: "not_satisfied", body: "Missing", severity: "risk" }] } } });
     await reviews.failArtifactReviewAgentAssignment({ ...f.bound, failure: { stage: "process", code: "fixture", message: "failed" } }); await reviews.retryArtifactReviewAgentAssignment(f.input);
-    const next = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+    const next = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, ...(graph ? {} : { workerPid: process.pid }) }))!;
     assert.deepEqual(next.assignment.nodeTree, c.assignment.nodeTree); assert.deepEqual(next.assignment.nodeStates, c.assignment.nodeStates); assert.deepEqual(next.assignment.draft.comments, JSON.parse(JSON.stringify(c.assignment.draft.comments)));
     await assert.rejects(reviews.mutateArtifactReviewNodes({ ...f.bound, mutation: { operation: "comment-delete", commentId: reviewCommentId(c.assignment.draft.comments[0]) } }));
     assert.deepEqual((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates, c.assignment.nodeStates);

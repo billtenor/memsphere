@@ -9,6 +9,7 @@ defines:
   - 定义 memsphere !procedure Memory 的合法内容结构和字段要求。
   - Procedure 的 name/names 标识可复用的流程定义；单次执行的 Run 名称不属于 Memory YAML，通过 run start --name 提供。
 asserts:
+  - "graph 运行时 report 可补充既有 Artifact.dependencies 的具体 artifact/external 引用；强制输入由冻结 Step 保留。此能力不新增本 Schema 的 YAML 字段，不改变 Action.dependencies、when 或 collect 的调度语义。"
   - graph artifact.model 保留 definedBy；definition 与 ref 并列且必须二选一。memsphere/schema.json 的 definition 为显式 syntax 的 !schema YAML；ref 只接受 schemas/canonical-name。其他标准保持 JSON definition，不开放 Memory ref。
   - graph Schema 的渐进式撰写、草稿、position token 与 Continue 是运行能力，不作为 Procedure、Action 或 Schema 的额外 DSL 字段。
   - graph 的 CLI 回溯属于运行记录语义，不在本 Schema 增加回溯字段；Procedure mode 省略仍为 flow。

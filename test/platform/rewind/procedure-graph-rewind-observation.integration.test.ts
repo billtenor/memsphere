@@ -145,3 +145,20 @@ test("Windows fixture CIM host reads fresh identities and never reuses evidence 
   await assert.rejects(watched.alive(unrelated.child.pid!), /observer is closed/);
   assert.ok(sameProcess(unrelated.identity, await captureProcessIdentity(unrelated.child.pid!)));
 });
+
+
+
+test("Windows fixture identity reads survive a denied numeric-PID probe", { skip: process.platform !== "win32" }, async t => {
+  const watched = await createFixtureProcesses(t.signal);
+  t.after(() => watched.close());
+  const identity = await captureProcessIdentity(process.pid);
+  assert.ok(identity);
+  watched.rememberSnapshot(identity);
+  const kill = process.kill.bind(process);
+  t.mock.method(process, "kill", (pid: number, signal?: NodeJS.Signals | number) => {
+    if (pid === process.pid && signal === 0)
+      throw Object.assign(new Error("denied numeric-PID probe"), { code: "EPERM" });
+    return kill(pid, signal);
+  });
+  assert.deepEqual(await watched.alive(process.pid), [true], "fresh CIM still proves that the original process is alive");
+});

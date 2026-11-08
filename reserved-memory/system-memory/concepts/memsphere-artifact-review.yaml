@@ -5,6 +5,10 @@ names:
   - Artifact Review
   - 产物评审
 defines:
+  - "受限 Reviewer 的命令由真实 CLI 解析并在处理层核对 Session 身份；合法 --project 可在子命令前后或使用等号，只能等于绑定 Project。所有显式 Run/Assignment 值必须一致，重复参数中含冲突值也拒绝。资源查询不自动注入不兼容的 assignment；错误区分参数、身份冲突、Session 失效及对象越界。"
+  - "graph Review 按轮次候选 Artifact 的不可变 dependencies 授权候选、直接强制或显式补充 Artifact，以及这些可读 Artifact 直接引用的 External；不默认开放所有祖先、分支或整个 Run。确认依据只含授权上下文 Artifact 对应原接纳轮次的已提交 Review，不公开当前候选他人草稿；无独立 Review 的接纳产物明确标识。"
+  - "run review assignment show 列出固定对象和可执行读取命令；run artifact show --run R --artifact A --out F、run external show --run R --external E --out F 完整导出原始正文；contract show 支持授权 Artifact ID，当前候选与上游输入均返回同一冻结版本的 Procedure、Action、Artifact 完整契约及适用规则，不把 Action 摘要称为完整契约。Step 查询须唯一定位本轮允许版本；run show 与 step show 在 Session 中仅返回受限摘要。显式 review show/list 只能读取授权上下文的确认记录，无目标仍读本人节点。"
+  - "读取和写入都核对 Attempt 生命周期：被重试替换、失败、取消、未启动或经回溯撤销的启动身份拒绝；当前有效 Attempt 可读授权历史依据，本人成功提交后可回读原轮次但不能继续写入。普通只读不握手或推进状态。Session 导出仅可在 Attempt 真实目录中新建工作副本，拒绝目录外、符号链接逃逸及覆盖；完整正文先写入工作目录内的私有临时文件，核对路径与文件身份后以不覆盖方式发布；写入失败不产生部分目标文件，已有或并发替换的目标不得覆盖或删除，无法完成发布或身份核验时明确失败。"
   - "review wait 已就绪时直接返回结果；仍需等待时按 Runner 配置选择异步登记或同步等待，无需命令参数选择。重复异步调用仅复用活动任务，历史终态不阻止新的必要等待。"
   - "review-wait 任务固定轮次与接收 Agent 会话，queue 成功才 completed；失败和取消通过 status/error 表达，通知仅含来源标记与继续执行的 wait 命令，完整结果由该命令读取，不保存 result 或 delivery。"
   - 流程执行 Run 中针对某次不可变 Artifact Submission 的正式评审，用于让 Human 或 Agent 从不同视角检查产物。
@@ -26,3 +30,9 @@ defines:
   - 全部规则之后必须进行开放审查，结合角色职责与专业经验寻找 Statement 未覆盖的问题；空树或全部节点不适用也必须完成。开放节点没有规则来源，额外意见只关联该节点；可以报告没有额外问题，但不能按不适用跳过。之后最终复核先展示概览，Reviewer 可按需展开或修改已处理判断，并独立决定投票，系统不由逐项结果自动推导投票。
   - 同轮同人 retry 保留规则树、内容和进度，但新建固定 Attempt；旧 Session 不得采用新 Attempt 写入。读取不触发写入或推进；并发报告固定目标节点，保存冲突不得改为推进新节点。新 Artifact 的新 Review 完全独立，不继承旧判断。View 仅增加简洁审查进度。
   - graph 回溯须取得受影响 Reviewer 的完整退出证明后才能恢复生产。Windows 使用禁止后代脱离的内核 Job，其他平台使用隔离进程组及 OS 创建身份；历史记录缺少可靠证明时明确拒绝，不由 leader 消失推断后代退出。Provider 原始故障与生命周期记录失败须分别保留诊断。
+  - "本人 Session 绑定与读取只加载所选轮次的本人 Review、Attempt、候选及授权上下文；不以前后其他轮次的候选记录、同轮其他参与者的草稿或锚点正文作为前置依赖。Runner/View 的完整评审投影保持独立用途。"
+  - "命令能力描述须标明 Session 协议适用性，并用于提示、帮助和处理层。graph 支持固定 Artifact/External 及原接纳确认查询；历史 flow 通过 assignment/step 读取固定候选和上下文，不支持的固定对象查询须明确说明，不能作为可执行指引。"
+  - "历史 flow 的 assignment 与显式 Step 读取共用固定 Submission 的完整 Artifact 展示字段；类型、格式、存储、文件与模型元信息随正文保留，当前候选的 revisionSummary 也固定到原轮次，上下文不得借最新 Submission 补全。缺少协议提示的旧 Session 帮助列出协议并集并说明适用边界，assignment show 返回实际绑定协议；授权仍以绑定身份为准。"
+  - "历史 flow 当前候选的契约按绑定 Review 的 Procedure/Step 定位；原步骤接纳、进入其他步骤或 Run 结束后仍从冻结 plan 与 Procedure 快照读取，保留原策略及模型目标。默认、assignment 和候选 step 入口一致；上下文快照缺少所属契约时明确拒绝 contract 查询。旧记录的调用祖先规则存在歧义时返回 REVIEW_CONTEXT_INVALID，不拼合或猜测规则。"
+  - "Reviewer 的可执行入口由 Attempt 注入的 MEMSPHERE_CLI 固定，初始提示、提醒、节点操作及返回的 readCommand/exportCommand 均显式调用该 Session launcher。PATH 或同名 memsphere 工具可能指向其他安装，不能替代绑定入口；变量缺失时明确失败，不回退全局安装。材料中的普通命令示例也须采用同一入口，原 Project/Run/Assignment、授权范围与生命周期检查仍由 CLI 处理。"
+  - "graph Artifact 使用 memsphere/schema.json 时，受限 contract show 仅返回所选合法 Artifact 对应 Action 在该 Run 中冻结的完整 Schema 定义与规则来源；不回退当前 Project，不暴露其他 Action 的 Schema 契约。"

@@ -36,12 +36,12 @@ function graphFormat(contentType: string) {
   const mime = mimeType(contentType);
   return { name: mime === "text/markdown" ? "markdown" : mime === "application/json" ? "json" : mime.includes("yaml") ? "yaml" : "plain", options: {} };
 }
-async function artifactDto(service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>, artifact: Artifact): Promise<legacy.RunEvent["artifact"]> {
+export async function graphArtifactDto(service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>, artifact: Artifact): Promise<legacy.RunEvent["artifact"]> {
   const body = await service.body(artifact);
   const value = decodeGraphContent(body.bytes, body.contentType);
   return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType };
 }
-async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl): Promise<legacy.RunState> {
+async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl, actorId?:string): Promise<legacy.RunState> {
   const service = providedService ?? (await openContextControl(dirname(runsRoot)))!;
   return service.withGraph(async g => {
     const run = snapshot.run;
@@ -50,7 +50,7 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
     const reviews: ArtifactReview<legacy.RunEvent["artifact"]>[] = [];
     for (const step of snapshot.steps.filter(s => s.reviewRounds?.length&&(!selected||s.id===selected))) {
       const rounds: ArtifactReviewRound[] = [], submissions = [];
-      for (const round of step.reviewRounds!) {
+      for (const round of step.reviewRounds!.filter(r => !actorId || r.id === viewRoundId)) {
         const artifact = snapshot.artifacts.find(a => a.id === round.artifactId);
         if (!artifact || artifact.stepId !== step.id) throw failure("INVALID_STATE", "Frozen Review Artifact missing or belongs to another Step");
         const body=!viewRoundId||round.id===viewRoundId?await service.body(artifact):undefined;
@@ -60,26 +60,29 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
         const dto:legacy.RunEvent["artifact"]={name:artifact.name,type:value===null?"null":Array.isArray(value)?"array":(typeof value==="undefined"?"string":typeof value),format:graphFormat(contentType),storage:"inline",contentType,...(!viewRoundId||round.id===viewRoundId?{value}:{})};
         const personalReviews = snapshot.reviews.filter(r => r.roundId === round.id);
         const materialDigests = new Map<string, string>();
-        for (const targetId of new Set(personalReviews.flatMap(r => r.comments.flatMap(c => c.anchor?.targetRef ? [c.anchor.targetRef.id] : [])))) {
-          const target = snapshot.artifacts.find(a => a.id === targetId);
+        for (const targetId of new Set((viewRoundId && round.id !== viewRoundId ? [] : personalReviews).flatMap(r => r.comments.flatMap(c => c.anchor?.targetRef ? [c.anchor.targetRef.id] : [])))) {
+          const target = snapshot.artifacts.find(a => a.id === targetId) ?? snapshot.externals.find(e => e.id === targetId);
           if (!target) throw failure("INVALID_STATE", `Review anchor material is missing: ${targetId}`);
           materialDigests.set(targetId, targetId === artifact.id && body ? hash : digest((await service.body(target)).bytes));
         }
         rounds.push(projectGraphRound(run, step, round, personalReviews, hash, materialDigests));
-        const contextArtifacts = [];
-        for (const id of new Set(Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id))) {
+        const contextArtifacts: import("../artifact-review.js").ArtifactReviewContextArtifact<legacy.RunEvent["artifact"]>[] = [];
+        for (const id of new Set((viewRoundId && round.id !== viewRoundId ? [] : artifact.dependencies).filter(r => r.kind === "artifact").map(r => r.id))) {
           const material = snapshot.artifacts.find(a => a.id === id);
           if (!material || !(snapshot.historicalCompleteIds ?? snapshot.completeIds).includes(id)) throw failure("INVALID_STATE", `Review material is not accepted: ${id}`);
-          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&!(round.id===viewRoundId&&contextArtifacts.length===viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await artifactDto(service,material)});
+          contextArtifacts.push({artifactId:material.id,stepId:material.stepId,artifact:viewRoundId&&(round.id!==viewRoundId || viewMaterialIndex!==undefined&&contextArtifacts.length!==viewMaterialIndex)?{name:material.name,type:"string",format:graphFormat(material.content?.payload.contentType??"text/plain"),storage:"inline" as const}:await graphArtifactDto(service,material)});
         }
-        submissions.push({ id: artifact.id, digest: hash, createdAt: round.createdAt, artifact: dto, contextArtifacts,
+        const readable = [artifact, ...snapshot.artifacts.filter(a => contextArtifacts.some(c => c.artifactId === a.id))];
+        const externalIds = new Set(readable.flatMap(a => a.dependencies.filter(r => r.kind === "external").map(r => r.id)));
+        const contextExternals = snapshot.externals.filter(e => externalIds.has(e.id)).map(e => ({ externalId: e.id, source: e.source, capturedAt: e.capturedAt }));
+        submissions.push({ id: artifact.id, digest: hash, createdAt: round.createdAt, artifact: dto, contextArtifacts, contextExternals,
           ...(artifact.revisedSummary ? { revisionSummary: { body: artifact.revisedSummary, digest: digest(artifact.revisedSummary), createdAt: round.createdAt, previousSubmissionId: artifact.revisedFrom! } } : {}) });
       }
       const last = rounds.at(-1)!;
       reviews.push({ id: graphReviewHandle(run.id, step.id), stepId: step.id, artifactName: g.action(run, step).artifact!.name,
         policyId: step.reviewRounds!.at(-1)!.reviewConfig.policy.id, controlPlane: last.controlPlane!,
         status: run.status === "abandoned" || !effectiveStep(run, step.id) ? "cancelled" : last.status === "passed" ? "passed" : last.status === "changes_requested" ? "awaiting_revision" : last.status === "awaiting_runner_vote" ? "awaiting_runner_vote" : "pending",
-        currentRoundId: last.id, createdAt: rounds[0].createdAt, updatedAt: snapshot.reviews.filter(r => step.reviewRounds!.some(round => round.id === r.roundId)).map(r => r.endedAt ?? r.createdAt).sort().at(-1) ?? last.createdAt,
+        currentRoundId: step.reviewRounds!.at(-1)!.id, createdAt: step.reviewRounds![0].createdAt, updatedAt: snapshot.reviews.filter(r => step.reviewRounds!.some(round => round.id === r.roundId)).map(r => r.endedAt ?? r.createdAt).sort().at(-1) ?? last.createdAt,
         submissions, rounds, ...(last.result?.status === "passed" ? { outcome: { status: "passed" as const, submissionId: last.submissionId, roundId: last.id, completedAt: last.result.completedAt } } : {}) });
     }
     const step = snapshot.steps.find(s => s.id === selected) ?? snapshot.steps.find(s => effectiveStep(run, s.id) && s.status === "awaiting_review");
@@ -103,16 +106,20 @@ export async function readRun(runsRoot: string, id: string): Promise<legacy.RunS
   if (run && isGraphRun(run)) return project(runsRoot, await service!.snapshot(id));
   throw missing;
 }
-export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0] & {viewRoundId?:string;viewMaterialIndex?:number;service?:ContextControl}) {
+export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0] & {viewRoundId?:string;viewMaterialIndex?:number;service?:ContextControl;viewActorId?:string}) {
   const id = identity(input.reviewId); if (!id) return legacy.findArtifactReview(input);
-  const run = await use(input, async (g,_,service) => project(input.runsRoot, await g.reviewSnapshot(id.runId,id.stepId,input.viewRoundId), id.stepId,input.viewRoundId,input.viewMaterialIndex,service));
+  const run = await use(input, async (g,_,service) => {
+    const snapshot = await g.reviewSnapshot(id.runId,id.stepId,input.viewRoundId,input.viewActorId);
+    const personal = input.viewActorId && snapshot.steps.find(s => s.id === id.stepId)?.reviewRounds?.find(r => r.id === input.viewRoundId)?.reviewConfig.reviewers[input.viewActorId]?.kind === "agent" ? input.viewActorId : undefined;
+    return project(input.runsRoot, snapshot, id.stepId,input.viewRoundId,input.viewMaterialIndex,service,personal);
+  });
   const review = run.artifactReviews!.find(r => r.id === input.reviewId);
   if (!review) throw failure("NOT_FOUND", `Graph Step has no Review: ${id.stepId}`);
   return { run, review };
 }
-export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0]) {
+export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0] & { service?: ContextControl }) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForActor(input);
-  return legacy.artifactReviewForActor({ ...await findArtifactReview(input), roundId: input.roundId, actorId: input.actorId });
+  return legacy.artifactReviewForActor({ ...await findArtifactReview({ ...input, viewRoundId: input.roundId, viewActorId: input.actorId }), roundId: input.roundId, actorId: input.actorId });
 }
 export async function readArtifactReviewForRunner(input: Parameters<typeof legacy.readArtifactReviewForRunner>[0]) {
   if (!identity(input.reviewId)) return legacy.readArtifactReviewForRunner(input);
@@ -208,7 +215,7 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
   }));
   return attemptId ? agentContext({ ...input, attemptId }) : undefined;
 }
-export async function markArtifactReviewAgentCliReady(input: Parameters<typeof legacy.markArtifactReviewAgentCliReady>[0]) {
+export async function markArtifactReviewAgentCliReady(input: Parameters<typeof legacy.markArtifactReviewAgentCliReady>[0] & { service?: ContextControl }) {
   if (!identity(input.reviewId)) return legacy.markArtifactReviewAgentCliReady(input);
   return mutateAttempt(input, (_r, a, now) => { a.cliReadyAt ??= now(); a.session = { ...a.session, ...(input.protocolVersion !== undefined ? { protocolVersion: input.protocolVersion } : {}), ...(input.sessionId ? { id: input.sessionId } : {}), ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
 }
@@ -305,14 +312,16 @@ export async function resolveArtifactReviewComment(input: Parameters<typeof lega
 
 export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation: NodeMutation }) {
   if (!identity(input.reviewId)) return legacy.mutateArtifactReviewNodes(input);
-  await agentContext(input);
-  const materialIds = await use(input, async (g, id) => {
-    const snapshot = await g.reviewSnapshot(id.runId, id.stepId);
-    const step = snapshot.steps.find(s => s.id === id.stepId)!;
-    const round = step.reviewRounds?.at(-1);
-    if (round?.id !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
-    return [round.artifactId, ...Object.values(step.inputs ?? {}).flat().filter(r => r.kind === "artifact").map(r => r.id)];
-  });
+  const context = await agentContext(input);
+  if (context.review.currentRoundId !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
+  const submission = context.review.submissions.find(s => s.id === context.round.submissionId)!;
+  // Reads and node writes consume the same personal, frozen context selection.
+  // The personal CAS below still checks that this Round is current at save time.
+  const materialIds = [
+    `artifact:${submission.id}`,
+    ...submission.contextArtifacts.flatMap(a => a.artifactId ? [`artifact:${a.artifactId}`] : []),
+    ...(submission.contextExternals ?? []).map(e => `external:${e.externalId}`)
+  ];
   return mutateAttempt(input, (review, _attempt, now) => {
     if (!review.nodeTree || !review.nodeStates) throw failure("INVALID_STATE", "Review nodes are not enabled");
     review.comments = mutateReviewNode({ nodeTree: review.nodeTree, nodeStates: review.nodeStates }, review.comments, input.mutation, item => {
@@ -320,7 +329,7 @@ export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation
       if (native) {
         if (Object.keys(native).some(k => !["location", "context", "targetRef"].includes(k)) || typeof native.location !== "string" || !native.location.trim() || native.context !== undefined && (typeof native.context !== "string" || native.context.length > 500)) throw failure("INVALID_ARGUMENT", "Invalid graph Comment anchor");
         const ref = native.targetRef as { kind?: string; id?: string } | undefined;
-        if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || ref.kind !== "artifact" || !materialIds.includes(ref.id!))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
+        if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || !["artifact", "external"].includes(ref.kind!) || !materialIds.includes(`${ref.kind}:${ref.id}`))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
       }
       return { commentId: `comment-${randomUUID()}`, body: item.body, severity: item.severity, createdAt: now(), ...(native ? { anchor: native as NonNullable<Review["comments"][number]["anchor"]> } : {}) };
     });

@@ -1,17 +1,17 @@
-memsphere continue report --artifact '{"applicable":true}'
-memsphere run review report --assignment A --artifact '{"applicable":true,"comments":[]}'
+"$MEMSPHERE_CLI" continue report --artifact '{"applicable":true}'
+"$MEMSPHERE_CLI" run review report --assignment A --artifact '{"applicable":true,"comments":[]}'
 省略 comments 保留逐条保存的意见及标识；显式数组完整替换当前节点。[] 确认全部满足，或开放审查未发现额外问题。
-memsphere continue comment add --artifact '{"body":"Issue","severity":"risk"}'
-memsphere continue comment update --comment C --artifact '{"body":"Updated issue"}'
-memsphere continue comment delete --comment C
-memsphere continue update --node N --artifact '{"applicable":true,"comments":[]}'
+"$MEMSPHERE_CLI" continue comment add --artifact '{"body":"Issue","severity":"risk"}'
+"$MEMSPHERE_CLI" continue comment update --comment C --artifact '{"body":"Updated issue"}'
+"$MEMSPHERE_CLI" continue comment delete --comment C
+"$MEMSPHERE_CLI" continue update --node N --artifact '{"applicable":true,"comments":[]}'
 规则异常 add 同时提供 rulePath/result。无当前节点时 add 必须传 --node。所有内容命令均支持 --artifact-file F，和 --artifact 二选一。编辑不推进，不必反复 show。
-memsphere continue list
-memsphere continue show
-memsphere continue show --node N
-memsphere continue show --all
+"$MEMSPHERE_CLI" continue list
+"$MEMSPHERE_CLI" continue show
+"$MEMSPHERE_CLI" continue show --node N
+"$MEMSPHERE_CLI" continue show --all
 
-Memory 默认读取当前 Project，不会自动添加 --run。需要 Run 冻结快照时，显式使用 `memsphere memory list --run <run-id> --output json` 或 `memsphere memory read <reference> --run <run-id> --output json`（须有可用快照）。正式评审规则与契约始终采用冻结版本，当前 Project Memory 仅作为辅助证据。
-ChangeSet 证据通过 `memsphere memory change show <change-id> --checkpoint <digest> --part summary|diff|validation` 读取；Memory 正文使用 `--part memory --reference <reference> --side before|after`，不存在的一侧返回 null。digest 过期时拒绝读取。评审材料应注明 ChangeSet ID、checkpoint digest、相关逻辑引用及这些读取命令，不应将 Memory 全文复制进 Artifact 或依赖内部存储路径。此入口只读，Reviewer 仍不得 validate/edit/publish/claim。
+Memory 默认读取当前 Project，不会自动添加 --run。需要 Run 冻结快照时，显式使用 `"$MEMSPHERE_CLI" memory list --run <run-id> --output json` 或 `"$MEMSPHERE_CLI" memory read <reference> --run <run-id> --output json`（须有可用快照）。正式评审规则与契约始终采用冻结版本，当前 Project Memory 仅作为辅助证据。
+ChangeSet 证据通过 `"$MEMSPHERE_CLI" memory change show <change-id> --checkpoint <digest> --part summary|diff|validation` 读取；Memory 正文使用 `--part memory --reference <reference> --side before|after`，不存在的一侧返回 null。digest 过期时拒绝读取。评审材料应注明 ChangeSet ID、checkpoint digest、相关逻辑引用及这些读取命令，不应将 Memory 全文复制进 Artifact 或依赖内部存储路径。此入口只读，Reviewer 仍不得 validate/edit/publish/claim。
 
 省略 --part 与显式 --part summary 等价；正文读取省略 --side 与显式 --side after 等价。显式选项均保留，--reference 只筛选。checkpoint 同时固定范围、基线、正文和校验结果，未校验的候选编辑不改变这些材料。旧 checkpoint 缺少冻结材料描述时须由 Runner 显式重新校验，Reviewer 不得执行 validate。

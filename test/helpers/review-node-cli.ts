@@ -45,12 +45,9 @@ export async function reviewCliFixture(t: test.TestContext, project?: {
   const moduleCli = async (args: string[], ok = true) => {
     let result;
     try {
-      // The native launcher binds --assignment before invoking these handlers.
-      // Module tests supply that established input explicitly; launcher binding
-      // and rejection continue to be covered by the native scenarios.
-      const boundArgs = args[0] === "run" && args[1] === "review" && !args.includes("--assignment")
-        ? [...args, "--assignment", f.claimed.assignment.id!] : args;
-      result = await invokeCliModule(boundArgs, f.cwd, env, runtime.descriptor.cliEntrypoint);
+      // In-process calls use the same real command tree and Session binding as
+      // the native launcher; no synthetic --assignment injection is needed.
+      result = await invokeCliModule(args, f.cwd, env, runtime.descriptor.cliEntrypoint);
     }
     catch (error) {
       if (ok) throw error;

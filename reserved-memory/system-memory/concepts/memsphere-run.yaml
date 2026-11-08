@@ -4,6 +4,10 @@ names:
   - memsphere-run
   - Run
 defines:
+  - "graph 与自由探索均可通过 run external add 登记 Run 的 External；登记不创建或完成 Step、不推进图。External 由 Artifact.dependencies 的 external 引用固定，不由 Step 直接引用，也不成为调度依赖；来源变化须登记新 External。"
+  - "graph report 可用 --depends-on artifact:ID|external:ID 或结构化 --file 的 dependencies 显式补充固定依据；二者互斥，不支持 graph tag 选择器。强制 Step.inputs 始终保留，补充 Artifact 只允许本实例冻结数据/控制来源中已接纳且当前有效的版本，不因显式引用增加调度边。"
+  - "graph 修订省略 dependencies 时继承明确 revisedFrom 前身的补充依赖，显式空数组清空补充集合，非空数组完整替换；强制输入不清空。回溯替代有明确前身时沿用该规则，独立循环实例不猜测继承。同一来源多个实例以具体 trigger/collection 证据核验，空 collect 的条件与控制来源仍可显式引用；证据缺失明确失败。"
+  - "run external add --run R --change C --checkpoint D 经官方固定读取捕获 summary、diff、before/after 正文和 validation 为原始 JSON External，与 --source/--content/--file 互斥。完整构造后复核 D 成功才登记，复核期间变化或损坏失败且不登记半份对象；复核后产生新 checkpoint 不改变已捕获正文。External 是原始依据，不自动代表正式评审通过。"
   - 一次有名称、有状态且可追溯的运行，可执行 Procedure，也可承载 Agent 自由探索。
   - Procedure 是可复用的流程定义，Run 是一次具体执行。流程执行按 Procedure 的 flow 过程或 graph 依赖展开，自由探索模式围绕逐步形成的产物及其依赖关系展开。
   - Step 是某个 Action 的执行实例。自由探索中的 Artifact 是围绕明确目的组织、可独立阅读或使用，并值得供后续引用、评审、修订或交付保留的一份结果；External 是引用的外部资料，Review 是对产物的评审或反馈。Run 将这些对象组织为同一次运行的上下文。
