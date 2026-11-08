@@ -67,12 +67,9 @@ test("Publisher always checks out trusted master, uses minimal permissions and n
   assert.match(steps.at(-1).run, /export CHECKED_OUT_SHA="\$\(git rev-parse HEAD\)"/);
   assert.equal(steps.at(-1).env.FULL_HEALTH_PUBLISH_LEGACY, "${{ vars.FULL_HEALTH_PUBLISH_LEGACY }}");
   const ci = parse(await readFile(".github/workflows/ci.yml", "utf8"));
-  const bootstrap = ci.jobs["full-health-bootstrap"];
-  assert.match(bootstrap.if, /github.actor == github.repository_owner/);
-  assert.match(bootstrap.if, /inputs.reviewed_sha == github.sha/);
-  assert.equal(bootstrap.steps[0].with.ref, "${{ github.sha }}");
-  assert.equal(bootstrap.permissions.statuses, "write");
+  assert.equal(ci.jobs["full-health-bootstrap"], undefined);
+  assert.equal(ci.on.workflow_dispatch.inputs.full_health_bootstrap, undefined);
+  assert.equal(ci.on.workflow_dispatch.inputs.reviewed_sha, undefined);
   assert.equal(ci.permissions.statuses, undefined);
-  assert.equal(ci.jobs.plan.if, "${{ !inputs.full_health_bootstrap }}");
-  assert(bootstrap.steps.some((s: any) => s.run === "node scripts/ci/full-health.mjs --bootstrap --publish"));
+  assert.equal(ci.jobs.plan.if, undefined);
 });
