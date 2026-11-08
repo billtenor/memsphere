@@ -5,6 +5,26 @@ import type { AppInstallation, AppProject } from "../src/app/state.js";
 import { removeBusinessStore } from "../src/project/business-stores.js";
 import { businessFixture } from "./helpers/business-data.js";
 
+import { waitForTestState } from "./helpers/test-state.js";
+
+// Register before starting operations: fixture disposal must follow their completion,
+// even when TestContext cancellation has already started its after hooks.
+function ownOperations(fixtures: Array<{beforeCleanup: (cleanup: () => Promise<void>) => void}>, release: () => void, removeGlobals = () => {}) {
+  const pending: Promise<unknown>[] = [];
+  let cleaning: Promise<void> | undefined;
+  const cleanup = () => cleaning ??= (async () => {
+    release();
+    try { await waitForTestState(Promise.allSettled(pending), "App operations to finish during cleanup"); }
+    finally { removeGlobals(); }
+  })();
+  for (const fixture of fixtures) fixture.beforeCleanup(cleanup);
+  return {cleanup, track<T>(operation: Promise<T>): Promise<T> {
+    pending.push(operation);
+    void operation.catch(() => {});
+    return operation;
+  }};
+}
+
 async function valueFixture(t: import("node:test").TestContext) {
   const { writeFile, mkdir } = await import("node:fs/promises");
   const { join } = await import("node:path");
@@ -135,12 +155,12 @@ test("a binding token cannot be used in another Project",{timeout:30000},async t
 test("a read and its binding token remain consistent across a rebinding attempt",{timeout:30000},async t=>{
   const f=await valueFixture(t);const {withSharedStoreLock}=await import("../src/project/shared-store-lock.js");
   const {FilesystemJsonValueStoreFactory}=await import("../src/data/extensions/filesystem-json-valuestore/index.js");
-  let release!:()=>void,reached!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{reached=resolve});t.after(()=>release());
+  let release!:()=>void,reached!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{reached=resolve});const owned=ownOperations([f.fixture],()=>release());
   const original=FilesystemJsonValueStoreFactory.prototype.openExisting;
   t.mock.method(FilesystemJsonValueStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){const store=await original.apply(this,args);const get=store.get.bind(store);store.get=async(...a)=>{reached();await barrier;return get(...a)};return store;});
-  const reading=f.read();await entered;
+  const reading=owned.track(f.read());await waitForTestState(entered,"Store read entry",t.signal);
   let switched=false;
-  const switching=f.configureApp(f.context,"example.app",{store:"second"}).then(()=>{switched=true;});
+  const switching=owned.track(f.configureApp(f.context,"example.app",{store:"second"}).then(()=>{switched=true;}));
   await assert.rejects(withSharedStoreLock(f.fixture.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
   assert.equal(switched,false,"configure must not complete while the read is in flight");
   assert.equal((await f.readAppState(f.project)).installations["example.app"]!.config.store,"first");
@@ -202,13 +222,17 @@ for (const mode of ["all", "async"]) for (const outcome of ["recover", "throw", 
     const barrier = new Promise<void>(resolve => { release = resolve; });
     const reached = new Promise<void>(resolve => { entered = resolve; });
     Object.assign(globalThis, {__issue137RecoveryBarrier:barrier, __issue137RecoveryEntered:entered});
+    const owned = ownOperations([f.fixture], release, () => {
+      delete (globalThis as Record<string,unknown>).__issue137RecoveryBarrier;
+      delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+    });
     let completed = false;
     let configured = false;
     try {
-      const result = f.invoke("nativebarrier", {mode, outcome, token, value:{name:"duplicate",count:2}})
-        .then(value => { completed = true; return {value}; }, error => { completed = true; return {error}; });
-      await reached;
-      const switching = f.configureApp(f.context, "example.app", {store:"second"}).then(() => { configured = true; });
+      const result = owned.track(f.invoke("nativebarrier", {mode, outcome, token, value:{name:"duplicate",count:2}})
+        .then(value => { completed = true; return {value}; }, error => { completed = true; return {error}; }));
+      await waitForTestState(reached, "native recovery entry", t.signal);
+      const switching = owned.track(f.configureApp(f.context, "example.app", {store:"second"}).then(() => { configured = true; }));
       const {withSharedStoreLock} = await import("../src/project/shared-store-lock.js");
       await assert.rejects(withSharedStoreLock(f.fixture.root, async () => {}, AbortSignal.timeout(300)), {name:"TimeoutError"});
       assert.equal(completed, false);
@@ -220,10 +244,50 @@ for (const mode of ["all", "async"]) for (const outcome of ["recover", "throw", 
       await switching;
       assert.equal(configured, true);
     } finally {
-      release();
-      delete (globalThis as Record<string,unknown>).__issue137RecoveryBarrier;
-      delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+      await owned.cleanup();
     }
+  });
+}
+
+for (const failure of ["missing notification", "cancelled wait"] as const) {
+  test(`recovery cleanup finishes after ${failure}`, {timeout:30000}, async t => {
+    let directory!: string;
+    await t.test("controlled recovery wait", async child => {
+      const f = await valueFixture(child);
+      directory = f.fixture.directory;
+      const token = (await f.read()).binding.token;
+      let release!: () => void, actualEntry!: () => void;
+      const barrier = new Promise<void>(resolve => { release = resolve; });
+      const actuallyEntered = new Promise<void>(resolve => { actualEntry = resolve; });
+      // Observe the real recovery callback but deliberately omit the notification
+      // consumed by the test wait. No product failure or scheduling delay is faked.
+      const missing = new Promise<void>(() => {});
+      Object.assign(globalThis, {__issue137RecoveryBarrier:barrier, __issue137RecoveryEntered:actualEntry});
+      const owned = ownOperations([f.fixture], release, () => {
+        delete (globalThis as Record<string,unknown>).__issue137RecoveryBarrier;
+        delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+      });
+      let completed = false;
+      const operation = owned.track(f.invoke("nativebarrier", {mode:"all", outcome:"recover", token, value:{name:"duplicate",count:2}})
+        .then(value => { completed = true; return value; }));
+      try {
+        await waitForTestState(actuallyEntered, "actual recovery callback", child.signal);
+        assert.equal(completed, false);
+        const controller = new AbortController();
+        const waiting = waitForTestState(missing, "deliberately omitted recovery notification", AbortSignal.any([child.signal, controller.signal]), 25);
+        if (failure === "cancelled wait") controller.abort(new Error("controlled cancellation"));
+        await assert.rejects(waiting, failure === "cancelled wait" ? /controlled cancellation/ : {code:"TEST_STATE_TIMEOUT"});
+      } finally { await owned.cleanup(); }
+      assert.equal(await operation, "started");
+      assert.equal(completed, true);
+      assert.equal("__issue137RecoveryEntered" in globalThis, false);
+      assert.equal("__issue137RecoveryBarrier" in globalThis, false);
+      const {withSharedStoreLock} = await import("../src/project/shared-store-lock.js");
+      await withSharedStoreLock(f.fixture.root, async () => {}, AbortSignal.timeout(5000));
+      await f.configureApp(f.context, "example.app", {store:"second"});
+    });
+    const {stat} = await import("node:fs/promises");
+    await assert.rejects(stat(directory), {code:"ENOENT"});
   });
 }
 
@@ -246,11 +310,15 @@ test("overlapping App scopes remain independent when one closes before the other
     __issue137RecoveryBarriers: barriers,
     __issue137RecoveryEntered: (key:string) => key === "first" ? firstEntered() : secondEntered()
   });
+  const owned = ownOperations([first.fixture, second.fixture], () => { releaseFirst(); releaseSecond(); }, () => {
+    delete (globalThis as Record<string,unknown>).__issue137RecoveryBarriers;
+    delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+  });
   try {
-    const successful = first.invoke("nativebarrier", {key:"first", mode:"all", outcome:"recover", token:firstToken, value:{name:"duplicate",count:2}});
-    const failing = second.invoke("nativebarrier", {key:"second", mode:"async", outcome:"throw", token:secondToken, value:{name:"duplicate",count:2}})
-      .then(value => ({value}), error => ({error}));
-    await bothEntered;
+    const successful = owned.track(first.invoke("nativebarrier", {key:"first", mode:"all", outcome:"recover", token:firstToken, value:{name:"duplicate",count:2}}));
+    const failing = owned.track(second.invoke("nativebarrier", {key:"second", mode:"async", outcome:"throw", token:secondToken, value:{name:"duplicate",count:2}})
+      .then(value => ({value}), error => ({error})));
+    await waitForTestState(bothEntered, "both recovery entries", t.signal);
     releaseFirst();
     assert.equal(await successful, "started");
     const {withSharedStoreLock} = await import("../src/project/shared-store-lock.js");
@@ -259,23 +327,21 @@ test("overlapping App scopes remain independent when one closes before the other
     const settled = await failing;
     assert.equal("error" in settled && settled.error.code, "ALREADY_EXISTS");
   } finally {
-    releaseFirst(); releaseSecond();
-    delete (globalThis as Record<string,unknown>).__issue137RecoveryBarriers;
-    delete (globalThis as Record<string,unknown>).__issue137RecoveryEntered;
+    await owned.cleanup();
   }
 });
 
 test("an unhandled Promise branch drains the failing write before reconfiguration",{timeout:30000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;
   const {FilesystemJsonValueStoreFactory}=await import("../src/data/extensions/filesystem-json-valuestore/index.js");
-  let release!:()=>void,started!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{started=resolve});t.after(()=>release());
+  let release!:()=>void,started!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{started=resolve});const owned=ownOperations([f.fixture],()=>release());
   const original=FilesystemJsonValueStoreFactory.prototype.openExisting;
   t.mock.method(FilesystemJsonValueStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){
     const store=await original.apply(this,args);const create=store.create.bind(store);
     store.create=async(...a)=>{started();await barrier;return create(...a);};return store;
   });
-  const result=f.invoke("branchfinally",{token,value:{name:"duplicate",count:2}}).then(()=>undefined,error=>error);await entered;
-  let configured=false;const switching=f.configureApp(f.context,"example.app",{store:"second"}).then(()=>{configured=true;});
+  const result=owned.track(f.invoke("branchfinally",{token,value:{name:"duplicate",count:2}}).then(()=>undefined,error=>error));await waitForTestState(entered,"Store create entry",t.signal);
+  let configured=false;const switching=owned.track(f.configureApp(f.context,"example.app",{store:"second"}).then(()=>{configured=true;}));
   const {withSharedStoreLock}=await import("../src/project/shared-store-lock.js");
   await assert.rejects(withSharedStoreLock(f.fixture.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
   assert.equal(configured,false);release();assert.equal((await result as {code?:string})?.code,"ALREADY_EXISTS");await switching;assert.equal(configured,true);
@@ -321,11 +387,11 @@ for(const mode of ["fire","firethrow","cancel"] as const) test(`in-flight Store 
   const {FilesystemJsonValueStoreFactory}=await import("../src/data/extensions/filesystem-json-valuestore/index.js");
   const token=(await f.read()).binding.token;let release!:()=>void,reached!:()=>void;
   const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{reached=resolve});
-  t.after(()=>release());
+  const controller=new AbortController();const owned=ownOperations([f.fixture],()=>{release();controller.abort();});
   const original=FilesystemJsonValueStoreFactory.prototype.openExisting;
   t.mock.method(FilesystemJsonValueStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){const store=await original.apply(this,args);const upsert=store.upsert!.bind(store);store.upsert=async(...a)=>{reached();await barrier;return upsert(...a)};return store;});
-  const controller=new AbortController();const pending=f.invoke(mode,{token,value:{name:"pending",count:4}},controller.signal);const outcome=pending.then(()=>undefined,error=>error);
-  await entered;if(mode==="cancel")controller.abort();
+  const pending=owned.track(f.invoke(mode,{token,value:{name:"pending",count:4}},controller.signal));const outcome=pending.then(()=>undefined,error=>error);
+  await waitForTestState(entered,"Store write entry",t.signal);if(mode==="cancel")controller.abort();
   await assert.rejects(withSharedStoreLock(f.fixture.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
   release();const result=await outcome;if(mode!=="fire")assert(result);else assert.equal(result,undefined);
   await f.configureApp(f.context,"example.app",{store:"second"});
@@ -357,7 +423,7 @@ test("a new host rejects an old token after same-ID re-registration without inte
 test("terminating a stuck shared App releases the Project lock",{timeout:45000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;const stuck=await launchWorker(t,f.fixture.root,"invoke",token,f.fixture.beforeCleanup);assert.equal((await stuck.next()).event,"locked");
   const blocked=await launchWorker(t,f.fixture.root,"remove-blocked","first",f.fixture.beforeCleanup);assert.equal((await blocked.next()).event,"started");assert.deepEqual(await blocked.next(),{event:"failed",name:"TimeoutError"});
-  const exited=new Promise<void>(resolve=>stuck.child.once("exit",()=>resolve()));stuck.child.kill("SIGKILL");await exited;
+  const exited=new Promise<void>(resolve=>stuck.child.once("exit",()=>resolve()));stuck.child.kill("SIGKILL");await waitForTestState(exited,"terminated worker exit",t.signal);
   const removal=await launchWorker(t,f.fixture.root,"remove","first",f.fixture.beforeCleanup);assert.equal((await removal.next()).event,"started");assert.equal((await removal.next()).event,"removed");
   await f.fixture.createStore("first");
   assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"old",count:1});
@@ -485,16 +551,16 @@ for (const reader of [false, true]) for (const outcome of ["success", "recover",
 }
 
 test("an unfinished output stream keeps reconfiguration waiting until it settles",{timeout:30000},async t=>{
-  const {project,context,configureApp,invokeAppOperation}=await dataFixture(t);
+  const {project,context,configureApp,invokeAppOperation,fixture}=await dataFixture(t);
   const {FilesystemDataStoreFactory}=await import("../src/data/extensions/filesystem-datastore/index.js");
-  let release!:()=>void,started!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{started=resolve});t.after(()=>release());
+  let release!:()=>void,started!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve});const entered=new Promise<void>(resolve=>{started=resolve});const owned=ownOperations([fixture],()=>release());
   const original=FilesystemDataStoreFactory.prototype.openExisting;
   t.mock.method(FilesystemDataStoreFactory.prototype,"openExisting",async function(...args:Parameters<typeof original>){
     const store=await original.apply(this,args);if(args[1]!=="files")return store;const get=store.get.bind(store);
     store.get=async(...a)=>{const item=await get(...a);if(item)item.data.payload.content.stream=()=>new ReadableStream({async pull(c){started();await barrier;c.close();}});return item;};return store;
   });
-  const running=invokeAppOperation(project,"example.data","streamunhandled",{});await entered;
-  let configured=false;const switching=configureApp(context,"example.data",{store:"files"}).then(()=>{configured=true;});
+  const running=owned.track(invokeAppOperation(project,"example.data","streamunhandled",{}));await waitForTestState(entered,"output stream entry",t.signal);
+  let configured=false;const switching=owned.track(configureApp(context,"example.data",{store:"files"}).then(()=>{configured=true;}));
   const {withSharedStoreLock}=await import("../src/project/shared-store-lock.js");
   await assert.rejects(withSharedStoreLock(project.paths.root,async()=>{},AbortSignal.timeout(300)),{name:"TimeoutError"});
   assert.equal(configured,false);release();assert.equal(await running,"started");await switching;assert.equal(configured,true);
