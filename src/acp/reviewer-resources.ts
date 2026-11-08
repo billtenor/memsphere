@@ -4,7 +4,7 @@ import { graphArtifactDto } from "../context_control/review-repository.js";
 import { buildReviewContract } from "./review-contract.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
-import { open, realpath, lstat } from "node:fs/promises";
+import { open, realpath, lstat, mkdtemp, link, rm } from "node:fs/promises";
 import { readConfig } from "../config.js";
 import { boundAgentReviewSession, boundReviewNodeContext, expandReviewArtifact } from "./review-session.js";
 import { inReviewerSession } from "./reviewer-commands.js";
@@ -57,25 +57,42 @@ export async function exportReviewerBody(file: string, bytes: Uint8Array) {
   // can name the same directory without sharing the root's lexical spelling.
   if (!contained(root, parent)) throw denied(file);
   const canonical = join(parent, basename(target));
-  const handle = await open(canonical, "wx");
-  const identity = await handle.stat();
-  const ownsTarget = async () => {
-    try { const current = await lstat(canonical); return current.isFile() && current.dev === identity.dev && current.ino === identity.ino; }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return false; throw error; }
-  };
-  const verify = async () => {
-    if (await realpath(dirname(target)) !== parent || !await ownsTarget()) throw denied(file);
-  };
+  // Complete the body privately on the same filesystem. Publishing a hard
+  // link is exclusive: a failed write never creates a partial target, and a
+  // concurrent destination is neither overwritten nor removed during cleanup.
+  const temporary = await mkdtemp(join(parent, ".memsphere-export-"));
+  const staged = join(temporary, "body");
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let failed = false;
   try {
-    await verify();
+    handle = await open(staged, "wx", 0o600);
+    const identity = await handle.stat();
+    const verify = async (path: string) => {
+      if (await realpath(dirname(target)) !== parent) throw denied(file);
+      let current;
+      try { current = await lstat(path); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw denied(file); throw error; }
+      if (!current.isFile() || current.dev !== identity.dev || current.ino !== identity.ino) throw denied(file);
+    };
+    await verify(staged);
     await handle.writeFile(bytes);
-    await verify();
+    await handle.close();
+    handle = undefined;
+    await verify(staged);
+    await link(staged, canonical);
+    await verify(canonical);
   } catch (error) {
-    // Node has no portable unlink-if-this-inode operation. A path check followed
-    // by rm can delete a concurrent replacement; retain the failed copy instead.
-    if (error instanceof Error) error.message += "; export failed: output may be incomplete and was not automatically removed";
+    failed = true;
     throw error;
-  } finally { await handle.close(); }
+  } finally {
+    try { await handle?.close(); }
+    catch (error) { if (!failed) throw error; }
+    finally {
+      // Never unlink the public target, including after a post-publication
+      // identity failure. Preserve the original error if private cleanup fails.
+      await rm(temporary, { recursive: true, force: true }).catch(error => { if (!failed) throw error; });
+    }
+  }
 }
 
 type Options = { run?: string; assignment?: string; artifact?: string | string[]; external?: string; review?: string; round?: string; step?: string; out?: string; output?: "text" | "json" };
