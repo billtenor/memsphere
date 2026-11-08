@@ -715,3 +715,23 @@ test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, 
     await runtime.cleanup();
   }
 });
+test("caller cancellation captures the live Provider and waits for its shutdown", { timeout: 15000 }, async t => {
+  const controller = new AbortController();
+  let provider: ChildProcessWithoutNullStreams | undefined;
+  let captured = 0;
+  await assert.rejects(runAgentReviewAcpSession({
+    launch: fakeClientLaunch("progress-hang", { startupTimeoutMs: 3000, idleTimeoutMs: null, maxRuntimeMs: null }),
+    signal: AbortSignal.any([controller.signal, t.signal]),
+    prompt: "Review", reminder: "Submit", workspaceRoot: tmpdir(),
+    isSubmitted: async () => false,
+    onSession: async () => { controller.abort(new Error("fixture canceled")); },
+    onPrompt: () => assert.fail("a canceled Session cannot advance to its prompt"),
+    onBeforeStop: async pid => {
+      captured++;
+      assert.equal(pid, provider!.pid);
+      assert.equal(provider!.exitCode, null, "capture ownership before requesting termination");
+    }
+  }, { spawn: launch => provider = crossSpawn(launch.command, launch.args, { cwd: launch.cwd, env: launch.env, stdio: "pipe" }) as ChildProcessWithoutNullStreams }), /fixture canceled/);
+  assert.equal(captured, 1);
+  assert.ok(provider!.exitCode !== null || provider!.signalCode !== null, "owned Provider exits before fixture reclamation");
+});

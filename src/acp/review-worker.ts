@@ -25,6 +25,7 @@ import { captureProcessIdentity } from "../context_control/review-process.js";
 import { startWindowsReviewJob } from "../context_control/windows-review-job.js";
 
 export type AgentReviewWorkerOptions = {
+  signal?: AbortSignal;
   config?: string;
   review?: string;
   round?: string;
@@ -37,12 +38,14 @@ export type AgentReviewWorkerOptions = {
 };
 
 export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOptions): Promise<void> {
+  options.signal?.throwIfAborted();
   const reviewId = requiredOption(options.review, "--review");
   const roundId = requiredOption(options.round, "--round");
   const assignmentId = requiredOption(options.assignment, "--assignment");
   const nodeExecutable = requiredOption(options.nodeExecutable, "--node-executable");
   const cliEntrypoint = requiredOption(options.cliEntrypoint, "--cli-entrypoint");
   const config = await readConfig(requiredOption(options.config, "--config"));
+  options.signal?.throwIfAborted();
   let workerJob: string | undefined;
   let enrollmentFailure: unknown;
   if (process.platform === "win32" && reviewId.startsWith("graph-review-")) {
@@ -90,6 +93,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   activity.recordLifecycle("running", "Agent worker started");
   let cliRuntime: Awaited<ReturnType<typeof createAgentReviewCliRuntime>> | undefined;
   try {
+    options.signal?.throwIfAborted();
     if (enrollmentFailure) throw enrollmentFailure;
     if (config.project?.store?.type === "embedded") {
       const canonical = await resolveWorkspaceIdentity(config.memoryRoot);
@@ -136,6 +140,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
     });
     const result = await (options.runSession ?? runAgentReviewAcpSession)({
       launch,
+      signal: options.signal,
       assertLaunchValid: () => assertArtifactReviewAgentAttemptRunning(common),
       onBeforeStop: providerPid => recordArtifactReviewAgentProcesses({ ...common, workerPid: process.pid, providerPid }),
       prompt: `${prompt}\n\n${claimed.run.language === "en"

@@ -40,36 +40,56 @@ async function fixture(t: test.TestContext, agent = false, advisory = false, mix
 
 test("graph ACP worker uses the real Session CLI to read the candidate and submit its assigned Review", { timeout: 60000 }, async t => {
   const f = await fixture(t, true, false, false, true);
-  const oldHome = process.env.MEMSPHERE_HOME;
-  process.env.MEMSPHERE_HOME = f.home;
-  try {
-    const initial = await reviews.readArtifactReviewForActor(f.input);
-    await runArtifactReviewAgentWorker({ config: join(f.root, "config.json"), review: f.input.reviewId, round: f.input.roundId, assignment: initial.assignment.id!, nodeExecutable: process.execPath, cliEntrypoint: fileURLToPath(new URL("../dist/cli.js", import.meta.url)), providerResolver: () => ({ id: "traex", buildLaunch: ({ actor, workspaceRoot, sessionEnv }) => ({ provider: "fake-test-provider", command: actor.agent.command, args: actor.agent.args, cwd: workspaceRoot, env: { ...process.env, MEMSPHERE_HOME: f.home, ...sessionEnv }, startupTimeoutMs: 10000, idleTimeoutMs: 10000, maxRuntimeMs: null, promptVersion: "artifact-review-v1" }) }) });
-    const result = await reviews.readArtifactReviewForActor(f.input);
-    assert.equal(result.assignment.status, "submitted", JSON.stringify(result.assignment.attempts));
-    assert.equal(result.assignment.submitted?.vote, "approve");
-    assert.ok(result.assignment.attempts?.[0].cliReadyAt);
-    assert.equal(result.round.status, "awaiting_runner_vote");
-  } finally { if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome; }
+  const startedAt = performance.now();
+  const work = (async () => {
+    t.signal.throwIfAborted();
+    const oldHome = process.env.MEMSPHERE_HOME;
+    process.env.MEMSPHERE_HOME = f.home;
+    try {
+      const initial = await reviews.readArtifactReviewForActor(f.input);
+      await runArtifactReviewAgentWorker({ signal: t.signal, config: join(f.root, "config.json"), review: f.input.reviewId, round: f.input.roundId, assignment: initial.assignment.id!, nodeExecutable: process.execPath, cliEntrypoint: fileURLToPath(new URL("../dist/cli.js", import.meta.url)), providerResolver: () => ({ id: "traex", buildLaunch: ({ actor, workspaceRoot, sessionEnv }) => ({ provider: "fake-test-provider", command: actor.agent.command, args: actor.agent.args, cwd: workspaceRoot, env: { ...process.env, MEMSPHERE_HOME: f.home, ...sessionEnv }, startupTimeoutMs: 10000, idleTimeoutMs: 10000, maxRuntimeMs: null, promptVersion: "artifact-review-v1" }) }) });
+      t.signal.throwIfAborted();
+      t.diagnostic(`Worker completed in ${Math.round(performance.now() - startedAt)}ms`);
+      const result = await reviews.readArtifactReviewForActor(f.input);
+      assert.equal(result.assignment.status, "submitted", JSON.stringify(result.assignment.attempts));
+      assert.equal(result.assignment.submitted?.vote, "approve");
+      assert.ok(result.assignment.attempts?.[0].cliReadyAt);
+      assert.equal(result.round.status, "awaiting_runner_vote");
+    } finally { if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome; }
+  })();
+  f.beforeCleanup(async () => { await work.catch(() => undefined); });
+  await work;
 });
 test("View-style worker launch outside an Embedded repository uses its verified canonical source", { timeout: 60000 }, async t => {
   const f = await fixture(t, true, false, false, true);
-  await runGit(["init", "-b", "master"], { cwd: f.root });
-  await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Embedded fixture"], { cwd: f.root });
-  const configPath = join(f.root, "config.json"), config = JSON.parse(await readFile(configPath, "utf8"));
-  config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
-  await writeFile(configPath, JSON.stringify(config));
-  const oldHome = process.env.MEMSPHERE_HOME; process.env.MEMSPHERE_HOME = f.home;
-  let source: string | undefined;
-  try {
-    const initial = await reviews.readArtifactReviewForActor(f.input);
-    await runArtifactReviewAgentWorker({ config: configPath, review: f.input.reviewId, round: f.input.roundId, assignment: initial.assignment.id!, workspaceRoot: f.cwd, nodeExecutable: process.execPath, cliEntrypoint: fileURLToPath(new URL("../dist/cli.js", import.meta.url)), providerResolver: () => ({ id: "traex", buildLaunch: ({ actor, workspaceRoot, sessionEnv }) => {
-      source = sessionEnv.MEMSPHERE_REVIEW_SOURCE_WORKSPACE;
-      return { provider: "fake-test-provider", command: actor.agent.command, args: actor.agent.args, cwd: workspaceRoot, env: { ...process.env, ...sessionEnv }, startupTimeoutMs: 10000, idleTimeoutMs: 10000, maxRuntimeMs: null, promptVersion: "artifact-review-v3" };
-    } }) });
-    assert.equal(source, f.root);
-    const completed = await reviews.readArtifactReviewForActor(f.input);
-    assert.equal(completed.assignment.status, "submitted", JSON.stringify(completed.assignment.attempts));
-    assert.equal(completed.assignment.submitted?.vote, "approve");
-  } finally { if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome; }
+  const startedAt = performance.now();
+  const work = (async () => {
+    t.signal.throwIfAborted();
+    await runGit(["init", "-b", "master"], { cwd: f.root });
+    t.signal.throwIfAborted();
+    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Embedded fixture"], { cwd: f.root });
+    t.signal.throwIfAborted();
+    const configPath = join(f.root, "config.json"), config = JSON.parse(await readFile(configPath, "utf8"));
+    config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+    await writeFile(configPath, JSON.stringify(config));
+    t.signal.throwIfAborted();
+    t.diagnostic(`Embedded setup completed in ${Math.round(performance.now() - startedAt)}ms`);
+    const oldHome = process.env.MEMSPHERE_HOME; process.env.MEMSPHERE_HOME = f.home;
+    let source: string | undefined;
+    try {
+      const initial = await reviews.readArtifactReviewForActor(f.input);
+      await runArtifactReviewAgentWorker({ signal: t.signal, config: configPath, review: f.input.reviewId, round: f.input.roundId, assignment: initial.assignment.id!, workspaceRoot: f.cwd, nodeExecutable: process.execPath, cliEntrypoint: fileURLToPath(new URL("../dist/cli.js", import.meta.url)), providerResolver: () => ({ id: "traex", buildLaunch: ({ actor, workspaceRoot, sessionEnv }) => {
+        source = sessionEnv.MEMSPHERE_REVIEW_SOURCE_WORKSPACE;
+        return { provider: "fake-test-provider", command: actor.agent.command, args: actor.agent.args, cwd: workspaceRoot, env: { ...process.env, ...sessionEnv }, startupTimeoutMs: 10000, idleTimeoutMs: 10000, maxRuntimeMs: null, promptVersion: "artifact-review-v3" };
+      } }) });
+      assert.equal(source, f.root);
+      t.signal.throwIfAborted();
+      t.diagnostic(`Embedded Worker completed in ${Math.round(performance.now() - startedAt)}ms`);
+      const completed = await reviews.readArtifactReviewForActor(f.input);
+      assert.equal(completed.assignment.status, "submitted", JSON.stringify(completed.assignment.attempts));
+      assert.equal(completed.assignment.submitted?.vote, "approve");
+    } finally { if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome; }
+  })();
+  f.beforeCleanup(async () => { await work.catch(() => undefined); });
+  await work;
 });

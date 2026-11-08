@@ -1,5 +1,6 @@
 import { registerReviewNodeCommands, reviewNodeCommand } from "./commands/review-nodes.js";
-import { installReviewerCommands } from "./acp/reviewer-commands.js";
+import { withConfigReadScope } from "./config-read-scope.js";
+import { installReviewerCommands, inReviewerSession } from "./acp/reviewer-commands.js";
 import { registerDaemonCommands, registerWaitTaskCommands } from "./daemon/commands.js";
 import { registerContinueCommand } from "./commands/continue.js";
 import { registerExplorationCommands } from "./commands/context-control.js";
@@ -93,6 +94,11 @@ import {
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
 export async function runCli(argv = process.argv): Promise<void> {
+  if (inReviewerSession()) return withConfigReadScope(() => executeCli(argv));
+  return executeCli(argv);
+}
+
+async function executeCli(argv: string[]): Promise<void> {
 const program = new Command();
 
 program

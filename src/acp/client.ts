@@ -17,6 +17,7 @@ export type AgentReviewAcpSession = {
 
 export async function runAgentReviewAcpSession(input: {
   launch: AgentReviewProviderLaunch;
+  signal?: AbortSignal;
   prompt: string;
   reminder: string;
   workspaceRoot: string;
@@ -28,9 +29,11 @@ export async function runAgentReviewAcpSession(input: {
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }, dependencies: { spawn?: typeof spawnAgent } = {}): Promise<AgentReviewAcpSession> {
+  input.signal?.throwIfAborted();
   const acp = await import("@agentclientprotocol/sdk");
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
   await input.assertLaunchValid?.();
+  input.signal?.throwIfAborted();
   const process = (dependencies.spawn ?? spawnAgent)(input.launch);
   const transport = new AbortController();
   let spawnFailure: Error | undefined;
@@ -79,6 +82,12 @@ export async function runAgentReviewAcpSession(input: {
   // Capture descendant identities while the Provider is still attached. Voting
   // completion alone cannot prove its process tree has stopped.
   const terminate = () => { void beforeStop().then(signalTermination, signalTermination); };
+  const onAbort = () => {
+    transport.abort(input.signal!.reason);
+    terminate();
+  };
+  input.signal?.addEventListener("abort", onAbort, { once: true });
+  if (input.signal?.aborted) onAbort();
   process.once("exit", () => {
     if (forceKillTimer) clearTimeout(forceKillTimer);
     forceKillTimer = undefined;
@@ -211,6 +220,7 @@ export async function runAgentReviewAcpSession(input: {
     }
     throw failureInFlight;
   } finally {
+    input.signal?.removeEventListener("abort", onAbort);
     startupTimeout.dispose();idleTimeout?.dispose();maxRuntimeTimeout?.dispose();
     try { await beforeStop(); }
     catch (cleanupError) {
@@ -315,7 +325,9 @@ async function promptUntilSubmission(
   waitForSubmission: (() => Promise<void>) | undefined,
   onPrompt: ((kind: "initial" | "reminder", prompt: string) => void | Promise<void>) | undefined
 ): Promise<{ submitted: true } | { submitted: false; response: acp.PromptResponse }> {
+  timeoutSignal.throwIfAborted();
   await onPrompt?.(kind, prompt);
+  timeoutSignal.throwIfAborted();
   if (!waitForSubmission) {
     return { submitted: false, response: await promptTurn(session, prompt, timeoutSignal) };
   }

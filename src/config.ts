@@ -1,3 +1,4 @@
+import { scopedConfigRead } from "./config-read-scope.js";
 import { runnerAgentsSchema } from "./runner/identity.js";
 import { readFile, stat, realpath } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -58,8 +59,11 @@ export type MemsphereConfig = {
 };
 
 export async function readConfig(configPath?: string): Promise<MemsphereConfig> {
-  if (configPath) return readConfigAt(resolve(configPath));
-  if (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID && process.env.MEMSPHERE_CONFIG_PATH) return readConfigAt(resolve(process.env.MEMSPHERE_CONFIG_PATH));
+  const path = configPath || (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID ? process.env.MEMSPHERE_CONFIG_PATH : undefined);
+  if (path) {
+    const absolute = resolve(path);
+    return scopedConfigRead(JSON.stringify([absolute, resolveMemsphereHome(), process.env.MEMSPHERE_REVIEW_SOURCE_WORKSPACE]), () => readConfigAt(absolute));
+  }
   return readProjectExecutionConfig();
 }
 
