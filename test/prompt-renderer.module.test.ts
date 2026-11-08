@@ -215,7 +215,7 @@ test("permission descriptions remain localized Prompt assets", () => {
   );
 });
 
-test("renderer reports missing injected assets and keeps fixture caches independent", () => {
+test("renderer reports missing injected assets with a diagnosable stage", () => {
   const renderer = createPromptRenderer({
     read() { throw new Error("fixture asset unavailable"); },
     partials: () => []
@@ -227,4 +227,19 @@ test("renderer reports missing injected assets and keeps fixture caches independ
     return true;
   });
   assert.match(renderPrompt("run.review-configuration-required", "en", { preflightJson: "{}" }), /run start/);
+});
+
+
+test("successful renderer instances keep compiled templates and partial engines isolated", () => {
+  const reads = [0, 0];
+  const make = (index: number, label: string) => createPromptRenderer({
+    read(_locale, _path) { reads[index]++; return `${label}:{{> fixture}}:{{preflightJson}}`; },
+    partials: () => [{ name: "fixture", source: `${label} partial` }]
+  });
+  const first = make(0, "first"), second = make(1, "second");
+  for (const input of ["one", "two"]) {
+    assert.equal(first.renderPrompt("run.review-configuration-required", "en", { preflightJson: input }), `first:first partial:${input}`);
+    assert.equal(second.renderPrompt("run.review-configuration-required", "en", { preflightJson: input }), `second:second partial:${input}`);
+  }
+  assert.deepEqual(reads, [1, 1], "both instances compile and then reuse only their own source");
 });

@@ -28,13 +28,24 @@ for (const [name, schema, initial, changed] of roots) test(`business operations 
   await assert.rejects(s.readData({}, root, "records", "item"), { code: "NOT_FOUND" });
 });
 
-test("business edits apply final-value validation and reject failed patches without changing value or revision", async () => {
-  const { service: s, root } = await businessDataModule(objectSchema);
+async function existingBusinessItem() {
+  const f = await businessDataModule(objectSchema);
   const input = { kind: "value" as const, value: { name: "before", count: 1 } };
-  await s.writeData({}, root, "records", "item", "create", input);
+  await f.service.writeData({}, f.root, "records", "item", "create", input);
+  return { ...f, input };
+}
+
+test("business edits validate the final complete value rather than intermediate patch states", async () => {
+  const { service: s, root } = await existingBusinessItem();
   await s.editData({}, root, "records", "item", [{ op: "remove", path: "/name" }, { op: "add", path: "/name", value: "after" }]);
+  const after = await s.readData({}, root, "records", "item");
+  assert.equal(after.revision, 2);
+  assert.deepEqual(after.value, { name: "after", count: 1 });
+});
+
+test("failed business patches preserve the complete value and revision", async () => {
+  const { service: s, root } = await existingBusinessItem();
   const before = await s.readData({}, root, "records", "item");
-  assert.equal(before.revision, 2); assert.deepEqual(before.value, { name: "after", count: 1 });
   for (const patch of [
     [{ op: "replace", path: "/count", value: 4 }, { op: "test", path: "/name", value: "wrong" }],
     [{ op: "replace", path: "/count", value: -1 }], [{ op: "remove", path: "/name" }]
@@ -42,10 +53,26 @@ test("business edits apply final-value validation and reject failed patches with
     await assert.rejects(s.editData({}, root, "records", "item", patch));
     assert.deepEqual(await s.readData({}, root, "records", "item"), before);
   }
-  await assert.rejects(s.editData({}, root, "records", "item", [], { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
-  await assert.rejects(s.writeData({}, root, "records", "item", "update", input, { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
+});
+
+for (const operation of ["edit", "update"] as const) test(`business ${operation} forwards revision conflicts without changing the record`, async () => {
+  const { service: s, root, input } = await existingBusinessItem();
   await s.upsertData({}, root, "records", "item", input);
-  assert.equal((await s.readData({}, root, "records", "item")).revision, 3);
+  const before = await s.readData({}, root, "records", "item");
+  const stale = { expectedRevision: 1 };
+  await assert.rejects(operation === "edit"
+    ? s.editData({}, root, "records", "item", [], stale)
+    : s.writeData({}, root, "records", "item", "update", input, stale), { code: "REVISION_CONFLICT" });
+  assert.deepEqual(await s.readData({}, root, "records", "item"), before);
+});
+
+test("business upsert replaces an existing complete value and advances its revision", async () => {
+  const { service: s, root } = await existingBusinessItem();
+  const input = { kind: "value" as const, value: { name: "replacement", count: 3 } };
+  await s.upsertData({}, root, "records", "item", input);
+  const after = await s.readData({}, root, "records", "item");
+  assert.equal(after.revision, 2);
+  assert.deepEqual(after.value, input.value);
 });
 
 test("business queries forward JSONPath and distinguish missing records, empty matches, null and array values", async () => {
@@ -66,7 +93,7 @@ test("business pagination forwards Store continuations and binds cursors to the 
   await assert.rejects(s.listData({}, root, "other", { cursor: page.nextCursor }), { code: "INVALID_CURSOR" });
 });
 
-test("business dry-run composes validation without publishing and model conflicts reject before export", async () => {
+test("business dry-run validates creates and deletes without publishing changes", async () => {
   const f = await businessDataModule(objectSchema), s = f.service;
   const input = { kind: "value" as const, value: { name: "original", count: 1 } };
   await s.writeData({}, f.root, "records", "item", "create", input, { dryRun: true });
@@ -74,6 +101,10 @@ test("business dry-run composes validation without publishing and model conflict
   await s.writeData({}, f.root, "records", "item", "create", input);
   await s.deleteData({}, f.root, "records", "item", { dryRun: true });
   assert.equal((await s.readData({}, f.root, "records", "item")).revision, 1);
+});
+
+test("business model conflicts reject export before publishing bytes", async () => {
+  const f = await existingBusinessItem(), s = f.service;
   f.changeModel();
   await assert.rejects(s.exportData({}, f.root, "records", "item", "json", "blocked.json"), { code: "MODEL_READ_CONFLICT" });
   assert.equal(f.exported.size, 0);
