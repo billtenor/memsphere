@@ -7,6 +7,7 @@ import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializedContextFixture } from './helpers/initialized-context.js';
+import { invokeCliModule } from './helpers/cli-module.js';
 import { readMemoryFile } from '../src/memory/store.js';
 import type { GraphProcedureMemory, MemoryEntity } from '../src/memory/ast.js';
 import { collectMemoryReferenceTargets } from '../src/memory/references.js';
@@ -14,7 +15,7 @@ import { openContextControl } from '../src/project/context-control.js';
 import { createAgentReviewCliRuntime } from '../src/acp/cli-runtime.js';
 import * as reviews from '../src/context_control/review-repository.js';
 import { graphReviewId } from '../src/context_control/graph-review.js';
-import { currentReviewNode } from '../src/review-nodes.js';
+import { currentReviewNode, mutateReviewNode } from '../src/review-nodes.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const entrypoint = join(root, 'dist/cli.js');
 type Produced = {
@@ -185,42 +186,53 @@ for (const source of [
       MEMSPHERE_HOME: f.home,
       MEMSPHERE_CONFIG_PATH: join(f.root, 'config.json')
     });
+    let currentSnapshot = started;
+    let currentPhase: test.TestContext = t;
+    let checkedRunnerProcess = false;
     async function phase<T>(name: string, operation: () => Promise<T>): Promise<T> {
       let result: { value: T } | undefined;
-      await t.test(name, { timeout: 180000 }, async () => {
+      await t.test(name, { timeout: 180000 }, async child => {
+        currentPhase = child;
         result = { value: await operation() };
       });
       // A failed subtest must stop dependent phases using its incomplete state.
       assert.ok(result, `Workflow phase did not complete: ${name}`);
       return result.value;
     }
-    function runner(args: string[], json = true) {
-      const r = crossSpawn.sync(process.execPath, [
-        entrypoint,
-        '--project',
-        'test-project',
-        ...args
-      ], {
-        cwd: f.cwd,
-        env,
-        encoding: 'utf8',
-        timeout: 20000,
-        maxBuffer: 2000000
+    async function runner(args: string[], json = true) {
+      const command = ['--project', 'test-project', ...args];
+      // One report per Procedure and the rewind retain the OS boundary. Other
+      // Runner setup calls use the real command tree, under the same 20s limit.
+      // Every Reviewer read below still executes the restricted OS launcher.
+      if (!checkedRunnerProcess || args[1] === 'step') {
+        checkedRunnerProcess = true;
+        const r = crossSpawn.sync(process.execPath, [entrypoint, ...command], {
+          cwd: f.cwd, env, encoding: 'utf8', timeout: 20000, maxBuffer: 2000000
+        });
+        assert.ifError(r.error);
+        assert.equal(r.status, 0, r.stderr);
+        return json ? JSON.parse(r.stdout) : r.stdout;
+      }
+      let receipt: Awaited<ReturnType<typeof invokeCliModule>> | undefined;
+      const commandStarted = performance.now();
+      await currentPhase.test(`Runner CLI ${args.slice(0, 2).join(' ')}`, { timeout: 20000 }, async () => {
+        receipt = await invokeCliModule(command, f.cwd, env, entrypoint);
       });
-      assert.ifError(r.error);
-      assert.equal(r.status, 0, r.stderr);
-      return json ? JSON.parse(r.stdout) : r.stdout;
+      assert.ok(receipt, 'Runner CLI command must finish within its 20s deadline');
+      assert.ok(performance.now() - commandStarted <= 20000, 'Runner CLI keeps its 20s wall-clock limit');
+      return json ? JSON.parse(receipt.stdout) : receipt.stdout;
     }
     async function active(id: string): Promise<Step> {
-      const snapshot = await service.snapshot(runId);
-      const rows = await service.withGraph(async g => g.ready(snapshot).filter(s => s.source?.actionId === id));
+      // The fixture has one writer. Reuse the last public write receipt to
+      // select the next Step; actual report/read authorization stays fresh.
+      const rows = await service.withGraph(async g => g.ready(currentSnapshot).filter(s => s.source?.actionId === id));
       assert.equal(rows.length, 1, id);
       return rows[0];
     }
-    async function produce(id: string, body: string, dependencies: Produced[] = [], native = false): Promise<Produced> {
+    async function produce(id: string, body: string, dependencies: Produced[] = [], throughCli = false): Promise<Produced> {
       const step = await active(id);
-      if (native) {
-        // Enter is fixture setup; the operation under test is the real CLI report.
+      if (throughCli) {
+        // Enter is fixture setup; report still uses the real CLI command tree.
         await service.withGraph(g => g.enter(runId, step.id));
         const args = [
           'run',
@@ -236,7 +248,7 @@ for (const source of [
         ];
         for (const dependency of dependencies)
           args.push('--depends-on', `artifact:${dependency.artifactId}`);
-        const r = runner(args);
+        const r = await runner(args);
         return {
           stepId: step.id,
           artifactId: r.artifactId,
@@ -249,6 +261,7 @@ for (const source of [
           text: body
         });
       });
+      currentSnapshot = r.snapshot;
       return {
         stepId: step.id,
         artifactId: r.artifact.id,
@@ -256,7 +269,7 @@ for (const source of [
       };
     }
     let sessionIndex = 0;
-    async function session(candidate: Produced): Promise<ReviewerSession> {
+    async function session(candidate: Produced, preparingInput = false): Promise<ReviewerSession> {
       const step = (await service.withGraph(g => g.reviewSnapshot(runId, candidate.stepId))).steps.find(s => s.id === candidate.stepId)!;
       const roundId = step.reviewRounds!.at(-1)!.id;
       candidate.reviewRoundId = roundId;
@@ -360,18 +373,32 @@ for (const source of [
         return view;
       }
       async function accept(): Promise<void> {
-        let context = await reviews.readArtifactReviewForActor(input);
-        while (currentReviewNode(context.assignment))
-          context = await reviews.mutateArtifactReviewNodes({
-            ...bound,
-            mutation: {
-              operation: 'report',
-              expectedNodeId: currentReviewNode(context.assignment)!.nodeId,
-              artifact: {
-                applicable: true
+        if (preparingInput) {
+          // Prepare the accepted input using the real node algorithm and one
+          // public CAS write. Final submission still checks every node. These
+          // source reviews are preconditions, not the Sessions under test.
+          await service.withGraph(g => g.mutateReview(runId, step.id, roundId, 'reader', async review => {
+            const nodes = { nodeTree: review.nodeTree!, nodeStates: review.nodeStates! };
+            let node;
+            while ((node = currentReviewNode(nodes)))
+              review.comments = mutateReviewNode(nodes, review.comments, {
+                operation: 'report', expectedNodeId: node.nodeId, artifact: { applicable: true }
+              }, () => { throw new Error('Input fixture has no findings'); });
+          }));
+        } else {
+          let context = await reviews.readArtifactReviewForActor(input);
+          while (currentReviewNode(context.assignment))
+            context = await reviews.mutateArtifactReviewNodes({
+              ...bound,
+              mutation: {
+                operation: 'report',
+                expectedNodeId: currentReviewNode(context.assignment)!.nodeId,
+                artifact: {
+                  applicable: true
+                }
               }
-            }
-          });
+            });
+        }
         await reviews.submitArtifactReviewAgentAssignment({
           ...bound,
           vote: 'approve'
@@ -381,6 +408,7 @@ for (const source of [
           ...input,
           vote: 'approve'
         });
+        currentSnapshot = await service.snapshot(runId);
       }
       return {
         read,
@@ -394,7 +422,7 @@ for (const source of [
     }
     async function confirmed(id: string, body: string): Promise<Produced> {
       const produced = await produce(id, body);
-      await (await session(produced)).accept();
+      await (await session(produced, true)).accept();
       return produced;
     }
     async function setup(version: string): Promise<WorkflowInputs> {
@@ -495,7 +523,7 @@ for (const source of [
       return accepted;
     });
     const replacement = await phase('rewind and confirm replacement requirements and plan', async () => {
-      runner([
+      await runner([
         'run',
         'step',
         'rewind',
@@ -508,6 +536,7 @@ for (const source of [
         '--output',
         'json'
       ]);
+      currentSnapshot = await service.snapshot(runId);
       return setup('after-rewind');
     });
     await phase('post-rewind acceptance and historical snapshots retain exact versions', async () => {
