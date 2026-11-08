@@ -108,54 +108,49 @@ default按PR号或ref分组，继续取消同目标旧default运行。full按run
 
 ## PR full 健康门禁
 
+master full 的已知失败具有合入否决权；full 完成不是每个 PR 或每轮敏捷迭代的前置条件。
 
 | 界面名称 | 对象与职责 |
 |---|---|
-| `CI (full)` | Actions工作流运行，真正执行完整跨平台测试。 |
-| `Update PR merge gate` | Actions工作流，查询测试结果并通过API更新PR状态；不跑测试。 |
-| `Merge gate / full regression` | 挂在PR最新提交SHA上的Commit Status标志，不执行任务；GitHub保护规则要求它成功。 |
+| `CI (full)` | 真正执行完整跨平台测试的 Actions 运行。 |
+| `Update PR merge gate` | 查询事实并更新 PR 状态的发布工作流，不跑测试。 |
+| `Merge gate / full regression` | PR 最新 head 上的 Commit Status，表示是否存在 full 健康阻断；success 不等于 master full 已通过。 |
 
-刷新任务的运行标题带事件来源，例如 `Update PR merge gate (master updated)`、`Update PR merge gate (CI completed)`、`Update PR merge gate (PR opened)`。同一工作流会被不同事件启动多次，每次都按实时事实刷新所有开放master PR，不读取另一次刷新任务的结果。default CI事件也会产生工作流运行，但脚本直接退出，不发布门禁状态。刷新job名 `Publish merge gate status (no tests)` 与PR状态名刻意不同。
+发布器优先使用 PR 当前 head 自身最新的显式 full（保留修复 PR 的解锁方式）。没有自身 full 时，按下表判断 master 健康门禁：
 
-新建普通PR时，default CI测试该PR；同时PR创建事件启动门禁刷新。状态最初不存在，必需状态缺失会阻拦合入；刷新脚本先通过API写pending，再查询当前master提交对应的full（或PR自身最新head的full），最后写success/failure/pending，必要查询失败写error。master变化会触发新刷新，撤掉其他PR保存的旧绿灯；master full结束的completed事件再次刷新这些PR。无需重跑其他PR的default CI，就能更新它们的合入门禁。查询/写入使用[GitHub Commit Status API](https://docs.github.com/en/rest/commits/statuses)，状态记录与真正执行测试的任务在PR检查区中并排展示。
-
-状态 `Merge gate / full regression` 是master ruleset的必需检查，绑定GitHub Actions app15368，保留其余保护且不额外要求PR更新到master。发布器只查GitHub API并发布commit status，不安装项目依赖、不构建、不执行PR代码或构建Artifact。`pull_request_target`、master push、CI full requested/in_progress/completed和手动刷新均从master可信代码读取实时事实，刷新所有开放master PR，事件乱序不会直接复用旧事件结论。
-
-| PR当前head最新full | master最新提交full | 结果 |
+| master 最新提交的 full | 最近已完成的 master full / attempt | 合入状态 |
 |---|---|---|
-| success | 任意 | success，修复解锁 |
-| 排队/运行/重跑 | 任意 | pending，等待 |
-| 非成功 | 任意 | failure，拦截 |
-| 无 | success | success |
-| 无 | 排队/运行/重跑，或新master提交尚无full登记 | pending，等待 |
-| 无 | 非成功或无有效full历史 | failure，拦截 |
-| 任意 | 必要API/身份查询异常 | error，重试可信刷新 |
+| success | 任意 | success |
+| 非成功的完成结果 | 任意 | failure |
+| 排队、运行中或尚未登记 | success | success，不等待当前 full |
+| 排队、运行中或尚未登记 | failure | failure，保持已知失败阻断 |
+| 排队、运行中或尚未登记 | 无 | success，尚无已知失败 |
+| 必要 API / 身份查询异常 | 任意 | error，不能推断无失败 |
 
-full限定本仓库固定CI workflow335696122，profile标记及实际full汇总核证；default中的skipped汇总不算full。成功必须run和full汇总均success；取消、超时、neutral、skipped、汇总缺失等不会放行。最新按created_at/run ID和当前attempt；重跑期间pending，保留前次失败作审计，绝不回退更旧绿灯。当前PR head改变后，旧head full不能解锁。master则必须匹配实时最新SHA，不能借合入前的绿灯放行。
+“最近已完成”按运行 created_at、run ID 及 attempt 选择，跨 master 提交保留；新提交和重跑不会清除已知失败。重跑的最新 attempt 尚在运行时，向前读取已完成 attempt，成功须核验其自身 full 汇总。失败后的后续完整成功可以解除阻断。PR 自身显式 full 保持原判定：排队/运行/重跑为 pending，失败为 failure，成功为 success；旧 PR head 的证明不适用于新 head。
 
-恢复命令（修复PR每次更新后需对最新提交再跑full）：
+full 仅识别本仓库固定 CI workflow 335696122，通过 profile 标记及实际 full 汇总核证。default 的 skipped 汇总不算 full；取消、超时、neutral、skipped、汇总缺失等已完成非成功结果仍计作 failure。无已知失败时，success 描述明确为 `No known master full failure; full completion is not required`，不宣称 full 已执行完毕或通过。
+
+### 事件刷新与合入约束
+
+`pull_request_target`、master push、CI full requested/in_progress/completed 和手动刷新都会从可信 master 代码读取实时事实，刷新所有开放的 master PR；default CI 事件直接退出，不发布状态。每次先撤销旧绿灯，短暂写入 `Refreshing merge gate` pending，再发布查询结果；这个短暂状态表示刷新中，不表示等待 full。失败事件会把同一 PR head 的门禁更新为 failure，无需重新运行 PR default CI。
+
+状态仍是 master Ruleset 的必需检查，绑定 GitHub Actions app 15368；本次判定调整无需修改 Ruleset、权限或 bypass。发布器不安装依赖、不构建、不执行 PR 代码。API 读取失败写 error，写入失败暴露工作流错误；查询失败不会冒充无已知失败。事件传播存在窗口，不承诺与点击合入原子同步。
+
+敏捷流程的“全部适用 CI”只包含实际验证当前 PR 候选的检查。master 健康门禁单独记录，失败不阻断技术或产品验收，也不进入本分支 CI 修复循环。最终交接核对并报告 master full 与实际合入门禁：full 在运行时正常交接，失败时报告合入受阻并保留验收成果；实际合入仍须满足 GitHub 门禁。合入后的 full 排队或运行也不是本轮清理的等待条件。
+
+### 修复与生效
+
+修复 PR 可以对当前 head 显式运行 full；其最新 full 成功沿用现有修复解锁机制：
 
 ```bash
 gh workflow run ci.yml --ref <repair-branch> -f profile=full
 gh run list --workflow ci.yml --branch <repair-branch>
-# 已部署后可信手动刷新；通常full状态事件会自动刷新所有PR
+# 已部署后通常由 full 状态事件自动刷新；必要时手动刷新
 gh workflow run full-health.yml --ref master
 ```
 
-API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通 PR 由三平台按默认选集运行的 default 检查保护；Linux default 和三平台 full 覆盖全部测试文件。
-
-### 首次安装与回滚
-
-发布器必须先进入默认分支才能自动触发；首次安装采用现有CI工作流受控bootstrap。维护者在Human架构/成果正式验收、精确head default/full/Security全部通过及只读dry-run成功后，先从最新ruleset追加必需context、Actions身份，保持全部现有规则和bypass设置；新增规则固定strict_required_status_checks_policy=false、do_not_enforce_on_create=false。此时验证required context尚未到达导致PR被阻拦，再由owner显式运行：
-
-```bash
-gh workflow run ci.yml --ref <reviewed-branch> -f full_health_bootstrap=true -f reviewed_sha=<exact-reviewed-head>
-```
-
-bootstrap要求owner workflow_dispatch，reviewed_sha等于实际运行github.sha，checkout精确SHA；仅轻量发布，无构建，且不能被识别为full。脚本检查master尚未安装正式发布器，已安装即拒绝bootstrap。依据真实当前head full成功发布状态，回读确认github-actions身份、required满足与PR恢复；不能伪造失败full来验证生产。首次真实接线验证仅missing→真实success，失败full路径由策略及本地HTTP集成覆盖；自动事件合入master后才生效。bootstrap到合入之间由Runner重查实际head/full，不声称已部署自动刷新。
-
-激活异常时只撤回本轮新增context和对应来源，保留全部既有及并发新增规则，回读确认；修复后重试。不移除其他保护，不把回滚当成完成。首次master full历史建立前，无自身head full证明的其他PR保守阻拦；可手动master full，或本次合入后的push full建立证明。
-
+发布器固定 checkout master，因此 PR 中的修改不会提前改变线上门禁；Human 合入后，master push 和后续 full 事件使用新判定。修改 CI 机制的 PR 仍会命中独立的 `CI change guard`，由 Human 审查并在合入时按该规则放行，不通过脚本伪造成功。
 
 ### 从旧名称迁移
 

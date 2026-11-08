@@ -10,6 +10,7 @@ defines:
   - 通过统一准出核验选择进入点，顺序完成同步 master、CI 跟进、技术验收和产品验收，再核验当前 HEAD 是否可交由 human 合入。
 asserts:
   - 各阶段产物须符合已确认的需求范围、实施方案和适用仓库规范；范围或方案变更须有 human 确认依据。
+  - 本流程的“全部适用 CI”仅指实际验证当前 PR 候选版本的检查；目标分支健康门禁单独记录，不计入该集合。master full 排队、运行中或尚未触发均不构成等待条件，已知失败只阻断合入，不阻断技术与产品验收；失败后重跑期间保持合入阻断，成功后解除。
 goals:
   - 确认当前迭代的范围、交付物和验收标准。
   - 按仓库规范完成实现和验证。
@@ -237,11 +238,12 @@ actions:
         - 产品负责人
   - !action
     id: ci_final
-    description: 核对准出结果与当前 PR、目标分支及 CI，形成合入交接报告；结果过期时通过 CLI 回溯准出核验。
+    description: 核对准出结果与当前 PR、目标分支及 CI，核对目标分支健康门禁并形成合入交接报告；候选准出结果过期时通过 CLI 回溯准出核验。
     actor: agent
     asserts:
       - 交接报告须引用当前候选的 ready 核验结果、PR URL、head SHA、目标 SHA、四项门禁证据和残留问题。
       - 交接版本须与准出核验一致，包含最新目标提交且全部适用 CI 成功。
+      - 交接须单独说明 master full 及实际合入门禁的状态与证据；master full 尚在运行时正常交接，已知失败或门禁查询异常时明确报告合入受阻，保留已完成验收，不将其转为本分支 CI 修复循环或重复验收。
       - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。
     dependencies:
       - !dependency
@@ -259,6 +261,7 @@ actions:
     description: 操作合入已通过准出核验的 PR。
     actor: human
     asserts:
+      - 实际合入时须满足仓库合入门禁；交接后的 master full 失败由仓库门禁继续阻断。
       - 合入记录须包含 PR URL、实际 merged 状态、合入提交和目标分支。
     dependencies:
       - !dependency
