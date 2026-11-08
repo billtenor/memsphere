@@ -19,6 +19,6 @@
 - `npm run test:unit`、`npm run test:module`、`npm run test:integration`、`npm run test:system` 分别构建并运行对应层。
 - `node scripts/ci/run-tests.mjs --suite=<layer> --list` 查看自动发现的文件；`--suite=system --list` 只列出系统测试，不执行。
 - `npm test` 和执行器默认的 `regression` 范围包含前三层，不运行系统测试。`--suite=all` 仅用于显式选择包括系统在内的全部文件。
-- 当前 CI 四层独立执行，系统测试每个平台完整跑一次，Windows 打包 Shell 另跑。系统作业在本次 Human 授权的耗时探索中不设置自定义 job 时限；前三层保留五分钟。full 汇总要求全部适用层级成功。
+- CI 各层独立执行。default 的单元、模块及适用集成作业限时五分钟；full 运行相同作业时仍为五分钟。full 额外运行的 macOS/Windows 普通集成、三个平台的系统/端到端及独立 Windows 打包 Shell 作业限时三十分钟。default 不运行系统/端到端和打包作业；full 汇总要求全部适用层级成功。
 
 OS 契约集成在 `platform/` 中，或通过文件头 `// @integration-platform: native` 显式声明；业务职责决定作业分组。default/full 都在 Linux、macOS、Windows 各运行一次，平台专有用例保留 skip。普通集成 default 在 Linux、full 在三个系统运行。CI 校验每个应跑文件在各适用系统恰好分配一次，并拒绝缺少层级标记的新文件。

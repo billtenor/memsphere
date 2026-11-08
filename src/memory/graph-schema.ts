@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { MEMSPHERE_SCHEMA_MODEL, parseSchemaModel } from "./schema-model.js";
+import { parseLogicalMemoryReference } from "./logical-reference.js";
 import jsonata from "jsonata";
 import type { GraphProcedureNode, RulePart } from "./ast.js";
 import { assertModelRef } from "../project/model-registration-contract.js";
@@ -21,15 +23,26 @@ export function graphProcedureSchema(input: {
   normalize: (value: unknown) => unknown;
 }): z.ZodType<GraphProcedureNode, z.ZodTypeDef, unknown> {
   const rules = z.array(input.rule).min(1).optional();
-  const model = z.object({ definedBy: text, definition: text }).strict().superRefine((value, context) => {
+  const model = z.object({ definedBy: text, definition: text.optional(), ref: text.optional() }).strict().superRefine((value, context) => {
     try { assertModelRef(value.definedBy); }
     catch (error) { context.addIssue({ code: "custom", path: ["definedBy"], message: errorMessage(error) }); }
+    if ((value.definition !== undefined) === (value.ref !== undefined)) {
+      context.addIssue({ code: "custom", message: "Exactly one of model.definition/model.ref is required" });
+      return;
+    }
     try {
-      const definition: unknown = JSON.parse(value.definition);
-      encodeJsonValue(definition);
-      if (value.definedBy === "json-schema/draft-07.json") validateJsonSchemaDefinition(definition);
-    } catch (error) { context.addIssue({ code: "custom", path: ["definition"], message: errorMessage(error) }); }
-  });
+      if (value.ref !== undefined) {
+        if (value.definedBy !== MEMSPHERE_SCHEMA_MODEL || parseLogicalMemoryReference(value.ref)?.kind !== "schemas") {
+          throw new TypeError("model.ref requires memsphere/schema.json and schemas/<canonical-name>");
+        }
+      } else if (value.definedBy === MEMSPHERE_SCHEMA_MODEL) parseSchemaModel(value.definition!);
+      else {
+        const definition: unknown = JSON.parse(value.definition!);
+        encodeJsonValue(definition);
+        if (value.definedBy === "json-schema/draft-07.json") validateJsonSchemaDefinition(definition);
+      }
+    } catch (error) { context.addIssue({ code: "custom", path: [value.ref !== undefined ? "ref" : "definition"], message: errorMessage(error) }); }
+  }).transform(value => value as import("./ast.js").GraphModelSpec);
   const artifact = z.object({
     name: text, asserts: rules, suggests: rules, model,
     payload: z.object({ contentType: text }).strict(), review: distinctIds.optional()

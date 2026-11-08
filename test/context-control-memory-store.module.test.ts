@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { ContextControl, type Stores } from "../src/context_control/service.js";
+import { ManualClock } from "./support/manual-clock.js";
+import { FakeWorkers } from "./support/fake-workers.js";
 import { textContent } from "../src/context_control/types.js";
 
 import { MemoryValueStore } from "./support/memory-value-store.js";
@@ -9,7 +11,7 @@ const memoryStore = (model: string) => new MemoryValueStore(model, model);
 
 test("free exploration services work with injected Stores without directory or file capabilities", async () => {
   const stores = Object.fromEntries(["run", "step", "artifact", "external", "review"].map(k => [k, memoryStore(`${k}.json`)])) as Stores;
-  const service = new ContextControl(stores, async () => { throw Error("no referenced content in this case"); });
+  const service = new ContextControl(stores, async () => { throw Error("no referenced content in this case"); }, { now: new ManualClock().iso, workers: new FakeWorkers() });
   const run = await service.start("可替换存储");
   const a = await service.report(run.id, { name: "A", content: textContent("正文") });
   const b = await service.createArtifact(run.id, { name: "B" });
@@ -23,7 +25,7 @@ test("free exploration services work with injected Stores without directory or f
 
 test("explicit invalid target/revision inputs cannot silently become a new report", async () => {
   const stores = Object.fromEntries(["run", "step", "artifact", "external", "review"].map(k => [k, memoryStore(`${k}.json`)])) as Stores;
-  const service = new ContextControl(stores, async () => { throw Error("unused"); });
+  const service = new ContextControl(stores, async () => { throw Error("unused"); }, { now: new ManualClock().iso, workers: new FakeWorkers() });
   const run = await service.start("输入边界");
   await assert.rejects(service.report(run.id, { name: "结果", target: "", content: textContent("正文") }), { code: "INVALID_ARGUMENT" });
   await assert.rejects(service.report(run.id, { name: "结果", revisedFrom: "", content: textContent("正文") }), { code: "INVALID_ARGUMENT" });

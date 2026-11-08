@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PromptRenderError, renderPrompt, validatePromptAssets } from "../src/prompts/renderer.js";
+import { PromptRenderError, createPromptRenderer } from "../src/prompts/renderer.js";
 import { listPromptTemplateIds, promptDefinition } from "../src/prompts/registry.js";
+
+import { promptAssetFixture } from "./support/prompt-assets.js";
+const { renderPrompt, validatePromptAssets } = createPromptRenderer(promptAssetFixture());
 
 const acpModel = {
   rolePrompts: ["Focus on correctness."],
@@ -210,4 +213,33 @@ test("permission descriptions remain localized Prompt assets", () => {
     renderPrompt("control-plane.permission-description", "zh-CN", { id: "artifact.submit" }),
     "你可以通过 run report 提交当前 Artifact。"
   );
+});
+
+test("renderer reports missing injected assets with a diagnosable stage", () => {
+  const renderer = createPromptRenderer({
+    read() { throw new Error("fixture asset unavailable"); },
+    partials: () => []
+  });
+  assert.throws(() => renderer.renderPrompt("run.review-configuration-required", "en", { preflightJson: "{}" }), (error: unknown) => {
+    assert(error instanceof PromptRenderError);
+    assert.equal(error.stage, "asset");
+    assert.match(error.message, /fixture asset unavailable/);
+    return true;
+  });
+  assert.match(renderPrompt("run.review-configuration-required", "en", { preflightJson: "{}" }), /run start/);
+});
+
+
+test("successful renderer instances keep compiled templates and partial engines isolated", () => {
+  const reads = [0, 0];
+  const make = (index: number, label: string) => createPromptRenderer({
+    read(_locale, _path) { reads[index]++; return `${label}:{{> fixture}}:{{preflightJson}}`; },
+    partials: () => [{ name: "fixture", source: `${label} partial` }]
+  });
+  const first = make(0, "first"), second = make(1, "second");
+  for (const input of ["one", "two"]) {
+    assert.equal(first.renderPrompt("run.review-configuration-required", "en", { preflightJson: input }), `first:first partial:${input}`);
+    assert.equal(second.renderPrompt("run.review-configuration-required", "en", { preflightJson: input }), `second:second partial:${input}`);
+  }
+  assert.deepEqual(reads, [1, 1], "both instances compile and then reuse only their own source");
 });

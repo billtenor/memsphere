@@ -12,6 +12,7 @@ export type Run = {
   id: string; name: string; status: "running" | "done" | "abandoned"; createdAt: string; language: "zh-CN" | "en";
   outputOverrides?: { addedArtifactIds: string[]; removedArtifactIds: string[] }; endedAt?: string; archived?: boolean;
   abandonment?: { source: "cli" | "view"; reason?: string };
+  schemaContracts?: Record<string, import("./schema-contract.js").FrozenSchemaContract>;
   memoryRef?: string;
   memorySnapshot?: { memories: Record<string, { memoryRef: string; payload: { contentType: string; content: string }; app?: AppOwnership[string] }> };
   memorySource?: { kind: "changeset"; project: string; changeId: string; checkpointDigest: string; baseRevision: string };
@@ -30,11 +31,12 @@ export type Step = {
   source?: { memoryRef: string; actionId: string };
   inputs?: Record<string, Ref[]>; artifact?: StepResult;
   reviewRounds?: ReviewRound[];
-  validation?: { sha256: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
+  validation?: { draftRevision?: number; sha256?: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
   frames?: Array<{ id: string; type: "submission"; submissionFrame: SubmissionFrame }>;
+  writing?: { draftId: string; baseSubmittedArtifactId?: string };
   reads?: Record<string, { readAt: string }>;
 };
-export type Artifact = Body & { id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
+export type Artifact = Body & { writing?: import("./schema-writing.js").SchemaWriting; id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
 export type External = Body & { id: string; runId: string; source: string; capturedAt: string };
 export type ReviewComment = { commentId?: string; id?: string; body: string; createdAt: string; severity?: "blocking" | "risk" | "suggestion"; anchor?: { targetRef?: Ref; location: string; context?: string } };
 /** New writes have one canonical identity; ReviewComment also reads historical id records. */
@@ -78,8 +80,8 @@ export type GraphFrame = {
   processedStepIds: string[]; nextCompletionSequence: number;
   rewinds?: GraphRewind[]; pendingRewind?: { id: string; workers: RewindWorker[] }; deferredCollects?: DeferredCollect[];
 };
-export type SubmissionFrame = { artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
+export type SubmissionFrame = { draft?: { id: string; token: string }; artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
 export type GraphContract = { procedure: GraphProcedureMemory; artifactSpecs: Record<string, GraphArtifactSpec>; rules: Record<string, { asserts: EffectiveRuleTree; suggests: EffectiveRuleTree }> };
-export type Snapshot = { run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
+export type Snapshot = { artifactRevisions?: Record<string, number>; run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
 export type ReportInput = Body & { target?: string; name?: string; revisedFrom?: string; revisedSummary?: string; tags?: string[]; dependencies?: Ref[]; dependsOn?: string[] };
 export const textContent = (content: string, contentType = "text/plain"): Content => ({ model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType, content } });
