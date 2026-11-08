@@ -70,6 +70,19 @@ test("pagination is lexical, scoped, bounded and rejects malformed cursors", () 
   assert.deepEqual(paginate([], { cursor: first.nextCursor }, "store-1"), { items: [] });
   assert.throws(() => paginate([], { cursor: first.nextCursor }, "store-2"), /cursor/);
   assert.throws(() => paginate([], { cursor: `${first.nextCursor}!` }, "store-1"), /cursor/);
-  for (const limit of [0, -1, 0.1, 1001, Infinity]) assert.throws(() => paginate([], { limit }, "store-1"), /limit/);
+  for (const limit of [0, -1, 0.1, 1.5, NaN, 1001, Infinity]) assert.throws(() => paginate([], { limit }, "store-1"), /limit/);
   assert.throws(() => paginate([], { limit: null as unknown as number }, "store-1"), /limit/);
+});
+
+// Complete lexical matrices belong here; native tests verify adapter admission
+// and actual filesystem properties with representative inputs.
+test("Store ID rejection matrices cover every adapter lexical boundary", () => {
+  for (const id of [
+      "a//b.bin", "a/./b.bin", "a/../b.bin", "a/b/../../escape.bin", "./a.bin", "/a.bin",
+      "a/b.bin/", "a\\b.bin", "a/b\\c.bin", "C:/a.bin", "//server/share/a.bin",
+      "a/CON/b.bin", "a/space /b.bin", "a/end./b.bin", "a/.memsphere-internal/b.bin",
+      "a/e\u0301/b.bin", "a/b\u0000/c.bin", `a/${"z".repeat(256)}/b.bin`
+    ]) assert.throws(() => validateRelativeFilePath(id), id);
+  for (const id of ["", "../escape.bin", "/absolute.bin", "a\\b.bin", "C:drive.bin", "a\u0000.bin", "bad?.bin", "bad*.bin", "bad<.bin", "bad>.bin", "bad|.bin", 'bad".bin', "CON.bin", "nul.bin", "COM1.json", "lpt9.txt", "COM¹.txt", "NUL .bin", "trail.bin.", "trail.bin ", ".", "..", ".memsphere-user.bin", "bad\ud800.bin", "e\u0301.bin", `${"x".repeat(252)}.bin`]) assert.throws(() => validateRelativeFilePath(id), id);
+  for (const id of ["../../../value-outside", "a//b", "/a", "a/", "a/../b", "a\\b", ".", "..", "CON", "aux.txt", "LPT1", "x:y", "x?y", "x*y", "x|y", "x<y", "x>y", 'x"y', "trailing.", "trailing ", "bad\u0000", "bad\ud800", "e\u0301"]) assert.throws(() => validateRelativeFilePath(id), id);
 });

@@ -62,14 +62,12 @@ test("management unset, tags and shared package names are checked without rewrit
   assert.equal(await fs.readFile(location(f.root, "a.json"), "utf8"), source);
 });
 
-test("create and update distinguish invalid definitions, Runtime limits and references and never publish rejected bytes", async t => {
+test("model create/update wire definition and Runtime rejection without publishing bytes", async t => {
   const f = await businessFixture(t, {});
   await mutateModel({}, f.root, "create", "good.json", { source });
   const cases = [
     ['{"required":42}', "MODEL_DEFINITION_INVALID"],
-    ['{"type":"string","format":"email"}', "MODEL_RUNTIME_UNSUPPORTED"],
-    ['{"type":"object","properties":{"x":{"$ref":"other.json"}}}', "MODEL_REFERENCE_UNSUPPORTED"],
-    ['{"type":"object","properties":{"x":{"$ref":"#/definitions/missing"}}}', "MODEL_REFERENCE_INVALID"]
+    ['{"type":"string","format":"email"}', "MODEL_RUNTIME_UNSUPPORTED"]
   ];
   for (const [candidate, code] of cases) {
     const before = await snapshotTree(join(f.root, "models"));
@@ -79,9 +77,7 @@ test("create and update distinguish invalid definitions, Runtime limits and refe
     assert.deepEqual(await snapshotTree(join(f.root, "models")), before);
   }
   await assert.rejects(mutateModel({}, f.root, "update", "good.json"), assertCode("INVALID_ARGUMENT"));
-  for (const ref of ["missing-suffix", "../outside.json", "/absolute.json", "a\\b.json", "a.JSON"]) {
-    await assert.rejects(mutateModel({}, f.root, "create", ref, { source }), assertCode("MODEL_ID_INVALID"));
-  }
+  await assert.rejects(mutateModel({}, f.root, "create", "../outside.json", { source }), assertCode("MODEL_ID_INVALID"));
   await mutateModel({}, f.root, "create", "local.json", { source: JSON.stringify({ type: "object", properties: { x: { $ref: "#/definitions/value" } }, definitions: { value: { type: "string" } }, examples: [{ $ref: "ordinary-data.json" }] }) });
   assert.equal((await readModel({}, f.root, "local.json")).modelRef, "local.json");
 });

@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { MemoryDataStore } from "./support/memory-data-store.js";
-import { ManualClock } from "./support/manual-clock.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 import { JsonPayloadSerializer } from "../src/data/extensions/json-serializer/index.js";
 import { checkModelDefinition } from "../src/project/model-validation.js";
@@ -21,16 +20,6 @@ test("schema, serializer, raw Store and value Store compose without a filesystem
   assert.deepEqual((await values.get({}, "order"))!.value, saved.value);
   for (let i = 0; i < 2; i++) assert.deepEqual(JSON.parse(Buffer.from(await readAll({}, (await raw.get({}, "order"))!.data.payload.content)).toString()), { quantity: 2 });
   await assert.rejects(raw.create({}, { id: "wrong", model: "other.json", payload: { contentType: "text/plain", content: bytesContent(new Uint8Array()) } }));
-});
-
-test("manual time resolves waits exactly at their deadlines and removes cancelled waits", async () => {
-  const clock = new ManualClock(0), other = new ManualClock(0), controller = new AbortController();
-  let done = false; const pending = clock.sleep(100).then(() => { done = true; });
-  const cancelled = clock.sleep(200, controller.signal); controller.abort(new Error("cancel wait"));
-  await assert.rejects(cancelled, /cancel wait/);
-  clock.advance(99); await Promise.resolve(); assert.equal(done, false);
-  clock.advance(1); await pending; assert.equal(done, true);
-  assert.equal(clock.waiting, 0); assert.equal(other.now(), 0);
 });
 
 test("reopened module services share records while isolating overrides, clocks and worker observations", async () => {

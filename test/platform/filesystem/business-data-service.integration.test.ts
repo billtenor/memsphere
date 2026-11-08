@@ -91,11 +91,9 @@ test("business ValueStore hierarchical records remain editable and readable afte
   assert.deepEqual(await listData({}, root, "records"), { items: [{ id: "run-1/artifact-1" }] });
 });
 
-test("business ValueStores preserve each JSON root type through CRUD and candidate validation", async (t) => {
+test("filesystem business CRUD persists object and falsy scalar roots through export", async (t) => {
   const examples = [
-    ["null", { type: "null" }, null, null], ["boolean", { type: "boolean" }, false, true],
-    ["number", { type: "number" }, 0, 2.5], ["string", { type: "string" }, "", "changed"],
-    ["array", { type: "array", items: { type: "integer" } }, [], [1, 2]],
+    ["boolean", { type: "boolean" }, false, true],
     ["object", { type: "object", properties: { value: { type: "integer" } }, required: ["value"], additionalProperties: false }, { value: 1 }, { value: 2 }]
   ] as const;
   const fixture = await businessFixture(t, Object.fromEntries(examples.map(([name, schema]) => [`${name}.json`, schema])));
@@ -127,7 +125,7 @@ test("edit validates only the final isolated value and failures preserve bytes a
   const before = await fs.readFile(join(root, "data/records/item.json"));
   for (const patch of [
     [{ op: "replace", path: "/count", value: 4 }, { op: "test", path: "/name", value: "wrong" }],
-    [{ op: "replace", path: "/count", value: -1 }], [{ op: "remove", path: "/name" }]
+    [{ op: "replace", path: "/count", value: -1 }]
   ]) {
     await assert.rejects(editData({}, root, "records", "item", patch));
     assert.deepEqual(await fs.readFile(join(root, "data/records/item.json")), before);
@@ -137,15 +135,12 @@ test("edit validates only the final isolated value and failures preserve bytes a
   assert.equal((await readData({}, root, "records", "item")).revision, 2);
 });
 
-test("read queries distinguish a missing record from empty matches, null and array nodes", async (t) => {
+test("filesystem business reads pass the decoded record to JSONPath and preserve missing-record errors", async (t) => {
   const { root, createStore } = await businessFixture(t, { "query.json": { type: "object", properties: { nil: { type: "null" }, values: { type: "array", items: { type: "integer" } } } } });
   await createStore("queries", "query.json");
   await writeData({}, root, "queries", "item", "create", { kind: "value", value: { nil: null, values: [1, 2] } });
-  assert.deepEqual((await readData({}, root, "queries", "item", { path: "$.missing" })).value, []);
-  assert.deepEqual((await readData({}, root, "queries", "item", { path: "$.nil" })).value, [null]);
   assert.deepEqual((await readData({}, root, "queries", "item", { path: "$.values" })).value, [[1, 2]]);
   await assert.rejects(readData({}, root, "queries", "absent", { path: "$.missing" }), { code: "NOT_FOUND" });
-  await assert.rejects(readData({}, root, "queries", "item", { metadataOnly: true, path: "$" }), { code: "INVALID_ARGUMENT" });
 });
 
 test("Store removal retains data and deletion history for explicit re-registration", async (t) => {

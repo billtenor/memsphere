@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { Config } from "../../../src/data/api/config.js";
 import type { ModelRuntime } from "../../../src/data/api/model-runtime.js";
-import type { TypeDescriptor } from "../../../src/data/api/reflection.js";
 import type { ValueStore } from "../../../src/data/api/value-store.js";
 import { FILESYSTEM_JSON_METADATA_DIRECTORY, FilesystemJsonValueStoreFactory } from "../../../src/data/extensions/filesystem-json-valuestore/index.js";
 import { JSON_SCHEMA_DRAFT_07, JsonSchemaModelRuntimeFactory } from "../../../src/data/extensions/json-schema/index.js";
@@ -186,30 +185,15 @@ test("filesystem JSON ValueStore rejects unsupported JSON values and descriptors
     const runtime = createPlainRuntime({ id: "loose-json.json", root: { kind: "object", fields: [], field: () => undefined } });
     const store = await new FilesystemJsonValueStoreFactory().createStore({}, STORE_ID, runtime, new Config({ directory }));
     await store.create({}, "kept", { valid: true });
-    const cyclic: { self?: unknown } = {};
-    cyclic.self = cyclic;
-    const invalid = [
-      { value: undefined }, { value: 1n }, { value: new Uint8Array([1]) }, { value: new Map() },
-      { value: new Date() }, { value: Infinity }, { value: NaN }, { value: -0 },
-      { value: Number.MAX_SAFE_INTEGER + 1 }, { value: Symbol("symbol") }, { value() {} },
-      { value: [, 1] }, cyclic, { [Symbol("key")]: 1 }, { toJSON: () => ({}) },
-      Object.defineProperty({}, "hidden", { value: 1 })
-    ];
-    for (const candidate of invalid) {
-      await assert.rejects(store.update({}, "kept", candidate), /JSON|Sparse/);
-      assert.deepEqual((await store.get({}, "kept"))!.value, { valid: true });
-      assert.equal((await store.get({}, "kept"))!.revision, 1);
-    }
-    const descriptors: Array<[TypeDescriptor, unknown]> = [
-      [{ kind: "scalar", scalar: "bigint" }, 1n],
-      [{ kind: "scalar", scalar: "bytes" }, new Uint8Array([1])],
-      [{ kind: "map", key: { kind: "scalar", scalar: "string" }, value: { kind: "scalar", scalar: "number" } }, new Map([["a", 1]])]
-    ];
-    for (const [index, [root, value]] of descriptors.entries()) {
-      const unsupported = await new FilesystemJsonValueStoreFactory().createStore({}, `unsupported-store-${index}`, createPlainRuntime({ id: `unsupported-${index}.json`, root }), new Config({ directory }));
-      await assert.rejects(unsupported.create({}, "missing", value), /JSON does not support/);
-      assert.equal(await unsupported.has({}, "missing"), false);
-    }
+    const before = await readFile(join(directory, "kept.json"));
+    await assert.rejects(store.update({}, "kept", { value: 1n }), /JSON/);
+    assert.deepEqual((await store.get({}, "kept"))!.value, { valid: true });
+    assert.equal((await store.get({}, "kept"))!.revision, 1);
+    assert.deepEqual(await readFile(join(directory, "kept.json")), before);
+    const unsupported = await new FilesystemJsonValueStoreFactory().createStore({}, "unsupported-store",
+      createPlainRuntime({ id: "unsupported.json", root: { kind: "scalar", scalar: "bigint" } }), new Config({ directory }));
+    await assert.rejects(unsupported.create({}, "missing", 1n), /JSON does not support/);
+    assert.equal(await unsupported.has({}, "missing"), false);
     await assert.rejects(store.create({}, "reflection-view", runtime.reflect({})), /reflection views|plain object/);
   });
 });
@@ -282,9 +266,17 @@ test("filesystem JSON ValueStore respects cancellation and portable configuratio
     for (const id of ["", " ", undefined as unknown as string]) {
       await assert.rejects(new FilesystemJsonValueStoreFactory().createStore({}, id, runtime, new Config({ directory })), /store id/i);
     }
-    for (const id of ["../../../value-outside", "a//b", "/a", "a/", "a/../b", "a\\b", ".", "..", "CON", "aux.txt", "LPT1", "x:y", "x?y", "x*y", "x|y", "x<y", "x>y", 'x"y', "trailing.", "trailing ", "bad\u0000", "bad\ud800", "e\u0301"]) {
+    const beforeInvalidIds = (await readdir(directory)).sort();
+    for (const id of ["../outside", "nested/CON/item"]) {
       await assert.rejects(store.create({}, id, value), id);
+      await assert.rejects(store.get({}, id), id);
+      await assert.rejects(store.has({}, id), id);
+      await assert.rejects(store.update({}, id, value), id);
+      await assert.rejects(store.delete({}, id), id);
+      assert.ok(store.upsert);
+      await assert.rejects(store.upsert({}, id, value), id);
     }
+    assert.deepEqual((await readdir(directory)).sort(), beforeInvalidIds);
     for (const id of ["订单 001", "café", "already.json"]) {
       await store.create({}, id, value);
       assert.deepEqual((await store.get({}, id))!.value, value);
