@@ -11,6 +11,8 @@ import { inReviewerSession } from "./reviewer-commands.js";
 import { failure } from "../context_control/errors.js";
 import type { Artifact, External, Review, Step } from "../context_control/types.js";
 import { emitCommandResult } from "../commands/cli-errors.js";
+import { MEMSPHERE_SCHEMA_MODEL } from "../memory/schema-model.js";
+import { resolvedArtifact } from "../context_control/schema-contract.js";
 
 const denied = (id: string) => failure("REVIEW_RESOURCE_DENIED", `Object is outside this Review's fixed context: ${id}`);
 export async function reviewerResources() {
@@ -153,13 +155,20 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     }
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;
-    if (a.id === candidate.id) result = await (await import("./review-session.js")).agentReviewArtifactContractPayload();
-    else result = await service.withGraph(async g => {
+    result = await service.withGraph(async g => {
       const action = g.action(run, step), rules = await g.rules(run, action), dto = await expanded(a);
-      return buildReviewContract({ procedureName: run.memoryRef!.slice("procedures/".length), procedureRules: [rules.procedure], artifactName: a.name,
+      const contract = buildReviewContract({ procedureName: run.memoryRef!.slice("procedures/".length), procedureRules: [rules.procedure], artifactName: a.name,
         step: { instruction: action.description, artifact: a.name, type: dto.type, format: dto.format,
           assertTree: rules.asserts, suggestTree: rules.suggests, reviewPolicy: step.reviewRounds?.find(r => r.artifactId === a.id)?.reviewConfig.policy.id,
           details: [JSON.stringify(action.artifact?.model), JSON.stringify({ artifactAsserts: rules.artifactAsserts, artifactSuggests: rules.artifactSuggests })] } });
+      if (action.artifact?.model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
+        // Use only this authorized Artifact's frozen Action contract. Reuse
+        // the runtime's version check; never reread current Project Schema or
+        // expose the Run's other Schema contracts.
+        resolvedArtifact(run, action.id, action.artifact);
+        contract.artifact.schema = structuredClone(run.schemaContracts![action.id]);
+      }
+      return contract;
     });
   } else if (operation === "run-show" || operation === "step-show") {
     if (o.step && !steps.some(s => s.id === o.step)) throw denied(o.step);

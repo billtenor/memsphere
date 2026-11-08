@@ -44,7 +44,9 @@ export async function buildArtifactReviewerPrompt(input: {
     const materials = {
       allowedOperations: capabilities.commands,
       capabilities,
-      artifact: { ...contract.artifact, schema: summarizeAgentReviewSchema(currentStep(run)?.schema) },
+      artifact: { ...contract.artifact, schema: capabilities.protocol === "graph"
+        ? { readCommand: reviewerCommand("run artifact contract show --assignment ") + assignment.id }
+        : summarizeAgentReviewSchema(step.schema) },
       inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: capabilities.protocol === "graph" && a.artifactId ? reviewerCommand(`run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt`) : reviewerCommand(`run artifact show --step ${JSON.stringify(a.stepId)} --out context-${submission.contextArtifacts.indexOf(a)}.txt`) })),
       externals: submission.contextExternals?.map(e => ({ ...e, readCommand: reviewerCommand(`run external show --run ${run.id} --external ${e.externalId} --out ${e.externalId}.txt`) })),
       memorySource: run.memorySource,

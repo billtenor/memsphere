@@ -73,6 +73,7 @@ import {
   runReviewVoteCommand,
   runReviewWaitCommand,
   runSchemaShowCommand,
+  runSchemaReportCommand,
   runShowCommand,
   runSkipCommand,
   runStartCommand,
@@ -494,6 +495,7 @@ runArtifact
   .requiredOption("--step <ref>", "step ref from run show")
   .requiredOption("--file <path>", "local destination")
   .option("--force", "overwrite the local destination")
+  .addOption(new Option("--output <format>", "text or json").choices(["text", "json"]).default("text"))
   .action(runArtifactExportCommand);
 
 runArtifactContract
@@ -515,7 +517,15 @@ runSchema
   .description("Show Schema progress, production constraints, and the managed draft path.")
   .requiredOption("--run <id>", "run id")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .option("--step <id>", "graph Step id")
   .action(runSchemaShowCommand);
+
+runSchema.command("report").description("Save the current graph Schema field to its draft and advance.")
+  .requiredOption("--run <id>", "run id").requiredOption("--step <id>", "graph Step id")
+  .requiredOption("--position <token>", "expected current Schema position")
+  .option("--artifact <text>", "current field content").option("--artifact-file <path>", "current field content file")
+  .addOption(new Option("--output <format>", "text or json").choices(["text", "json"]).default("text"))
+  .action(runSchemaReportCommand);
 
 const runReview = run
   .command("review")
@@ -636,6 +646,8 @@ run
   .description("Enter a schema artifact writing flow.")
   .argument("[schema-name]", "schema primary name or alias; omit for the current inline schema")
   .requiredOption("--run <id>", "run id")
+  .option("--step <id>", "graph Step id")
+  .addOption(new Option("--output <format>", "text or json").choices(["text", "json"]).default("text"))
   .action(runEnterSchemaCommand);
 
 run
@@ -643,12 +655,18 @@ run
   .description("Choose a repeat count for the current Schema Repeat step.")
   .argument("<count>", "non-negative repeat count within the Schema limit")
   .requiredOption("--run <id>", "run id")
+  .option("--step <id>", "graph Step id")
+  .option("--position <token>", "expected current graph Schema position")
+  .addOption(new Option("--output <format>", "text or json").choices(["text", "json"]).default("text"))
   .action(runRepeatCommand);
 
 run
   .command("skip")
   .description("Skip the current optional Schema field step.")
   .requiredOption("--run <id>", "run id")
+  .option("--step <id>", "graph Step id")
+  .option("--position <token>", "expected current graph Schema position")
+  .addOption(new Option("--output <format>", "text or json").choices(["text", "json"]).default("text"))
   .action(runSkipCommand);
 
 run

@@ -1,3 +1,4 @@
+import { MEMSPHERE_SCHEMA_MODEL, SchemaModelRuntime } from "../data/extensions/memsphere-schema/index.js";
 import type { Context } from "../data/api/context.js";
 import type { Model } from "../data/api/model.js";
 import type { ModelRuntime, ModelRuntimeRegistry } from "../data/api/model-runtime.js";
@@ -10,7 +11,7 @@ import { validateModelSchemaReferences } from "./model-schema-references.js";
 import { contextControlRuntime } from "../context_control/invariants.js";
 
 export type ModelCheck = "definition" | "runtime";
-export type ModelCandidate = { modelRef: string; metaModel?: string; definition: unknown; source?: string };
+export type ModelCandidate = { modelRef: string; metaModel?: string; definition: unknown; source?: string; scope?: "graph" };
 export type CheckedModel = { model: Model; runtime?: ModelRuntime };
 
 const noDependencies: ModelRuntimeRegistry = {
@@ -31,6 +32,16 @@ export async function checkModelDefinition(context: Context, candidate: ModelCan
   assertModelRef(candidate.modelRef);
   const metaModel = candidate.metaModel ?? JSON_SCHEMA_DRAFT_07;
   assertModelRef(metaModel);
+  if (metaModel === MEMSPHERE_SCHEMA_MODEL) {
+    if (candidate.scope !== "graph") invalid("MODEL_RUNTIME_UNSUPPORTED", candidate.modelRef, "Memsphere Schema is currently supported only by graph Artifacts");
+    const source = candidate.source;
+    if (typeof source !== "string") invalid("MODEL_DEFINITION_INVALID", candidate.modelRef, "Schema definition must be YAML text");
+    const model: Model = { data: { id: candidate.modelRef, model: metaModel, payload: { contentType: "application/yaml", content: bytesContent(Buffer.from(source)) } }, definition: source };
+    try {
+      const runtime = new SchemaModelRuntime(model);
+      return check === "definition" ? { model } : { model, runtime };
+    } catch (error) { invalid("MODEL_DEFINITION_INVALID", candidate.modelRef, error); }
+  }
   let definition: unknown;
   let source: string;
   try {

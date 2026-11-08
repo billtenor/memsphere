@@ -2794,8 +2794,9 @@ function renderProcedure(node: JsonRecord, path: string, t: (key: string) => str
             section.append(el("div","memory-artifact-field-title",heading));for(const child of [...detail.childNodes])if(child!==summary)section.append(child);detail.replaceWith(section);
           });
           const model=artifact.model as JsonRecord|undefined;
+          if(model?.ref){requirements.append(el("div","memory-artifact-field-title",label("Schema 引用","Schema reference")),el("pre","memory-pre",String(model.ref)));}
           if(model?.definition!==undefined){requirements.append(el("div","memory-artifact-field-title",label("产物结构","Artifact structure")));const modelPath=`${artifactPath}.model.definition`;let definition:unknown=model.definition;try{definition=JSON.parse(String(definition));}catch{}
-            const structure=el("div","memory-artifact-model-structure");if(options.ui)structure.append(options.ui.modelDefinition({model:{id:String(artifact.name??""),metaModel:String(model.definedBy??""),builtin:false,definition,source:String(model.definition)},view:"structure"}));else structure.append(el("pre","memory-pre",String(model.definition)));
+            const structure=el("div","memory-artifact-model-structure");if(options.ui&&model.definedBy!=="memsphere/schema.json")structure.append(options.ui.modelDefinition({model:{id:String(artifact.name??""),metaModel:String(model.definedBy??""),builtin:false,definition,source:String(model.definition)},view:"structure"}));else structure.append(el("pre","memory-pre",String(model.definition)));
             structure.dataset.diffPath=modelPath;commentable(structure,modelPath,model.definition,comment);requirements.append(structure);
           }
         }

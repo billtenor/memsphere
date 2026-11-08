@@ -36,3 +36,6 @@ defines:
   - graph 通过 run step rewind 对已经开始的当前普通生产 Step 发起回溯。dry-run 只读预览；执行必须填写 reason 或 reason-file，生成新的 pending Step，并返回显式 step enter 命令。目标输入保持原上游版本，受影响后继按实际依赖重建，独立分支保留。
   - 回溯保留旧 Step 的状态、产物、依赖与评审记录；旧 Step 退出当前有效执行链，迟到上报、投票和评审修改不能推进流程。新目标首次产物关联旧目标候选 revisedFrom；没有旧候选时只记录步骤替代关系。回溯不撤销代码、Git 或外部业务副作用。
   - Agent Reviewer 的 Continue 是绑定个人审查和固定 Attempt 的可选入口，与 Runner 的 Run/Step CommandState 独立；原生 run review 命令同时保留。节点编辑不推进，report 自动进入下一个规则或开放审查节点，submit 在最终复核后完成个人审查；具体审查语义由 memsphere-artifact-review 定义。
+  - graph 的 Memsphere Schema 产物可引用 Memory 或内联定义，启动时固定结构、格式和规则；字段保存与完整提交分开，草稿不进入下游、collect 或最终成果。
+  - graph 渐进撰写通过 run enter-schema、run schema show/report、run skip/repeat 操作当前 Step；Runner Continue 提供对应入口，保存、跳过与 Repeat 必须携带回执中的 position token，过期请求拒绝。
+  - Schema 规则随正式提交进入按字段或章节组织的节点评审，包含实际 Repeat 实例、对应内容和来源；开放审查、最终复核与投票规则不变，中间草稿保存不发起正式评审。

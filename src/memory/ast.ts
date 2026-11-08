@@ -122,11 +122,15 @@ export type FlowProcedureNode = ProcedureBase & {
 };
 
 export type GraphDependency = { tag: "!dependency"; from: string | string[]; when?: string };
+export type GraphModelSpec = { definedBy: string } & (
+  | { definition: string; ref?: never }
+  | { ref: string; definition?: never }
+);
 export type GraphArtifactSpec = {
   name: string;
   asserts?: RulePart[];
   suggests?: RulePart[];
-  model: { definedBy: string; definition: string };
+  model: GraphModelSpec;
   payload: { contentType: string };
   review?: string[];
 };

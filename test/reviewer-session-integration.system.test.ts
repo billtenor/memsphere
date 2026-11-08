@@ -86,7 +86,8 @@ test('generated Artifact and External read commands execute inside the restricte
   const wrong=run('memsphere --version');assert.equal(wrong.status,93);assert.match(wrong.stderr,/WRONG_GLOBAL_CLI/);
   const generatedPrompt=await buildArtifactReviewerPrompt({context:await reviews.readArtifactReviewForActor(f.input),locale:"zh-CN",promptVersion:"artifact-review-v3"});
   const generatedReads=[...generatedPrompt.matchAll(/"readCommand":\s*("(?:\\.|[^"\\])*")/g)].map(m=>JSON.parse(m[1]) as string);
-  assert.equal(generatedReads.length,4,"both Artifact inputs and both External references have read commands");
+  assert.equal(generatedReads.length,5,"the frozen contract, both Artifact inputs and both External references have read commands");
+  assert.equal(generatedReads.filter(command=>command.includes('run artifact contract show')).length,1);
   const missing=run(generatedReads[0],{MEMSPHERE_CLI:""});assert.notEqual(missing.status,0);assert.doesNotMatch(missing.stderr,/WRONG_GLOBAL_CLI/);
   for(const command of generatedReads){const r=run(command+' --output json');assert.equal(r.status,0,command+": "+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
 });

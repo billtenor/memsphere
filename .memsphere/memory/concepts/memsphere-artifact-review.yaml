@@ -35,3 +35,4 @@ defines:
   - "历史 flow 的 assignment 与显式 Step 读取共用固定 Submission 的完整 Artifact 展示字段；类型、格式、存储、文件与模型元信息随正文保留，当前候选的 revisionSummary 也固定到原轮次，上下文不得借最新 Submission 补全。缺少协议提示的旧 Session 帮助列出协议并集并说明适用边界，assignment show 返回实际绑定协议；授权仍以绑定身份为准。"
   - "历史 flow 当前候选的契约按绑定 Review 的 Procedure/Step 定位；原步骤接纳、进入其他步骤或 Run 结束后仍从冻结 plan 与 Procedure 快照读取，保留原策略及模型目标。默认、assignment 和候选 step 入口一致；上下文快照缺少所属契约时明确拒绝 contract 查询。旧记录的调用祖先规则存在歧义时返回 REVIEW_CONTEXT_INVALID，不拼合或猜测规则。"
   - "Reviewer 的可执行入口由 Attempt 注入的 MEMSPHERE_CLI 固定，初始提示、提醒、节点操作及返回的 readCommand/exportCommand 均显式调用该 Session launcher。PATH 或同名 memsphere 工具可能指向其他安装，不能替代绑定入口；变量缺失时明确失败，不回退全局安装。材料中的普通命令示例也须采用同一入口，原 Project/Run/Assignment、授权范围与生命周期检查仍由 CLI 处理。"
+  - "graph Artifact 使用 memsphere/schema.json 时，受限 contract show 仅返回所选合法 Artifact 对应 Action 在该 Run 中冻结的完整 Schema 定义与规则来源；不回退当前 Project，不暴露其他 Action 的 Schema 契约。"

@@ -5,3 +5,5 @@ export { JsonSchemaMetaModelRuntimeFactory, jsonSchemaMetaModelExtension } from 
 export { RawModelRuntime, RawModelRuntimeFactory, rawExtension, RAW_MODEL, type RawModelDefinition } from "./raw/index.js";
 export { JsonPayloadSerializer, jsonSerializerExtension } from "./json-serializer/index.js";
 export { FilesystemJsonValueStoreFactory, filesystemJsonValueStoreExtension } from "./filesystem-json-valuestore/index.js";
+
+export { SchemaModelRuntime, SchemaModelRuntimeFactory, MEMSPHERE_SCHEMA_MODEL } from "./memsphere-schema/index.js";

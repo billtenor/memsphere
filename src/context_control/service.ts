@@ -110,14 +110,19 @@ export class ContextControl {
     const all=(await Promise.all(stepIds.map(id=>this.record<Step>("step",runId,id)))).flatMap(row=>row?[row.value]:[]);
     const selected=surface==="action"?all.filter(s=>s.source?.actionId===actionId):all;
     let artifacts:Artifact[]=[];
+    const selectedRevisions = new Map<string, number | undefined>();
     if(surface!=="overview"){
       const ids=new Set<string>();
-      for(const step of selected){if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
-      artifacts=(await Promise.all([...ids].map(id=>this.record<Artifact>("artifact",runId,id)))).flatMap(row=>row?[row.value]:[]);
+      for(const step of selected){if(step.writing)ids.add(step.writing.draftId);if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
+      const rows = (await Promise.all([...ids].map(id=>this.record<Artifact>("artifact",runId,id)))).filter((row): row is NonNullable<typeof row> => Boolean(row));
+      artifacts = rows.map(row => { selectedRevisions.set(row.value.id, row.revision); return row.value; });
     }
+    // A draft changes independently from its Step. Expose only its revision in
+    // the overview so visible dialogs can invalidate their lazy content cache.
+    const draftRevisions = new Map(await Promise.all(all.filter(s => s.writing).map(async s => [s.id, selectedRevisions.has(s.writing!.draftId) ? selectedRevisions.get(s.writing!.draftId) : (await this.record<Artifact>("artifact", runId, s.writing!.draftId))?.revision] as const)));
     // Bodies are obtained only from the artifact content endpoint.
-    artifacts=artifacts.map(({content,contentRef,...a})=>{if(a.revisedFrom&&!artifacts.some(other=>other.id===a.revisedFrom))delete a.revisedFrom;return a;});
-    const steps=all.map(s=>({id:s.id,runId:s.runId,createdAt:s.createdAt,status:s.status,source:s.source,startedAt:s.startedAt,endedAt:s.endedAt,artifact:s.artifact,
+    artifacts=artifacts.map(({content,contentRef,writing,...a})=>{if(writing)Object.assign(a,{writingProgress:{index:writing.index,items:writing.items.map(item=>({id:item.id,path:item.schemaContext?.path})),skipped:writing.skipped,submitting:Boolean(writing.submission),validation:all.find(s=>s.id===a.stepId)?.validation?.artifactId===a.id&&all.find(s=>s.id===a.stepId)?.validation?.draftRevision===draftRevisions.get(a.stepId)?all.find(s=>s.id===a.stepId)?.validation:undefined}});if(a.revisedFrom&&!artifacts.some(other=>other.id===a.revisedFrom))delete a.revisedFrom;return a;});
+    const steps=all.map(s=>({id:s.id,runId:s.runId,createdAt:s.createdAt,status:s.status,source:s.source,writing:s.writing ? {...s.writing,revision:draftRevisions.get(s.id),validation:s.validation} : undefined,startedAt:s.startedAt,endedAt:s.endedAt,artifact:s.artifact,
       ...(surface!=="overview"&&selected.some(x=>x.id===s.id)?{artifact:s.artifact,inputs:s.inputs,reviewRounds:s.reviewRounds}: {})}));
     return {run,steps,artifacts,externals:[],reviews:[],completeIds:all.filter(s=>s.status==="done"&&s.artifact?.mode==="produce").map(s=>(s.artifact as {id:string}).id),outputArtifactIds:[]};
   }

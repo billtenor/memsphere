@@ -112,7 +112,14 @@ collect Action 由命令自动完成，Agent 不执行 enter/report；结果是�
 
 graph 可用 `run external add --run R --source S --content C` 登记原始依据，或用 `--change C --checkpoint D` 捕获同一固定 ChangeSet 的完整证据；两种来源互斥。External 由当前 Step 生产的 Artifact.dependencies 引用，不由 Step 直接引用。上报时用 `--depends-on artifact:A|external:E` 或结构化 `--file` 的 dependencies（互斥），补充 Artifact 须是本实例固定数据/控制来源中已接纳且当前有效的具体版本。强制输入不变；修订省略继承前身补充依赖，空数组清空，非空完整替换。不要为传递验收依据增加调度边或默认读取同 Action 最新产物。
 
-Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。当前候选和授权上游的 contract show 都须读取完整冻结契约。graph 支持固定 Artifact/External/确认；历史 flow 按 assignment/step 读取固定候选和上下文，遵循提示中的协议适用性。本人读取不依赖其他轮次记录或同轮他人的草稿锚点。导出先在目录内完整暂存正文、核对路径及文件身份，再以不覆盖方式发布；写入失败不产生部分目标文件，不覆盖或删除已有及并发替换的目标，无法发布或核验时明确失败。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
+Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。当前候选和授权上游的 contract show 都须读取完整冻结契约；Schema 模型只返回该合法 Artifact 的 Run 冻结 Schema 定义与规则来源，不回退当前 Project 或返回其他 Action 契约。graph 支持固定 Artifact/External/确认；历史 flow 按 assignment/step 读取固定候选和上下文，遵循提示中的协议适用性。本人读取不依赖其他轮次记录或同轮他人的草稿锚点。导出先在目录内完整暂存正文、核对路径及文件身份，再以不覆盖方式发布；写入失败不产生部分目标文件，不覆盖或删除已有及并发替换的目标，无法发布或核验时明确失败。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
+#### graph：Schema 渐进式撰写
+
+Artifact 使用 `model: {definedBy: memsphere/schema.json, ref: schemas/canonical-name}`，或以 definition 保存带显式 syntax 的完整 !schema YAML；ref/definition 必须二选一。payload.contentType 决定整体格式，根 format.layout 指定布局，局部字段可声明 format。启动冻结引用及规则，不另建 Schema 定义 Store。
+
+当前 Step 使用此模型时，可用 `run enter-schema --run R --step S`（或 `continue enter-schema`）进入/恢复，用 `run schema show --run R --step S` 查看进度和草稿。字段保存用 `continue schema report --position <回执token> --artifact-file F`，可选项用 `continue skip --position <token>`，Repeat 用 `continue repeat N --position <token>`；原生命令显式携带 --run/--step。position 必须使用当前回执，不猜测，不在旧请求中自动刷新。
+
+每轮持续修改同一个 draft Artifact，不把字段分别上报为交付产物；完成后导出本地副本检查，再 `continue report --artifact-file F` 完整提交，同 ID 结束草稿。正式提交后的修改创建新修订草稿；完整重交沿用 revision-summary 要求。草稿不供下游消费，字段保存不启动正式 Review。show 只读，初始化/提交中断按提示通过 enter/status 显式恢复。Schema Runtime 不支持反射；结构检查通过不代表自然语言内容规则通过。
 
 #### graph：CLI 回溯
 

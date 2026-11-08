@@ -239,6 +239,10 @@
         "baseRevision"
       ],
       "additionalProperties": false
+    },
+    "schemaContracts": {
+      "type": "object",
+      "description": "graph 启动时冻结的 Schema 编译契约；带版本，历史执行不重编译。"
     }
   },
   "required": [
