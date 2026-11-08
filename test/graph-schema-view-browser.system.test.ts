@@ -124,7 +124,7 @@ test("reopening a revised Schema Step shows its current draft while the precedin
   try {
     browser = await browserScope(); const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(15000);
     await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/test-project/tasks/${state.run}`);
-    const openCurrent = async () => {
+    const openCurrent = async (completed = 2) => {
       await page.locator('.pg-node[data-action-id="write"]').click();
       const dialog = page.locator(".cc-dialog[open]"); await dialog.locator(".cc-artifact-header").waitFor();
       assert.equal(await dialog.getAttribute("data-artifact-id"), state.cli.draft!.id);
@@ -132,7 +132,9 @@ test("reopening a revised Schema Step shows its current draft while the precedin
       const info = dialog.locator(".cc-execution-info");
       if (!await info.evaluate(node => (node as HTMLDetailsElement).open)) await info.locator("summary").click();
       const progress = info.getByRole("region", { name: "Schema 撰写进度" });
-      await progress.waitFor(); assert.match(await progress.innerText(), /2\/3/); assert.match(await progress.innerText(), /Report.Risks/);
+      await progress.waitFor(); assert.match(await progress.innerText(), new RegExp(`${completed}/3`));
+      if (completed === 2) assert.match(await progress.innerText(), /Report.Risks/);
+      else await dialog.locator(".cc-document").getByText("Updated risks after history selection", { exact: true }).waitFor();
       return dialog;
     };
     let dialog = await openCurrent();
@@ -141,10 +143,32 @@ test("reopening a revised Schema Step shows its current draft while the precedin
     assert.equal(await dialog.getAttribute("data-artifact-id"), state.originalId);
     const historicalRound = dialog.locator("select:has(option[data-round-id])");
     await historicalRound.waitFor(); assert.equal(await historicalRound.inputValue(), state.originalRoundId);
+    const revisions = await service.withGraph(async g => {
+      const before = (await g.snapshot(state.run)).artifactRevisions![state.draftId];
+      await g.schemaWrite(state.run, state.step, "report", state.cli.position!, "Updated risks after history selection");
+      const after = (await g.snapshot(state.run)).artifactRevisions![state.draftId];
+      assert.ok(after > before, "the refresh must receive an actually changed draft revision");
+      return { before, after };
+    });
+    const oldHeader = await dialog.locator(".cc-artifact-header").elementHandle(); assert.ok(oldHeader);
+    const overview = page.waitForResponse(response => response.request().method() === "GET" && response.url().includes(`/runs/${state.run}?representation=overview`), { timeout: 15000 });
     await page.getByRole("button", { name: "刷新", exact: true }).dispatchEvent("click");
+    const payload = await (await overview).json();
+    assert.equal(payload.run.context.graph.work.find((step: { id: string }) => step.id === state.step).writing.revision, revisions.after);
+    await page.waitForFunction(node => !node.isConnected, oldHeader, { timeout: 15000 });
+    await dialog.locator(".cc-artifact-header").waitFor();
     await dialog.getByText("Original summary", { exact: true }).filter({ visible: true }).waitFor();
-    assert.equal(await dialog.getAttribute("data-artifact-id"), state.originalId, "refresh preserves an explicitly selected historical submission");
-    await page.reload(); dialog = await openCurrent();
+    assert.equal(await dialog.getAttribute("data-artifact-id"), state.originalId, "the new detail rendering preserves the explicit historical submission");
+    await historicalRound.waitFor(); assert.equal(await historicalRound.inputValue(), state.originalRoundId);
+    await dialog.getByRole("combobox", { name: "产物版本", exact: true }).selectOption(state.draftId);
+    await dialog.locator(".cc-document").getByText("Updated risks after history selection", { exact: true }).waitFor();
+    const updatedInfo = dialog.locator(".cc-execution-info");
+    if (!await updatedInfo.evaluate(node => (node as HTMLDetailsElement).open)) await updatedInfo.locator("summary").click();
+    await updatedInfo.getByRole("region", { name: "Schema 撰写进度" }).getByText(/3\/3/).waitFor();
+    await dialog.getByRole("combobox", { name: "产物版本", exact: true }).selectOption(state.originalId);
+    await dialog.getByText("Original summary", { exact: true }).filter({ visible: true }).waitFor();
+    await historicalRound.waitFor(); assert.equal(await historicalRound.inputValue(), state.originalRoundId);
+    await page.reload(); dialog = await openCurrent(3);
     assert.equal(await dialog.getAttribute("data-artifact-id"), state.draftId);
     assert.equal((await service.withGraph(g => g.schemaShow(state.run, state.step))).draft!.id, state.draftId);
   } finally { try { await browser?.close(); } finally { await new Promise<void>(resolve => server.close(() => resolve())); } }
