@@ -72,6 +72,30 @@ for (const source of [
     timeout: 180000
   }, async (t) => {
     const f = await initializedContextFixture(t);
+    let currentPhase: test.TestContext = t;
+    const pending = new Set<Promise<unknown>>();
+    function checkCancellation() {
+      t.signal.throwIfAborted();
+      currentPhase.signal.throwIfAborted();
+    }
+    async function checked<T>(operation: () => Promise<T>): Promise<T> {
+      checkCancellation();
+      const work = operation();
+      pending.add(work);
+      try {
+        const result = await work;
+        checkCancellation();
+        return result;
+      } finally {
+        pending.delete(work);
+      }
+    }
+    // node:test can finish a canceled subtest while its async callback is still
+    // unwinding. Keep the fixture until that callback stops, including any
+    // already-started atomic Store operation; guards prevent subsequent work.
+    f.beforeCleanup(async () => {
+      await Promise.allSettled([...pending]);
+    });
     const service = (await openContextControl(f.root))!;
     const file = join(root, source);
     const procedure = (await readMemoryFile('procedures', file)).entity as GraphProcedureMemory;
@@ -141,7 +165,7 @@ for (const source of [
           'human']
       }])));
     assert.ok(Object.values(slots).every(slot => slot.actorIds.length === 2), 'every declared Review Slot is enabled');
-    const started = await service.withGraph(g => g.start({
+    const started = await checked(() => service.withGraph(g => g.start({
       name: 'Real agile Reviewer access fixture',
       procedure,
       memorySnapshot: {
@@ -174,32 +198,36 @@ for (const source of [
         reviews: policies,
         slots
       }
-    }));
+    })));
     const runId = started.run.id;
     const runtime = await createAgentReviewCliRuntime({
       nodeExecutable: process.execPath,
       cliEntrypoint: entrypoint
     });
-    t.after(() => runtime.cleanup());
+    f.beforeCleanup(() => runtime.cleanup());
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('MEMSPHERE_')));
     Object.assign(env, {
       MEMSPHERE_HOME: f.home,
       MEMSPHERE_CONFIG_PATH: join(f.root, 'config.json')
     });
     let currentSnapshot = started;
-    let currentPhase: test.TestContext = t;
     let checkedRunnerProcess = false;
     async function phase<T>(name: string, operation: () => Promise<T>): Promise<T> {
       let result: { value: T } | undefined;
       await t.test(name, { timeout: 180000 }, async child => {
         currentPhase = child;
-        result = { value: await operation() };
+        checkCancellation();
+        const work = operation();
+        pending.add(work);
+        void work.then(() => pending.delete(work), () => pending.delete(work));
+        result = { value: await work };
       });
       // A failed subtest must stop dependent phases using its incomplete state.
       assert.ok(result, `Workflow phase did not complete: ${name}`);
       return result.value;
     }
     async function runner(args: string[], json = true) {
+      checkCancellation();
       const command = ['--project', 'test-project', ...args];
       // One report per Procedure and the rewind retain the OS boundary. Other
       // Runner setup calls use the real command tree, under the same 20s limit.
@@ -216,7 +244,7 @@ for (const source of [
       let receipt: Awaited<ReturnType<typeof invokeCliModule>> | undefined;
       const commandStarted = performance.now();
       await currentPhase.test(`Runner CLI ${args.slice(0, 2).join(' ')}`, { timeout: 20000 }, async () => {
-        receipt = await invokeCliModule(command, f.cwd, env, entrypoint);
+        receipt = await checked(() => invokeCliModule(command, f.cwd, env, entrypoint));
       });
       assert.ok(receipt, 'Runner CLI command must finish within its 20s deadline');
       assert.ok(performance.now() - commandStarted <= 20000, 'Runner CLI keeps its 20s wall-clock limit');
@@ -225,7 +253,7 @@ for (const source of [
     async function active(id: string): Promise<Step> {
       // The fixture has one writer. Reuse the last public write receipt to
       // select the next Step; actual report/read authorization stays fresh.
-      const rows = await service.withGraph(async g => g.ready(currentSnapshot).filter(s => s.source?.actionId === id));
+      const rows = await checked(() => service.withGraph(async g => g.ready(currentSnapshot).filter(s => s.source?.actionId === id)));
       assert.equal(rows.length, 1, id);
       return rows[0];
     }
@@ -233,7 +261,7 @@ for (const source of [
       const step = await active(id);
       if (throughCli) {
         // Enter is fixture setup; report still uses the real CLI command tree.
-        await service.withGraph(g => g.enter(runId, step.id));
+        await checked(() => service.withGraph(g => g.enter(runId, step.id)));
         const args = [
           'run',
           'report',
@@ -255,12 +283,13 @@ for (const source of [
           body
         };
       }
-      const r = await service.withGraph(async (g) => {
+      const r = await checked(() => service.withGraph(async (g) => {
         await g.enter(runId, step.id);
+        checkCancellation();
         return g.report(runId, step.id, {
           text: body
         });
-      });
+      }));
       currentSnapshot = r.snapshot;
       return {
         stepId: step.id,
@@ -270,7 +299,7 @@ for (const source of [
     }
     let sessionIndex = 0;
     async function session(candidate: Produced, preparingInput = false): Promise<ReviewerSession> {
-      const step = (await service.withGraph(g => g.reviewSnapshot(runId, candidate.stepId))).steps.find(s => s.id === candidate.stepId)!;
+      const step = (await checked(() => service.withGraph(g => g.reviewSnapshot(runId, candidate.stepId)))).steps.find(s => s.id === candidate.stepId)!;
       const roundId = step.reviewRounds!.at(-1)!.id;
       candidate.reviewRoundId = roundId;
       const input = {
@@ -280,14 +309,15 @@ for (const source of [
         actorId: 'reader',
         service
       };
-      const claimed = (await reviews.claimArtifactReviewAgentAssignment(input))!;
+      const claimed = (await checked(() => reviews.claimArtifactReviewAgentAssignment(input)))!;
       const bound = {
         ...input,
         attemptId: claimed.attempt.id
       };
       const cwd = join(f.directory, `review-attempt-${++sessionIndex}`);
+      checkCancellation();
       await mkdir(cwd);
-      await reviews.markArtifactReviewAgentCliReady(bound);
+      await checked(() => reviews.markArtifactReviewAgentCliReady(bound));
       const sessionEnv = {
         ...env,
         MEMSPHERE_CLI: runtime.launcherPath,
@@ -302,6 +332,7 @@ for (const source of [
       };
       let exports = 0;
       const cli = (args: string[], ok = true): SpawnSyncReturns<string> => {
+        checkCancellation();
         const r = crossSpawn.sync(runtime.launcherPath, [
           ...args,
           '--output',
@@ -377,18 +408,18 @@ for (const source of [
           // Prepare the accepted input using the real node algorithm and one
           // public CAS write. Final submission still checks every node. These
           // source reviews are preconditions, not the Sessions under test.
-          await service.withGraph(g => g.mutateReview(runId, step.id, roundId, 'reader', async review => {
+          await checked(() => service.withGraph(g => g.mutateReview(runId, step.id, roundId, 'reader', async review => {
             const nodes = { nodeTree: review.nodeTree!, nodeStates: review.nodeStates! };
             let node;
             while ((node = currentReviewNode(nodes)))
               review.comments = mutateReviewNode(nodes, review.comments, {
                 operation: 'report', expectedNodeId: node.nodeId, artifact: { applicable: true }
               }, () => { throw new Error('Input fixture has no findings'); });
-          }));
+          })));
         } else {
-          let context = await reviews.readArtifactReviewForActor(input);
+          let context = await checked(() => reviews.readArtifactReviewForActor(input));
           while (currentReviewNode(context.assignment))
-            context = await reviews.mutateArtifactReviewNodes({
+            context = await checked(() => reviews.mutateArtifactReviewNodes({
               ...bound,
               mutation: {
                 operation: 'report',
@@ -397,18 +428,18 @@ for (const source of [
                   applicable: true
                 }
               }
-            });
+            }));
         }
-        await reviews.submitArtifactReviewAgentAssignment({
+        await checked(() => reviews.submitArtifactReviewAgentAssignment({
           ...bound,
           vote: 'approve'
-        });
-        await service.withGraph(g => g.submitReview(runId, step.id, roundId, 'human', 'approve', [], 'Fixture Human confirms this fixed version.'));
-        await reviews.submitArtifactReviewRunnerVote({
+        }));
+        await checked(() => service.withGraph(g => g.submitReview(runId, step.id, roundId, 'human', 'approve', [], 'Fixture Human confirms this fixed version.')));
+        await checked(() => reviews.submitArtifactReviewRunnerVote({
           ...input,
           vote: 'approve'
-        });
-        currentSnapshot = await service.snapshot(runId);
+        }));
+        currentSnapshot = await checked(() => service.snapshot(runId));
       }
       return {
         read,
@@ -536,7 +567,7 @@ for (const source of [
         '--output',
         'json'
       ]);
-      currentSnapshot = await service.snapshot(runId);
+      currentSnapshot = await checked(() => service.snapshot(runId));
       return setup('after-rewind');
     });
     await phase('post-rewind acceptance and historical snapshots retain exact versions', async () => {
@@ -548,7 +579,7 @@ for (const source of [
         '--artifact',
         firstInputs.requirements.artifactId
       ], false);
-      const history = await service.withGraph(g => g.reviewSnapshot(runId, first.product.stepId, first.review.roundId));
+      const history = await checked(() => service.withGraph(g => g.reviewSnapshot(runId, first.product.stepId, first.review.roundId)));
       assert.ok(history.artifacts.some(a => a.id === firstInputs.requirements.artifactId));
       assert.ok(history.artifacts.some(a => a.id === first.technical.artifactId));
       assert.ok(!history.artifacts.some(a => a.id === replacement.requirements.artifactId || a.id === third.technical.artifactId));
