@@ -13,6 +13,14 @@ export async function memoryChangeShowCommand(changeId: string, options: {
   const payload = await withMemoryChangeDetailSnapshot({
     home: context.home, project: context.primary.name, changeId, checkpointDigest: options.checkpoint,
     use: async ({ change, files }) => {
+      return memoryChangePart({ change, files }, options);
+    }
+  });
+  process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+}
+
+type Detail = Parameters<Parameters<typeof withMemoryChangeDetailSnapshot>[0]["use"]>[0];
+export async function memoryChangePart({ change, files }: Pick<Detail, "change" | "files">, options: { part: string; reference?: string; side: string }) {
       const identity = { changeId: change.id, project: change.project, checkpointDigest: change.checkpoint!.digest };
       const selected = options.reference ? files.filter(file => file.reference === options.reference) : files;
       if (options.reference && selected.length !== 1) throw new Error(`ChangeSet Memory reference not found or ambiguous: ${options.reference}`);
@@ -34,9 +42,21 @@ export async function memoryChangeShowCommand(changeId: string, options: {
         }))) };
         default: throw new Error(`Unknown ChangeSet material: ${options.part}`);
       }
-    }
-  });
-  process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+}
+
+/** Pure fixed snapshot construction; registration happens only after the reader's final check. */
+export async function captureMemoryChange(changeId: string, checkpoint: string) {
+  const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
+  return withMemoryChangeDetailSnapshot({ home: context.home, project: context.primary.name, changeId, checkpointDigest: checkpoint,
+    use: async detail => ({
+      summary: await memoryChangePart(detail, { part: "summary", side: "after" }),
+      diff: await memoryChangePart(detail, { part: "diff", side: "after" }),
+      validation: await memoryChangePart(detail, { part: "validation", side: "after" }),
+      memories: await Promise.all(detail.files.map(async file => ({
+        before: await memoryChangePart(detail, { part: "memory", side: "before", reference: file.reference }),
+        after: await memoryChangePart(detail, { part: "memory", side: "after", reference: file.reference })
+      })))
+    }) });
 }
 
 async function unifiedDiff(before: string, after: string): Promise<string> {

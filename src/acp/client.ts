@@ -1,8 +1,8 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, realpath, open, stat } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { Readable, Writable } from "node:stream";
-import * as acp from "@agentclientprotocol/sdk";
+import type * as acp from "@agentclientprotocol/sdk";
 import type { AgentReviewProviderLaunch } from "./provider.js";
 import { spawnCommand, terminateProcessTree } from "../platform-process.js";
 
@@ -17,6 +17,7 @@ export type AgentReviewAcpSession = {
 
 export async function runAgentReviewAcpSession(input: {
   launch: AgentReviewProviderLaunch;
+  signal?: AbortSignal;
   prompt: string;
   reminder: string;
   workspaceRoot: string;
@@ -28,8 +29,11 @@ export async function runAgentReviewAcpSession(input: {
   onUpdate?(update: acp.SessionUpdate): void | Promise<void>;
   onPrompt?(kind: "initial" | "reminder", prompt: string): void | Promise<void>;
 }, dependencies: { spawn?: typeof spawnAgent } = {}): Promise<AgentReviewAcpSession> {
+  input.signal?.throwIfAborted();
+  const acp = await import("@agentclientprotocol/sdk");
   if (isAbsolute(input.launch.command)) await assertAbsoluteLaunchCommand(input.launch.command);
   await input.assertLaunchValid?.();
+  input.signal?.throwIfAborted();
   const process = (dependencies.spawn ?? spawnAgent)(input.launch);
   const transport = new AbortController();
   let spawnFailure: Error | undefined;
@@ -78,6 +82,12 @@ export async function runAgentReviewAcpSession(input: {
   // Capture descendant identities while the Provider is still attached. Voting
   // completion alone cannot prove its process tree has stopped.
   const terminate = () => { void beforeStop().then(signalTermination, signalTermination); };
+  const onAbort = () => {
+    transport.abort(input.signal!.reason);
+    terminate();
+  };
+  input.signal?.addEventListener("abort", onAbort, { once: true });
+  if (input.signal?.aborted) onAbort();
   process.once("exit", () => {
     if (forceKillTimer) clearTimeout(forceKillTimer);
     forceKillTimer = undefined;
@@ -210,6 +220,7 @@ export async function runAgentReviewAcpSession(input: {
     }
     throw failureInFlight;
   } finally {
+    input.signal?.removeEventListener("abort", onAbort);
     startupTimeout.dispose();idleTimeout?.dispose();maxRuntimeTimeout?.dispose();
     try { await beforeStop(); }
     catch (cleanupError) {
@@ -314,7 +325,9 @@ async function promptUntilSubmission(
   waitForSubmission: (() => Promise<void>) | undefined,
   onPrompt: ((kind: "initial" | "reminder", prompt: string) => void | Promise<void>) | undefined
 ): Promise<{ submitted: true } | { submitted: false; response: acp.PromptResponse }> {
+  timeoutSignal.throwIfAborted();
   await onPrompt?.(kind, prompt);
+  timeoutSignal.throwIfAborted();
   if (!waitForSubmission) {
     return { submitted: false, response: await promptTurn(session, prompt, timeoutSignal) };
   }
@@ -398,11 +411,24 @@ async function readWorkspaceTextFile(
   workspaceRoot: string,
   request: acp.ReadTextFileRequest
 ): Promise<acp.ReadTextFileResponse> {
+  const acp = await import("@agentclientprotocol/sdk");
   const path = resolve(request.path);
   if (!isAbsolute(request.path) || !isWithin(workspaceRoot, path)) {
-    throw new Error(`agent_fs_denied: path is outside the workspace: ${request.path}`);
+    throw new acp.RequestError(-32000, `agent_fs_denied: path is outside the workspace: ${request.path}`, { code: "REVIEW_RESOURCE_DENIED" });
   }
-  const content = await readFile(path, "utf8");
+  const root = await realpath(workspaceRoot), target = await realpath(path);
+  if (!isWithin(root, target)) throw new acp.RequestError(-32000, `agent_fs_denied: path is outside the workspace: ${request.path}`, { code: "REVIEW_RESOURCE_DENIED" });
+  const handle = await open(target, "r");
+  let content: string;
+  try {
+    const identity = await handle.stat();
+    if (!identity.isFile()) throw new acp.RequestError(-32000, "agent_fs_denied: target is not a regular file", { code: "REVIEW_RESOURCE_DENIED" });
+    const verify = async () => {
+      const current = await realpath(path), info = await stat(current);
+      if (current !== target || !isWithin(root, current) || info.dev !== identity.dev || info.ino !== identity.ino) throw new acp.RequestError(-32000, "agent_fs_denied: file identity changed", { code: "REVIEW_RESOURCE_DENIED" });
+    };
+    await verify(); content = await handle.readFile("utf8"); await verify();
+  } finally { await handle.close(); }
   const lines = content.split("\n");
   const start = Math.max(0, (request.line ?? 1) - 1);
   const end = request.limit === undefined || request.limit === null ? undefined : start + Math.max(0, request.limit);

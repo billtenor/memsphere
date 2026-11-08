@@ -8,6 +8,7 @@ defines:
   - 定义 memsphere !schema Memory 的合法内容结构、值契约和组合约束。
   - Schema 的 name/names 标识值契约或字段，不是 Procedure 的单次 Run 名称。
 asserts:
+  - "Artifact 的运行时补充依赖与 Reviewer 读取范围不属于 Schema YAML 字段；Schema 填写及最终提交仍按原契约执行，不因 Session 资源读取改变。"
   - graph model.definedBy 为 memsphere/schema.json 时，definition 是完整 !schema YAML；ref 是并列的 schemas/canonical-name 引用，二者恰选其一，不向 !schema 增加 model/ref/payload 等字段。
   - graph 整体格式以 payload.contentType 为准；根 format.name 如声明必须与其一致，format.layout 控制 outline/table。Schema 的 format 可以只声明 layout，等价于 Markdown 对应布局；局部省略时继承兼容的外层表达规则，无法表达时拒绝。
   - graph 的 CLI 回溯属于运行记录语义，不在本 Schema 增加回溯字段；Procedure mode 省略仍为 flow。

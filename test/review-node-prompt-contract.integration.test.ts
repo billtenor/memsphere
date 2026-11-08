@@ -19,7 +19,8 @@ for (const graph of [true, false]) for (const locale of ["en", "zh-CN"] as const
     const f = await reviewNodeFixture(t, graph);
     const context = await reviews.readArtifactReviewForActor(f.input);
     const prompt = await buildArtifactReviewerPrompt({ context, locale, promptVersion: "artifact-review-v3" });
-    assert.match(prompt, /memsphere memory change show/);
+    assert.match(prompt, /"\$MEMSPHERE_CLI" memory change show/);
+    assert.doesNotMatch(prompt, /\bmemsphere (?:run|memory|continue)\b/);
     assert.match(prompt, /--checkpoint/);
     assert.match(prompt, locale === "en" ? /no --run is added automatically/ : /不会自动添加 --run/);
     assert.match(prompt, locale === "en" ? /Formal review rules and contracts always use the frozen version/ : /正式评审规则与契约始终采用冻结版本/);
@@ -62,5 +63,47 @@ test("All supported legacy reviewer prompts describe explicit Run reads and equi
     assert.match(prompt, /memory change show/);
     assert.match(prompt, locale === "en" ? /no --run is added automatically/ : /不会自动添加 --run/);
     assert.doesNotMatch(prompt, /automatically bind their frozen|会自动绑定其冻结/);
+    assert.match(prompt, locale === "en"
+      ? /restricted Run summary containing only steps allowed in this round/
+      : /本轮允许步骤的受限 Run 摘要/);
+    assert.match(prompt, locale === "en"
+      ? /legal context Artifact fixed to this round/
+      : /本轮固定绑定的合法上下文产物/);
+    assert.doesNotMatch(prompt, /including every step|prior Artifact from the outline/);
   }
+});
+
+// Run startup provenance can outlive a current ChangeSet checkpoint. Frozen Run
+// Memory remains readable; delivery evidence is an explicitly referenced External.
+test("startup ChangeSet provenance is metadata rather than an assumed live checkpoint command", async t => {
+  const f = await reviewNodeFixture(t, true);
+  const context = await reviews.readArtifactReviewForActor(f.input);
+  context.run.memorySource = { kind: "changeset", project: "test-project", changeId: "old-start-source", checkpointDigest: "a".repeat(64), baseRevision: "old-base" };
+  const prompt = await buildArtifactReviewerPrompt({ context, locale: "en", promptVersion: "artifact-review-v3" });
+  assert.match(prompt, /old-start-source/);
+  assert.ok(prompt.includes(`memory list --run ${context.run.id}`));
+  assert.doesNotMatch(prompt, /memory change show old-start-source/);
+});
+
+for (const ambiguous of [false,true]) test(`historical flow contract ${ambiguous?'rejects differing caller rules':'retains frozen called-procedure rules'}`,async t=>{
+ const f=await reviewNodeFixture(t,false),context=await reviews.readArtifactReviewForActor(f.input),run=structuredClone(context.run),step=structuredClone(run.plan![0]),rules=structuredClone(step.assertTree!);
+ run.status='done';run.stack=[];
+ run.plan=[{id:'flow[1]',kind:'call',instruction:'Call middle',target:'middle'},...(ambiguous?[{id:'flow[2]',kind:'call' as const,instruction:'Call child',target:'child'}]:[])];
+ run.procedureSnapshots={...run.procedureSnapshots,middle:{memoryName:'middle',assertTree:rules,steps:[{id:'flow[1]',kind:'call',instruction:'Call child',target:'child'}]},child:{memoryName:'child',steps:[step]}};
+ const review=structuredClone(context.review);review.controlPlane.artifactScope=`child#${step.id}`;const round=structuredClone(context.round);if(round.controlPlane)round.controlPlane.artifactScope=review.controlPlane.artifactScope;
+ const historical={...context,run,review,round};
+ if(ambiguous)assert.throws(()=>buildAgentReviewContract(historical),(error:any)=>error.code==='REVIEW_CONTEXT_INVALID'&&/ambiguous/.test(error.message));
+ else{const result=buildAgentReviewContract(historical);assert.equal(result.procedure.name,'child');assert.match(JSON.stringify(result.procedure.asserts),/Check evidence/);assert.equal(result.action.instruction,'Make result');assert.equal(result.artifact.review,review.policyId);}
+});
+
+test('historical flow contract cannot select a later called procedure with the same local Step ID',async t=>{
+ const f=await reviewNodeFixture(t,false),context=await reviews.readArtifactReviewForActor(f.input),expected=buildAgentReviewContract(context),run=structuredClone(context.run);
+ run.stack=[{type:'procedure',memoryName:'other',index:0,steps:[{...run.plan![0],instruction:'Different current procedure'}]}];
+ assert.deepEqual(buildAgentReviewContract({...context,run}),expected);
+});
+
+for(const version of ['artifact-review-v1','artifact-review-v2'])for(const locale of ['zh-CN','en'] as const)test(`${version} ${locale} binds initial and reminder commands to the Session launcher`,async t=>{
+ const f=await reviewNodeFixture(t,false),context=await reviews.readArtifactReviewForActor(f.input);delete context.assignment.nodeTree;delete context.assignment.nodeStates;
+ const initial=await buildArtifactReviewerPrompt({context,locale,promptVersion:version}),reminder=buildArtifactReviewerReminder(locale,version);
+ for(const prompt of [initial,reminder]){assert.match(prompt,/\$MEMSPHERE_CLI/);assert.doesNotMatch(prompt,/\bmemsphere (?:run|memory|continue)\b/);}
 });

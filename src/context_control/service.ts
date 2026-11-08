@@ -330,7 +330,10 @@ export class ContextControl {
   }
   async addExternal(runId: string, source: string, body: Body) {
     await this.body(body); nonblank(source, "source");
-    return this.writeRecord(runId, async () => { const e: External = { id: id("external"), runId, source, capturedAt: this.runtime.now(), ...structuredClone(body) }; await this.create("external", runId, e); return e; });
+    return this.writeRecord(runId, async () => {
+      const run = (await this.require<Run>("run", runId, runId)).value;
+      if (run.permissionConfig && !run.permissionConfig.runner.permissions.includes("artifact.submit")) throw failure("PERMISSION_DENIED", "Runner requires artifact.submit to register External");
+      const e: External = { id: id("external"), runId, source, capturedAt: this.runtime.now(), ...structuredClone(body) }; await this.create("external", runId, e); return e; });
   }
   async review(runId: string, artifactId: string, source: "human" | "agent", comments: string[]) {
     if (!comments.length || !["human", "agent"].includes(source)) throw failure("INVALID_ARGUMENT", "Review requires source and comments");

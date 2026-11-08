@@ -1,4 +1,6 @@
 import { registerReviewNodeCommands, reviewNodeCommand } from "./commands/review-nodes.js";
+import { withConfigReadScope } from "./config-read-scope.js";
+import { installReviewerCommands, inReviewerSession } from "./acp/reviewer-commands.js";
 import { registerDaemonCommands, registerWaitTaskCommands } from "./daemon/commands.js";
 import { registerContinueCommand } from "./commands/continue.js";
 import { registerExplorationCommands } from "./commands/context-control.js";
@@ -93,6 +95,11 @@ import {
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
 export async function runCli(argv = process.argv): Promise<void> {
+  if (inReviewerSession()) return withConfigReadScope(() => executeCli(argv));
+  return executeCli(argv);
+}
+
+async function executeCli(argv: string[]): Promise<void> {
 const program = new Command();
 
 program
@@ -470,7 +477,7 @@ const runArtifact = run
 
 runArtifact
   .command("show")
-  .description("Show an Artifact; use --step for Procedure or --artifact for free exploration.")
+  .description("Read an Artifact; --artifact fixes a model-backed version, --step selects a Procedure Step.")
   .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
   .option("--run <id>", "run id")
   .option("--step <ref>", "step ref from run show")
@@ -494,6 +501,7 @@ runArtifact
 runArtifactContract
   .command("show")
   .description("Show the complete frozen Action and Artifact contract.")
+  .option("--artifact <id>", "fixed authorized Artifact version in a Reviewer Session")
   .option("--assignment <id>", "Artifact Review Assignment bound to the active ACP Session")
   .option("--run <id>", "run id")
   .option("--step <ref>", "step ref from run show")
@@ -726,5 +734,6 @@ restore
   .argument("<id>", "run id")
   .action(archiveRestoreRunCommand);
 
+installReviewerCommands(program);
 await parseCli(program, argv);
 }
