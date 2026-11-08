@@ -13,4 +13,3 @@ export async function waitForTestState<T>(state: Promise<T>, label: string, sign
   try { return await Promise.race([state, cancelled]); }
   finally { clearTimeout(timer); if (abort) signal?.removeEventListener("abort", abort); }
 }
-
