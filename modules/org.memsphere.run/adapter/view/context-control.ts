@@ -8,8 +8,8 @@ import { renderArtifactValue } from "./run-detail.js";
 import { contextControlStyles } from "./context-control-styles.js";
 import { layoutGraph } from "./graph-layout.js";
 
-type Artifact = { id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
-type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
+type Artifact = { writingProgress?: { index: number; items: Array<{ path?: string }>; skipped: string[]; validation?: {issues: Array<{message: string}>}; submitting?: boolean }; id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
+type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ writing?: { draftId: string }; id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag); node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
@@ -216,7 +216,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       void mountReview!(snapshot.run.id,reviewStep!.reviewHandle!,reviewRound!.id,dialog,material,panel).catch(error=>{if(!disposed&&currentId===id)panel.textContent=error instanceof Error?error.message:String(error);});
       body.hidden=Boolean(material.querySelector(".artifact-review-material-heading"));
     }
-    if (!body.hidden && (inline || a.status !== "draft")) try {
+    if (!body.hidden) try {
       const value = await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}/artifacts/${encodeURIComponent(id)}/content`);
       if (!disposed && generation === currentGeneration && currentId === id) {
         if (value.previewable === false) {
@@ -241,10 +241,21 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const section=element("section","cc-upstream-steps");section.setAttribute("aria-label",label("上游步骤","Upstream steps"));section.append(element("h3","",label("上游步骤","Upstream steps")));
     const links=element("div","cc-upstream-links");for(const input of inputs){const link=graphMember(input.id);link.classList.add("cc-upstream-link");link.querySelector(".cc-member-arrow")!.textContent="←";links.append(link);}section.append(links);return section;
   }
-  function executionInformation(step:NonNullable<Snapshot["graph"]>["work"][number]){
+  function executionInformation(step:NonNullable<Snapshot["graph"]>["work"][number], artifact?: Artifact){
     const statuses:Record<string,string>={pending:label("待执行","Pending"),running:label("执行中","Running"),awaiting_review:label("待评审","Awaiting review"),done:label("已完成","Done"),failed:label("失败","Failed"),cancelled:label("已取消","Cancelled")};
     const info=element("details","cc-execution-info");info.dataset.disclosureKey=`execution:${step.id}`;info.append(element("summary","",label("执行信息","Execution information")));
     const facts=element("dl","cc-execution-facts");for(const [name,value]of [[label("状态","Status"),statuses[step.status]??step.status],[label("创建时间","Created"),step.createdAt],[label("开始时间","Started"),step.startedAt],[label("结束时间","Ended"),step.endedAt]])if(value){const content=element("dd");if(name!==label("状态","Status")){const time=element("time","",new Date(value).toLocaleString(english?"en":"zh-CN"));time.dateTime=value;content.append(time);}else content.textContent=value;facts.append(element("dt","",name),content);}info.append(facts);
+    if (artifact?.writingProgress) {
+      const writing = artifact.writingProgress, progress = element("section", "cc-schema-writing");
+      progress.setAttribute("aria-label", label("Schema 撰写进度", "Schema writing progress"));
+      progress.append(element("p", "", `${label("进度", "Progress")} ${writing.index}/${writing.items.length}`));
+      const current = writing.items[writing.index]?.path;
+      if (current) progress.append(element("p", "", `${label("当前项", "Current field")}: ${current}`));
+      else progress.append(element("p", "", writing.submitting ? label("提交处理中", "Submitting") : label("待完整检查与提交", "Ready for final inspection and submission")));
+      progress.append(element("p", "", `${label("已跳过", "Skipped")}: ${writing.skipped.length}`));
+      for (const issue of writing.validation?.issues ?? []) progress.append(element("p", "cc-schema-issue", issue.message));
+      info.append(progress);
+    }
     return info;
   }
   function actionDefinition(action: ProcedureAction) {
@@ -280,7 +291,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     };
     const result = step.artifact as { mode?: string; id?: string; items?: Record<string,string[]> } | undefined;
     const candidates = snapshot.artifacts.filter(a => a.stepId === step.id);
-    const artifactId = candidates.some(a => a.id === chosenArtifactId) ? chosenArtifactId : result?.id ?? step.reviewRounds?.at(-1)?.artifactId ?? candidates.at(-1)?.id;
+    const artifactId = candidates.some(a => a.id === chosenArtifactId) ? chosenArtifactId : candidates.find(a => a.id === step.writing?.draftId)?.id ?? result?.id ?? step.reviewRounds?.at(-1)?.artifactId ?? candidates.at(-1)?.id;
     selection.artifactId = artifactId;
     if (!artifactId) {
       disposeReview?.();
@@ -302,7 +313,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     if (!dialog || currentId !== artifactId || graphSelection !== selection) return;
     const head=dialog.querySelector<HTMLElement>(".cc-modal-head")!;dialog.querySelector(".cc-version-bar")?.prepend(executionSelect());graphBack(head);
     const header=dialog.querySelector(".cc-artifact-header");
-    const info=executionInformation(step),metadata=header?.querySelector(".cc-metadata");
+    const info=executionInformation(step, snapshot.artifacts.find(a=>a.id===artifactId)),metadata=header?.querySelector(".cc-metadata");
     if(metadata){const facts=info.querySelector("dl")!;facts.append(element("dt","",label("产物 ID","Artifact ID")),element("dd","cc-artifact-id",metadata.textContent??""));}
     header?.querySelector(".cc-artifact-info")?.remove();
     const upstream=upstreamSteps(step);if(upstream)header?.append(upstream);
@@ -367,7 +378,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
         value.artifacts=snapshot.artifacts;artifactsLoaded=false;
         if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
           const old=snapshot.graph!.work.find(s=>s.id===step.id);
-          if(old?.status===step.status&&JSON.stringify(old.artifact)===JSON.stringify(step.artifact))return {...old,...step};
+          if(old?.status===step.status&&JSON.stringify(old.artifact)===JSON.stringify(step.artifact)&&JSON.stringify(old.writing)===JSON.stringify(step.writing))return {...old,...step};
           if(step.source)loadedActions.delete(step.source.actionId);return step;
         });
       }else{loadedActions.clear();actionDefinitions.clear();artifactsLoaded=false;}

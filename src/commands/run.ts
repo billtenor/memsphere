@@ -722,6 +722,7 @@ export async function runArtifactShowCommand(options: RunArtifactShowOptions): P
 }
 
 export async function runArtifactExportCommand(options: { run: string; step: string; file: string; force?: boolean }): Promise<void> {
+  if (await graphCommand("schema-export", options)) return;
   const config = await readConfig();
   const run = await readRun(config.runsRoot, requireRunId(options.run));
   await exportRunArtifact(config.runsRoot, run, requireStepRef(options.step), options.file, options.force, join(config.archiveRoot, "runs"));
@@ -737,6 +738,12 @@ export async function exportRunArtifact(runsRoot: string, run: RunState, referen
   const event = [...run.events].reverse().find((candidate) => candidate.stepId === located.step.id);
   const selected = draft && ["writing", "awaiting_finalization"].includes(draft.status) ? draft : submission?.artifact ?? event?.artifact;
   if (!selected?.path) throw new Error(`No file Artifact to export: ${reference}`);
+  const bytes = await requireRunContent(runsRoot, "artifact", selected.path);
+  await exportArtifactBytes(bytes, file, force, [runsRoot, archivedRunsRoot]);
+}
+
+/** Shared local-copy export; callers provide bytes without exposing managed paths. */
+export async function exportArtifactBytes(bytes: Uint8Array, file: string, force: boolean, managedRoots: string[]): Promise<void> {
   const target = resolve(file);
   const parent = await realpath(dirname(target));
   try {
@@ -744,7 +751,7 @@ export async function exportRunArtifact(runsRoot: string, run: RunState, referen
   } catch (error) {
     if (!(error && typeof error === "object" && "code" in error && error.code === "ENOENT")) throw error;
   }
-  for (const root of [runsRoot, archivedRunsRoot]) {
+  for (const root of managedRoots) {
     const contained = (path: string, boundary: string) => {
       const child = relative(resolve(boundary), path);
       return !child || (!isAbsolute(child) && child !== ".." && !child.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`));
@@ -755,7 +762,6 @@ export async function exportRunArtifact(runsRoot: string, run: RunState, referen
     }
     if (contained(target, root) || contained(join(parent, basename(target)), resolvedRoot)) throw new Error("Export to a local working copy outside managed Run storage");
   }
-  const bytes = await requireRunContent(runsRoot, "artifact", selected.path);
   if (!force) await writeFile(target, bytes, { flag: "wx" });
   else {
     // Replace the working-copy entry, not a possibly hard-linked managed inode.
@@ -768,6 +774,7 @@ export async function exportRunArtifact(runsRoot: string, run: RunState, referen
 }
 
 export async function runArtifactContractShowCommand(options: RunArtifactShowOptions): Promise<void> {
+  if (!options.assignment && await graphCommand("contract-show", options)) return;
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);
@@ -867,6 +874,7 @@ export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions):
 }
 
 export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {
+  if (await graphCommand("schema-enter", { ...options, schemaName })) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await enterSchema({
@@ -886,6 +894,7 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
 }
 
 export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promise<void> {
+  if (await graphCommand("schema-show", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, runId));
@@ -903,6 +912,7 @@ export function buildSchemaWritingDetail(snapshot: SchemaWritingSnapshot): unkno
 }
 
 export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
+  if (await graphCommand("schema-repeat", { ...options, count: countValue })) return;
   const runId = requireRunId(options.run);
   if (!/^\d+$/.test(countValue)) {
     throw new Error("repeat count must be a non-negative integer");
@@ -917,6 +927,7 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
 }
 
 export async function runSkipCommand(options: RunIdOptions): Promise<void> {
+  if (await graphCommand("schema-skip", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await skipRun({ runsRoot: config.runsRoot, runId });
@@ -1249,4 +1260,8 @@ function collectRunStepLocations(
 
 function locatedStepRef(located: LocatedRunStep): string {
   return `${located.memoryName}#${located.step.id}`;
+}
+
+export async function runSchemaReportCommand(options: object): Promise<void> {
+  if (!await graphCommand("schema-report", options)) throw new Error("schema report requires a graph Step; flow uses run report");
 }

@@ -15,7 +15,7 @@ export const contextControlStyles = `
 .cc-procedure-definition-body > section { margin:0 0 14px; }
 .cc-procedure-definition-body h3, .cc-procedure-definition-body h4 { margin:0 0 6px; font-size:13px; }
 .cc-procedure-definition-body ul { margin:0; padding-left:20px; }
-.cc-action-definition > summary { cursor:pointer; }
+.cc-action-definition > summary, .cc-execution-info > summary { cursor:pointer; font-size:12px; font-weight:500; color:var(--mem-view-color-text-muted); }
 .cc-action-definition pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
@@ -177,7 +177,7 @@ export const contextControlStyles = `
 .cc-member-list{display:grid;gap:0}
 .cc-member-row{position:relative;display:grid;gap:5px;width:100%;text-align:left;padding:14px 32px 14px 0;border:0;border-bottom:1px solid var(--mem-view-color-border);background:transparent;color:var(--mem-view-color-text);cursor:pointer}
 .cc-member-row:hover{background:var(--mem-view-color-accent-soft)}.cc-member-row strong{font-size:13px;font-weight:600}.cc-member-row>span{font-size:12px;color:var(--mem-view-color-text-muted)}.cc-member-row .cc-member-arrow{position:absolute;right:10px;top:50%;transform:translateY(-50%)}
-.cc-execution-info{margin-top:22px;font-size:12px;color:var(--mem-view-color-text-muted)}.cc-execution-info>summary{cursor:pointer}
+.cc-execution-info{margin-top:22px;font-size:12px;color:var(--mem-view-color-text-muted)}
 .cc-execution-facts{display:grid;grid-template-columns:90px minmax(0,1fr);gap:8px 12px;margin:14px 0}.cc-execution-facts dd{margin:0;overflow-wrap:anywhere}
 .cc-step-empty,.cc-member-empty{font-size:13px;color:var(--mem-view-color-text-muted);margin:22px 0}
 @media(max-width:760px){.cc-review-divider,.cc-review-toggle{display:none}.cc-step-body{padding:18px}.cc-modal-head{flex-wrap:wrap}}
