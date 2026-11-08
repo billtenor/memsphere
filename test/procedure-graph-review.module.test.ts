@@ -74,7 +74,11 @@ test("Agent claims once, requires handshake, and submits only its current attemp
   assert.equal(await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }), undefined);
   const input = { ...f.input, attemptId: claimed.attempt.id };
   await assert.rejects(reviews.submitArtifactReviewAgentAssignment({ ...input, vote: "approve" }), /handshake/);
+  assert.equal(claimed.attempt.startedAt, f.clock.iso());
+  f.clock.advance(1234);
   await reviews.markArtifactReviewAgentCliReady(input);
+  const handshake = await reviews.readArtifactReviewForActor(input);
+  assert.equal(handshake.assignment.attempts!.at(-1)!.cliReadyAt, f.clock.iso());
   let pending = await reviews.readArtifactReviewForActor(input);
   while (currentReviewNode(pending.assignment)) pending = await reviews.mutateArtifactReviewNodes({ ...input, mutation: { operation: "report", artifact: { applicable: true }, expectedNodeId: currentReviewNode(pending.assignment)!.nodeId } });
   await reviews.submitArtifactReviewAgentAssignment({ ...input, vote: "approve" });

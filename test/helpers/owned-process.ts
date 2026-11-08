@@ -1,34 +1,44 @@
 import type { ChildProcess } from "node:child_process";
 
-/** Stop fixture-owned children before removing their working directories.
- * Cancellation must stop the child immediately, rather than waiting for an
- * after hook while the timed-out test continues using its fixture.
- */
+/** Cancellation stops fixture-owned children; failed termination must block deletion. */
 export function ownTestProcess(
   child: ChildProcess,
   signal: AbortSignal,
   beforeCleanup: (cleanup: () => Promise<void>) => void
 ) {
   let exited = child.exitCode !== null || child.signalCode !== null;
-  const stop = () => { if (!exited) child.kill("SIGKILL"); };
-  const exit = new Promise<void>(resolve => {
-    const finished = () => {
-      exited = true;
-      signal.removeEventListener("abort", stop);
-      resolve();
-    };
-    if (exited) finished();
-    else { child.once("exit", finished); child.once("error", finished); }
-  });
-  if (!exited) {
+  let terminationError: unknown;
+  let notify: () => void;
+  const settled = new Promise<void>(resolve => { notify = resolve; });
+  const finished = () => {
+    exited = true;
+    signal.removeEventListener("abort", stop);
+    notify();
+  };
+  const failed = (error: Error) => {
+    // An unsuccessful spawn has no owned PID. An error from an enrolled child
+    // (kill/send failures included) is not evidence that the process exited.
+    if (child.pid === undefined) finished();
+    else { terminationError ??= error; notify(); }
+  };
+  const stop = () => {
+    if (exited) return;
+    try {
+      if (!child.kill("SIGKILL")) failed(new Error(`Could not terminate owned process ${child.pid}`));
+    } catch (error) { failed(error as Error); }
+  };
+  child.once("exit", finished);
+  child.on("error", failed);
+  if (exited) finished();
+  else {
     signal.addEventListener("abort", stop, { once: true });
     if (signal.aborted) stop();
   }
   beforeCleanup(async () => {
     stop();
-    await exit;
-    // Compiler descendants may inherit pipes on Windows. The owned child has
-    // exited; fixture reclamation must not wait for inherited handles to close.
+    await settled;
+    if (!exited) throw terminationError ?? new Error(`Owned process ${child.pid} has not exited`);
+    // Only a confirmed exit (or failed spawn) permits fixture reclamation.
     child.stdin?.destroy(); child.stdout?.destroy(); child.stderr?.destroy();
   });
 }

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { fork, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { join } from "node:path";
@@ -43,10 +44,12 @@ function failure(result: Result, code?: string): any {
   if (code) assert.equal(error.code, code); return error;
 }
 
-async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRead = false) {
+async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRead = false, signal = t.signal) {
+  signal.throwIfAborted();
   const child = fork(new URL("../../fixtures/data-cli-worker.ts", import.meta.url), [JSON.stringify({ args: ["--project", "test-project", ...args], recordPath: join(fixture.root, "data/records/item.json"), pauseRead })], {
     cwd: fixture.cwd, execArgv: ["--import", loader], env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["ignore", "pipe", "pipe", "ipc"]
   });
+  ownTestProcess(child, signal, fixture.beforeCleanup);
   const messages: string[] = []; const waits = new Map<string, { resolve: () => void; reject: (error: Error) => void }>();
   const stdout: Buffer[] = []; const stderr: Buffer[] = [];
   child.stdout!.on("data", chunk => stdout.push(chunk)); child.stderr!.on("data", chunk => stderr.push(chunk));
@@ -54,7 +57,6 @@ async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRea
     const waiter = waits.get(message.type); if (waiter) { waits.delete(message.type); waiter.resolve(); } else messages.push(message.type);
   });
   let closed = false;
-  const exit = new Promise<void>(resolve => child.once("exit", () => resolve()));
   const result = new Promise<Result>((resolve, reject) => {
     child.once("error", reject);
     child.once("close", code => {
@@ -63,19 +65,21 @@ async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRea
       resolve({ code, stdout: bytes.toString("utf8"), stderr: error, bytes });
     });
   });
-  t.after(async () => {
-    if (!closed) child.kill("SIGKILL");
-    await exit;
-    // Killed tsx workers can leave inherited pipes open in their compiler
-    // subprocess on Windows. Cleanup must not wait for those pipes to close.
-    child.stdout!.destroy(); child.stderr!.destroy();
-  });
+  const abort = () => {
+    for (const waiter of waits.values()) waiter.reject(signal.reason);
+    waits.clear();
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  child.once("exit", () => signal.removeEventListener("abort", abort));
+  // Observe cancellation before the caller starts awaiting the final receipt.
+  void result.catch(() => undefined);
   function next(type: string): Promise<void> {
+    if (signal.aborted) return Promise.reject(signal.reason);
     const index = messages.indexOf(type); if (index !== -1) { messages.splice(index, 1); return Promise.resolve(); }
     if (closed) return Promise.reject(new Error(`CLI exited before ${type}`));
     return new Promise((resolve, reject) => waits.set(type, { resolve, reject }));
   }
-  await next("ready"); return { next, result, send: (message: string) => child.send(message) };
+  await next("ready"); return { next, result, child, send: (message: string) => child.send(message) };
 }
 
 test("data CLI creates from stdin, reads/updates/edits complete values and returns explicit identities", { timeout: 30_000 }, async (t) => {
@@ -268,3 +272,27 @@ test("data upsert CLI creates then replaces a whole value and dry-run leaves dat
   await fixture.createStore("files", "record.json", "data");
   failure(await cli(t, fixture, ["data", "upsert", "item.json", "--store", "files", "--value", '{"name":"x","count":0}', "--output", "json"]), "UNSUPPORTED_CAPABILITY");
 });
+
+for (const mode of ["abort", "fixture-cleanup"] as const) {
+  test(`data IPC worker waiting at its read barrier exits before fixture deletion on ${mode}`, { timeout: 15_000 }, async t => {
+    const fixture = await businessFixture(t);
+    await fixture.createStore();
+    await writeData({}, fixture.root, "records", "item", "create", { kind: "value", value: { name: "before", count: 1 } });
+    const controller = new AbortController();
+    const command = await ipcCli(t, fixture, ["data", "edit", "item", "--store", "records", "--patch", '[{"op":"replace","path":"/name","value":"after"}]', "--output", "json"], true, controller.signal);
+    command.send("start");
+    await command.next("captured");
+    fixture.beforeCleanup(async () => {
+      assert.ok(command.child.exitCode !== null || command.child.signalCode !== null, "IPC worker must exit before the fixture can be deleted");
+    });
+    if (mode === "abort") {
+      const exit = once(command.child, "exit");
+      const blocked = command.next("never");
+      const rejected = assert.rejects(blocked, { name: "AbortError" });
+      controller.abort();
+      await rejected;
+      await exit;
+      assert.ok((await fs.stat(fixture.root)).isDirectory());
+    }
+  });
+}
