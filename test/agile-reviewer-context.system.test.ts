@@ -8,7 +8,8 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initializedContextFixture } from './helpers/initialized-context.js';
 import { readMemoryFile } from '../src/memory/store.js';
-import type { GraphProcedureMemory } from '../src/memory/ast.js';
+import type { GraphProcedureMemory, MemoryEntity } from '../src/memory/ast.js';
+import { collectMemoryReferenceTargets } from '../src/memory/references.js';
 import { openContextControl } from '../src/project/context-control.js';
 import { createAgentReviewCliRuntime } from '../src/acp/cli-runtime.js';
 import * as reviews from '../src/context_control/review-repository.js';
@@ -20,6 +21,7 @@ type Produced = {
   stepId: string;
   artifactId: string;
   body: string;
+  reviewRoundId?: string;
 };
 type WorkflowInputs = {
   requirements: Produced;
@@ -87,6 +89,9 @@ for (const source of [
         content: await readFile(file, 'utf8')
       }
     };
+    // Freeze the Procedure's real reference closure, like normal graph startup.
+    // Unrelated repository Statements are not part of this Run's rule contract.
+    const statementSources = new Map<string, { entity: MemoryEntity; content: string }>();
     const statements = join(root, '.memsphere/memory/statements');
     for (const filename of await readdir(statements)) {
       if (!filename.endsWith('.yaml'))
@@ -94,13 +99,16 @@ for (const source of [
       const path = join(statements, filename);
       const memory = await readMemoryFile('statements', path);
       const reference = `statements/${memory.entity.names[0]}`;
-      memories[reference] = {
-        memoryRef: reference,
-        payload: {
-          contentType: 'application/yaml',
-          content: await readFile(path, 'utf8')
-        }
-      };
+      statementSources.set(reference, { entity: memory.entity, content: await readFile(path, 'utf8') });
+    }
+    const references = collectMemoryReferenceTargets(procedure);
+    while (references.length) {
+      const reference = references.pop()!;
+      if (memories[reference]) continue;
+      const statement = statementSources.get(reference);
+      assert.ok(statement, `Referenced Statement must be available: ${reference}`);
+      memories[reference] = { memoryRef: reference, payload: { contentType: 'application/yaml', content: statement.content } };
+      references.push(...collectMemoryReferenceTargets(statement.entity));
     }
     const reader = {
       kind: 'agent' as const,
@@ -249,8 +257,9 @@ for (const source of [
     }
     let sessionIndex = 0;
     async function session(candidate: Produced): Promise<ReviewerSession> {
-      const step = (await service.snapshot(runId)).steps.find(s => s.id === candidate.stepId)!;
+      const step = (await service.withGraph(g => g.reviewSnapshot(runId, candidate.stepId))).steps.find(s => s.id === candidate.stepId)!;
       const roundId = step.reviewRounds!.at(-1)!.id;
+      candidate.reviewRoundId = roundId;
       const input = {
         runsRoot: join(f.root, 'runs'),
         reviewId: reviews.graphReviewHandle(runId, step.id),
@@ -317,8 +326,8 @@ for (const source of [
         assert.equal(await readFile(join(cwd, out), 'utf8'), produced.body);
       }
       async function confirmation(produced: Produced): Promise<void> {
-        const source = (await service.snapshot(runId)).steps.find(s => s.id === produced.stepId)!;
-        const sourceRound = source.reviewRounds!.at(-1)!.id;
+        const sourceRound = produced.reviewRoundId;
+        assert.ok(sourceRound, 'expected confirmation belongs to the original reviewed version');
         const r = JSON.parse(cli([
           'run',
           'review',
@@ -337,7 +346,6 @@ for (const source of [
           'artifact',
           'show'
         ]).stdout) as ArtifactView;
-        const snapshot = await service.snapshot(runId);
         assert.equal(view.artifact.value, candidate.body);
         for (const expected of inputs) {
           const actual = view.contextArtifacts.find((a: {
@@ -345,8 +353,8 @@ for (const source of [
           }) => a.artifactId === expected.artifactId);
           assert.ok(actual, expected.artifactId);
           assert.equal(actual.artifact.value, expected.body);
-          const source = snapshot.steps.find(s => s.id === expected.stepId)!;
-          const sourceRound = source.reviewRounds!.at(-1)!.id;
+          const sourceRound = expected.reviewRoundId;
+          assert.ok(sourceRound, 'expected confirmation keeps its original Round ID');
           assert.ok(view.confirmations.some(r => r.artifactId === expected.artifactId && r.roundId === sourceRound && r.reviewer.source === 'human' && r.status === 'submitted' && r.vote.value === 'approve'));
         }
         return view;

@@ -32,7 +32,7 @@ test("fixed ChangeSet External survives D2 cleanup and historical restricted Rev
   await reviews.submitArtifactReviewAgentAssignment({...input,vote:'approve'});
   await reviews.submitArtifactReviewRunnerVote({...input,vote:'request_changes',comment:'Replace fixed evidence'});
   const next=await service.withGraph(g=>g.report(runId,step.id,{text:'Evidence candidate',revisionSummary:'Replace fixed evidence',dependencies:[{kind:'external',id:external}]}));
-  const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input,roundId:next.step.reviewRounds!.at(-1)!.id,workerPid:process.pid}))!;
+  const claimed=(await reviews.claimArtifactReviewAgentAssignment({...input,roundId:next.step.reviewRounds!.at(-1)!.id}))!;
   Object.assign(f.env,{MEMSPHERE_REVIEW_ASSIGNMENT_ID:claimed.assignment.id!,MEMSPHERE_REVIEW_ATTEMPT_ID:claimed.attempt.id});
  }
  await revise(e1);

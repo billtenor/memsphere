@@ -11,6 +11,8 @@ export async function reviewerSessionEnvironment(root: string, home: string, wor
     await g.enter(start.run.id, start.steps[0].id); return g.report(start.run.id, start.steps[0].id, { text: body.text });
   });
   const input = { service, runsRoot: join(root, "runs"), reviewId: reviews.graphReviewHandle(result.snapshot.run.id, result.step.id), roundId: result.step.reviewRounds![0].id, actorId: "reader" };
-  const claim = (await reviews.claimArtifactReviewAgentAssignment({ ...input, workerPid: process.pid }))!;
+  // This fixture starts an Assignment, not an OS Worker. Native Worker enrollment
+  // is covered by the real worker/launcher suites.
+  const claim = (await reviews.claimArtifactReviewAgentAssignment(input))!;
   return { MEMSPHERE_HOME: home, MEMSPHERE_CONFIG_PATH: join(root, "config.json"), MEMSPHERE_WORKSPACE_ROOT: workspace, MEMSPHERE_REVIEW_SOURCE_WORKSPACE: workspace, MEMSPHERE_REVIEW_RUN_ID: result.snapshot.run.id, MEMSPHERE_REVIEW_MEMORY_RUN_ID: result.snapshot.run.id, MEMSPHERE_REVIEW_ASSIGNMENT_ID: claim.assignment.id!, MEMSPHERE_REVIEW_ATTEMPT_ID: claim.attempt.id };
 }
