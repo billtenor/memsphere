@@ -263,10 +263,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [isolated, parallel]
+        mode: [isolated, contended]
     env:
       MEMSPHERE_TEST_TRACE: "1"
-      MEMSPHERE_TEST_PROFILE_DIR: ${{ github.workspace }}/.ci-system-profiles
+      MEMSPHERE_TEST_PROFILE_DIR: ${{ github.workspace }}/ci-system-profiles
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -278,7 +278,7 @@ jobs:
         run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npm run build
-      - if: matrix.mode == 'parallel'
+      - if: matrix.mode != 'isolated'
         run: npx playwright install chromium
       - name: Trace original scenarios without changing assertions or deadlines
         shell: bash
@@ -289,7 +289,7 @@ jobs:
           name: windows-system-diagnostics-${{ matrix.mode }}
           path: |
             system-diagnostics-${{ matrix.mode }}.log
-            ${{ github.workspace }}/.ci-system-profiles
+            ${{ github.workspace }}/ci-system-profiles
           if-no-files-found: error
 
   full-health-bootstrap:

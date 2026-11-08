@@ -1,3 +1,5 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { after, before } from "node:test";
 import { chromium, type Browser, type BrowserContext } from "playwright";
 
@@ -8,6 +10,7 @@ before(async () => {
   // Launch before any fixture changes cwd: on Windows a live browser process
   // retains its inherited working directory and would block fixture removal.
   sharedBrowser = await chromium.launch({ headless: true });
+  if (process.env.MEMSPHERE_DIAGNOSTIC_READY_DIR) await writeFile(join(process.env.MEMSPHERE_DIAGNOSTIC_READY_DIR, `${process.pid}.ready`), "ready");
 });
 after(async () => {
   await sharedBrowser?.close();
