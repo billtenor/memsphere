@@ -28,7 +28,10 @@ export async function changeShowFixture(t: test.TestContext) {
   const workspace = join(root, "workspace"), home = join(root, "home");
   const saved = { cwd: process.cwd(), home: process.env.MEMSPHERE_HOME, project: process.env.MEMSPHERE_PROJECT, git: process.env.GIT_CONFIG_GLOBAL };
   const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: cli });
+  const cleanups: Array<() => Promise<void>> = [];
+  const beforeCleanup = (cleanup: () => Promise<void>) => { cleanups.push(cleanup); };
   t.after(async () => {
+    for (const cleanup of cleanups) await cleanup();
     process.chdir(saved.cwd);
     for (const [key, value] of [["MEMSPHERE_HOME", saved.home], ["MEMSPHERE_PROJECT", saved.project], ["GIT_CONFIG_GLOBAL", saved.git]]) {
       if (value === undefined) delete process.env[key!]; else process.env[key!] = value;
@@ -80,5 +83,5 @@ export async function changeShowFixture(t: test.TestContext) {
     return result;
   };
   const versionRoot = (version = digest) => join(projectRoot, "changes", edit.change.id, "checkpoints", version);
-  return { root, home, projectRoot, env, edit, candidate, metadata, checkpoint, command, invoke, read, readMaterial, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
+  return { root, home, projectRoot, beforeCleanup, env, edit, candidate, metadata, checkpoint, command, invoke, read, readMaterial, snapshot, versionRoot, setDigest: (value: string) => { digest = value; } };
 }

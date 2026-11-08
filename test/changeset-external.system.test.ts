@@ -49,19 +49,50 @@ test("fixed ChangeSet External survives D2 cleanup and historical restricted Rev
  await assert.rejects(read(e1,f.env,'forbidden-e1.json'),(error:any)=>error.code===1&&error.stdout===''&&/REVIEW_RESOURCE_DENIED/.test(error.stderr));
 });
 
-test("checkpoint changes during pure construction fail before any External registration", async t=>{
- const f=await changeShowFixture(t), service=(await openContextControl(f.projectRoot))!,runId=f.env.MEMSPHERE_REVIEW_RUN_ID;
- const before=(await service.snapshot(runId)).externals;
- let release!:()=>void, reached!:()=>void;
- const barrier=new Promise<void>(r=>{release=r}), ready=new Promise<void>(r=>{reached=r});
- const operation=(async()=>{
-  const body=await withMemoryChangeDetailSnapshot({home:f.home,project:'project',changeId:f.edit.change.id,checkpointDigest:f.checkpoint.checkpointDigest,use:async detail=>{
-   const part=await memoryChangePart(detail,{part:'diff',side:'after'});reached();await barrier;return part;
-  }});
-  return service.addExternal(runId,'fixed-capture',{content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'application/json',content:JSON.stringify(body)}}});
+test("checkpoint changes during pure construction fail before any External registration", { timeout: 180000 }, async t => {
+ const f = await changeShowFixture(t);
+ const work = (async () => {
+  t.signal.throwIfAborted();
+  const service = (await openContextControl(f.projectRoot))!, runId = f.env.MEMSPHERE_REVIEW_RUN_ID;
+  const before = (await service.snapshot(runId)).externals;
+  const construction = new AbortController();
+  let release!: () => void, reached!: () => void, canceled!: () => void;
+  const barrier = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { reached = resolve; });
+  const aborted = new Promise<never>((_resolve, reject) => {
+   canceled = () => { construction.abort(t.signal.reason); reject(t.signal.reason); };
+   t.signal.addEventListener('abort', canceled, { once: true });
+   if (t.signal.aborted) canceled();
+  });
+  const operation = (async () => {
+   const body = await withMemoryChangeDetailSnapshot({ home: f.home, project: 'project', changeId: f.edit.change.id, checkpointDigest: f.checkpoint.checkpointDigest, use: async detail => {
+    const part = await memoryChangePart(detail, { part: 'diff', side: 'after' });
+    reached(); await barrier; return part;
+   } });
+   construction.signal.throwIfAborted();
+   return service.addExternal(runId, 'fixed-capture', { content: { model: { definedBy: 'raw.json', definition: '{}' }, payload: { contentType: 'application/json', content: JSON.stringify(body) } } });
+  })();
+  try {
+   // Fail immediately if construction rejects before reaching the state. The
+   // scenario deadline also cancels readiness waiting explicitly.
+   await Promise.race([ready, aborted, operation.then(() => { throw new Error('Construction completed without reaching its checkpoint barrier'); })]);
+   t.signal.throwIfAborted();
+   await writeFile(f.candidate, (await readFile(f.candidate, 'utf8')).replace('Pinned content', 'Changed at barrier'));
+   t.signal.throwIfAborted();
+   await validateMemoryChange(f.edit.change.id);
+   t.signal.throwIfAborted();
+   release();
+   await assert.rejects(operation, /checkpoint mismatch/);
+   assert.deepEqual((await service.snapshot(runId)).externals, before);
+  } finally {
+   t.signal.removeEventListener('abort', canceled);
+   construction.abort(new Error('Checkpoint scenario ended before registration'));
+   release();
+   // A failed assertion/validation must release and drain construction before
+   // the fixture directory can be removed. Preserve the original test failure.
+   await operation.catch(() => undefined);
+  }
  })();
- const rejected=assert.rejects(operation,/checkpoint mismatch/);
- await ready;await writeFile(f.candidate,(await readFile(f.candidate,'utf8')).replace('Pinned content','Changed at barrier'));
- await validateMemoryChange(f.edit.change.id);release();await rejected;
- assert.deepEqual((await service.snapshot(runId)).externals,before);
+ f.beforeCleanup(async () => { await work.catch(() => undefined); });
+ await work;
 });

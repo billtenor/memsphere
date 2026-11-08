@@ -32,31 +32,6 @@ for (const nonempty of [false, true]) test(`explicit dependencies validate ${non
  });
 });
 
-test("graph revision inherits supplemental External, empty clears it, replacement preserves old Review versions", async t => {
- const {service}=await contextModuleFixture(t);
- await service.withGraph(async g=>{
-  const a=action('A'); a.artifact!.review=['approval'];
-  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
-  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
-  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
-  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
-  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
-  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
-  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
-  await reject(first);
-  const inherited=await g.report(start.run.id,step.id,{text:'second',revisionSummary:'inherit'}); assert.deepEqual(inherited.artifact.dependencies,first.artifact.dependencies);
-  await reject(inherited);
-  const cleared=await g.report(start.run.id,step.id,{text:'third',revisionSummary:'clear',dependencies:[]}); assert.deepEqual(cleared.artifact.dependencies,[]);
-  await reject(cleared);
-  const replaced=await g.report(start.run.id,step.id,{text:'fourth',revisionSummary:'replace',dependencies:[{kind:'external',id:e2.id}]}); assert.deepEqual(replaced.artifact.dependencies,[{kind:'external',id:e2.id}]);
-  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);
-  assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
-  const current=await g.reviewSnapshot(start.run.id,step.id,'current'); assert.deepEqual(current.externals.map(e=>e.id),[e2.id]);
-  assert.equal((await g.readArtifact(start.run.id,first.artifact.id)).bytes.toString(),'first');
-  assert.ok(!current.artifacts.some(a=>a.id===i.artifact.id));
- });
-});
-
 test("loop and rewind acceptance snapshots pin concrete requirements and never drift to the latest Action", async t => {
  const {service}=await contextModuleFixture(t);
  await service.withGraph(async g=>{
@@ -81,56 +56,67 @@ test("loop and rewind acceptance snapshots pin concrete requirements and never d
  });
 });
 
-test("graph revision independently verifies External inherit", async t=>{
- const {service}=await contextModuleFixture(t);
- await service.withGraph(async g=>{
-  const a=action('A'); a.artifact!.review=['approval'];
-  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
-  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
-  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
-  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
-  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
-  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
-  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
-  await reject(first);
-  const revised=await g.report(start.run.id,step.id,{text:'revised',revisionSummary:'inherit'});
-  assert.deepEqual(revised.artifact.dependencies,first.artifact.dependencies);
-  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
+/** Non-subject setup uses the real graph module with isolated runtime fakes. */
+async function revisionFixture(t: test.TestContext, withUnrelated = false) {
+ const { service } = await contextModuleFixture(t);
+ return service.withGraph(async g => {
+  const candidate = action('A'); candidate.artifact!.review = ['approval'];
+  const start = await g.start({
+   name: 'revisions', procedure: procedure([...(withUnrelated ? [action('unrelated')] : []), candidate]),
+   controlPlane: { runner: { permissions: ['artifact.read','artifact.submit','decision.decide'] }, actors: { human: { kind: 'human', name: 'Human', permissions: ['artifact.read','decision.assess'] } }, acpProviders: {} },
+   reviewConfiguration: { reviews: { 'evidence#actions[A]': { policy: 'artifact_acceptance.unanimous' } }, slots: { 'evidence::approval': { actorIds: ['human'] } } }
+  });
+  const runId = start.run.id, step = start.steps.find(s => s.source?.actionId === 'A')!;
+  let unrelatedId: string | undefined;
+  if (withUnrelated) {
+   const unrelated = start.steps.find(s => s.source?.actionId === 'unrelated')!;
+   await g.enter(runId, unrelated.id);
+   unrelatedId = (await g.report(runId, unrelated.id, { text: 'unrelated' })).artifact.id;
+  }
+  const external = (source: string) => service.addExternal(runId, source, { content: { model: { definedBy: 'raw.json', definition: '{}' }, payload: { contentType: 'text/plain', content: source } } });
+  const e1 = await external('E1');
+  await g.enter(runId, step.id);
+  const first = await g.report(runId, step.id, { text: 'first', dependencies: [{ kind: 'external', id: e1.id }] });
+  async function revise(dependencies?: Array<{ kind: 'external'; id: string }>) {
+   await g.submitReview(runId, step.id, first.step.reviewRounds![0].id, 'runner', 'request_changes', [], 'revise');
+   return g.report(runId, step.id, { text: 'revised', revisionSummary: 'Revise fixed references', ...(dependencies !== undefined ? { dependencies } : {}) });
+  }
+  return { g, runId, stepId: step.id, first, e1, external, revise, unrelatedId };
  });
+}
+
+test('omitting revision dependencies retains the previous candidate External', async t => {
+ const f = await revisionFixture(t);
+ const revised = await f.revise();
+ assert.deepEqual(revised.artifact.dependencies, f.first.artifact.dependencies);
+ assert.deepEqual((await f.g.reviewSnapshot(f.runId, f.stepId, 'current')).externals.map(e => e.id), [f.e1.id]);
 });
 
-test("graph revision independently verifies External clear", async t=>{
- const {service}=await contextModuleFixture(t);
- await service.withGraph(async g=>{
-  const a=action('A'); a.artifact!.review=['approval'];
-  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
-  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
-  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
-  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
-  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
-  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
-  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
-  await reject(first);
-  const revised=await g.report(start.run.id,step.id,{text:'revised',revisionSummary:'clear',dependencies:[]});
-  assert.deepEqual(revised.artifact.dependencies,[]);
-  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
- });
+test('explicit empty revision dependencies remove the candidate External from its new Review', async t => {
+ const f = await revisionFixture(t);
+ const revised = await f.revise([]);
+ assert.deepEqual(revised.artifact.dependencies, []);
+ assert.deepEqual((await f.g.reviewSnapshot(f.runId, f.stepId, 'current')).externals, []);
 });
 
-test("graph revision independently verifies External replace", async t=>{
- const {service}=await contextModuleFixture(t);
- await service.withGraph(async g=>{
-  const a=action('A'); a.artifact!.review=['approval'];
-  const start=await g.start({name:'revisions',procedure:procedure([action('input'),a]),controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{human:{kind:'human',name:'Human',permissions:['artifact.read','decision.assess']}},acpProviders:{}},reviewConfiguration:{reviews:{'evidence#actions[A]':{policy:'artifact_acceptance.unanimous'}},slots:{'evidence::approval':{actorIds:['human']}}}});
-  const input=start.steps.find(s=>s.source?.actionId==='input')!; await g.enter(start.run.id,input.id); const i=await g.report(start.run.id,input.id,{text:'unrelated'});
-  const step=start.steps.find(s=>s.source?.actionId==='A')!; await g.enter(start.run.id,step.id);
-  const body={content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'external'}}};
-  const e1=await service.addExternal(start.run.id,'E1',body), e2=await service.addExternal(start.run.id,'E2',body);
-  const first=await g.report(start.run.id,step.id,{text:'first',dependencies:[{kind:'external',id:e1.id}]});
-  async function reject(result:typeof first){ await g.submitReview(start.run.id,step.id,result.step.reviewRounds!.at(-1)!.id,'runner','request_changes',[],'revise'); }
-  await reject(first);
-  const revised=await g.report(start.run.id,step.id,{text:'revised',revisionSummary:'replace',dependencies:[{kind:'external',id:e2.id}]});
-  assert.deepEqual(revised.artifact.dependencies,[{kind:'external',id:e2.id}]);
-  const old=await g.reviewSnapshot(start.run.id,step.id,first.step.reviewRounds![0].id);assert.deepEqual(old.externals.map(e=>e.id),[e1.id]);
- });
+test('explicit replacement exposes only the replacement External to the new Review', async t => {
+ const f = await revisionFixture(t), e2 = await f.external('E2');
+ const revised = await f.revise([{ kind: 'external', id: e2.id }]);
+ assert.deepEqual(revised.artifact.dependencies, [{ kind: 'external', id: e2.id }]);
+ assert.deepEqual((await f.g.reviewSnapshot(f.runId, f.stepId, 'current')).externals.map(e => e.id), [e2.id]);
+});
+
+test('historical Review retains its original candidate body and External after revision', async t => {
+ const f = await revisionFixture(t), e2 = await f.external('E2');
+ await f.revise([{ kind: 'external', id: e2.id }]);
+ const old = await f.g.reviewSnapshot(f.runId, f.stepId, f.first.step.reviewRounds![0].id);
+ assert.deepEqual(old.externals.map(e => e.id), [f.e1.id]);
+ assert.equal(Buffer.from((await f.g.readArtifact(f.runId, f.first.artifact.id)).bytes).toString(), 'first');
+});
+
+test('candidate Review does not expose an unrelated parallel Artifact', async t => {
+ const f = await revisionFixture(t, true);
+ assert.ok(f.unrelatedId);
+ const current = await f.g.reviewSnapshot(f.runId, f.stepId, 'current');
+ assert.ok(!current.artifacts.some(a => a.id === f.unrelatedId));
 });
