@@ -146,9 +146,9 @@ API读取失败时发布error；状态写API本身故障时工作流失败并暴
 
 ### 敏捷流程中的 CI 跟进与合入
 
-`Merge gate / full regression` 是 master 分支健康门禁，不是本轮 PR 的测试。master full 排队、运行中或尚未登记时，该门禁保持 pending，GitHub 禁止合入；失败时也禁止合入。PR 自身显式 full 的既有修复解锁机制不变。
+master full 检查已合入代码，不作为当前分支验收依据；当前分支只按自身适用 CI 验收。`Merge gate / full regression` 是 master 分支健康门禁，用于防止已合入代码的问题继续扩散。master full 排队、运行中或尚未登记时，该门禁保持 pending，GitHub 禁止合入；失败时也禁止合入。PR 自身显式 full 的既有修复解锁机制不变。
 
-PR 状态说明会写明“等待 master full，仅阻止合入，不阻止验收”；失败时写明“master full 未通过，仅阻止合入，不阻止验收”。刷新期间显示“正在刷新合入门禁，不阻止验收”。这些文案不改变 pending、failure 的合入限制；PR 自身 full 的说明仍以 `PR full` 标识。发布器从 master 加载，文案在本 PR 合入后生效。
+PR 状态说明先写明“master full 检查已合入代码，不作为当前分支验收依据”；运行中补充“运行中，暂不可合入”，失败时补充“已失败，暂停合入，防止问题扩散”。刷新期间显示“正在刷新 master full 合入门禁；当前分支仍按自身 CI 验收”。这些文案不改变 pending、failure 的合入限制；PR 自身 full 的说明仍以 `PR full` 标识。发布器从 master 加载，文案在本 PR 合入后生效。
 
 `check_ci` 只判断实际验证当前 PR 的检查，不因 master full 或 master 分支健康门禁未通过而返回 true。PR 自身适用的 full 检查仍须跟进。
 

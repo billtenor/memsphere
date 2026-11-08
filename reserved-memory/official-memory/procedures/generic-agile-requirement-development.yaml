@@ -9,7 +9,7 @@ defines:
   - 通过统一准出核验选择进入点，顺序完成同步 master、CI 跟进、技术验收和产品验收，再核验当前 HEAD 是否可交由 human 合入。
 asserts:
   - 各阶段产物须符合已确认的需求范围、实施方案和适用仓库规范；范围或方案变更须有 human 确认依据。
-  - 本流程的“全部适用 CI”仅指实际验证当前 PR 候选版本的检查；master 分支健康门禁单独记录，不计入该集合。
+  - master full 检查已合入代码，不作为当前 PR 的验收依据。本流程的“全部适用 CI”仅指实际验证当前 PR 候选版本的检查；master 分支健康门禁单独记录。
 goals:
   - 确认当前迭代的范围、交付物和验收标准。
   - 按仓库规范完成实现和验证。
@@ -254,7 +254,7 @@ actions:
     description: 操作合入已通过准出核验的 PR。
     actor: human
     asserts:
-      - 实际合入时须满足仓库的全部合入门禁；以 GitHub 当时的检查状态为准，pending 仍阻止合入。
+      - master full 失败时暂停合入，防止已有问题扩散；实际合入须满足仓库的全部合入门禁，以 GitHub 当时的检查状态为准，pending 仍阻止合入。
       - 合入记录须包含 PR URL、实际 merged 状态、合入提交和 master 分支。
     dependencies:
       - !dependency
