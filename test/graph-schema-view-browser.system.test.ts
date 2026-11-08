@@ -1,6 +1,7 @@
 import { browserScope, type TestBrowser } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { Page, Locator } from "playwright";
 import type { AddressInfo } from "node:net";
 import { businessFixture } from "./helpers/business-data.js";
 import { openContextControl } from "../src/project/context-control.js";
@@ -8,7 +9,7 @@ import { readProjectConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
 
-test("graph draft dialog shows positioned progress and Markdown on desktop and narrow screens", { timeout: 60000 }, async t => {
+async function prepareDraft(t: test.TestContext) {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const procedure: GraphProcedureMemory = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["schema-browser"], defines: ["Draft preview"], actions: [{ tag: "!action", id: "write", description: "Write a report", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Report", model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nformat: {name: markdown, layout: outline}\nfields: [Summary, !schema {name: Risks, type: number}]\n" }, payload: { contentType: "text/markdown" } } }] };
   const state = await service.withGraph(async g => {
@@ -18,6 +19,13 @@ test("graph draft dialog shows positioned progress and Markdown on desktop and n
     draft = await g.schemaWrite(run, step, "report", draft.position!, "Visible summary");
     return { run, step, draft };
   });
+  return { f, service, state };
+}
+
+async function withDraftPage(t: test.TestContext, check: (fixture: Awaited<ReturnType<typeof prepareDraft>> & {
+  page: Page; execution: Locator; progress: Locator; openExecution: () => Promise<void>;
+}) => Promise<void>) {
+  const { f, service, state } = await prepareDraft(t);
   const server = createViewServer(await readProjectConfig("test-project", f.home));
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   let browser: TestBrowser | undefined;
@@ -32,18 +40,39 @@ test("graph draft dialog shows positioned progress and Markdown on desktop and n
     };
     const progress = execution.getByRole("region", { name: "Schema 撰写进度", includeHidden: true });
     await progress.waitFor({ state: "attached" });
+    await check({ f, service, state, page, execution, progress, openExecution });
+  } finally { try { await browser?.close(); } finally { await new Promise<void>(resolve => server.close(() => resolve())); } }
+}
+
+test("graph draft execution disclosure starts collapsed and matches the definition heading style", { timeout: 60000 }, async t => {
+  await withDraftPage(t, async ({ page, progress, openExecution }) => {
     assert.equal(await progress.isVisible(), false, "draft execution progress follows the collapsed execution disclosure");
     const headingStyles = await page.locator(".cc-action-definition > summary, .cc-execution-info > summary").evaluateAll(nodes => nodes.map(node => {
       const style = getComputedStyle(node); return { fontSize: style.fontSize, fontWeight: style.fontWeight, color: style.color, markerColor: getComputedStyle(node, "::marker").color };
     }));
     assert.equal(headingStyles.length, 2); assert.deepEqual(headingStyles[0], headingStyles[1]);
     await openExecution(); await progress.waitFor();
-    assert.match(await progress.innerText(), /2\/3/); assert.match(await progress.innerText(), /Report.Risks/);
+    assert.equal(await progress.isVisible(), true);
+  });
+});
+
+test("graph draft content and execution progress fit desktop and narrow screens", { timeout: 60000 }, async t => {
+  await withDraftPage(t, async ({ page, progress, openExecution }) => {
+    await openExecution(); await progress.waitFor();
     await page.locator(".cc-document").getByText("Visible summary", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.getByRole("button", { name: "产物内容", exact: true }).click();
     assert.ok(await progress.isVisible());
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  });
+});
+
+test("graph draft diagnostics refresh and clear with the positioned draft validation", { timeout: 60000 }, async t => {
+  await withDraftPage(t, async ({ service, state, page, execution, progress, openExecution }) => {
+    await openExecution(); await progress.waitFor();
+    assert.match(await progress.innerText(), /2\/3/); assert.match(await progress.innerText(), /Report.Risks/);
+    await page.locator(".cc-document").getByText("Visible summary", { exact: true }).waitFor();
     await assert.rejects(service.withGraph(g => g.schemaWrite(state.run, state.step, "report", state.draft.position!, "invalid number")));
     const failure = await service.withGraph(g => g.schemaShow(state.run, state.step));
     const issue = failure.validation!.issues[0].message;
@@ -72,8 +101,7 @@ test("graph draft dialog shows positioned progress and Markdown on desktop and n
     await openExecution();
     await progress.getByText(/3\/3/).waitFor();
     assert.equal((await service.withGraph(g => g.schemaShow(state.run, state.step))).draft!.content!.payload.content.includes("42"), true);
-
-  } finally { try { await browser?.close(); } finally { await new Promise<void>(resolve => server.close(() => resolve())); } }
+  });
 });
 
 test("reopening a revised Schema Step shows its current draft while the preceding submission remains selectable", { timeout: 60000 }, async t => {
