@@ -1,3 +1,6 @@
+import { createAgentReviewCliRuntime } from "../../../src/acp/cli-runtime.js";
+import { realpath } from "node:fs/promises";
+import { assertWindowsPrerequisites } from "../../../src/windows-prerequisites.js";
 import assert from "node:assert/strict";
 import crossSpawn from "cross-spawn";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
@@ -277,8 +280,9 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     assert.match(prompt, /"rulePath": "asserts\[0\]"/);
     assert.match(prompt, /"text": "Keep the review evidence traceable\."/);
     assert.doesNotMatch(prompt, /"text": "The candidate must be concrete\."/);
-    assert.match(prompt, /memsphere run artifact show/);
-    assert.match(prompt, /memsphere continue report --artifact/);
+    assert.match(prompt, /MEMSPHERE_CLI/);
+    assert.match(prompt, /run artifact show/);
+    assert.match(prompt, /"\$MEMSPHERE_CLI" continue report --artifact/);
     assert.doesNotMatch(prompt, /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     assert.doesNotMatch(JSON.stringify(launch), /MEMSPHERE_REVIEW_ENDPOINT|MEMSPHERE_REVIEW_CAPABILITY|bridge\.sock/);
     await assert.rejects(
@@ -630,4 +634,104 @@ test("Windows queue passes complete multiline messages through direct and npm No
   }
   await writeFile(shim, '@echo unknown %*\r\n');
   await assert.rejects(checkQueueCapability(shim), /QUEUE_BATCH_UNSUPPORTED/);
+});
+
+
+// Session authorization is exercised against real persisted Assignments in
+// reviewer-session-integration.test.ts, rather than an argv-recording fake CLI.
+test("Agent Review launcher preserves CLI arguments without injecting a second protocol", async () => {
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
+  try {
+    for (const args of [
+      ["--project", "bound", "run", "artifact", "show", "--run", "R", "--artifact", "A", "--out", "copy.md"],
+      ["memory", "list", "--output=json"],
+      ["memory", "read", "p", "--run=R", "--project=bound"],
+      ["memory", "list", "--", "--project", "literal-name"]
+    ]) {
+      const result = crossSpawn.sync(runtime.launcherPath, args, { encoding: "utf8", env: launcherEnv({ MEMSPHERE_REVIEW_ASSIGNMENT_ID: "A" }) });
+      assert.equal(result.status, 0, result.stderr);
+      assert.deepEqual(JSON.parse(result.stdout), args);
+    }
+  } finally { await runtime.cleanup(); }
+});
+
+
+test("Agent Review launcher runs the fixed CLI in one Node process and preserves its identity and exit code", async t => {
+  const directory = await mkdtemp(join(tmpdir(), "memsphere-cli identity % # -"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const entrypoint = join(directory, "fixed cli.mjs");
+  await writeFile(entrypoint, `if (!process.argv.includes("--version")) {
+    console.log(JSON.stringify({ pid: process.pid, parent: process.ppid, entrypoint: process.argv[1], module: import.meta.url, args: process.argv.slice(2), cwd: process.cwd(), token: process.env.MEMSPHERE_TEST_LAUNCH_TOKEN }));
+    process.exitCode = 23;
+  }`);
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: entrypoint });
+  t.after(() => runtime.cleanup());
+  const args = ["--project", "bound", "run", "artifact", "show", "--", "literal argument"];
+  const result = crossSpawn.sync(runtime.launcherPath, args, { cwd: directory, encoding: "utf8", env: launcherEnv({ MEMSPHERE_TEST_LAUNCH_TOKEN: "kept" }) });
+  assert.ifError(result.error);
+  assert.equal(result.status, 23, result.stderr);
+  const actual = JSON.parse(result.stdout);
+  assert.equal(process.platform === "win32" ? actual.parent : actual.pid, result.pid);
+  assert.equal(await realpath(actual.entrypoint), await realpath(entrypoint));
+  assert.equal(await realpath(fileURLToPath(actual.module)), await realpath(entrypoint));
+  assert.equal(await realpath(actual.cwd), await realpath(directory));
+  assert.deepEqual(actual.args, args);
+  assert.equal(actual.token, "kept");
+});
+
+
+test("Windows PowerShell, CMD, and Git Bash execute Agent Review read, comment, and vote commands", {
+  skip: process.platform !== "win32"
+}, async () => {
+  const prerequisites = await assertWindowsPrerequisites();
+  assert(prerequisites);
+  const runtime = await createAgentReviewCliRuntime({ nodeExecutable: process.execPath, cliEntrypoint: fakeArgsCli });
+  const env = launcherEnv({
+    PATH: `${runtime.directory};${process.env.PATH ?? ""}`,
+    MEMSPHERE_REVIEW_RUN_ID: "bound-run",
+    MEMSPHERE_REVIEW_ASSIGNMENT_ID: "bound-assignment"
+  });
+  try {
+    const reviewCommands = [
+      "memsphere run artifact show --output json",
+      "memsphere run artifact contract show --output json",
+      "memsphere run review assignment show --output json",
+      "memsphere run review comment --severity suggestion --body shell-smoke --output json",
+      "memsphere run review submit --vote approve --summary shell-smoke --output json"
+    ];
+    for (const [command, prefix] of [
+      ["powershell.exe", ["-NoProfile", "-Command"]],
+      ["pwsh.exe", ["-NoProfile", "-Command"]],
+      ["cmd.exe", ["/d", "/s", "/c"]],
+      [prerequisites.gitBashPath, ["-lc"]]
+    ] as const) {
+      for (const reviewCommand of reviewCommands) {
+        const result = crossSpawn.sync(command, [...prefix, reviewCommand], { encoding: "utf8", env });
+        assert.equal(result.status, 0, `${command}: ${result.stderr || result.stdout}`);
+        assert.deepEqual(JSON.parse(result.stdout), reviewCommand.split(" ").slice(1));
+      }
+    }
+  } finally {
+    await runtime.cleanup();
+  }
+});
+test("caller cancellation captures the live Provider and waits for its shutdown", { timeout: 15000 }, async t => {
+  const controller = new AbortController();
+  let provider: ChildProcessWithoutNullStreams | undefined;
+  let captured = 0;
+  await assert.rejects(runAgentReviewAcpSession({
+    launch: fakeClientLaunch("progress-hang", { startupTimeoutMs: 3000, idleTimeoutMs: null, maxRuntimeMs: null }),
+    signal: AbortSignal.any([controller.signal, t.signal]),
+    prompt: "Review", reminder: "Submit", workspaceRoot: tmpdir(),
+    isSubmitted: async () => false,
+    onSession: async () => { controller.abort(new Error("fixture canceled")); },
+    onPrompt: () => assert.fail("a canceled Session cannot advance to its prompt"),
+    onBeforeStop: async pid => {
+      captured++;
+      assert.equal(pid, provider!.pid);
+      assert.equal(provider!.exitCode, null, "capture ownership before requesting termination");
+    }
+  }, { spawn: launch => provider = crossSpawn(launch.command, launch.args, { cwd: launch.cwd, env: launch.env, stdio: "pipe" }) as ChildProcessWithoutNullStreams }), /fixture canceled/);
+  assert.equal(captured, 1);
+  assert.ok(provider!.exitCode !== null || provider!.signalCode !== null, "owned Provider exits before fixture reclamation");
 });

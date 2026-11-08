@@ -186,6 +186,7 @@ actions:
     description: 按需求契约和实施方案验收当前 PR 的实现与验证成果；修正问题后完成 master 同步、本地验证、PR 更新及 CI 验证，提交技术评审。
     actor: agent
     asserts:
+      - "验收候选 Artifact 必须用 --depends-on artifact:ID 显式声明本执行链已接纳的需求契约、实施方案及必要确认依据；存在 Memory 交付差异时登记固定 ChangeSet External 并以 external:ID 声明。提供对象读取入口，不能只引用 CI 布尔结果或同 Action 最新产物。"
       - 验收对象须覆盖当前候选的完整代码、测试、文档及 Memory 改动；已确认范围正确实现、验收标准有充分证据且无阻塞交付的问题或风险。
       - 验收材料须固定 PR URL、head SHA、目标分支 SHA 和实际 diff；该 HEAD 须包含最新目标提交，全部适用本地检查和 CI 已通过。
       - 评审结论须体现各角色的审查依据，区分亲自检查或执行的内容与引用的证据，并记录问题、修正结果及残余风险。
@@ -217,6 +218,7 @@ actions:
     description: 验收当前 PR 的产品行为并形成交付报告；修正问题后完成受影响验证、commit 和推送，提交产品评审。
     actor: agent
     asserts:
+      - "产品验收候选 Artifact 必须显式声明本执行链已接纳的需求契约、对应技术验收及其必要确认依据；External 由 Artifact 依赖，不新增 Step 引用或调度边。循环及回溯使用实际固定来源，旧评审保持旧版本。"
       - 交付报告须固定 PR URL 和最终 head SHA，说明交付内容、验收标准的达成情况、验证结果、后续范围及残留问题。
       - 产品验收结论须以已确认的需求契约和实际产品行为为依据，并覆盖报告固定的候选版本。
       - 本轮存在 Memory 差异时，报告须引用匹配交付版本且通过 Store 与 ChangeSet 校验的结果，包含 ChangeSet ID 和 View 入口。

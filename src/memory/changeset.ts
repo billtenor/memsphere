@@ -507,7 +507,9 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         return changed || left.label.localeCompare(right.label);
       });
       if (input.checkpointDigest !== undefined) await verifyCheckpoint();
-      return await input.use({ change, memoryRoot: previewRoot, baseMemoryRoot: baseRoot, files });
+      const result = await input.use({ change, memoryRoot: previewRoot, baseMemoryRoot: baseRoot, files });
+      if (input.checkpointDigest !== undefined) await verifyCheckpoint();
+      return result;
     } finally {
       await rm(baseRoot, { recursive: true, force: true });
       await rm(previewRoot, { recursive: true, force: true });

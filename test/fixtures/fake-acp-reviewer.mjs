@@ -68,8 +68,8 @@ const app = acp
         const {mutateBoundReviewNode} = await import('../../dist/acp/review-session.js');
         await mutateBoundReviewNode({operation:'report',artifact:{applicable:true}});
       } else {
-        invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
-        invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
+        await invoke(process.env.MEMSPHERE_CLI,["run","artifact","show","--assignment",process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID,"--output","json"]);
+        await invoke(process.env.MEMSPHERE_CLI,["continue","report","--artifact",JSON.stringify({applicable:true}),"--output","json"]);
       }
       const child = spawn(process.execPath,[fileURLToPath(new URL(process.env.REVIEW_TEST_LATE_DESCENDANT ? './rewind-late-child.mjs' : './rewind-provider-child.mjs', import.meta.url))],{detached:process.platform === "win32" && Boolean(process.env.REVIEW_TEST_RELEASE),stdio:["ignore","ignore","ignore","ipc"]});
       await new Promise(resolve=>child.once("message",resolve));
@@ -151,10 +151,26 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   ]);
 }
 
-function invoke(command, args) {
-  const result = crossSpawn.sync(command, args, { encoding: "utf8", env: process.env });
-  if (result.status !== 0) throw new Error(`fake reviewer CLI failed: ${result.stderr || result.stdout}`);
-  return result.stdout.trim();
+async function invoke(command, args) {
+  // CLI tools are real child processes. Keep the ACP event loop available so
+  // queued progress and cancellation traffic can be delivered during execution.
+  const child = crossSpawn(command, args, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const output = [], errors = [];
+  const limit = 1024 * 1024; // Preserve spawnSync's default output bound.
+  let outputBytes = 0, errorBytes = 0;
+  await new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.stdout.on('data', chunk => {
+      output.push(chunk); outputBytes += chunk.length;
+      if (outputBytes > limit) { child.kill(); reject(new Error('fake reviewer CLI stdout exceeded maxBuffer')); }
+    });
+    child.stderr.on('data', chunk => {
+      errors.push(chunk); errorBytes += chunk.length;
+      if (errorBytes > limit) { child.kill(); reject(new Error('fake reviewer CLI stderr exceeded maxBuffer')); }
+    });
+    child.once('close', code => code === 0 ? resolve() : reject(new Error(`fake reviewer CLI failed: ${Buffer.concat(errors).toString() || Buffer.concat(output).toString()}`)));
+  });
+  return Buffer.concat(output).toString().trim();
 }
 
 function delay(milliseconds) {
