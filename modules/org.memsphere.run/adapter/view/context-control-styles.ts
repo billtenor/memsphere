@@ -9,6 +9,14 @@ export const contextControlStyles = `
 .cc-work-step { margin:8px 0; padding:12px; border:1px solid var(--mem-view-color-border); border-radius:8px; }
 .cc-work summary { cursor:pointer; overflow-wrap:anywhere; }
 .cc-work pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; font-size:12px; }
+.cc-procedure-definition, .cc-action-definition { min-width:0; overflow-wrap:anywhere; }
+.cc-procedure-definition { padding:0 24px; }
+.cc-procedure-summary { cursor:pointer; font-weight:600; padding:8px 0; list-style-position:inside; }
+.cc-procedure-definition-body > section { margin:0 0 14px; }
+.cc-procedure-definition-body h3, .cc-procedure-definition-body h4 { margin:0 0 6px; font-size:13px; }
+.cc-procedure-definition-body ul { margin:0; padding-left:20px; }
+.cc-action-definition > summary { cursor:pointer; }
+.cc-action-definition pre { max-width:100%; white-space:pre-wrap; overflow-wrap:anywhere; }
 .cc-exploration button { font:inherit; }
 .cc-exploration button:focus-visible { outline:3px solid var(--mem-view-color-focus-ring); outline-offset:3px; }
 
