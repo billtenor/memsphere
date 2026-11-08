@@ -8,6 +8,8 @@ import { reportRun, readArtifactReviewForActor, startRun } from "../src/run/stor
 import { reviewConfiguration } from "./helpers/review.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
+// Integration scope: real flow Store persistence feeds the ACP contract builder.
+// Public restricted CLI entrypoints are covered by the Reviewer system suites.
 test("a persisted flow Review exposes its complete frozen requirement contract", async () => {
  const root = await mkdtemp(join(tmpdir(), "memsphere-review-contract-"));
  try {

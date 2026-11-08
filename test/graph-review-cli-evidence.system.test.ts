@@ -23,31 +23,22 @@ async function fixture(t:test.TestContext,actions:GraphAction[]) {
  const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:entrypoint});t.after(()=>runtime.cleanup());
  function runner(args:string[],ok=true){const r=crossSpawn.sync(process.execPath,[entrypoint,'--project','test-project',...args],{cwd:f.cwd,env,encoding:'utf8',timeout:20000,maxBuffer:2000000});assert.ifError(r.error);if(ok)assert.equal(r.status,0,r.stderr);else {assert.notEqual(r.status,0);assert.equal(r.stdout,'');}return r;}
  const active=async(id:string)=>(await service.snapshot(runId)).steps.find(s=>s.source?.actionId===id&&['pending','running'].includes(s.status))!;
- // Entry is fixture setup; every report, restricted read and rewind under test
- // still crosses the real CLI process boundary.
+ // Non-subject predecessors use the graph API; reports, restricted reads and
+ // rewinds under test still cross the real CLI process boundary.
  async function produce(id:string,text:string,extra:string[]=[],stepId?:string){const step=stepId??(await active(id)).id;await service.withGraph(g=>g.enter(runId,step));const out=runner(['run','report','--run',runId,'--step',step,'--artifact',text,...extra,'--output','json']);return {...JSON.parse(out.stdout),stepId:step};}
+ async function seed(id:string,text:string){
+  const step=(await active(id)).id;
+  const result=await service.withGraph(async g=>{await g.enter(runId,step);return g.report(runId,step,{text});});
+  return {artifactId:result.artifact.id,stepId:step};
+ }
  async function claim(stepId:string){const snapshot=await service.snapshot(runId),step=snapshot.steps.find(s=>s.id===stepId)!;const input={service,runsRoot:join(f.root,'runs'),reviewId:reviews.graphReviewHandle(runId,stepId),roundId:step.reviewRounds!.at(-1)!.id,actorId:'reader'};const claimed=(await reviews.claimArtifactReviewAgentAssignment(input))!;
   const bound={...input,attemptId:claimed.attempt.id},session={...env,MEMSPHERE_REVIEW_RUN_ID:runId,MEMSPHERE_REVIEW_MEMORY_RUN_ID:runId,MEMSPHERE_REVIEW_HANDLE:input.reviewId,MEMSPHERE_REVIEW_ASSIGNMENT_ID:claimed.assignment.id!,MEMSPHERE_REVIEW_ATTEMPT_ID:claimed.attempt.id,MEMSPHERE_WORKSPACE_ROOT:f.cwd,MEMSPHERE_REVIEW_SOURCE_WORKSPACE:f.cwd};
   const read=(kind:'artifact'|'external',id:string,out:string,ok=true)=>{const r=crossSpawn.sync(runtime.launcherPath,['run',kind,'show','--run',runId,`--${kind}`,id,'--out',out,'--output','json'],{cwd:f.cwd,env:session,encoding:'utf8',timeout:20000});assert.ifError(r.error);if(ok)assert.equal(r.status,0,r.stderr);else{assert.notEqual(r.status,0);assert.equal(r.stdout,'');assert.match(r.stderr,/REVIEW_RESOURCE_DENIED|REVIEW_SESSION_INVALID/);}return r;};
   async function decide(vote:'approve'|'request_changes'){await reviews.markArtifactReviewAgentCliReady(bound);let c=await reviews.readArtifactReviewForActor(input);while(currentReviewNode(c.assignment))c=await reviews.mutateArtifactReviewNodes({...bound,mutation:{operation:'report',expectedNodeId:currentReviewNode(c.assignment)!.nodeId,artifact:{applicable:true}}});await reviews.submitArtifactReviewAgentAssignment({...bound,vote:'approve'});await reviews.submitArtifactReviewRunnerVote({...input,vote,comment:vote==='request_changes'?'Revise fixed evidence':undefined});}
   return {input,read,decide};
  }
- return {...f,service,runId,runner,active,produce,claim};
+ return {...f,service,runId,runner,active,produce,seed,claim};
 }
-
-test('production CLI dependency omission, clear and replace preserve mandatory inputs and historical Session references',async t=>{
- const f=await fixture(t,[action('R'),action('P','R'),action('C','P',true),action('U')]);
- const r=await f.produce('R','requirements'),p=await f.produce('P','plan'),u=await f.produce('U','unrelated');
- const e1=JSON.parse(f.runner(['run','external','add','--run',f.runId,'--source','E1','--content','external v1','--output','json']).stdout).externalId;
- const e2=JSON.parse(f.runner(['run','external','add','--run',f.runId,'--source','E2','--content','external v2','--output','json']).stdout).externalId;
- const first=await f.produce('C','candidate one',['--depends-on',`artifact:${r.artifactId}`,'--depends-on',`external:${e1}`]),old=await f.claim(first.stepId);
- old.read('artifact',r.artifactId,'r1.txt');old.read('artifact',u.artifactId,'deny-u.txt',false);await old.decide('request_changes');
- const second=await f.produce('C','candidate two',['--revision-summary','inherit']);assert.deepEqual(second.dependencies,first.dependencies);await(await f.claim(second.stepId)).decide('request_changes');
- const file=join(f.cwd,'clear.json');await writeFile(file,JSON.stringify({content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'candidate three'}},dependencies:[]}));
- const cleared=JSON.parse(f.runner(['run','report','--run',f.runId,'--step',first.stepId,'--file',file,'--revision-summary','clear','--output','json']).stdout);assert.deepEqual(cleared.dependencies,[{kind:'artifact',id:p.artifactId}]);const clear=await f.claim(first.stepId);clear.read('artifact',p.artifactId,'p.txt');clear.read('artifact',r.artifactId,'deny-r.txt',false);clear.read('external',e1,'deny-e1.txt',false);await clear.decide('request_changes');
- const fourth=await f.produce('C','candidate four',['--revision-summary','replace','--depends-on',`external:${e2}`]);assert.deepEqual(fourth.dependencies,[{kind:'artifact',id:p.artifactId},{kind:'external',id:e2}]);const current=await f.claim(first.stepId);current.read('external',e2,'e2.txt');current.read('external',e1,'deny-old.txt',false);
- old.read('external',e1,'historical-e1.txt');old.read('external',e2,'deny-new.txt',false);assert.equal(await readFile(join(f.cwd,'historical-e1.txt'),'utf8'),'external v1');
-});
 
 for(const nonempty of [false,true])test(`production CLI accepts ${nonempty?'nonempty':'empty'} collect control provenance and restricts its Reviewer`,async t=>{
  const b=action('B','X');b.dependencies[0].when=String(nonempty);
@@ -75,13 +66,13 @@ test('real production CLI loops and rewinds pin each acceptance Session to the c
 });
 
 async function supplementalRevisionFixture(t:test.TestContext){
- const f=await fixture(t,[action('R'),action('P','R'),action('C','P',true)]),r=await f.produce('R','requirements'),p=await f.produce('P','plan');
+ const f=await fixture(t,[action('R'),action('P','R'),action('C','P',true)]),r=await f.seed('R','requirements'),p=await f.seed('P','plan');
  const body=(text:string)=>({content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:text}}});
  const e1=await f.service.addExternal(f.runId,'E1',body('first external')),e2=await f.service.addExternal(f.runId,'E2',body('second external')),step=(await f.active('C')).id;
  // API setup supplies an independent predecessor; the operation under test
  // below crosses the real production CLI and restricted Session boundaries.
- await f.service.withGraph(async g=>{await g.enter(f.runId,step);return g.report(f.runId,step,{text:'previous candidate',dependencies:[{kind:'artifact',id:r.artifactId},{kind:'external',id:e1.id}]});});
- await(await f.claim(step)).decide('request_changes');return {f,r,p,e1,e2,step};
+ const previous=await f.service.withGraph(async g=>{await g.enter(f.runId,step);return g.report(f.runId,step,{text:'previous candidate',dependencies:[{kind:'artifact',id:r.artifactId},{kind:'external',id:e1.id}]});});
+ const old=await f.claim(step);await old.decide('request_changes');return {f,r,p,e1,e2,step,previous,old};
 }
 for(const operation of ['inherit','clear','replace'] as const)test(`production CLI independently ${operation}s supplemental dependencies while preserving mandatory inputs`,async t=>{
  const {f,r,p,e1,e2,step}=await supplementalRevisionFixture(t);let result;
@@ -89,11 +80,21 @@ for(const operation of ['inherit','clear','replace'] as const)test(`production C
   const file=join(f.cwd,'clear-independent.json');await writeFile(file,JSON.stringify({content:{model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain',content:'clear'}},dependencies:[]}));
   result=JSON.parse(f.runner(['run','report','--run',f.runId,'--step',step,'--file',file,'--revision-summary','clear','--output','json']).stdout);
  }else result=await f.produce('C',operation,['--revision-summary',operation,...(operation==='replace'?['--depends-on',`external:${e2.id}`]:[])]);
- assert.ok(result.dependencies.some((d:any)=>d.id===p.artifactId));const current=await f.claim(step);current.read('artifact',p.artifactId,'mandatory.txt');
+ const expected=[{kind:'artifact',id:p.artifactId},...(operation==='inherit'?[{kind:'artifact',id:r.artifactId},{kind:'external',id:e1.id}]:operation==='replace'?[{kind:'external',id:e2.id}]:[])];
+ assert.deepEqual(result.dependencies,expected);const current=await f.claim(step);current.read('artifact',p.artifactId,'mandatory.txt');
  current.read('artifact',r.artifactId,'ancestor.txt',operation==='inherit');current.read('external',e1.id,'e1.txt',operation==='inherit');current.read('external',e2.id,'e2.txt',operation==='replace');
 });
+test('a historical restricted Session retains its original candidate and External after a CLI revision',async t=>{
+ const {f,e1,e2,step,previous,old}=await supplementalRevisionFixture(t);
+ await f.produce('C','replacement',['--revision-summary','replace','--depends-on',`external:${e2.id}`]);
+ old.read('artifact',previous.artifact.id,'historical-candidate.txt');
+ old.read('external',e1.id,'historical-external.txt');
+ old.read('external',e2.id,'deny-future-external.txt',false);
+ assert.equal(await readFile(join(f.cwd,'historical-candidate.txt'),'utf8'),'previous candidate');
+ assert.equal(await readFile(join(f.cwd,'historical-external.txt'),'utf8'),'first external');
+});
 test('production CLI rejects an unrelated supplemental Artifact and accepts a causal ancestor',async t=>{
- const f=await fixture(t,[action('R'),action('P','R'),action('U'),action('C','P',true)]),r=await f.produce('R','requirements');await f.produce('P','plan');const u=await f.produce('U','unrelated'),step=(await f.active('C')).id;
+ const f=await fixture(t,[action('R'),action('P','R'),action('U'),action('C','P',true)]),r=await f.seed('R','requirements');await f.seed('P','plan');const u=await f.seed('U','unrelated'),step=(await f.active('C')).id;
  f.runner(['run','step','enter','--run',f.runId,'--step',step]);const before=(await f.service.snapshot(f.runId)).artifacts.length;
  const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/outside this Step/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
  await f.produce('C','valid',['--depends-on',`artifact:${r.artifactId}`]);const reader=await f.claim(step);reader.read('artifact',r.artifactId,'ancestor.txt');reader.read('artifact',u.artifactId,'unrelated.txt',false);

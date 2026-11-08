@@ -104,7 +104,7 @@ flow:
       "statements/shared-rules"
     );
 
-    // Persisted Review contract coverage lives in run-review-contract.system.test.ts.
+    // Persisted Review contract coverage lives in run-review-contract.integration.test.ts.
     assert.doesNotMatch(JSON.stringify(detail), /ruleId|source_path|imported_at/);
 
     const output = renderRunOutput({ kind: "start", run: started, runsRoot }, "zh-CN");
