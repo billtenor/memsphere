@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 const exec = promisify(execFile);
 const mode = process.argv[2];
-if (!["isolated", "parallel", "contended"].includes(mode)) throw new Error("Expected isolated, parallel or contended");
+if (!["isolated", "parallel", "contended", "full-baseline"].includes(mode)) throw new Error("Unknown diagnostic mode");
 await mkdir(process.env.MEMSPHERE_TEST_PROFILE_DIR, { recursive: true });
 console.log(JSON.stringify({ mode, platform: process.platform, cpu: availableParallelism(), memory: totalmem(), freeMemory: freemem() }));
 for (let sample = 1; sample <= 3; sample++) {
@@ -16,7 +16,14 @@ for (let sample = 1; sample <= 3; sample++) {
   console.log(JSON.stringify({ startupControl: "CLI --version", sample, milliseconds: Math.round(performance.now() - start) }));
 }
 const files = ["test/platform/cli/data-command.system.test.ts", "test/procedure-graph-cli.system.test.ts"];
-if (mode === "contended") {
+if (mode === "full-baseline") {
+  // Match the original runner and coverage. Disable profiling overhead; retain
+  // opt-in lightweight step timestamps only.
+  const env = { ...process.env }; delete env.MEMSPHERE_TEST_PROFILE_DIR;
+  const child = spawn(process.execPath, ["scripts/ci/run-tests.mjs", "--suite=system", "--results=windows-full-system-trace.json"], { env, stdio: "inherit" });
+  child.on("error", error => { console.error(error); process.exitCode = 1; });
+  child.on("close", code => { process.exitCode = code ?? 1; });
+} else if (mode === "contended") {
   const ready = await mkdtemp(resolve(tmpdir(), "memsphere-diagnostic-ready-"));
   const background = spawn(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=3",
     "test/models-builtin-view-browser.system.test.ts", "test/artifact-review-browser.system.test.ts", "test/view-responsive.system.test.ts"], {
