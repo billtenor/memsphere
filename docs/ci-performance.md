@@ -148,6 +148,8 @@ API读取失败时发布error；状态写API本身故障时工作流失败并暴
 
 `Merge gate / full regression` 是 master 分支健康门禁，不是本轮 PR 的测试。master full 排队、运行中或尚未登记时，该门禁保持 pending，GitHub 禁止合入；失败时也禁止合入。PR 自身显式 full 的既有修复解锁机制不变。
 
+PR 状态说明会写明“等待 master full，仅阻止合入，不阻止验收”；失败时写明“master full 未通过，仅阻止合入，不阻止验收”。刷新期间显示“正在刷新合入门禁，不阻止验收”。这些文案不改变 pending、failure 的合入限制；PR 自身 full 的说明仍以 `PR full` 标识。发布器从 master 加载，文案在本 PR 合入后生效。
+
 `check_ci` 只判断实际验证当前 PR 的检查，不因 master full 或 master 分支健康门禁未通过而返回 true。PR 自身适用的 full 检查仍须跟进。
 
 PR 自身检查通过后，继续完成技术与产品验收。交接报告单独说明 master full 和合入门禁状态：master full 未完成时注明“本轮验收完成，等待 master full 通过后合入”；失败或查询异常时说明不能合入的原因。Agent 不持续轮询 master full，不因此修复本分支或重复验收；Human 在 GitHub 合入门禁满足后操作合入。
