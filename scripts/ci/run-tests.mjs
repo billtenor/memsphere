@@ -1,38 +1,32 @@
 import { readFile, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { discoverTestFiles, selectTests, selectTestShard, testSuites } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites } from "./test-plan.mjs";
 import { terminateTestProcesses } from "./test-processes.mjs";
 
 const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
 const files = (await discoverTestFiles(testDirectory)).map(name => resolve(testDirectory, name));
 const testName = file => relative(testDirectory, file).split(sep).join("/");
-const platformDurations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
-const durations = platformDurations[process.platform] ?? platformDurations.win32;
 const nodeArguments = [];
-let concurrency = 2;
-let suite = "all";
-let shard;
+let concurrency = availableParallelism();
+let suite = "regression";
 let listOnly = false;
 let resultsPath = process.env.CI_TEST_RESULTS;
 for (const argument of process.argv.slice(2)) {
   if (argument.startsWith("--test-concurrency=")) concurrency = Number(argument.split("=")[1]);
   else if (argument.startsWith("--suite=")) suite = argument.slice(8);
-  else if (argument.startsWith("--shard=")) {
-    shard = argument.slice(8);
-    if (!shard) throw new Error("Shard must be index/count");
-  } else if (argument === "--list") listOnly = true;
+  else if (argument === "--list") listOnly = true;
   else if (argument.startsWith("--results=")) resultsPath = argument.slice(10);
   else nodeArguments.push(argument);
 }
 if (!Number.isInteger(concurrency) || concurrency < 1) throw new Error("Concurrency must be a positive integer");
 const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(file, "utf8")])));
-const selected = selectTestShard(selectTests(files, sources, durations, suite), durations, shard);
+const selected = selectTests(files, sources, suite);
 const title = suite === "all" ? "All tests" : testSuites[suite].title;
 if (listOnly) {
-  console.log(JSON.stringify({ suite, title, ...(shard ? { shard } : {}), files: selected }, null, 2));
+  console.log(JSON.stringify({ suite, title, files: selected }, null, 2));
   process.exit(0);
 }
 
@@ -66,7 +60,7 @@ process.on("SIGINT", interrupt);
 process.on("SIGTERM", terminate);
 process.on("SIGHUP", hangup);
 try {
-  console.log(`Running ${selected.length}/${files.length} files, suite ${title}${shard ? `, shard ${shard}` : ""}, concurrency ${concurrency}`);
+  console.log(`Running ${selected.length}/${files.length} files, suite ${title}, concurrency ${concurrency}`);
   await Promise.all(Array.from({ length: Math.min(concurrency, selected.length) }, async () => {
     while (!cancelled && next < selected.length) {
       const file = selected[next++];
@@ -109,7 +103,7 @@ try {
   if (resultsPath) {
     const path = resolve(resultsPath);
     await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, JSON.stringify({ platform: process.platform, suite, title, ...(shard ? { shard } : {}),
+    await writeFile(path, JSON.stringify({ platform: process.platform, suite, title,
       seconds: (performance.now() - started) / 1000, planned: selected.map(testName), results }, null, 2) + "\n");
   }
 }

@@ -14,178 +14,31 @@ export async function discoverTestFiles(directory) {
   return groups.flat().sort();
 }
 
-// Fixed exclusions preserve the previous native PR coverage. New test paths
-// are included automatically; adding an exclusion is a protected CI change.
-export const defaultTestExclusions = [
-  "agent-activity.test.ts",
-  "archive-run-data.test.ts",
-  "archive-worker-guard.test.ts",
-  "artifact-format-fixtures.test.ts",
-  "artifact-migration.test.ts",
-  "artifact-review-browser.test.ts",
-  "artifact-review-view.test.ts",
-  "artifact-review.test.ts",
-  "artifact-validation.test.ts",
-  "builtin-memory-view.test.ts",
-  "builtin-run-view.test.ts",
-  "ci/ci-change-guard.test.ts",
-  "ci/ci-workflow.test.ts",
-  "ci/full-health.test.ts",
-  "ci/test-plan.test.ts",
-  "ci/test-runner.test.ts",
-  "cli-output-format.test.ts",
-  "cli-presentation.test.ts",
-  "command-state-store.test.ts",
-  "config.test.ts",
-  "context-control-cli.test.ts",
-  "context-control-graph.test.ts",
-  "context-control-invariants.test.ts",
-  "context-control-lifecycle.test.ts",
-  "context-control-memory-store.test.ts",
-  "context-control-outputs.test.ts",
-  "context-control-run-lock.test.ts",
-  "context-control-upgrade.test.ts",
-  "context-control-view-browser.test.ts",
-  "context-control-view-read.test.ts",
-  "context-control-view.test.ts",
-  "context-control.test.ts",
-  "context-run-summaries.test.ts",
-  "control-plane.test.ts",
-  "daemon-integration.test.ts",
-  "data-command.test.ts",
-  "data-extension-registry.test.ts",
-  "data-extensions.test.ts",
-  "data-filesystem-hierarchy-process.test.ts",
-  "data-interfaces.test.ts",
-  "data-json-schema-metamodel.test.ts",
-  "data-json-schema.test.ts",
-  "data-json-serializer.test.ts",
-  "data-manager.test.ts",
-  "data-plain-reflection.test.ts",
-  "data-preparation.test.ts",
-  "data-raw.test.ts",
-  "default-content-style.test.ts",
-  "disclosure-state.test.ts",
-  "file-memory-provider.test.ts",
-  "json-patch.test.ts",
-  "json-path.test.ts",
-  "legacy-general-task-upgrade.test.ts",
-  "list-pagination-cli.test.ts",
-  "market-changeset.test.ts",
-  "market-store.test.ts",
-  "market-view.test.ts",
-  "memory-catalog.test.ts",
-  "memory-changeset-collaboration.test.ts",
-  "memory-cli.test.ts",
-  "memory-command.test.ts",
-  "memory-diff.test.ts",
-  "memory-navigation.test.ts",
-  "memory-references.test.ts",
-  "memory-rules.test.ts",
-  "memory-schema.test.ts",
-  "memory-serializer.test.ts",
-  "memory-store.test.ts",
-  "memory-syntax.test.ts",
-  "memory-write-access.test.ts",
-  "model-asset-checkout.test.ts",
-  "model-browser-state.test.ts",
-  "model-command.test.ts",
-  "model-definition-component-browser.test.ts",
-  "model-market-package.test.ts",
-  "model-market.test.ts",
-  "model-prototype-tree.test.ts",
-  "model-publication.test.ts",
-  "model-registration-browser.test.ts",
-  "model-schema-references.test.ts",
-  "model-unavailable.test.ts",
-  "model-upgrade.test.ts",
-  "model-validation.test.ts",
-  "models-builtin-view-browser.test.ts",
-  "models-view-slots-browser.test.ts",
-  "module-manifest.test.ts",
-  "package-release.test.ts",
-  "page-layout-view.test.ts",
-  "pagination.test.ts",
-  "procedure-graph-canvas-browser.test.ts",
-  "procedure-graph-cli.test.ts",
-  "procedure-graph-content.test.ts",
-  "procedure-graph-presentation.test.ts",
-  "procedure-graph-review.test.ts",
-  "procedure-graph-rewind.test.ts",
-  "procedure-graph-runtime.test.ts",
-  "procedure-graph-syntax.test.ts",
-  "procedure-graph-view-browser.test.ts",
-  "procedure-graph-view.test.ts",
-  "product-positioning.test.ts",
-  "project-memory-provider.test.ts",
-  "project-model-registration-cli.test.ts",
-  "project-models.test.ts",
-  "project-preparation.test.ts",
-  "prompt-renderer.test.ts",
-  "review-node-cli.test.ts",
-  "review-node-content-cli.test.ts",
-  "review-node-graph-paths.test.ts",
-  "review-node-order.test.ts",
-  "review-node-prompt-contract.test.ts",
-  "review-node-receipts.test.ts",
-  "review-node-regressions.test.ts",
-  "review-node-rewind.test.ts",
-  "review-node-store.test.ts",
-  "review-node-target-race.test.ts",
-  "review-nodes.test.ts",
-  "run-abandonment-view.test.ts",
-  "run-changeset.test.ts",
-  "run-command.test.ts",
-  "run-data-access.test.ts",
-  "run-model-storage.test.ts",
-  "run-start-cli.test.ts",
-  "run-summary-requests.test.ts",
-  "runner-delegated-review-cli.test.ts",
-  "runner-identity.test.ts",
-  "schema-contract-migration.test.ts",
-  "schema-writing-view.test.ts",
-  "settings-builtin-module.test.ts",
-  "settings-builtin-view-browser.test.ts",
-  "skill-command.test.ts",
-  "system-model-creation.test.ts",
-  "system-models.test.ts",
-  "validate-command.test.ts",
-  "view-browser.test.ts",
-  "view-fault-isolation-browser.test.ts",
-  "view-global-style-contract.test.ts",
-  "view-host-composition.test.ts",
-  "view-host.test.ts",
-  "view-locales.test.ts",
-  "view-models.test.ts",
-  "view-package-browser.test.ts",
-  "view-package-config.test.ts",
-  "view-package-example.test.ts",
-  "view-package-router-browser.test.ts",
-  "view-project-switch.test.ts",
-  "view-responsive.test.ts",
-  "view-sdk.test.ts",
-  "view-settings-browser.test.ts",
-  "view-settings.test.ts",
-  "view-shell-layout.test.ts",
-  "view-style-contract.test.ts",
-  "view-theme-registry.test.ts"
-];
-const defaultExclusions = new Set(defaultTestExclusions);
-const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
-const testKey = file => (isAbsolute(file) ? relative(testDirectory, file) : file).split(sep).join("/");
-// Routing changes only the owning job, never whether a discovered test runs.
-function nativeGroup(file, source) {
-  const key = testKey(file);
-  if (key === "project-command.test.ts") return "package-platform";
-  if (["system-upgrade-changeset.test.ts", "run-model-artifact.test.ts", "memory-changeset.test.ts"].includes(key) || testCategory(file, source) === "project-upgrade") return "platform-upgrades";
-  return "platform-core";
-}
 export const testSuites = {
-  "package-platform": { title: "Packaged Job Platform Contracts", categories: [] },
-  "platform-core": { title: "Platform Core Contracts", categories: [] },
-  "platform-upgrades": { title: "Platform Publication & Upgrades", categories: [] },
-  platform: { title: "Platform Contracts", categories: [] },
-  "platform-and-upgrades": { title: "Platform & Upgrade Contracts", categories: [] },
+  regression: { title: "Unit, module & integration tests", categories: [] },
+  unit: { title: "Unit tests", categories: [] },
+  module: { title: "Module tests", categories: [] },
+  system: { title: "System tests", categories: [] },
+  e2e: { title: "End-to-end tests", categories: [] },
+  integration: { title: "Integration tests", categories: [] },
+  "integration-model-ui": { title: "Integration · Models & Settings UI", categories: ["model-ui"] },
+  "integration-review-ui": { title: "Integration · Content, Reviews & Shell UI", categories: ["review-ui"] },
+  "integration-browser": { title: "Integration · Browser UI", categories: ["model-ui", "review-ui"] },
+  "integration-cli": { title: "Integration · CLI contracts", categories: ["memory-cli", "app-cli"] },
+  "integration-memory-and-projects": { title: "Integration · Memory & Projects", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core"] },
+  "integration-runtime-core": { title: "Integration · Run, Data & SDK", categories: ["runtime-core"] },
+  "platform-locks": { title: "Platform integration · Cross-process locks", categories: [] },
+  "platform-context": { title: "Platform integration · Context & Review", categories: [] },
+  "platform-artifacts": { title: "Platform integration · Artifacts & Archives", categories: [] },
+  "platform-models": { title: "Platform integration · Model storage", categories: [] },
+  "platform-cli": { title: "Platform integration · Native CLI sessions", categories: [] },
+  "platform-process": { title: "Platform integration · Processes & launchers", categories: [] },
+  "platform-rewind": { title: "Platform integration · Rewind & process ownership", categories: [] },
+  "platform-filesystem": { title: "Platform integration · Filesystem & paths", categories: [] },
+  "platform-upgrade": { title: "Platform integration · Project upgrades", categories: [] },
+  "platform-memory-publication": { title: "Platform integration · Memory publication", categories: [] },
+  "platform-git": { title: "Platform integration · Git & worktrees", categories: [] },
+  platform: { title: "Platform integration", categories: [] },
   "model-ui": { title: "Models & Settings UI", categories: ["model-ui"] },
   "review-ui": { title: "Review & Shell UI", categories: ["review-ui"] },
   "memory-cli": { title: "Memory & Project CLI", categories: ["memory-cli"] },
@@ -200,14 +53,9 @@ export const testSuites = {
   core: { title: "Projects, Memory & Runtime", categories: ["project-core", "project-upgrade", "runtime-upgrades", "memory-core", "runtime-core"] }
 };
 
-// Default native jobs use the same category boundaries as full, with fixed exclusions.
-for (const [name, definition] of Object.entries({ ...testSuites })) {
-  if (definition.categories.length) testSuites[`native-${name}`] = definition;
-}
-
 /** Categories describe the primary contract; integration tests remain whole. */
 export function testCategory(file, source) {
-  const name = basename(file);
+  const name = basename(file).replace(/\.(unit|module|integration|system|e2e)\.test\.ts$/, ".test.ts");
   if (["legacy-general-task-upgrade.test.ts", "system-upgrade-changeset.test.ts"].includes(name)) return "runtime-upgrades";
   if (name === "embedded-changeset.test.ts") return "memory-core";
   if (source.includes("helpers/browser") || /from ["']playwright["']/.test(source)) {
@@ -222,41 +70,41 @@ export function testCategory(file, source) {
   return "runtime-core";
 }
 
-export function selectTests(files, sources, durations, suite = "all") {
+const testDirectory = fileURLToPath(new URL("../../test/", import.meta.url));
+const key = file => (isAbsolute(file) ? relative(testDirectory, file) : file).split(sep).join("/");
+export const isUnitTest = file => file.endsWith(".unit.test.ts");
+export const isModuleTest = file => file.endsWith(".module.test.ts");
+export const isIntegrationTest = file => file.endsWith(".integration.test.ts");
+export const isSystemTest = file => file.endsWith(".system.test.ts");
+export const isE2ETest = file => file.endsWith(".e2e.test.ts");
+export const isPlatformTest = (file, source = "") => /(?:^|\/)platform\//.test(key(file)) || source.includes("// @integration-platform: native");
+export function platformGroup(file, source = "") {
+  const declared = key(file).match(/(?:^|\/)platform\/([^/]+)\//)?.[1];
+  if (declared) return declared;
+  if (!isPlatformTest(file, source)) return undefined;
+  const name = basename(file);
+  if (/^(context-|procedure-graph-|review-node)/.test(name)) return "context";
+  if (/^(run-model|run-rule|archive-)/.test(name)) return "artifacts";
+  if (/^(model-|project-model|system-model|data-manager|data-extensions|data-raw)/.test(name)) return "models";
+  if (/^(memory-|file-memory|project-memory|market-store|artifact-migration|schema-contract-migration|checkpoint-publication|example-relocation|legacy-general)/.test(name)) return "memory-publication";
+  if (/^runner-identity/.test(name)) return "process";
+  return "filesystem";
+}
+
+/** Layer and native-system contracts are declared by placement, not timing or business-name guesses. */
+export function selectTests(files, sources, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
     if (suite === "all") return true;
-    if (suite.startsWith("native-")) {
-      return !defaultExclusions.has(testKey(file)) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
-    }
-    if (["platform", "platform-and-upgrades", "platform-core", "platform-upgrades", "package-platform"].includes(suite)) {
-      if (defaultExclusions.has(testKey(file))) return false;
-      return suite === "platform" || suite === "platform-and-upgrades" || nativeGroup(file, sources[file]) === suite;
-    }
+    if (suite === "regression") return !isSystemTest(file) && !isE2ETest(file);
+    if (suite === "unit") return isUnitTest(file);
+    if (suite === "module") return isModuleTest(file);
+    if (suite === "system") return isSystemTest(file);
+    if (suite === "e2e") return isE2ETest(file);
+    if (suite === "integration") return isIntegrationTest(file);
+    if (suite === "platform") return isIntegrationTest(file) && isPlatformTest(file, sources[file]);
+    if (suite.startsWith("platform-")) return isIntegrationTest(file) && platformGroup(file, sources[file]) === suite.slice(9);
+    if (suite.startsWith("integration-")) return isIntegrationTest(file) && !isPlatformTest(file, sources[file]) && testSuites[suite].categories.includes(testCategory(file, sources[file]));
     return testSuites[suite].categories.includes(testCategory(file, sources[file]));
-  })
-    .sort((a, b) => (durations[basename(b)] ?? 2) - (durations[basename(a)] ?? 2) || a.localeCompare(b, "en"));
-}
-
-/** Partition whole files, keeping every eligible test in exactly one shard. */
-export function selectTestShard(files, durations, shard) {
-  if (!shard) return files;
-  const match = /^([1-9]\d*)\/([1-9]\d*)$/.exec(shard);
-  const index = Number(match?.[1]), count = Number(match?.[2]);
-  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || index > count || count > files.length) {
-    throw new Error("Shard must be index/count with 1 <= index <= count <= eligible file count");
-  }
-  const groups = Array.from({ length: count }, () => ({ files: [], seconds: 0 }));
-  // The Linux planner sees relative POSIX names; Windows workers see absolute
-  // native paths. Both must assign exactly the same logical files to each shard.
-  const key = file => testKey(file).replaceAll("\\", "/");
-  const seconds = file => durations[basename(key(file))] ?? 2;
-  const ordered = [...files].sort((a, b) => seconds(b) - seconds(a) || key(a).localeCompare(key(b), "en"));
-  for (const [position, file] of ordered.entries()) {
-    const group = position < count ? groups[position]
-      : groups.reduce((least, candidate) => candidate.seconds < least.seconds ? candidate : least);
-    group.files.push(file);
-    group.seconds += seconds(file);
-  }
-  return groups[index - 1].files;
+  }).sort((a, b) => a.localeCompare(b, "en"));
 }

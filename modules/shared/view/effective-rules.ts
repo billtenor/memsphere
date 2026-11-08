@@ -32,7 +32,7 @@ export function appendEffectiveRules(parent: HTMLElement, node: RuleNode, channe
     if (list.childElementCount) parent.append(list);
   }
   for (const section of records(node.sections)) {
-    const block = document.createElement('section'); block.className = 'memory-node effective-rule-section';
+    const block = document.createElement('section'); block.className = 'effective-rule-section';
     const title = document.createElement('h4'); title.textContent = String(section.name ?? ''); block.append(title);
     if (Array.isArray(section.defines)) for (const definition of section.defines) { const p = document.createElement('p'); p.textContent = String(definition); block.append(p); }
     appendEffectiveRules(block, section, channel); parent.append(block);
@@ -46,7 +46,7 @@ export const effectiveRuleStyles = `
 .rule-reference-toggle:disabled { opacity:.55; cursor:not-allowed; }
 .effective-rule-inline { margin:8px 0 2px 14px; padding-left:12px; border-left:2px solid var(--mem-view-color-border); }
 .effective-rule-inline[hidden] { display:none; }
-.effective-rule-section { position:relative; margin:8px 0; padding:10px 12px; border-left:3px solid var(--mem-view-color-border-strong); background:var(--mem-view-color-subtle); }
+:where(.effective-rule-section) { position:relative; margin:8px 0; padding:10px 12px; border-left:3px solid var(--mem-view-color-border-strong); background:var(--mem-view-color-subtle); }
 .effective-rule-section h4 { margin:0 0 8px; }
 .effective-rule-section ul { margin:6px 0; padding-left:22px; }
 `;

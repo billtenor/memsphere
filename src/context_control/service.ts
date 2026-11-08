@@ -11,7 +11,7 @@ export { failure } from "./errors.js";
 
 export type Stores = Record<Entity, ValueStore>;
 export type ContentReader = (ref: { storeId: string; dataId: string }, context: Context) => Promise<{ bytes: Uint8Array; contentType: string }>;
-const now = () => new Date().toISOString();
+import { systemContextRuntime, type ContextRuntime } from "./runtime.js";
 const id = (kind: string) => `${kind}-${randomUUID()}`;
 const nonblank = (s: string | undefined, label: string): string => { if (typeof s !== "string" || !s.trim()) throw failure("INVALID_ARGUMENT", `${label} must be nonblank`); return s; };
 const tags = (input: string[] = []) => [...new Set(["default", ...input.map(v => nonblank(v, "tag"))])];
@@ -20,10 +20,10 @@ const uniqueRefs = (refs: Ref[]) => [...new Map(refs.map(r => [refKey(r), r])).v
 
 /** Domain writes and recovery use each ValueStore record's uniqueness and CAS. */
 export class ContextControl {
-  constructor(readonly stores: Stores, private readonly contentReader: ContentReader) {}
+  constructor(readonly stores: Stores, private readonly contentReader: ContentReader, readonly runtime: ContextRuntime = systemContextRuntime) {}
   /** Graph operations share the same model Stores. */
   async withGraph<T>(action: (runtime: GraphRuntime) => Promise<T>): Promise<T> {
-    return action(new GraphRuntime(this.stores, this.contentReader));
+    return action(new GraphRuntime(this.stores, this.contentReader, this.runtime));
   }
   private key(entity: Entity, runId: string, entityId: string) { return entity === "run" ? entityId : `${runId}/${entityId}`; }
   private async record<T>(entity: Entity, runId: string, entityId: string, context: Context = {}): Promise<(StoredValue & { value: T }) | undefined> {
@@ -94,7 +94,7 @@ export class ContextControl {
     return entries;
   }
   async start(name: string, language: Run["language"] = "zh-CN") {
-    const run: Run = { id: id("run"), name: nonblank(name, "name"), status: "running", language, createdAt: now() };
+    const run: Run = { id: id("run"), name: nonblank(name, "name"), status: "running", language, createdAt: this.runtime.now() };
     await this.create("run", run.id, run); return run;
   }
   private async running(runId: string, context: Context = {}) {
@@ -185,11 +185,11 @@ export class ContextControl {
       }
       if (a.status === "submitted") { await this.body(a); await this.validateRefs(runId, a.dependencies, a.id); }
       if (!step) {
-        const value: Step = { id: a.stepId, runId, createdAt: now(), status: "running", artifact: { mode: "produce", id: a.id } };
+        const value: Step = { id: a.stepId, runId, createdAt: this.runtime.now(), status: "running", artifact: { mode: "produce", id: a.id } };
         await this.create("step", runId, value); step = await this.require<Step>("step", runId, a.stepId);
       }
       if (a.status === "submitted" && step.value.status !== "done") {
-        await this.update("step", runId, step, { ...step.value, status: "done", endedAt: now() });
+        await this.update("step", runId, step, { ...step.value, status: "done", endedAt: this.runtime.now() });
       }
     } catch (error) { throw Object.assign(error as object, { details: { runId, artifactId: a.id, stepId: a.stepId } }); }
   }
@@ -238,7 +238,7 @@ export class ContextControl {
       const previous = input.revisedFrom ? await this.complete(runId, input.revisedFrom) : undefined;
       const artifact: Artifact = { id: id("artifact"), stepId: id("step"), name: nonblank(input.name ?? previous?.name, "name"), status: "draft", tags: tags(input.tags), dependencies: [], ...(previous ? { revisedFrom: previous.id } : {}) };
       await this.create("artifact", runId, artifact);
-      await this.create("step", runId, { id: artifact.stepId, runId, createdAt: now(), status: "running", artifact: { mode: "produce", id: artifact.id } } satisfies Step);
+      await this.create("step", runId, { id: artifact.stepId, runId, createdAt: this.runtime.now(), status: "running", artifact: { mode: "produce", id: artifact.id } } satisfies Step);
       return artifact;
     });
   }
@@ -306,11 +306,11 @@ export class ContextControl {
       const a = (await this.require<Artifact>("artifact", runId, targetId, context)).value;
       if (a.status !== "draft") throw failure("TARGET_FINISHED", "Read target is not a draft");
       if (!await this.record<Step>("step", runId, a.stepId, context)) {
-        await this.create("step", runId, { id: a.stepId, runId, createdAt: now(), status: "running", artifact: { mode: "produce", id: a.id } } satisfies Step, context);
+        await this.create("step", runId, { id: a.stepId, runId, createdAt: this.runtime.now(), status: "running", artifact: { mode: "produce", id: a.id } } satisfies Step, context);
       }
       const step = await this.require<Step>("step", runId, a.stepId, context);
       if (step.value.status !== "running" || step.value.runId !== runId) throw failure("TARGET_FINISHED", "Read target Step is not running");
-      const value: Step = { ...step.value, reads: { ...step.value.reads, [refKey(source)]: { readAt: now() } } };
+      const value: Step = { ...step.value, reads: { ...step.value.reads, [refKey(source)]: { readAt: this.runtime.now() } } };
       await this.update("step", runId, step, value, context);
       return [];
     } catch (error) { return [`Read succeeded; accounting skipped: ${error instanceof Error ? error.message : String(error)}`]; }
@@ -328,12 +328,12 @@ export class ContextControl {
     return this.writeRecord(runId, async () => {
       const run = (await this.require<Run>("run", runId, runId)).value;
       if (run.permissionConfig && !run.permissionConfig.runner.permissions.includes("artifact.submit")) throw failure("PERMISSION_DENIED", "Runner requires artifact.submit to register External");
-      const e: External = { id: id("external"), runId, source, capturedAt: now(), ...structuredClone(body) }; await this.create("external", runId, e); return e; });
+      const e: External = { id: id("external"), runId, source, capturedAt: this.runtime.now(), ...structuredClone(body) }; await this.create("external", runId, e); return e; });
   }
   async review(runId: string, artifactId: string, source: "human" | "agent", comments: string[]) {
     if (!comments.length || !["human", "agent"].includes(source)) throw failure("INVALID_ARGUMENT", "Review requires source and comments");
     comments.forEach(c => nonblank(c, "comment"));
-    return this.writeRecord(runId, async () => { await this.complete(runId, artifactId); const time = now(); const r: Review = { id: id("review"), artifactId, reviewer: { role: "reviewer", source }, status: "submitted", comments: comments.map((body): NewReviewComment => ({ commentId: id("comment"), body, createdAt: time })), createdAt: time, endedAt: time }; await this.create("review", runId, r); return r; });
+    return this.writeRecord(runId, async () => { await this.complete(runId, artifactId); const time = this.runtime.now(); const r: Review = { id: id("review"), artifactId, reviewer: { role: "reviewer", source }, status: "submitted", comments: comments.map((body): NewReviewComment => ({ commentId: id("comment"), body, createdAt: time })), createdAt: time, endedAt: time }; await this.create("review", runId, r); return r; });
   }
   async finish(runId: string, artifactIds?: string[]) {
     const row = await this.require<Run>("run", runId, runId);
@@ -352,7 +352,7 @@ export class ContextControl {
     if (row.value.status === "done" && matches(outputs)) return row.value;
     if (row.value.status !== "running" || row.value.archived) throw failure("RUN_FINISHED", `Run is ${row.value.status}`);
     await this.validateRefs(runId, roots.map(id => ({ kind: "artifact", id })));
-    const value: Run = { ...row.value, status: "done", outputOverrides: outputOverrides(automaticOutputs(snapshot.artifacts, snapshot.completeIds), roots), endedAt: now() };
+    const value: Run = { ...row.value, status: "done", outputOverrides: outputOverrides(automaticOutputs(snapshot.artifacts, snapshot.completeIds), roots), endedAt: this.runtime.now() };
     try { await this.update("run", runId, row, value); }
     catch (error) {
       if ((error as { code?: string }).code !== "REVISION_CONFLICT") throw error;
@@ -366,7 +366,7 @@ export class ContextControl {
     const run = await this.require<Run>("run", runId, runId);
     if (isGraphRun(run.value)) return this.withGraph(g => g.abandon(runId, reason, source));
     const row = await this.running(runId);
-    const value: Run = { ...row.value, status: "abandoned", endedAt: now(), abandonment: { source, ...(reason ? { reason } : {}) } };
+    const value: Run = { ...row.value, status: "abandoned", endedAt: this.runtime.now(), abandonment: { source, ...(reason ? { reason } : {}) } };
     await this.update("run", runId, row, value);
     return value;
   }

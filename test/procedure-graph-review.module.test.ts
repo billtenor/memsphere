@@ -1,0 +1,138 @@
+import { currentReviewNode } from "../src/review-nodes.js";
+
+import assert from "node:assert/strict";
+
+import test from "node:test";
+
+import { join } from "node:path";
+
+import { fileURLToPath } from "node:url";
+
+
+
+import { contextModuleFixture } from "./helpers/module-context.js";
+
+
+
+
+
+
+
+import { graphMemorySyntax } from "../src/memory/syntax.js";
+
+import type { GraphProcedureMemory } from "../src/memory/ast.js";
+
+import * as reviews from "../src/context_control/review-repository.js";
+
+async function fixture(t: test.TestContext, agent = false, advisory = false, mixed = false, filesystem = false) {
+  const f = { ...(await contextModuleFixture(t)), root: "module-context", home: "module-home" };
+  const service = f.service;
+  const actor = agent ? { kind: "agent" as const, name: "Agent", permissions: ["artifact.read" as const, "decision.assess" as const], agent: { provider: "test", providerType: "traex" as const, command: process.execPath, args: [fileURLToPath(new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url)), "approve"], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: 10000 } } : { kind: "human" as const, name: "Human", permissions: ["artifact.read" as const, ...(advisory ? ["decision.assess" as const] : ["decision.decide" as const])] };
+  const procedure: GraphProcedureMemory = { tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["review-graph"], defines: ["Review"], actions: [{ tag: "!action", id: "A", description: "Deliver", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/markdown" }, review: ["approval"] } }] };
+  const result = await service.withGraph(async g => {
+    const start = await g.start({ name: "review", procedure, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { reviewer: actor, ...(mixed ? { human: { kind: "human" as const, name: "Human", permissions: ["artifact.read" as const, "decision.decide" as const] } } : {}) }, acpProviders: {} }, reviewConfiguration: { reviews: { "review-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } }, slots: { "review-graph::approval": { actorIds: mixed ? ["reviewer", "human"] : ["reviewer"] } } } });
+    await g.enter(start.run.id, start.steps[0].id); return g.report(start.run.id, start.steps[0].id, { text: "# Candidate" });
+  });
+  return { ...f, service, result, input: { service, runsRoot: join(f.root, "runs"), reviewId: reviews.graphReviewHandle(result.snapshot.run.id, result.step.id), roundId: result.step.reviewRounds![0].id, actorId: "reviewer" } };
+}
+
+test("graph Review adapter preserves Human drafts, checks revisions and never stores legacy Review DTOs", async t => {
+  const f = await fixture(t, false, false, false, true);
+  const initial = await reviews.readArtifactReviewForActor(f.input);
+  const saved = await reviews.updateArtifactReviewDraft({ ...f.input, expectedRevision: initial.round.revision, draft: { comments: [], vote: "approve" } });
+  await assert.rejects(reviews.submitArtifactReviewAssignment({ ...f.input, expectedRevision: initial.round.revision }));
+  await reviews.submitArtifactReviewAssignment({ ...f.input, expectedRevision: saved.round.revision });
+  assert.equal((await reviews.readArtifactReviewForRunner(f.input)).round.status, "awaiting_runner_vote");
+  await reviews.submitArtifactReviewRunnerVote({ ...f.input, vote: "approve" });
+  const snapshot = await f.service.snapshot(f.result.snapshot.run.id);
+  assert.equal(snapshot.steps[0].status, "done"); assert.equal((snapshot.run as any).artifactReviews, undefined);
+  assert.equal(snapshot.reviews.filter(r => r.status === "submitted").length, 2);
+});
+
+for (const advisory of [false, true]) for (const vote of ["request_changes", "abstain"] as const) test(`delegated ${advisory ? "advisory" : "decision"} Human ${vote} requires actionable Comments`, async t => {
+  const f = await fixture(t, false, advisory);
+  const input = { ...f.input, runId: f.result.snapshot.run.id, assignmentId: "reviewer", authorizationNote: "Explicit authorization in isolated fixture", vote, summary: "Summary cannot replace a Comment" };
+  const before = await f.service.snapshot(input.runId);
+  await assert.rejects(reviews.submitArtifactReviewHumanAssignmentForRunner({ ...input, comments: [] }), /at least one Comment/);
+  if (advisory) {
+    for (const severity of [undefined, "unknown"]) await assert.rejects(reviews.submitArtifactReviewHumanAssignmentForRunner({ ...input, comments: [{ body: "Reason", ...(severity ? { severity } : {}) }] as any }), /severity/);
+  }
+  assert.deepEqual(await f.service.snapshot(input.runId), before);
+  const submitted = await reviews.submitArtifactReviewHumanAssignmentForRunner({ ...input, comments: [{ body: "Explain the missing requirement", ...(advisory ? { severity: "risk" as const } : {}) }] });
+  assert.equal(submitted.assignment.binding, advisory ? "advisory" : "decision");
+  assert.equal(submitted.assignment.submitted?.vote, vote); assert.equal(submitted.assignment.submitted?.comments.length, 1);
+  assert.equal(submitted.assignment.status, "submitted");
+  if (advisory) {
+    await reviews.submitArtifactReviewRunnerVote({ ...f.input, vote: "approve" });
+    assert.equal((await f.service.snapshot(input.runId)).steps[0].status, "done");
+  } else if (vote === "request_changes") assert.equal(submitted.review.status, "awaiting_revision");
+});
+
+test("Agent claims once, requires handshake, and submits only its current attempt", async t => {
+  const f = await fixture(t, true);
+  const claimed = await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }); assert.ok(claimed);
+  assert.equal(await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }), undefined);
+  const input = { ...f.input, attemptId: claimed.attempt.id };
+  await assert.rejects(reviews.submitArtifactReviewAgentAssignment({ ...input, vote: "approve" }), /handshake/);
+  await reviews.markArtifactReviewAgentCliReady(input);
+  let pending = await reviews.readArtifactReviewForActor(input);
+  while (currentReviewNode(pending.assignment)) pending = await reviews.mutateArtifactReviewNodes({ ...input, mutation: { operation: "report", artifact: { applicable: true }, expectedNodeId: currentReviewNode(pending.assignment)!.nodeId } });
+  await reviews.submitArtifactReviewAgentAssignment({ ...input, vote: "approve" });
+  assert.equal((await reviews.readArtifactReviewForActor(f.input)).assignment.status, "submitted");
+  assert.equal((await f.service.snapshot(f.result.snapshot.run.id)).steps[0].status, "awaiting_review");
+});
+
+test("Reviewer failure before OS enrollment remains retryable without an undefined PID record", async t => {
+  const f = await fixture(t, true);
+  const first = (await reviews.claimArtifactReviewAgentAssignment(f.input))!;
+  await reviews.failArtifactReviewAgentAssignment({ ...f.input, attemptId: first.attempt.id, failure: { stage: "spawn", code: "containment_failed", message: "No Provider or contained worker started" } });
+  assert.equal((await reviews.waitForArtifactReview(f.input)).round.assignments[0].status, "failed");
+  await reviews.retryArtifactReviewAgentAssignment(f.input);
+  const next = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+  assert.notEqual(next.attempt.id, first.attempt.id);
+  assert.equal(next.attempt.workerPid, process.pid);
+});
+
+test("failed Agent Review remains undecided until explicit retry; retry invalidates old attempt", async t => {
+  const f = await fixture(t, true);
+  const first = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+  await reviews.failArtifactReviewAgentAssignment({ ...f.input, attemptId: first.attempt.id, failure: { stage: "process", code: "failed", message: "test failure" } });
+  assert.equal((await reviews.waitForArtifactReview(f.input)).round.assignments[0].status, "failed");
+  await assert.rejects(reviews.submitArtifactReviewRunnerVote({ ...f.input, vote: "approve" }));
+  await reviews.retryArtifactReviewAgentAssignment(f.input);
+  const next = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: process.pid }))!;
+  assert.notEqual(next.attempt.id, first.attempt.id);
+  await assert.rejects(reviews.markArtifactReviewAgentCliReady({ ...f.input, attemptId: first.attempt.id }));
+  await reviews.markArtifactReviewAgentCliReady({ ...f.input, attemptId: next.attempt.id });
+});
+
+test("graph Review adapter restores omitted idle timeout as null", async t => {
+  const f = await fixture(t, true);
+  const runId = f.result.snapshot.run.id;
+  const row = (await f.service.stores.run.get({}, runId))!;
+  const value = structuredClone(row.value) as any;
+  delete value.permissionConfig.actors.reviewer.agent.idleTimeoutMs;
+  await f.service.stores.run.update({}, runId, value, { expectedRevision: row.revision });
+  const context = await reviews.readArtifactReviewForActor(f.input);
+  const actor = context.run.controlPlane!.actors.reviewer;
+  assert.equal(actor.kind, "agent");
+  if (actor.kind === "agent") assert.equal(actor.agent.idleTimeoutMs, null);
+});
+
+test("graph worker enrollment and rewind use supplied lifecycle observations without inspecting the host", async t => {
+  const f = await fixture(t, true), { workers } = f;
+  const identity = { pid: workers.pid, group: workers.pid, started: "fixture-start" };
+  workers.identities.set(workers.pid, identity);
+  workers.identities.set(workers.pid + 1, { ...identity, pid: workers.pid + 1 });
+  const claimed = (await reviews.claimArtifactReviewAgentAssignment({ ...f.input, workerPid: workers.pid }))!;
+  await f.service.withGraph(g => g.recordReviewProcesses(f.result.snapshot.run.id, f.result.step.id, f.input.roundId, "reviewer", claimed.attempt.id, workers.pid, workers.pid + 1));
+  const stop = workers.stop;
+  workers.stop = async () => { throw new Error("fixture process still exiting"); };
+  await assert.rejects(f.service.withGraph(g => g.rewind(f.result.snapshot.run.id, f.result.step.id, "replace")), /still exiting/);
+  assert.ok((await f.service.findRun(f.result.snapshot.run.id))!.frames![0].graphFrame.pendingRewind);
+  workers.stop = stop;
+  await f.service.withGraph(g => g.advance(f.result.snapshot.run.id));
+  assert.equal(workers.stopped.length, 1);
+  assert.deepEqual(workers.stopped[0].identity, identity);
+  assert.equal((await f.service.findRun(f.result.snapshot.run.id))!.frames![0].graphFrame.pendingRewind, undefined);
+});

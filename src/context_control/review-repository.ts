@@ -17,7 +17,6 @@ import { isGraphRun, type GraphRuntime } from "./graph-runtime.js";
 import type { Artifact, Review, Run, Snapshot, Step } from "./types.js";
 import { failure } from "./errors.js";
 import { effectiveStep } from "./graph-rewind.js";
-import { captureProcessIdentity } from "./review-process.js";
 import type { ContextControl } from "./service.js";
 export * from "../run/store.js";
 const stamp = () => new Date().toISOString();
@@ -205,11 +204,11 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
     attempt.startedAt = stamp();
     if (input.workerPid !== undefined) {
       attempt.workerPid = input.workerPid;
-      const identity = await captureProcessIdentity(input.workerPid);
+      const identity = await g.runtime.workers.captureIdentity(input.workerPid);
       if (identity) attempt.workerIdentity = identity;
     }
     if (input.workerJob) {
-      if (input.workerPid !== process.pid || process.platform !== "win32" || !attempt.workerIdentity)
+      if (input.workerPid !== g.runtime.workers.pid || g.runtime.workers.platform !== "win32" || !attempt.workerIdentity)
         throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Only the enrolled Windows worker may register its job");
       attempt.workerJob = input.workerJob;
     }
@@ -279,7 +278,7 @@ export async function submitArtifactReviewAgentAssignment(input: Parameters<type
 }
 export async function updateArtifactReviewDraft(input: Parameters<typeof legacy.updateArtifactReviewDraft>[0]) {
   if (!identity(input.reviewId)) return legacy.updateArtifactReviewDraft(input);
-  await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, run, step) => {
+  await use(input, (g, id, service) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, run, step) => {
     const round = step.reviewRounds!.at(-1)!;
     const all = await g.records.list<Review>("review", run.id);
     const state = projectGraphRound(run, step, round, all);
@@ -288,7 +287,6 @@ export async function updateArtifactReviewDraft(input: Parameters<typeof legacy.
     const permissions = round.reviewConfig.reviewers[input.actorId].permissions;
     if (!permissions.some(p => p === "decision.assess" || p === "decision.decide")) throw failure("PERMISSION_DENIED", "Reviewer cannot submit an opinion");
     const artifact = (await g.records.require<Artifact>("artifact", run.id, round.artifactId)).value;
-    const service = (await openContextControl(dirname(input.runsRoot)))!;
     const hash = digest((await service.body(artifact)).bytes);
     if (!permissions.includes("decision.decide") && input.draft.comments.some(c => !c.severity)) throw failure("INVALID_ARGUMENT", "Advisory comment requires severity");
     review.comments = storeGraphComments(comments(input.draft.comments).map(comment => ({ ...comment, createdAt: review.comments.find(old => reviewCommentId(old) === reviewCommentId(comment))?.createdAt ?? comment.createdAt })), round.artifactId, hash);

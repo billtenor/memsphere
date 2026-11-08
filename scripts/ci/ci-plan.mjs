@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverTestFiles, selectTests, selectTestShard, testSuites } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isIntegrationTest, isSystemTest, isE2ETest, isPlatformTest } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -10,39 +10,30 @@ export function ciProfile(event, input = "default") {
   return input;
 }
 
-const linux = [
-  ["ubuntu-24.04", "browser", 3], ["ubuntu-24.04", "cli", 3],
-  ["ubuntu-24.04", "memory-and-projects", 2], ["ubuntu-24.04", "runtime-core", 2]
-];
-const fullRows = [...linux,
-  ["macos-latest", "model-ui", 3], ["macos-latest", "review-ui", 3],
-  ["macos-latest", "cli", 4], ["macos-latest", "memory-and-projects", 3], ["macos-latest", "runtime-core", 3],
-  ["windows-latest", "model-ui", 2], ["windows-latest", "review-ui", 3],
-  ["windows-latest", "memory-cli", 2], ["windows-latest", "app-cli", 2],
-  ["windows-latest", "project-core", 3], ["windows-latest", "project-upgrade", 3],
-  ["windows-latest", "memory-core", 2], ["windows-latest", "runtime-core", 3]
-];
+const systems = ["ubuntu-24.04", "macos-latest", "windows-latest"];
+const portableSuites = ["integration-model-ui", "integration-review-ui", "integration-cli", "integration-memory-and-projects", "integration-runtime-core"];
+const nativeSuites = ["platform-process", "platform-locks", "platform-cli", "platform-rewind", "platform-filesystem", "platform-git", "platform-memory-publication", "platform-upgrade", "platform-context", "platform-artifacts", "platform-models"];
 
-export function createCiPlan(profile, files, sources, durationsByPlatform = {}) {
+export function createCiPlan(profile, files, sources) {
   if (!["default", "full"].includes(profile)) throw new Error(`Unknown CI profile: ${profile}`);
-  return { include: fullRows.flatMap(([os, categorySuite, workers]) => {
-    const suite = profile === "default" && os !== "ubuntu-24.04" ? `native-${categorySuite}` : categorySuite;
-    const platform = os === "ubuntu-24.04" ? "linux" : os === "macos-latest" ? "darwin" : "win32";
-    const durations = durationsByPlatform[platform] ?? {};
-    const selected = selectTests(files, sources, durations, suite);
-    if (!selected.length) {
-      if (profile === "full") throw new Error(`Empty CI suite: ${suite}`);
-      return [];
-    }
-    const split = profile === "default" && categorySuite === "runtime-core" && os !== "macos-latest" && selected.length > 1;
-    return (split ? ["1/2", "2/2"] : [""]).map(shard => {
-      const assigned = selectTestShard(selected, durations, shard);
-      const browser = assigned.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file]));
-      const title = testSuites[suite].title;
-      return { os, suite, title, label: title + (shard ? ` [${shard}]` : ""), workers, browser,
-        shard, shardArgs: shard ? `--shard=${shard}` : "", shardSuffix: shard ? `-shard-${shard.replace("/", "-of-")}` : "" };
-    });
-  }) };
+  if (!selectTests(files, sources, "unit").length) throw new Error("No unit tests discovered");
+  const unknown = files.filter(file => !isUnitTest(file) && !isModuleTest(file) && !isIntegrationTest(file) && !isSystemTest(file) && !isE2ETest(file));
+  if (unknown.length) throw new Error(`Tests need an explicit layer suffix: ${unknown.join(", ")}`);
+  const include = systems.flatMap(os => ["unit", "module", ...(profile === "full" ? ["system", "e2e"] : []), ...nativeSuites, ...(profile === "full" || os === "ubuntu-24.04" ? portableSuites : [])].flatMap(suite => {
+    const selected = selectTests(files, sources, suite);
+    if (!selected.length) return [];
+    const runsInDefault = ["unit", "module"].includes(suite) || nativeSuites.includes(suite)
+      || (os === "ubuntu-24.04" && portableSuites.includes(suite));
+    return [{ os, suite, layer: ["unit", "module", "system", "e2e"].includes(suite) ? suite : "integration", title: testSuites[suite].title,
+      timeoutMinutes: runsInDefault ? 5 : 30,
+      browser: !["unit", "module"].includes(suite) && selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])) }];
+  }));
+  for (const os of systems) {
+    const expected = files.filter(file => profile === "full" || (!isSystemTest(file) && !isE2ETest(file) && (os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file, sources[file])))).sort();
+    const assigned = include.filter(row => row.os === os).flatMap(row => selectTests(files, sources, row.suite)).sort();
+    if (JSON.stringify(assigned) !== JSON.stringify(expected)) throw new Error(`Unassigned or duplicate tests on ${os}`);
+  }
+  return { include };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -50,7 +41,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const files = await discoverTestFiles(directory);
   const sources = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(directory, file), "utf8")])));
   const profile = ciProfile(process.env.GITHUB_EVENT_NAME, process.env.CI_PROFILE);
-  const durations = JSON.parse(await readFile(new URL("./test-durations.json", import.meta.url), "utf8"));
   console.log(`profile=${profile}`);
-  console.log(`matrix=${JSON.stringify(createCiPlan(profile, files, sources, durations))}`);
+  const plan = createCiPlan(profile, files, sources);
+  console.log(`matrix=${JSON.stringify(plan)}`);
+  console.log(`unit_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "unit")})}`);
+  console.log(`module_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "module")})}`);
+  console.log(`system_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "system" || row.layer === "e2e")})}`);
+  console.log(`integration_matrix=${JSON.stringify({include: plan.include.filter(row => row.layer === "integration")})}`);
 }
