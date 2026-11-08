@@ -10,6 +10,12 @@ import { requireEffectiveStep } from "../context_control/graph-rewind.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
 
 const operations: Array<[string[], string, string[]]> = [
+  [["enter-schema"], "schema-enter", ["output"]],
+  [["schema", "show"], "schema-show", ["output"]],
+  [["schema", "report"], "schema-report", ["position", "artifact", "artifactFile", "output"]],
+  [["skip"], "schema-skip", ["position", "output"]],
+  [["repeat"], "schema-repeat", ["position", "output"]],
+  [["artifact", "export"], "schema-export", ["file", "force", "output"]],
   [["review", "wait"], "review-wait", []],
   [["review", "vote"], "review-vote", ["vote", "comment", "commentFile"]],
   [["review", "resolve"], "review-resolve", ["comment", "disposition", "note", "noteFile", "validationSummary", "validationSummaryFile", "output"]],
@@ -32,7 +38,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     console.log(`sessionId: ${context.sessionId}\ncommandGroup: ${context.commandGroup}\nproject: ${context.parameters.project}\nrun: ${context.groupId}`);
     if (context.parameters.step) console.log(`step: ${context.parameters.step}`);
     if (!context.available) { console.log(`No further transitions (${context.runStatus}). Use ordinary run status/show commands.`); return; }
-    console.log(target === router ? context.parameters.step ? "Available: report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <command> --help" : "Available: report, review create, external add, artifact tag, outputs update, finish, abandon\nContent, Artifact IDs, comments and dependencies remain explicit.\nUse: memsphere continue <command> --help" : target.helpInformation());
+    console.log(target === router ? context.parameters.step ? "Available: enter-schema, schema show, schema report, skip, repeat, artifact export, report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <command> --help" : "Available: report, review create, external add, artifact tag, outputs update, finish, abandon\nContent, Artifact IDs, comments and dependencies remain explicit.\nUse: memsphere continue <command> --help" : target.helpInformation());
   };
   const load = async () => {
     const row = (await currentCommandState(true))!;
@@ -77,7 +83,9 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       command.addOption(copy);
     }
     const target = command;
-    command.action(async (options: Options & { help?: boolean }) => {
+    if (operation === "schema-repeat") command.argument("<count>", "Repeat count");
+    command.action(async (...args: unknown[]) => {
+      const options = (operation === "schema-repeat" ? { ...(args[1] as Options), count: args[0] as string } : args[0]) as Options & { help?: boolean };
       if (options.help) { await help(target); return; }
       const context = await load();
       if (!context.available) throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
@@ -93,7 +101,8 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         else await commands.runReviewSubmitForHumanCommand({ ...options, run: context.groupId, review, round: context.roundId } as Parameters<typeof commands.runReviewSubmitForHumanCommand>[0]);
         return;
       }
-      if (context.parameters.step && operation !== "report") throw failure("INVALID_ARGUMENT", "Use the Step report or review commands shown by its current prompt");
+      if (context.parameters.step && operation !== "report" && !operation.startsWith("schema-")) throw failure("INVALID_ARGUMENT", "Use the Step report or review commands shown by its current prompt");
+      if (!context.parameters.step && operation.startsWith("schema-")) throw failure("INVALID_ARGUMENT", "Schema writing requires a graph Step");
       await contextOnlyCommand(operation, { ...options, run: context.groupId, ...(context.parameters.step ? { step: context.parameters.step } : {}), sessionStateId: context.id });
     });
   }

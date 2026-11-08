@@ -5,12 +5,12 @@ export type NodeId = string;
 export type CommentId = string;
 export type ReviewSource = { kind: "procedure" | "step" | "schema" | "statement"; path: string; memoryRef?: string };
 export type ReviewRule = { rulePath: string; text: string };
-export type ReviewNode = { nodeId: NodeId; name: string; kind?: "open_review"; source?: ReviewSource; defines: string[]; asserts: ReviewRule[]; suggests: ReviewRule[]; children: ReviewNode[] };
+export type ReviewNode = { nodeId: NodeId; name: string; kind?: "open_review"; requiresReport?: boolean; source?: ReviewSource; defines: string[]; asserts: ReviewRule[]; suggests: ReviewRule[]; children: ReviewNode[] };
 export type ReviewNodeTree = { root: ReviewNode };
 export type ReviewRuleResult = { rulePath: string; result: "not_satisfied" | "undetermined"; commentIds: CommentId[] };
 export type ReviewNodeState = { nodeId: NodeId; reported: boolean; applicable?: boolean; ruleResults: ReviewRuleResult[]; reasonCommentId?: CommentId; commentIds?: CommentId[] };
 export type ReviewNodes = { nodeTree?: ReviewNodeTree; nodeStates?: ReviewNodeState[] };
-export type ReviewNodeSource = { name: string; source: ReviewSource; defines?: string[]; asserts?: EffectiveRuleTree; suggests?: EffectiveRuleTree; children?: ReviewNodeSource[] };
+export type ReviewNodeSource = { name: string; requiresReport?: boolean; source: ReviewSource; defines?: string[]; asserts?: EffectiveRuleTree; suggests?: EffectiveRuleTree; children?: ReviewNodeSource[] };
 export type NodeComment = { commentId?: string; id?: string; body: string; severity?: "blocking" | "risk" | "suggestion" };
 export function reviewCommentId(comment: Pick<NodeComment, "commentId" | "id">): string {
   if (Boolean(comment.commentId) === Boolean(comment.id)) throw new Error("review_comment_identity_invalid");
@@ -19,7 +19,7 @@ export function reviewCommentId(comment: Pick<NodeComment, "commentId" | "id">):
 const nonempty = z.string().trim().min(1);
 export const reviewSourceSchema = z.object({ kind: z.enum(["procedure", "step", "schema", "statement"]), path: nonempty, memoryRef: nonempty.optional() }).strict();
 export const reviewRuleSchema = z.object({ rulePath: nonempty, text: nonempty }).strict();
-export const reviewNodeSchema: z.ZodType<ReviewNode> = z.lazy(() => z.object({ nodeId: nonempty, name: nonempty, kind: z.literal("open_review").optional(), source: reviewSourceSchema.optional(), defines: z.array(z.string()), asserts: z.array(reviewRuleSchema), suggests: z.array(reviewRuleSchema), children: z.array(reviewNodeSchema) }).strict());
+export const reviewNodeSchema: z.ZodType<ReviewNode> = z.lazy(() => z.object({ nodeId: nonempty, name: nonempty, kind: z.literal("open_review").optional(), requiresReport: z.boolean().optional(), source: reviewSourceSchema.optional(), defines: z.array(z.string()), asserts: z.array(reviewRuleSchema), suggests: z.array(reviewRuleSchema), children: z.array(reviewNodeSchema) }).strict());
 export const reviewNodeTreeSchema = z.object({ root: reviewNodeSchema }).strict();
 export const reviewNodeStateSchema = z.object({ nodeId: nonempty, reported: z.boolean(), applicable: z.boolean().optional(), ruleResults: z.array(z.object({ rulePath: nonempty, result: z.enum(["not_satisfied", "undetermined"]), commentIds: z.array(nonempty) }).strict()), reasonCommentId: nonempty.optional(), commentIds: z.array(nonempty).optional() }).strict();
 const anchor = z.record(z.unknown()); // Native flow/graph adapters validate their existing anchor contract.
@@ -37,7 +37,7 @@ export function allReviewNodes(tree: ReviewNodeTree): ReviewNode[] {
   const visit = (node: ReviewNode) => { nodes.push(node); node.children.forEach(visit); };
   visit(tree.root); return nodes;
 }
-export const needsNodeReport = (node: ReviewNode) => node.kind === "open_review" || node.asserts.length + node.suggests.length > 0;
+export const needsNodeReport = (node: ReviewNode) => node.kind === "open_review" || node.requiresReport === true || node.asserts.length + node.suggests.length > 0;
 export function currentReviewNode(value: ReviewNodes): ReviewNode | undefined {
   return value.nodeTree && allReviewNodes(value.nodeTree).find(n => needsNodeReport(n) && !value.nodeStates?.find(s => s.nodeId === n.nodeId)?.reported);
 }
@@ -101,6 +101,7 @@ export function createReviewNodes(sources: ReviewNodeSource[], openName: string)
   const empty = (name: string, source?: ReviewSource, defines: string[] = []): ReviewNode => ({ nodeId: "", name, ...(source ? { source } : {}), defines, asserts: [], suggests: [], children: [] });
   const projectSource = (s: ReviewNodeSource): ReviewNode => {
     const node = empty(s.name, s.source, s.defines);
+    if (s.requiresReport) node.requiresReport = true;
     const sectionPositions = new Map<ReviewNode, number>();
     // Matching source positions merge the two projected channels. Different references remain distinct.
     const project = (parent: ReviewNode, entries: EffectiveRuleEntry[], sections: EffectiveRuleSection[], channel: "asserts" | "suggests") => {

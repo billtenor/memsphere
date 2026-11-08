@@ -23,7 +23,7 @@ export function decodeGraphContent(bytes: Uint8Array, contentType: string): unkn
 }
 export async function validateGraphSpec(spec: GraphArtifactSpec) {
   if (!["application/json", "application/yaml", "application/x-yaml", "text/yaml", "text/plain", "text/markdown"].includes(mimeType(spec.payload.contentType))) throw failure("CONTENT_TYPE_UNSUPPORTED", `Unsupported graph content type: ${spec.payload.contentType}`);
-  return checkModelDefinition({}, { modelRef: "memsphere/graph-artifact.json", metaModel: spec.model.definedBy, definition: undefined, source: spec.model.definition });
+  return checkModelDefinition({}, { modelRef: "memsphere/graph-artifact.json", metaModel: spec.model.definedBy, definition: undefined, source: spec.model.definition, scope: "graph" });
 }
 export async function graphBody(body: Body, reader: ContentReader) {
   if (!!body.content === !!body.contentRef) throw failure("INVALID_ARGUMENT", "Exactly one of content/contentRef is required");
@@ -42,6 +42,7 @@ export async function validateGraphBody(body: Body, spec: GraphArtifactSpec, rea
   if (mimeType(value.contentType) !== mimeType(spec.payload.contentType)) throw failure("CONTENT_TYPE_MISMATCH", `Expected ${spec.payload.contentType}, received ${value.contentType}`);
   const { runtime } = await validateGraphSpec(spec);
   const decoded = decodeGraphContent(value.bytes, value.contentType);
-  runtime!.reflect(spec.model.definedBy === "raw.json" ? value.bytes : decoded);
+  if (runtime!.validatePayload) await runtime!.validatePayload(value.bytes, value.contentType);
+  else runtime!.reflect(spec.model.definedBy === "raw.json" ? value.bytes : decoded);
   return { ...value, decoded, sha256: createHash("sha256").update(value.bytes).digest("hex") };
 }

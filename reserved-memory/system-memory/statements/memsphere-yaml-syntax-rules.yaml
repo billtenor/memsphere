@@ -435,7 +435,7 @@ sections:
             ```
         asserts:
           - format 的字符串简写等价于只包含同名 name、且没有附加配置的 YAML mapping。
-          - format YAML mapping 必须包含非空 name，只允许 plain、markdown、json 或 yaml。
+          - Artifact 的 format YAML mapping 必须包含非空 name，只允许 plain、markdown、json 或 yaml；Schema 可只声明 Markdown 的 layout，解析为对应 Markdown 布局。
           - name 以外的字段必须是当前格式明确支持的附加配置。
         sections:
           - !statement
@@ -1136,8 +1136,9 @@ sections:
       - dependencies 是非空 !dependency 数组；每条只允许 from 与可选 when。from 为 START/Action ID 或非空无重复的来源数组；字符串是单来源，数组共同等待所有来源。多条 dependency 各自独立触发。同一图至少有一条 START 来源。
       - when 是 JSONata 表达式字符串，启动前检查语法，触发时严格返回 boolean；false 消费本次触发而不建 Step，解码、模型或求值失败报错且不消费。上下文仅提供 artifacts，不提供全局 State 或启动业务 input。
       - 普通来源在 artifacts.<Action ID> 下提供本次采用的单个解码值；collect 来源按原生产 Action ID 提供固定数组，空数组保留。同一上下文键冲突明确拒绝。
-      - graph artifact 是普通 mapping，不使用 !artifact tag；只允许 name、model、payload、asserts、suggests、review。model 由 definedBy 和 definition JSON 字符串组成，payload 只声明 contentType；正文在执行时提交，不放在定义里。不存在 type、format、schema、store、final。
-      - Artifact MIME 解码后由现有模型 Runtime 校验；raw.json 校验原始字节，JSON/文本/Markdown/YAML 使用已注册解码规则；未知编码或模型能力明确失败，不扩展 Runtime 语言。
+      - graph artifact 是普通 mapping，不使用 !artifact tag；只允许 name、model、payload、asserts、suggests、review。model 包含 definedBy，以及恰选其一的 definition 或 ref。JSON Schema/raw 的 definition 仍是 JSON 字符串；memsphere/schema.json 的 definition 是含显式 syntax 的完整 !schema YAML，或通过 ref 引用 schemas/canonical-name。payload 只声明 contentType；正文在执行时提交，不放在定义里。不存在 type、format、schema、store、final。
+      - Memsphere Schema 的 graph 根布局可用 format.layout 指定 outline/table；整体序列化由 payload 决定，局部 format 保留，根 format.name 如声明必须与 payload 一致；内部引用与规则在启动时冻结。
+      - Artifact MIME 解码后由现有模型 Runtime 校验；raw.json 校验原始字节，JSON/文本/Markdown/YAML 使用已注册解码规则；未知编码或模型能力明确失败，Memsphere Schema 通过独立 payload 校验入口检查结构，调用其反射能力明确报不支持。
       - collect 是非空无重复的普通生产 Action ID 数组，不得指向 START 或另一个 collect；由 Memsphere 自动收集已完成且正式接纳的产物引用，按对应 Step 的持久创建顺序排列，不制造聚合 Artifact、不评审、不要求 Agent 执行。
       - graph 不提供 !if、!while、!call、动态 foreach、子图或启动业务参数；入口 Action 自行收集材料并产出 Artifact，循环由普通依赖表达。
       - 旧版本到新版本的显式 syntax 迁移只更新版本标识，不把旧 flow 改为 graph，也不强制迁移现有 Memory。

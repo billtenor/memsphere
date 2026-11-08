@@ -56,10 +56,23 @@ export async function queryWindowsProcesses(pid?: number, query: ProcessQuery = 
   });
 }
 const windowsProcesses = () => queryWindowsProcesses();
-function windowsGroup(rows: WindowsProcess[], group: number): ProcessIdentity[] {
-  const ids = new Set([group]); let more = true;
-  while (more) { more = false; for (const row of rows) if (ids.has(row.parent) && !ids.has(row.pid)) { ids.add(row.pid); more = true; } }
-  return rows.filter(row => ids.has(row.pid)).map(windowsIdentity);
+export function windowsGroup(rows: WindowsProcess[], group: number): ProcessIdentity[] {
+  const root = rows.find(row => row.pid === group);
+  if (!root) return [];
+  const members = new Map([[group, windowsIdentity(root)]]); let more = true;
+  while (more) {
+    more = false;
+    for (const row of rows) {
+      const parent = members.get(row.parent);
+      if (!parent || members.has(row.pid)) continue;
+      const child = windowsIdentity(row);
+      // Windows retains the numeric parent PID after its owner exits. A child
+      // older than the current parent belongs to its retired PID owner.
+      if (BigInt(child.started) < BigInt(parent.started)) continue;
+      members.set(row.pid, child); more = true;
+    }
+  }
+  return rows.filter(row => members.has(row.pid)).map(row => members.get(row.pid)!);
 }
 export async function captureProcessGroup(group: number): Promise<ProcessIdentity[]> {
   if (process.platform === "win32") {

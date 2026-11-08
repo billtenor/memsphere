@@ -1,3 +1,4 @@
+import { MEMSPHERE_SCHEMA_MODEL, parseSchemaModel } from "./schema-model.js";
 import type {
   ActionNode,
   ArtifactNode,
@@ -214,6 +215,11 @@ function collectReferenceEdges(entity: MemoryEntity, source: string, filePath: s
           collectRuleRefs(action.asserts ?? [], source, filePath, `${path}.asserts`, "asserts", edges);
           collectRuleRefs(action.suggests ?? [], source, filePath, `${path}.suggests`, "suggests", edges);
           if (action.artifact) {
+            const model = action.artifact.model;
+            if (model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
+              if (model.ref) edges.push(referenceEdge(source, filePath, `${path}.artifact.model.ref`, { tag: "!ref", target: model.ref }, ["schemas"]));
+              else if (model.definition) collectSchemaRefs(parseSchemaModel(model.definition).node, source, filePath, `${path}.artifact.model.definition`, edges, false);
+            }
             collectRuleRefs(action.artifact.asserts ?? [], source, filePath, `${path}.artifact.asserts`, "asserts", edges);
             collectRuleRefs(action.artifact.suggests ?? [], source, filePath, `${path}.artifact.suggests`, "suggests", edges);
           }

@@ -22,12 +22,17 @@ export function contextRunPayload(snapshot: Snapshot, lightweight = false) {
   const p = isGraphRun(run) ? parseMemoryEntity("procedures", parseMemoryYaml(run.memorySnapshot!.memories[run.memoryRef!].payload.content)) : undefined;
   const creationOrder = new Map(run.frames?.[0]?.graphFrame?.triggers.map((trigger, index) => [trigger.stepId, index]) ?? []);
   const graph = p?.tag === "!procedure" && p.mode === "graph" ? { procedure: p, work: [...snapshot.steps].sort((a, b) => creationOrder.get(a.id)! - creationOrder.get(b.id)!).map(s => ({ ...s, action: p.actions.find(a => a.id === s.source?.actionId), ...(s.reviewRounds?.length ? { reviewHandle: graphReviewHandle(run.id, s.id) } : {}) })) } : undefined;
+  if (graph) for (const step of graph.work) {
+    const draft = snapshot.artifacts.find(a => a.id === step.writing?.draftId);
+    const writing = draft?.writing;
+    if (draft && writing) Object.assign(step, { schemaWriting: { phase: writing.submission ? "submitting" : writing.index === writing.items.length ? "awaiting_finalization" : "writing", current: writing.items[writing.index]?.schemaContext?.path, completed: writing.index, total: writing.items.length, skipped: writing.skipped, requirements: run.schemaContracts?.[step.source!.actionId]?.sources } });
+  }
   const artifactReviewSummaries = graph && !lightweight ? snapshot.steps.filter(s => s.reviewRounds?.length).map(step => {
     const round = step.reviewRounds!.at(-1)!; const projected = projectGraphRound(run, step, round, snapshot.reviews);
     return { id: graphReviewHandle(run.id, step.id), stepId: step.id, currentRoundId: round.id, status: projected.status === "changes_requested" ? "awaiting_revision" : projected.status, round: projected };
   }) : [];
   return { ...run, artifactReviewSummaries, outputArtifactIds: snapshot.outputArtifactIds, representation: "context-control", procedureName: p?.names[0] ?? "", updatedAt: run.endedAt ?? snapshot.steps.map(s => s.endedAt ?? s.createdAt).sort().at(-1) ?? run.createdAt,
-    contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, ...(graph ? { graph } : {}) } };
+    contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, artifacts: snapshot.artifacts.map(a => ({ ...a, ...(a.writing ? { writingProgress: { index: a.writing.index, items: a.writing.items.map(item => ({ id: item.id, path: item.schemaContext?.path })), skipped: a.writing.skipped, submitting: Boolean(a.writing.submission), validation: snapshot.steps.find(s => s.id === a.stepId)?.validation?.artifactId === a.id && snapshot.steps.find(s => s.id === a.stepId)?.validation?.draftRevision === snapshot.artifactRevisions?.[a.id] ? snapshot.steps.find(s => s.id === a.stepId)?.validation : undefined } } : {}) })), ...(graph ? { graph } : {}) } };
 }
 /** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
 export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false, projection?: { surface: 'overview' | 'artifacts' | 'action'; actionId?: string }) {
@@ -44,6 +49,10 @@ export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = 
     statements.set(reference, entity);
     return entity;
   };
+  for (const action of procedure.actions) {
+    const frozen = snapshot.run.schemaContracts?.[action.id];
+    if (frozen && action.artifact) Object.assign(action.artifact.model, { frozenDefinition: frozen.definition });
+  }
   const actions = projection?.surface === 'action' ? procedure.actions.filter(action => action.id === projection.actionId) : procedure.actions;
   const sources = !projection ? [procedure, ...actions.flatMap(action => [action, action.artifact])]
     : projection.surface === 'overview' ? [procedure]

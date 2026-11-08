@@ -611,6 +611,10 @@
             "open_review"
           ],
           "description": "系统追加的必审开放节点；无此字段为普通规则/组织节点。"
+        },
+        "requiresReport": {
+          "type": "boolean",
+          "description": "Schema 内容实例即使没有显式规则，也必须逐组确认。"
         }
       },
       "required": [

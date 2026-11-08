@@ -148,7 +148,13 @@ const formatInputSchema = z.union([
 ]);
 
 const artifactFormatInputSchema = formatInputSchema.optional().transform((value) => value ?? { name: "plain", options: {} });
-const schemaFormatInputSchema = formatInputSchema.optional();
+const schemaFormatInputSchema = z.preprocess(value => {
+  // A layout alone constrains Markdown presentation; the payload still owns its MIME.
+  if (value && typeof value === "object" && !Array.isArray(value) && !("name" in value) && "layout" in value) {
+    return { ...value, name: "markdown" };
+  }
+  return value;
+}, formatInputSchema.optional());
 
 const statementNodeSchema: z.ZodType<StatementNode, z.ZodTypeDef, unknown> = z.lazy(() =>
   z.preprocess(normalizeNameShorthand, z.object({

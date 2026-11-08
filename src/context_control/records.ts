@@ -22,8 +22,8 @@ export class Records {
     if (row.revision === undefined) throw failure("UNSUPPORTED_CAPABILITY", "Graph execution requires revision CAS");
     return this.stores[entity].update({}, this.key(entity, runId, value.id), value, { expectedRevision: row.revision });
   }
-  async list<T extends { id: string; runId?: string }>(entity: Entity, runId: string): Promise<T[]> {
-    const result: T[] = []; let cursor: string | undefined;
+  async listRows<T extends { id: string; runId?: string }>(entity: Entity, runId: string): Promise<Array<StoredValue & { value: T }>> {
+    const result: Array<StoredValue & { value: T }> = []; let cursor: string | undefined;
     do {
       const page = await this.stores[entity].list({}, { limit: 1000, cursor });
       for (const item of page.items) {
@@ -32,10 +32,13 @@ export class Records {
         if (!row) continue;
         const value = row.value as T;
         if (this.key(entity, runId, value.id) !== item.id || value.runId !== undefined && value.runId !== runId) throw failure("INVALID_STATE", `Stored ${entity} Run mismatch: ${item.id}`);
-        result.push(value);
+        result.push(row as StoredValue & { value: T });
       }
       cursor = page.nextCursor;
     } while (cursor);
     return result;
+  }
+  async list<T extends { id: string; runId?: string }>(entity: Entity, runId: string): Promise<T[]> {
+    return (await this.listRows<T>(entity, runId)).map(row => row.value);
   }
 }
