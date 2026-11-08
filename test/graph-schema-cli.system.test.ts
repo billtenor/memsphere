@@ -81,10 +81,29 @@ test("CLI and Continue keep concurrent Schema Step drafts and their positions is
   const resumed = await call("continue", "schema", "show"); assert.equal(resumed.position, first.position); assert.equal(resumed.draft.content.payload.content, "");
   await call("continue", "schema", "report", "--position", first.position, "--artifact", '{"summary":"A"}');
   const untouched = await call("run", "schema", "show", "--run", started.runId, "--step", b); assert.equal(untouched.draft.content.payload.content, '{"summary":"B"}');
+});
+
+test("Continue submits each concurrent Schema draft once and preserves both completed identities", { timeout: 90000 }, async t => {
+  const { f, call, raw } = await schemaCliFixture(t);
+  const { openContextControl } = await import("../src/project/context-control.js");
+  const service = (await openContextControl(f.root))!;
+  // This scenario exercises CLI finalization. Prepare persisted positioned drafts
+  // through the public API; the preceding scenario independently checks CLI saves.
+  const { run, a, first, second } = await service.withGraph(async g => {
+    const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["parallel-finalization"], defines: ["Independent reports"], actions: ["a", "b"].map(id => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: id, model: { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261027-stable\ntype: object\nfields: [summary]\n" }, payload: { contentType: "application/json" } } })) };
+    const started = await g.start({ name: "Parallel finalization", procedure: source as import("../src/memory/ast.js").GraphProcedureMemory });
+    const run = started.run.id, a = started.steps.find(s => s.source?.actionId === "a")!.id, b = started.steps.find(s => s.source?.actionId === "b")!.id;
+    await g.enter(run, a); const first = await g.enterSchema(run, a);
+    await g.schemaWrite(run, a, "report", first.position!, '{"summary":"A"}');
+    await g.enter(run, b); const second = await g.enterSchema(run, b);
+    await g.schemaWrite(run, b, "report", second.position!, '{"summary":"B"}');
+    return { run, a, first, second };
+  });
+  await raw("run", "step", "enter", "--run", run, "--step", a);
   const aDone = await call("continue", "report", "--artifact", '{"summary":"A"}'); assert.equal(aDone.artifactId, first.draft.id);
   const bDraft = await call("continue", "schema", "show"); assert.equal(bDraft.draft.id, second.draft.id);
   const bDone = await call("continue", "report", "--artifact", '{"summary":"B"}'); assert.equal(bDone.artifactId, second.draft.id);
-  const completed = await call("run", "show", "--run", started.runId);
+  const completed = await call("run", "show", "--run", run);
   assert.deepEqual(new Set(completed.completeIds), new Set([first.draft.id, second.draft.id]));
 });
 
