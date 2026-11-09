@@ -312,7 +312,8 @@ const memoryStyles = `
   .memory-section-header { display:grid; grid-template-columns:22px minmax(0,1fr) auto; align-items:center; gap:8px; width:100%; border:0; background:transparent; color:var(--text); padding:12px 14px; text-align:left; }
   .memory-section-header:hover { background:var(--mem-view-color-subtle); }
   .memory-chevron { color:var(--muted); font-size:22px; line-height:1; transform:rotate(0); transition:transform .12s ease; }
-  .memory-section.open>.memory-section-header .memory-chevron { transform:rotate(90deg); }
+  .memory-section.open>.memory-section-header .memory-chevron,
+  .memory-section.open>.memory-artifact-heading>.memory-section-header .memory-chevron { transform:rotate(90deg); }
   .memory-node-title { min-width:0; font-size:var(--memory-page-text-section-title); font-weight:650; line-height:var(--memory-page-line-compact); overflow-wrap:anywhere; }
   .memory-section-body { display:none; padding:4px 16px 16px 44px; border-top:1px solid var(--line); }
   .memory-graph-action-body { padding:12px; }
