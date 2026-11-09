@@ -14,10 +14,18 @@ const result = (state, description, run) => ({ state, description, target_url: r
 // A PR's own latest full is an explicit repair escape hatch, including while master is waiting.
 export function decideHealth(master, own, hasMasterHistory = true) {
   if (own) return result(own.state, `PR full: ${own.reason}`, own.run);
-  if (master) return result(master.state, `master full: ${master.reason}`, master.run);
+  const scope = "master full 检查已合入代码，不作为当前分支验收依据";
+  if (master) {
+    const description = master.state === "pending"
+      ? `${scope}；运行中，暂不可合入；${master.reason}`
+      : master.state === "failure"
+        ? `${scope}；已失败，暂停合入，防止问题扩散；${master.reason}`
+        : `${scope}；${master.reason}`;
+    return result(master.state, description, master.run);
+  }
   return hasMasterHistory
-    ? result("pending", "Waiting for full on the latest master commit")
-    : result("failure", "No master full history; run full manually on master or this PR head");
+    ? result("pending", `${scope}；最新 master 提交尚无 full 结果，暂不可合入`)
+    : result("failure", `${scope}；无有效记录，暂不可合入，请在 master 或当前 PR head 手动运行 full`);
 }
 
 export function requiredCheckRules(rules, remove = false) {
@@ -158,7 +166,7 @@ export async function refreshHealth(api, { publish = false, bootstrap = false, e
     // Finish the old-context phase for every PR before any new-context write.
     // A failure must not leave other writable PR gates with stale green lights.
     for (const context of contexts) for (const pull of pulls) {
-      try { await writeStatus(pull.head.sha, result("pending", "Refreshing merge gate"), context); }
+      try { await writeStatus(pull.head.sha, result("pending", "正在刷新 master full 合入门禁；当前分支仍按自身 CI 验收"), context); }
       catch (error) { failures.push(error); }
     }
     if (failures.length) throw new AggregateError(failures, failures.map(error => error.message).join("\n"));
@@ -177,7 +185,7 @@ export async function refreshHealth(api, { publish = false, bootstrap = false, e
         const pull = await api.request(`/pulls/${item.number}`);
         if (pull.state !== "open" || pull.base.ref !== "master") { settled = true; break; }
         sha = pull.head.sha;
-        if (publish) await post(sha, result("pending", "Refreshing merge gate"));
+        if (publish) await post(sha, result("pending", "正在刷新 master full 合入门禁；当前分支仍按自身 CI 验收"));
         const master = await masterSha(api);
         const health = await computeHealth(api, sha, master);
         const freshPull = await api.request(`/pulls/${item.number}`);

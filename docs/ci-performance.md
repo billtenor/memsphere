@@ -144,6 +144,20 @@ gh workflow run full-health.yml --ref master
 
 API读取失败时发布error；状态写API本身故障时工作流失败并暴露无法刷新，不能保证服务故障期间阻拦。事件/API从触发到状态更新存在传播窗口，此机制不承诺与点击合入原子同步；需要绝对串行合入须另外采用merge queue。本门禁证明master已知健康，普通 PR 由三平台按默认选集运行的 default 检查保护；Linux default 和三平台 full 覆盖全部测试文件。
 
+### 敏捷流程中的 CI 跟进与合入
+
+master full 检查已合入代码，不作为当前分支验收依据；当前分支只按自身适用 CI 验收。`Merge gate / full regression` 是 master 分支健康门禁，用于防止已合入代码的问题继续扩散。master full 排队、运行中或尚未登记时，该门禁保持 pending，GitHub 禁止合入；失败时也禁止合入。PR 自身显式 full 的既有修复解锁机制不变。
+
+PR 状态说明先写明“master full 检查已合入代码，不作为当前分支验收依据”；运行中补充“运行中，暂不可合入”，失败时补充“已失败，暂停合入，防止问题扩散”。刷新期间显示“正在刷新 master full 合入门禁；当前分支仍按自身 CI 验收”。这些文案不改变 pending、failure 的合入限制；PR 自身 full 的说明仍以 `PR full` 标识。发布器从 master 加载，文案在本 PR 合入后生效。
+
+`check_ci` 只判断实际验证当前 PR 的检查，不因 master full 或 master 分支健康门禁未通过而返回 true。PR 自身适用的 full 检查仍须跟进。
+
+PR 自身检查通过后，继续完成技术与产品验收。交接报告单独说明 master full 和合入门禁状态：master full 未完成时注明“本轮验收完成，等待 master full 通过后合入”；失败或查询异常时说明不能合入的原因。Agent 不持续轮询 master full，不因此修复本分支或重复验收；Human 在 GitHub 合入门禁满足后操作合入。
+
+合入后，Agent 核验 PR 已合入 master、本轮改动完整纳入，再清理本地分支。`cleanup` 不查询、等待或重跑合入后的 master full，也不以其状态决定核验是否通过或是否清理分支。
+
+已启动 Run 的冻结 Memory 不随本次流程修改自动更新。
+
 ### 首次安装与回滚
 
 发布器必须先进入默认分支才能自动触发；首次安装采用现有CI工作流受控bootstrap。维护者在Human架构/成果正式验收、精确head default/full/Security全部通过及只读dry-run成功后，先从最新ruleset追加必需context、Actions身份，保持全部现有规则和bypass设置；新增规则固定strict_required_status_checks_policy=false、do_not_enforce_on_create=false。此时验证required context尚未到达导致PR被阻拦，再由owner显式运行：
