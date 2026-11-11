@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -29,6 +29,50 @@ for (const userEdit of [false, true]) {
       assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("User"));
     } else {
       const claimed = await claimMemoryChange({ changeId: id }); assert(claimed.change.claim);
+      assert.equal(await readFile(join(root, "memory/concepts/second.yaml"), "utf8"), concept("Second", "second"));
+    }
+  })));
+}
+
+for (const userEdit of [false, true]) {
+  test(`claim staging write fails after partial bytes and ${userEdit ? "protects a subsequent user edit" : "safely retries"}`, async () => fixture(async f => claimFixture(f, async (id, root) => {
+    const filesystem = (await import("node:fs/promises")).default;
+    const { syncBuiltinESMExports } = await import("node:module");
+    const originalWrite = filesystem.writeFile;
+    const metadata = join(f.changes, id, "change.json"), before = await readFile(metadata);
+    let injected = false;
+    try {
+      filesystem.writeFile = (async (path: unknown, data: unknown, options: unknown) => {
+        if (String(path).includes(".memsphere-claim-") || path === join(root, "memory/concepts/example.yaml")) {
+          injected = true;
+          await (originalWrite as Function)(path, Buffer.from(data as Uint8Array).subarray(0, 8), options);
+          throw Object.assign(new Error("injected partial staging write"), { code: "EIO" });
+        }
+        return (originalWrite as Function)(path, data, options);
+      }) as typeof originalWrite;
+      syncBuiltinESMExports();
+      await assert.rejects(claimMemoryChange({ changeId: id }), error => {
+        assert(error instanceof EmbeddedClaimWriteError);
+        assert.deepEqual(error.details.writtenPaths, []);
+        assert.deepEqual(error.details.pendingPaths, ["concepts/example.yaml", "concepts/second.yaml"]);
+        assert.equal(error.details.metadataConfirmed, false);
+        assert.match(error.message, /injected partial staging write/);
+        return true;
+      });
+    } finally { filesystem.writeFile = originalWrite; syncBuiltinESMExports(); }
+    assert.equal(injected, true);
+    assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Base"));
+    await assert.rejects(readFile(join(root, "memory/concepts/second.yaml")), { code: "ENOENT" });
+    assert.deepEqual(await readFile(metadata), before);
+    assert.equal((await readdir(join(root, "memory/concepts"))).some(name => name.startsWith(".memsphere-claim-")), false);
+    if (userEdit) {
+      await writeFile(join(root, "memory/concepts/example.yaml"), concept("User"));
+      await assert.rejects(claimMemoryChange({ changeId: id }), /edit conflict/);
+      assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("User"));
+      assert.deepEqual(await readFile(metadata), before);
+    } else {
+      assert((await claimMemoryChange({ changeId: id })).change.claim);
+      assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Changed"));
       assert.equal(await readFile(join(root, "memory/concepts/second.yaml"), "utf8"), concept("Second", "second"));
     }
   })));

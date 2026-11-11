@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, sep } from "node:path";
 import { gitHashObject } from "../git.js";
 import { repositoryMemoryPath } from "./embedded-capture.js";
@@ -78,8 +78,20 @@ export async function prepareEmbeddedClaim(input: { change: MemoryChangeSet; roo
           if (Boolean(now) !== Boolean(mutation.before) || now && !now.equals(mutation.before!)) throw new Error(`Memory changed after claim preflight: ${mutation.path}`);
           if (now && mutation.after && now.equals(mutation.after) || !now && !mutation.after) continue;
           if (mutation.after) {
-            await mkdir(dirname(join(input.root, mutation.path)), { recursive: true });
-            await writeFile(join(input.root, mutation.path), mutation.after);
+            const destination = join(input.root, mutation.path);
+            await mkdir(dirname(destination), { recursive: true });
+            const staging = await mkdtemp(join(dirname(destination), ".memsphere-claim-"));
+            try {
+              const prepared = join(staging, "memory");
+              // A failed write must leave the worktree file intact so claim can be retried.
+              await writeFile(prepared, mutation.after);
+              if (now) await chmod(prepared, (await lstat(destination)).mode & 0o777);
+              const current = await currentFile(input.root, mutation.path);
+              if (Boolean(current) !== Boolean(now) || current && !current.equals(now!)) throw new Error(`Memory changed while preparing claim write: ${mutation.path}`);
+              await rename(prepared, destination);
+            } finally {
+              await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+            }
           } else await rm(join(input.root, mutation.path));
           written.push(mutation.path);
         } catch (cause) {
