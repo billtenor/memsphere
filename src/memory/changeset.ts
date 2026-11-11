@@ -3508,7 +3508,9 @@ async function revisionMatchesCheckpoint(
     const candidatePath = join(candidateRoot, target.path);
     if (!await exists(candidatePath)) return false;
     const candidateDigest = target.candidate_blob_digest ?? await gitHashObject(
-      await readFile(candidatePath), source.repository_root, destinationPath
+      // v1 ordinary evidence only proved the raw candidate bytes. Applying today's
+      // path filters would invent a historical blob and could falsely complete X.
+      await readFile(candidatePath), source.repository_root, isOrdinaryEmbedded(change) ? undefined : destinationPath
     ).catch(() => undefined);
     if (!candidateDigest || destinationDigest !== candidateDigest) return false;
     if (target.operation === "rename") {

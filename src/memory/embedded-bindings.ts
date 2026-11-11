@@ -55,11 +55,11 @@ export function selectEmbeddedChange<T extends BoundChange>(changes: T[], contex
     // A worktree is a fallback before branching, not ownership of arbitrary new branches.
     const eligible = context.branch === null || c.bindings.branches.length === 0 || branchMatch;
     const worktrees = eligible ? c.bindings.worktrees.filter(w => w.instance_key === context.instanceKey
-      && (!w.root || w.root === context.root)
-      && (!w.generation || w.generation === context.instanceGeneration)) : [];
+      && (!w.root || !context.root || w.root === context.root)
+      && (!w.generation || !context.instanceGeneration || w.generation === context.instanceGeneration)) : [];
     const worktreeMatch = worktrees.some(w => w.root !== undefined && w.root === context.root
       && w.generation !== undefined && w.generation === context.instanceGeneration);
-    const unknownWorktree = worktrees.some(w => !w.root || !w.generation);
+    const unknownWorktree = worktrees.some(w => !w.root || !context.root || !w.generation || !context.instanceGeneration);
     if (!prMatch && !branchMatch && !worktreeMatch && unknownWorktree) unproven.add(c.id);
     return prMatch || branchMatch || worktreeMatch || unknownWorktree;
   });

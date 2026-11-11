@@ -41,6 +41,11 @@ test("new worktree bindings reject recycled roots or generations and require exp
   const original = record("original", detached);
   assert.equal(selectEmbeddedChange([original], { ...detached, root: "/other", instanceGeneration: "generation-2" }), undefined);
   assert.equal(selectEmbeddedChange([original], { ...detached, instanceGeneration: "generation-2" }), undefined);
+  for (const missing of [{ instanceGeneration: undefined }, { root: undefined }]) {
+    assert.throws(() => selectEmbeddedChange([original], { ...detached, ...missing }), error => {
+      assert(error instanceof EmbeddedChangeAmbiguityError); assert.deepEqual(error.candidates.map(c => c.id), [original.id]); return true;
+    });
+  }
   const unproven = { ...original, bindings: { ...original.bindings, worktrees: [{ instance_key: context.instanceKey, root: context.root }] } };
   assert.throws(() => selectEmbeddedChange([unproven], detached), /--change/);
   assert.equal(selectEmbeddedChange([original], detached, original.id), original);

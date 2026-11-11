@@ -154,3 +154,27 @@ test("View uses canonical branch binding and repeated creation reuses that recor
   await writeFile(join(f.memory, "concepts/example.yaml"), concept("View edit"));
   assert.equal((await validateMemoryChange()).changeId, a.id);
 }));
+
+test("missing current generation keeps a known detached record ambiguous instead of implicitly creating another", async () => fixture(async f => {
+  await writeFile(join(f.memory, "concepts/example.yaml"), concept("First")); const first = await validateMemoryChange();
+  const metadata = join(f.changes, first.changeId, "change.json"), before = await readFile(metadata);
+  const record = JSON.parse(before.toString()); assert(record.bindings.worktrees[0].generation); assert.equal(record.claim, undefined);
+  const filesystem = (await import("node:fs/promises")).default, { syncBuiltinESMExports } = await import("node:module");
+  const originalStat = filesystem.stat, admin = await gitOutput(["rev-parse", "--absolute-git-dir"]);
+  try {
+    filesystem.stat = (async (path: unknown, options: unknown) => {
+      const result = await (originalStat as Function)(path, options);
+      if (path === admin && (options as { bigint?: boolean })?.bigint) result.birthtimeNs = 0n;
+      return result;
+    }) as typeof originalStat; syncBuiltinESMExports();
+    await writeFile(join(f.memory, "concepts/example.yaml"), concept("Next"));
+    await assert.rejects(validateMemoryChange(), error => {
+      assert(error instanceof EmbeddedChangeAmbiguityError); assert.deepEqual(error.candidates.map(c => c.id), [first.changeId]); return true;
+    });
+    assert.deepEqual(await readFile(metadata), before);
+    assert.deepEqual((await readdir(f.changes)).filter(id => id.startsWith("change-")), [first.changeId]);
+    assert.equal(await readFile(join(f.memory, "concepts/example.yaml"), "utf8"), concept("Next"));
+    assert.equal(await readFile(join(f.changes, first.changeId, "checkpoints", first.checkpointDigest, "memory/concepts/example.yaml"), "utf8"), concept("First"));
+    assert.equal((await validateMemoryChange(first.changeId)).changeId, first.changeId);
+  } finally { filesystem.stat = originalStat; syncBuiltinESMExports(); }
+}));
