@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { execFile } from "node:child_process";
@@ -137,7 +137,7 @@ test("claim replacement rename failure preserves the original file and accurate 
       if (String(source).includes(".memsphere-claim-")) {
         replacementReached = true;
         assert.equal(await readFile(String(source), "utf8"), concept("Changed"));
-        assert.equal(target, destination);
+        assert.equal(await realpath(String(target)), await realpath(destination));
         throw Object.assign(new Error("injected replacement rename failure"), { code: "EACCES" });
       }
       return (originalRename as Function)(source, target);
