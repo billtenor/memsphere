@@ -12,9 +12,28 @@ import { currentMemorySyntax } from "../../../src/memory/syntax.js";
 import { withCurrentMemorySyntax } from "../../helpers/memory.js";
 import { resolveWorkspaceIdentity } from "../../../src/project/workspace.js";
 import { runGit } from "../../../src/git.js";
+import { validateMemoryChange } from "../../../src/memory/changeset.js";
+import { concept, fixture as embeddedFixture } from "../../helpers/embedded-continuation.js";
 
 const projectRoot = resolve(fileURLToPath(new URL("../../", import.meta.url)), "..");
 const cliPath = join(projectRoot, "dist", "cli.js");
+
+test("validate ambiguity text and JSON expose candidate status and legacy source without modifying records", async () => embeddedFixture(async f => {
+  await writeFile(join(f.memory, "concepts/example.yaml"), concept("Candidate")); const first = await validateMemoryChange();
+  const originalPath = join(f.changes, first.changeId, "change.json"), original = await readFile(originalPath, "utf8");
+  const legacy = JSON.parse(original); legacy.id = "change-legacy-ambiguous"; delete legacy.bindings;
+  const legacyRoot = join(f.changes, legacy.id); await mkdir(legacyRoot); const legacyPath = join(legacyRoot, "change.json");
+  const legacyBytes = JSON.stringify(legacy); await writeFile(legacyPath, legacyBytes);
+  const text = await runNativeCli(f.linked, ["memory", "change", "validate"], f.home);
+  assert.equal(text.code, 1); assert.match(text.stderr, /Ambiguous/); assert.match(text.stderr, /change-legacy-ambiguous\tactive\t/);
+  assert(text.stderr.includes(f.linked)); assert.match(text.stderr, /concepts\/example/);
+  const json = await runNativeCli(f.linked, ["memory", "change", "validate", "--format", "json"], f.home);
+  assert.equal(json.code, 1); assert.equal(json.stderr, "");
+  const candidate = JSON.parse(json.stdout).error.candidates.find((c: { id: string }) => c.id === legacy.id);
+  assert.equal(candidate.status, "active"); assert.equal(candidate.source_worktree.root, f.linked);
+  assert.deepEqual(candidate.references, ["concepts/example"]);
+  assert.equal(await readFile(originalPath, "utf8"), original); assert.equal(await readFile(legacyPath, "utf8"), legacyBytes);
+}));
 
 type CommandResult = {
   code: number | null;

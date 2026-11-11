@@ -193,7 +193,7 @@ defines:
 
 Managed 删除/改名使用 `memory delete <references...>`、`memory rename <reference> <new-canonical-name>`，需要时用 `--change <id>` 追加同一候选；改 canonical 不自动移动物理文件。当前这两个命令不支持 Embedded：在其有效 worktree 中审阅并删除文件或修改 YAML 的 names，必要的文件移动走正常 Git 操作，然后统一变更级校验与集成。Mounted 不可写。
 
-普通 Embedded 的首次 `memory change validate` 自动建立 ChangeSet；后续 commit、amend、rebase 或合并 master 继续同一轮修改，不要求独立 create/finish/commit 操作。校验比较本地 `merge-base master HEAD` 与最终工作树。按 PR、分支、未建分支时的 worktree 识别 active ChangeSet；出现歧义时阅读候选并用 `--change <id>` 选择，不能按 HEAD 相同或 worktree 路径猜归属。旧 `validate <id>` 位置写法已移除。PR 发现 unknown 不妨碍本地校验；已有记录撤回为空候选仍 active，invalid 修复沿用同 ID，确认合入 master 才完成。
+普通 Embedded 的首次 `memory change validate` 自动建立 ChangeSet；后续 commit、amend、rebase 或合并 master 继续同一轮修改，不要求独立 create/finish/commit 操作。校验比较本地 `merge-base master HEAD` 与最终工作树。按 PR、分支、未建分支时的 worktree 识别 active ChangeSet；出现歧义时阅读候选并用 `--change <id>` 选择，不能按 HEAD 相同或 worktree 路径猜归属；临时 worktree 关联须核实目录及创建身份，Git 回收目录后重建的工作区不得静默继承旧记录。旧 `validate <id>` 位置写法已移除。PR 发现 unknown 不妨碍本地校验；已有记录撤回为空候选仍 active，invalid 修复沿用同 ID，确认合入 master 才完成。
 
 本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [--change <id>]`，记录 ChangeSet ID、checkpoint digest、校验状态和 View 入口；后续再改则重新校验。校验回执提供实际 reviewCommand，评审材料列出它及相关逻辑引用，按需使用 part 读取证据；无需将 Memory 全文复制进 Artifact 或访问内部存储文件。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet，稀疏 candidate/checkpoint 不是完整 Memory Root，不能拿它调用 `validate --memory-root`。
 

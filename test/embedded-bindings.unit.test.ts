@@ -3,7 +3,7 @@ import test from "node:test";
 import { mergeEmbeddedBindings, selectEmbeddedChange, EmbeddedChangeAmbiguityError, type BindingContext } from "../src/memory/embedded-bindings.js";
 import { githubRepository, remoteHeadRef } from "../src/memory/embedded-context.js";
 
-const context: BindingContext = { repositoryKey: "repo", instanceKey: "worktree", branch: "refs/heads/feature", pullRequests: [] };
+const context: BindingContext = { repositoryKey: "repo", instanceKey: "worktree", branch: "refs/heads/feature", pullRequests: [], root: "/worktree", instanceGeneration: "generation-1" };
 const record = (id: string, binding: BindingContext) => ({ id, workspace_key: "repo", status: "active", targets: [], bindings: mergeEmbeddedBindings(undefined, binding) });
 
 test("cross-layer matches list both records; explicit choice preserves other associations", () => {
@@ -24,7 +24,7 @@ test("detached fallback and branch upgrade differ from switching unrelated named
   assert.equal(selectEmbeddedChange([detached], context), detached);
   const named = record("named", context);
   assert.equal(selectEmbeddedChange([named], { ...context, branch: "refs/heads/new" }), undefined);
-  assert.throws(() => selectEmbeddedChange([{ id: "legacy", workspace_key: "repo", status: "active", targets: [], source_worktree: { instance_key: "worktree" } }], context), /--change/);
+  assert.throws(() => selectEmbeddedChange([{ id: "legacy", workspace_key: "repo", status: "active", targets: [], source_worktree: { instance_key: "worktree", root: context.root } }], context), /--change/);
   const recycled = { id: "legacy", workspace_key: "repo", status: "active", targets: [], source_worktree: { instance_key: "worktree", root: "/old-root" } };
   assert.equal(selectEmbeddedChange([recycled], { ...context, root: "/new-root" }), undefined);
   assert.throws(() => selectEmbeddedChange([recycled], { ...context, root: "/old-root" }), /--change/);
@@ -34,6 +34,16 @@ test("binding sets preserve branch case, normalize PR identity and union old wor
   const original = mergeEmbeddedBindings(undefined, { ...context, pullRequests: [{ host: "GitHub.COM", repository: "Owner/Repo", number: 153 }] });
   const merged = mergeEmbeddedBindings(original, { ...context, instanceKey: "second", branch: "refs/heads/Feature", pullRequests: [{ host: "github.com", repository: "owner/repo", number: 153 }] });
   assert.equal(merged.pull_requests.length, 1); assert.equal(merged.branches.length, 2); assert.equal(merged.worktrees.length, 2);
+});
+
+test("new worktree bindings reject recycled roots or generations and require explicit choice without proof", () => {
+  const detached = { ...context, branch: null };
+  const original = record("original", detached);
+  assert.equal(selectEmbeddedChange([original], { ...detached, root: "/other", instanceGeneration: "generation-2" }), undefined);
+  assert.equal(selectEmbeddedChange([original], { ...detached, instanceGeneration: "generation-2" }), undefined);
+  const unproven = { ...original, bindings: { ...original.bindings, worktrees: [{ instance_key: context.instanceKey, root: context.root }] } };
+  assert.throws(() => selectEmbeddedChange([unproven], detached), /--change/);
+  assert.equal(selectEmbeddedChange([original], detached, original.id), original);
 });
 
 test("push refspec resolves exact and wildcard remote head names without guessing multiple destinations", () => {

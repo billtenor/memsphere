@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { stat } from "node:fs/promises";
 import { z } from "zod";
-import { gitOutput } from "../git.js";
+import { gitOutput, runGit } from "../git.js";
 import type { WorkspaceIdentity } from "../project/workspace.js";
 import { pullRequestKey, type BindingContext, type PullRequestIdentity } from "./embedded-bindings.js";
 
@@ -118,13 +119,22 @@ export async function readEmbeddedGitFacts(root: string): Promise<{ head: string
   const master = await gitOutput(["rev-parse", "--verify", "refs/heads/master"], root).catch(() => { throw new Error("Embedded validation requires local master; synchronize/create the integration ref before validating"); });
   const branchText = await gitOutput(["rev-parse", "--symbolic-full-name", "HEAD"], root);
   const branch = branchText === "HEAD" ? null : branchText;
-  const bases = (await gitOutput(["merge-base", "--all", master, head], root)).split(/\r?\n/).filter(Boolean);
-  if (bases.length !== 1) throw new Error("Embedded validation requires exactly one merge-base of master and HEAD");
+  const bases = (await runGit(["merge-base", "--all", master, head], { cwd: root, allowFailure: true })).stdout.split(/\r?\n/).filter(Boolean);
+  if (bases.length !== 1) throw new Error(`Embedded validation requires exactly one merge-base of master and HEAD (${bases.length ? "multiple common ancestors" : "no common ancestor"})`);
   if ((await gitOutput(["ls-files", "--unmerged"], root)).length) throw new Error("Resolve Git merge conflicts before validating Embedded Memory");
   return { head, master, base: bases[0], branch };
 }
+export async function readEmbeddedWorktreeGeneration(root: string): Promise<string | undefined> {
+  const directory = await gitOutput(["rev-parse", "--absolute-git-dir"], root);
+  // Directory creation evidence survives commits but changes when Git recreates
+  // an administrative path. Without it, fallback must require explicit choice.
+  return stat(directory, { bigint: true }).then(info =>
+    info.birthtimeNs > 0n ? `${info.dev}:${info.ino}:${info.birthtimeNs}` : undefined).catch(() => undefined);
+}
 export async function readEmbeddedDevelopmentContext(workspace: WorkspaceIdentity, known: PullRequestIdentity[] = [], transport?: GhTransport): Promise<EmbeddedDevelopmentContext> {
   const facts = await readEmbeddedGitFacts(workspace.path);
+  const instanceGeneration = await readEmbeddedWorktreeGeneration(workspace.path);
   return { ...facts, root: workspace.path, repositoryKey: workspace.key, instanceKey: workspace.instanceKey,
+    instanceGeneration,
     ...await discoverPullRequests(workspace.path, facts.branch, known, transport) };
 }

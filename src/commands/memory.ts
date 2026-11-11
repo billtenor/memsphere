@@ -306,7 +306,7 @@ export async function memoryChangeValidateCommand(
     if (format === "json") process.stdout.write(`${JSON.stringify({ valid: false, error: { code: error.code, message: error.message, candidates: error.candidates } }, null, 2)}\n`);
     else {
       console.error(error.message);
-      for (const candidate of error.candidates) console.error(`${candidate.id}\t${JSON.stringify(candidate.bindings ?? {})}\t${candidate.references.join(", ")}`);
+      for (const candidate of error.candidates) console.error(`${candidate.id}\t${candidate.status}\t${JSON.stringify(candidate.bindings ?? {})}\t${JSON.stringify(candidate.source_worktree ?? {})}\t${candidate.references.join(", ")}`);
     }
     process.exitCode = 1;
     return;

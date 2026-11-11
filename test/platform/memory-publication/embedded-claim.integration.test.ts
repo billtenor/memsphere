@@ -46,16 +46,20 @@ for (const acknowledged of [false, true]) {
   })));
 }
 
-test("claim holds context admission through writes and metadata so validate cannot publish between them", async () => fixture(async f => claimFixture(f, async (id, root) => {
+test("claim holds context admission through writes and metadata so validate cannot publish between them", { timeout: 30_000 }, async t => fixture(async f => claimFixture(f, async (id, root) => {
   let resume!: () => void, entered!: () => void;
   const gate = new Promise<void>(resolve => { resume = resolve; }), ready = new Promise<void>(resolve => { entered = resolve; });
   const claiming = claimMemoryChange({ changeId: id, beforeWrite: async (_, index) => { if (!index) { entered(); await gate; } } });
-  await ready;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const releaseOnAbort = () => resume();
+  t.signal.addEventListener("abort", releaseOnAbort, { once: true });
   try {
+    await Promise.race([ready, claiming.then(() => { throw new Error("Claim ended before the write boundary"); }),
+      new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error("Claim did not reach its write boundary")), 10_000); })]);
     await writeFile(join(root, "memory/concepts/third.yaml"), concept("Third", "third"));
-    await assert.rejects(validateMemoryChange(id), /context is being updated/);
+    await assert.rejects(validateMemoryChange(id), { code: "MEMORY_PUBLISH_BUSY" });
     assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Base"));
-  } finally { resume(); await claiming; }
+  } finally { clearTimeout(deadline); t.signal.removeEventListener("abort", releaseOnAbort); resume(); await claiming; }
   assert((await claiming).change.claim);
 })));
 

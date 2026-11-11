@@ -6,7 +6,27 @@ import { runGit, gitOutput } from "../../../src/git.js";
 import { readMemoryChange, validateMemoryChange, queryActiveEmbeddedChanges, claimMemoryChange, createViewMemoryChange } from "../../../src/memory/changeset.js";
 import { resolveProjectContext } from "../../../src/project/resolver.js";
 import { EmbeddedChangeAmbiguityError } from "../../../src/memory/embedded-bindings.js";
+import { resolveWorkspaceIdentity } from "../../../src/project/workspace.js";
 import { concept, fixture } from "../../helpers/embedded-continuation.js";
+
+for (const sameRoot of [false, true]) {
+  test(`recycled detached worktree administrative path cannot silently reuse a ChangeSet at ${sameRoot ? "the same" : "another"} root`, async () => fixture(async f => {
+    const oldRoot = join(f.home, "old", "task"), nextRoot = sameRoot ? oldRoot : join(f.home, "new", "task");
+    await runGit(["worktree", "add", "--detach", oldRoot], { cwd: f.main }); process.chdir(oldRoot);
+    const identity = await resolveWorkspaceIdentity();
+    await writeFile(join(oldRoot, "memory/concepts/example.yaml"), concept("Old task"));
+    const first = await validateMemoryChange();
+    const metadata = join(f.changes, first.changeId, "change.json"), before = await readFile(metadata, "utf8");
+    process.chdir(f.main); await runGit(["worktree", "remove", "--force", oldRoot]);
+    await runGit(["worktree", "add", "--detach", nextRoot]); process.chdir(nextRoot);
+    assert.equal((await resolveWorkspaceIdentity()).instanceKey, identity.instanceKey);
+    await writeFile(join(nextRoot, "memory/concepts/example.yaml"), concept("New task"));
+    try { assert.notEqual((await validateMemoryChange()).changeId, first.changeId); }
+    catch (error) { if (!(error instanceof EmbeddedChangeAmbiguityError)) throw error; }
+    assert.equal(await readFile(metadata, "utf8"), before);
+    assert.equal(await readFile(join(f.changes, first.changeId, "checkpoints", first.checkpointDigest, "memory/concepts/example.yaml"), "utf8"), concept("Old task"));
+  }));
+}
 
 test("ordinary Embedded retains its ID and complete baseline across commit, clean validation and detached-to-branch", async () => fixture(async f => {
   const file = join(f.memory, "concepts/example.yaml");

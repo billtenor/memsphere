@@ -1,6 +1,6 @@
 import { checkpointRecordToken, publishCheckpoint, withCheckpointRecordLock } from "./checkpoint-publication.js";
 import { embeddedBindingsSchema, mergeEmbeddedBindings, selectEmbeddedChange, withEmbeddedContextLocks } from "./embedded-bindings.js";
-import { readEmbeddedDevelopmentContext, readEmbeddedGitFacts, type EmbeddedDevelopmentContext, type PrDiscovery, type GhTransport } from "./embedded-context.js";
+import { readEmbeddedDevelopmentContext, readEmbeddedGitFacts, readEmbeddedWorktreeGeneration, type EmbeddedDevelopmentContext, type PrDiscovery, type GhTransport } from "./embedded-context.js";
 import { captureOrdinaryEmbeddedTargets, inspectOrdinaryEmbeddedTargets, embeddedAttributesFingerprint } from "./embedded-capture.js";
 import { prepareEmbeddedClaim, EmbeddedClaimWriteError } from "./embedded-claim.js";
 import { createHash, randomBytes } from "node:crypto";
@@ -1241,7 +1241,7 @@ export async function resumeMemoryChange(changeId: string): Promise<string> {
 export async function publishMemoryChange(
   changeId: string,
   message?: string,
-  options: { expectedKind?: "regular" | "sync"; context?: ProjectContext } = {}
+  options: { expectedKind?: "regular" | "sync"; context?: ProjectContext; afterEmbeddedApply?: () => Promise<void> } = {}
 ): Promise<MemoryChangeSet> {
   const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = initialContext.workspace;
@@ -1252,7 +1252,7 @@ export async function publishMemoryChange(
       if ((change.intent !== "market_import" && change.intent !== "app_install")) {
         throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
       }
-      return applyEmbeddedMarketChange(context.primary, change, workspace);
+      return applyEmbeddedMarketChange(context.primary, change, workspace, options.afterEmbeddedApply);
     }
     assertManaged(context.primary);
     assertDraftOwner(change, context.primary.name, workspace.key);
@@ -1719,11 +1719,25 @@ type EmbeddedCapture = {
 function isOrdinaryEmbedded(change: MemoryChangeSet): boolean {
   return change.store_type === "embedded" && change.intent === undefined;
 }
+function embeddedClaimMatches(change: MemoryChangeSet, context: EmbeddedDevelopmentContext): boolean {
+  return change.claim?.instance_key === context.instanceKey && change.claim.root === context.root
+    && Boolean(change.bindings?.worktrees.some(worktree =>
+      worktree.instance_key === context.instanceKey && worktree.root === context.root && worktree.generation === context.instanceGeneration));
+}
 /** Only unarchived metadata is loaded. No checkpoint or reconciliation side effects. */
 export async function queryActiveEmbeddedChanges(project: ResolvedProject, repositoryKey: string): Promise<MemoryChangeSet[]> {
   const listed = await listProjectChangesBestEffort(project, false);
   await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
   return listed.changes.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === repositoryKey);
+}
+/** Completion is an explicit write operation, separate from the binding query. */
+async function reconcileOrdinaryEmbeddedChanges(project: ResolvedProject, repositoryKey: string, candidates?: MemoryChangeSet[]): Promise<string[]> {
+  const active = candidates ?? await queryActiveEmbeddedChanges(project, repositoryKey);
+  const completed: string[] = [];
+  for (const candidate of active.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === repositoryKey)) {
+    if ((await readReconciledChange(project, candidate.id)).status === "completed") completed.push(candidate.id);
+  }
+  return completed;
 }
 async function captureEmbeddedWorkingChange(project: ResolvedProject, workspace: WorkspaceIdentity, requestedId?: string, options: { prTransport?: GhTransport; onPrepared?: () => Promise<void> } = {}): Promise<EmbeddedCapture> {
   if (project.config.store.type !== "embedded" || workspace.kind !== "git") throw new Error("Embedded validation requires its Git worktree");
@@ -1735,19 +1749,15 @@ async function captureEmbeddedWorkingChange(project: ResolvedProject, workspace:
   await assertEmbeddedCaptureFailuresAreTerminal(project, raw.failures);
   const upgrades = raw.changes.filter(c => c.status === "active" && c.intent === "system_upgrade" && c.system_upgrade?.instance_key === workspace.instanceKey);
   if (upgrades.length && !requestedId) throw new Error(`Use memsphere memory change validate --change ${upgrades[0].id} for this system_upgrade worktree`);
-  const completedChangeIds: string[] = [];
-  for (const candidate of raw.changes.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === workspace.key)) {
-    const reconciled = await readReconciledChange(project, candidate.id);
-    if (reconciled.status === "completed") completedChangeIds.push(reconciled.id);
-  }
-  const active = await queryActiveEmbeddedChanges(project, workspace.key);
-  const knownPrs = active.flatMap(c => c.bindings?.pull_requests ?? []);
+  const knownPrs = raw.changes.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === workspace.key).flatMap(c => c.bindings?.pull_requests ?? []);
   const context = await readEmbeddedDevelopmentContext(workspace, knownPrs, options.prTransport);
+  const completedChangeIds = await reconcileOrdinaryEmbeddedChanges(project, workspace.key, raw.changes);
+  const active = await queryActiveEmbeddedChanges(project, workspace.key);
   let change = requestedId ? await readChange(project, requestedId) : selectEmbeddedChange(active, context);
   if (change) {
     assertDraftOwner(change, project.name, workspace.key);
     if (!isOrdinaryEmbedded(change)) throw new Error(`ChangeSet ${change.id} requires its dedicated validation path`);
-    if (change.claim && change.claim.instance_key !== workspace.instanceKey) throw new Error(`ChangeSet ${change.id} is claimed by ${change.claim.root}`);
+    if (change.claim && !embeddedClaimMatches(change, context)) throw new Error(`ChangeSet ${change.id} is claimed by ${change.claim.root}; claim ownership cannot be confirmed for this worktree`);
   }
   const initialId = change?.id;
   const captured = await captureOrdinaryEmbeddedTargets(workspace.path, memoryRoot, memoryPath, context.base);
@@ -1764,21 +1774,22 @@ async function captureEmbeddedWorkingChange(project: ResolvedProject, workspace:
     const ordinary: OrdinaryCheckpoint = { context, attributesFingerprint: captured.attributesFingerprint, attributePaths: captured.files.map(f => f.repositoryPath),
       withAdmission: async commit => {
         await options.onPrepared?.();
-        return withEmbeddedContextLocks(project.paths.runtimeRoot, context, async () => {
+        return withMemoryWriteAccess(memoryRoot, () => withEmbeddedContextLocks(project.paths.runtimeRoot, context, async () => {
         const facts = await readEmbeddedGitFacts(workspace.path);
-        if (facts.head !== context.head || facts.master !== context.master || facts.branch !== context.branch || facts.base !== context.base) throw new Error("Git context changed during validation; validate again");
+        if (facts.head !== context.head || facts.master !== context.master || facts.branch !== context.branch || facts.base !== context.base
+          || await readEmbeddedWorktreeGeneration(workspace.path) !== context.instanceGeneration) throw new Error("Git context changed during validation; validate again");
         const current = await inspectOrdinaryEmbeddedTargets(workspace.path, memoryRoot, memoryPath, context.base);
         if (current.fingerprint !== captured.fingerprint) throw new Error("Memory or Git attributes changed during validation; validate again");
         const candidates = await queryActiveEmbeddedChanges(project, workspace.key);
         if (requestedId) {
           const live = candidates.find(c => c.id === selected.id);
           if (!live) throw new Error(`ChangeSet ${selected.id} is no longer active or available`);
-          if (live.claim && live.claim.instance_key !== workspace.instanceKey) throw new Error(`ChangeSet ${selected.id} is claimed by another worktree`);
+          if (live.claim && !embeddedClaimMatches(live, context)) throw new Error(`ChangeSet ${selected.id} is claimed by another or unverified worktree`);
         } else if (selectEmbeddedChange(candidates, context)?.id !== initialId) {
           throw new Error("Embedded associations changed during validation; validate again");
         }
         return commit();
-        });
+        }));
       } };
     return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds, expectedToken, ordinary };
   } catch (error) { await rm(dirname(captured.candidateRoot), { recursive: true, force: true }); throw error; }
@@ -2095,11 +2106,13 @@ export async function createViewMemoryChange(input: {
     const workspace = await resolveWorkspaceIdentity(store.repository_path);
     const active = await queryActiveEmbeddedChanges(project, workspace.key);
     const development = await readEmbeddedDevelopmentContext(workspace, active.flatMap(c => c.bindings?.pull_requests ?? []));
+    await reconcileOrdinaryEmbeddedChanges(project, workspace.key, active);
     const target = await resolveTarget(project, input.reference, "edit", undefined, development.base);
     if (target.operation !== "update" || !target.base_digest) throw new Error("View can only create a ChangeSet from an existing Memory");
     return withEmbeddedContextLocks(project.paths.runtimeRoot, development, async () => {
       const facts = await readEmbeddedGitFacts(workspace.path);
-      if (facts.head !== development.head || facts.master !== development.master || facts.branch !== development.branch) throw new Error("Git context changed during ChangeSet creation; retry");
+      if (facts.head !== development.head || facts.master !== development.master || facts.branch !== development.branch
+        || await readEmbeddedWorktreeGeneration(workspace.path) !== development.instanceGeneration) throw new Error("Git context changed during ChangeSet creation; retry");
       const change = selectEmbeddedChange(await queryActiveEmbeddedChanges(project, workspace.key), development)
         ?? newChange(project, workspace.key, { origin: "view", actor: memoryChangeActorSchema.parse(input.actor), baseRevision: development.base });
       assertMutableChange(change);
@@ -2413,11 +2426,14 @@ async function claimOrdinaryEmbedded(context: ProjectContext, id: string, option
   const store = project.config.store;
   const initial = await readChange(project, id);
   const development = await readEmbeddedDevelopmentContext(workspace, initial.bindings?.pull_requests);
-  return withEmbeddedContextLocks(project.paths.runtimeRoot, development, () => withCheckpointRecordLock(project.paths.runtimeRoot, id, async () => {
+  // Shared physical admission comes first, matching market/App apply. Context
+  // and record locks then guard the ordinary ChangeSet's metadata and writes.
+  return withMemoryWriteAccess(project.memoryRoot, () => withEmbeddedContextLocks(project.paths.runtimeRoot, development, () => withCheckpointRecordLock(project.paths.runtimeRoot, id, async () => {
     const change = await readChange(project, id);
     assertDraftOwner(change, project.name, workspace.key);
-    if (change.claim && change.claim.instance_key !== workspace.instanceKey && !options.force) throw new Error(`ChangeSet ${id} is already claimed by ${change.claim.root}; use --force to take over`);
-    if (change.claim?.instance_key === workspace.instanceKey && await exists(project.memoryRoot)) return { change, candidateRoot: project.memoryRoot, warnings: ["ChangeSet is already claimed by this Workspace; the existing candidate was preserved"] };
+    if (await readEmbeddedWorktreeGeneration(workspace.path) !== development.instanceGeneration) throw new Error("Worktree identity changed during claim; retry");
+    if (change.claim && !embeddedClaimMatches(change, development) && !options.force) throw new Error(`ChangeSet ${id} is already claimed by ${change.claim.root}; use --force to take over an unverified or different worktree claim`);
+    if (embeddedClaimMatches(change, development) && await exists(project.memoryRoot)) return { change, candidateRoot: project.memoryRoot, warnings: ["ChangeSet is already claimed by this Workspace; the existing candidate was preserved"] };
     let checkpointRoot: string | undefined;
     if (change.checkpoint) {
       const frozen = await readCheckpointChange(project, change, true);
@@ -2434,7 +2450,8 @@ async function claimOrdinaryEmbedded(context: ProjectContext, id: string, option
     const prepared = await prepareEmbeddedClaim({ change, root: project.memoryRoot, repositoryRoot: workspace.path,
       memoryPath: store.memory_path, checkpointRoot });
     const facts = await readEmbeddedGitFacts(workspace.path);
-    if (facts.head !== development.head || facts.master !== development.master || facts.branch !== development.branch) throw new Error("Git context changed during claim preflight; retry");
+    if (facts.head !== development.head || facts.master !== development.master || facts.branch !== development.branch
+      || await readEmbeddedWorktreeGeneration(workspace.path) !== development.instanceGeneration) throw new Error("Git context changed during claim preflight; retry");
     const written = await prepared.apply(options.beforeWrite);
     const now = new Date().toISOString();
     change.bindings = mergeEmbeddedBindings(change.bindings, development);
@@ -2452,7 +2469,7 @@ async function claimOrdinaryEmbedded(context: ProjectContext, id: string, option
       warnings.push("Claim metadata was saved; its acknowledgement failed and was confirmed by re-reading the record");
     }
     return { change, candidateRoot: project.memoryRoot, warnings };
-  }));
+  })));
 }
 
 export async function finishMemoryChange(input: {
@@ -2891,7 +2908,8 @@ async function readSyncConflictCandidate(root: string, path: string): Promise<Bu
 async function applyEmbeddedMarketChange(
   project: ResolvedProject,
   change: MemoryChangeSet,
-  workspace: WorkspaceIdentity
+  workspace: WorkspaceIdentity,
+  afterApply?: () => Promise<void>
 ): Promise<MemoryChangeSet> {
   if (project.config.store.type !== "embedded") throw new Error("Embedded market apply requires an Embedded Project");
   const embeddedStore = project.config.store;
@@ -2935,6 +2953,7 @@ async function applyEmbeddedMarketChange(
       snapshots.set(target.path, { source, mode });
     }
     await applyTargets(project.memoryRoot, checkpointRoot, pendingTargets);
+    await afterApply?.();
     const formalValidation = await validateMemoryRoot(project.memoryRoot);
     if (formalValidation.issues.length > 0) {
       throw new Error(`Embedded market apply validation failed: ${formalValidation.issues[0]?.path}: ${formalValidation.issues[0]?.message}`);

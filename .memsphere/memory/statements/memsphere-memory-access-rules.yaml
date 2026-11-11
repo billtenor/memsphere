@@ -8,10 +8,10 @@ defines:
   - 规定 Agent 如何通过 memsphere CLI 发现和读取当前 Workspace 可见 Project 中的 Memory。
 asserts:
   - 普通 Embedded ChangeSet 表示一轮尚未合入的 Memory 修改，首次 validate 自动建立，不要求额外 create、finish 或 commit 状态操作；commit、amend、rebase 或合并 master 后仍可沿用同一 ID。每次以本地 master 与 HEAD 的唯一 merge-base 比较最终工作树，包含已提交和未跟踪的净修改，不隐式 fetch。
-  - 显式续编统一使用 memsphere memory change validate --change <id>，旧位置参数不再接受。自动识别优先参考 PR、分支及未建分支时的 worktree；绑定保存在各 ChangeSet 自身，只查询未归档 active 记录，不按 HEAD 或基线 SHA 判断身份。同一 worktree 切换无关分支不得自动沿用旧需求。
+  - 显式续编统一使用 memsphere memory change validate --change <id>，旧位置参数不再接受。自动识别优先参考 PR、分支及未建分支时的 worktree；绑定保存在各 ChangeSet 自身，只查询未归档 active 记录，不按 HEAD 或基线 SHA 判断身份。同一 worktree 切换无关分支不得自动沿用旧需求。临时 worktree 关联还须核实来源目录及创建身份；Git 管理目录回收后重新创建的工作区不得静默接续旧记录，身份依据不足时要求 --change 显式选择。
   - 关联出现多个候选或跨层冲突时，Agent 先阅读返回的候选列表，依据任务上下文用 --change 明确选择；显式选择只补充所选记录的绑定，不改动其他记录。无法发现 PR 时保持 unknown，并继续安全的本地校验，不将其视为确认不存在。
   - 已有普通 Embedded ChangeSet 的净修改全部撤回时，发布当前空候选并保持 active；没有已有记录且没有净修改时不创建空记录。正文校验失败仍保存 ID、绑定及 invalid checkpoint，修复后继续同一 ID。仅确认候选已进入 master 才按既有规则完成，completed 不参与自动接续。
-  - 普通 Embedded claim 先检查全部目标及 rename 两端，当前正文必须符合允许的基线或候选；冲突时不写回。实际写入中失败须报告已写、未写路径和元数据提交状态；重试重新读取正文，保留失败后用户另改的内容，不宣称跨文件原子回滚。
+  - 普通 Embedded claim 与市场或 App apply 共享当前物理工作树的写入准入，再检查全部目标及 rename 两端，当前正文必须符合允许的基线或候选；冲突时不写回。实际写入中失败须报告已写、未写路径和元数据提交状态；重试重新读取正文，保留失败后用户另改的内容，不宣称跨文件原子回滚。
   - "Reviewer Session 的普通 memory list/read 保持当前 Project 辅助读取，不自动绑定 Run；显式 --run 仅允许绑定 Run 的冻结 Memory。Session 固定 Home/config/Project 与来源 Workspace，Embedded 当前 Memory 从来源 worktree 读取；正式规则不由当前辅助 Memory 替换。 View 或服务从其他仓库启动 Reviewer 时，使用已核对的 Embedded Project canonical 仓库作为来源；调用方确属本 Project 时保留其具体 worktree，不把服务进程 cwd 冒充来源。"
   - "固定 checkpoint 读取在正文构造前后复核 digest 与冻结描述，期间变化明确失败。需要供历史评审持续读取的交付 ChangeSet，应在该版本有效时登记为 External 并由交付 Artifact 声明依赖；run.memorySource 只表示启动来源，不自动表示交付 ChangeSet。保留当前 checkpoint 失配拒绝边界；普通 Embedded 保留旧 checkpoint 正文用于固定历史证据，其他类型沿用既有清理规则。"
   - graph model.ref 仅在 memsphere/schema.json 标准下接受 schemas/canonical-name，不接受文件路径或 alias；内联 Schema 内部结构和规则引用参与同一冻结闭包。缺失、kind 错误或循环在执行任务前拒绝，历史读取不得回退当前 Memory。
