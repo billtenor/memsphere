@@ -78,6 +78,90 @@ for (const userEdit of [false, true]) {
   })));
 }
 
+for (const userChange of ["edit", "delete"] as const) {
+  test(`claim preserves a user ${userChange} made after staging succeeds and before replacement`, async () => fixture(async f => claimFixture(f, async (id, root) => {
+    const filesystem = (await import("node:fs/promises")).default;
+    const { syncBuiltinESMExports } = await import("node:module");
+    const originalWrite = filesystem.writeFile;
+    const destination = join(root, "memory/concepts/example.yaml");
+    const metadata = join(f.changes, id, "change.json"), before = await readFile(metadata);
+    let changedDuringStaging = false;
+    try {
+      filesystem.writeFile = (async (path: unknown, data: unknown, options: unknown) => {
+        await (originalWrite as Function)(path, data, options);
+        if (!changedDuringStaging && String(path).includes(".memsphere-claim-")) {
+          changedDuringStaging = true;
+          if (userChange === "edit") await originalWrite(destination, concept("User during staging"));
+          else await rm(destination);
+        }
+      }) as typeof originalWrite;
+      syncBuiltinESMExports();
+      await assert.rejects(claimMemoryChange({ changeId: id }), error => {
+        assert(error instanceof EmbeddedClaimWriteError);
+        assert.deepEqual(error.details.writtenPaths, []);
+        assert.deepEqual(error.details.pendingPaths, ["concepts/example.yaml", "concepts/second.yaml"]);
+        assert.equal(error.details.metadataConfirmed, false);
+        if (userChange === "delete") assert.equal((error.cause as NodeJS.ErrnoException).code, "ENOENT");
+        else assert.match(error.message, /Memory changed while preparing claim write/);
+        return true;
+      });
+    } finally { filesystem.writeFile = originalWrite; syncBuiltinESMExports(); }
+    assert.equal(changedDuringStaging, true);
+    const assertUserState = async () => {
+      if (userChange === "edit") assert.equal(await readFile(destination, "utf8"), concept("User during staging"));
+      else await assert.rejects(readFile(destination), { code: "ENOENT" });
+      await assert.rejects(readFile(join(root, "memory/concepts/second.yaml")), { code: "ENOENT" });
+      assert.deepEqual(await readFile(metadata), before);
+      assert.equal((await readdir(join(root, "memory/concepts"))).some(name => name.startsWith(".memsphere-claim-")), false);
+    };
+    await assertUserState();
+    await assert.rejects(claimMemoryChange({ changeId: id }), /edit conflict/);
+    await assertUserState();
+    // The user explicitly restores the known baseline before retrying the same ChangeSet.
+    await writeFile(destination, concept("Base"));
+    assert((await claimMemoryChange({ changeId: id })).change.claim);
+    assert.equal(await readFile(destination, "utf8"), concept("Changed"));
+    assert.equal(await readFile(join(root, "memory/concepts/second.yaml"), "utf8"), concept("Second", "second"));
+  })));
+}
+
+test("claim replacement rename failure preserves the original file and accurate state for retry", async () => fixture(async f => claimFixture(f, async (id, root) => {
+  const filesystem = (await import("node:fs/promises")).default;
+  const { syncBuiltinESMExports } = await import("node:module");
+  const originalRename = filesystem.rename;
+  const destination = join(root, "memory/concepts/example.yaml");
+  const metadata = join(f.changes, id, "change.json"), before = await readFile(metadata);
+  let replacementReached = false;
+  try {
+    filesystem.rename = (async (source: unknown, target: unknown) => {
+      if (String(source).includes(".memsphere-claim-")) {
+        replacementReached = true;
+        assert.equal(await readFile(String(source), "utf8"), concept("Changed"));
+        assert.equal(target, destination);
+        throw Object.assign(new Error("injected replacement rename failure"), { code: "EACCES" });
+      }
+      return (originalRename as Function)(source, target);
+    }) as typeof originalRename;
+    syncBuiltinESMExports();
+    await assert.rejects(claimMemoryChange({ changeId: id }), error => {
+      assert(error instanceof EmbeddedClaimWriteError);
+      assert.deepEqual(error.details.writtenPaths, []);
+      assert.deepEqual(error.details.pendingPaths, ["concepts/example.yaml", "concepts/second.yaml"]);
+      assert.equal(error.details.metadataConfirmed, false);
+      assert.match(error.message, /injected replacement rename failure/);
+      return true;
+    });
+  } finally { filesystem.rename = originalRename; syncBuiltinESMExports(); }
+  assert.equal(replacementReached, true);
+  assert.equal(await readFile(destination, "utf8"), concept("Base"));
+  await assert.rejects(readFile(join(root, "memory/concepts/second.yaml")), { code: "ENOENT" });
+  assert.deepEqual(await readFile(metadata), before);
+  assert.equal((await readdir(join(root, "memory/concepts"))).some(name => name.startsWith(".memsphere-claim-")), false);
+  assert((await claimMemoryChange({ changeId: id })).change.claim);
+  assert.equal(await readFile(destination, "utf8"), concept("Changed"));
+  assert.equal(await readFile(join(root, "memory/concepts/second.yaml"), "utf8"), concept("Second", "second"));
+})));
+
 for (const acknowledged of [false, true]) {
   test(`claim all writes then ${acknowledged ? "acknowledgement" : "metadata commit"} fails with accurate state`, async () => fixture(async f => claimFixture(f, async (id, root) => {
     const fail = async () => { throw new Error("metadata boundary"); };
