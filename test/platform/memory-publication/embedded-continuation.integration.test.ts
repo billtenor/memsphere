@@ -24,6 +24,9 @@ async function fixture(run: (f: { main: string; linked: string; home: string; me
     await mkdir(main); await writeFile(git, "[user]\nname = Fixture\nemail = fixture@example.com\n");
     process.env.GIT_CONFIG_GLOBAL = git; process.env.MEMSPHERE_HOME = home; process.env.MEMSPHERE_PROJECT = "embedded";
     await runGit(["init", "-b", "master"], { cwd: main });
+    // Exact-byte preflight assertions use LF; attributes tests override paths
+    // explicitly instead of inheriting a runner's checkout conversion policy.
+    await runGit(["config", "core.autocrlf", "false"], { cwd: main });
     for (const kind of ["concepts", "statements", "procedures", "schemas"]) await mkdir(join(main, "memory", kind), { recursive: true });
     await writeFile(join(main, "memory/concepts/example.yaml"), concept("Base"));
     await runGit(["add", "memory"], { cwd: main }); await runGit(["commit", "-m", "base"], { cwd: main });
@@ -258,7 +261,7 @@ test("claim holds context admission through writes and metadata so validate cann
     await writeFile(join(root, "memory/concepts/third.yaml"), concept("Third", "third"));
     await assert.rejects(validateMemoryChange(id), /context is being updated/);
     assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Base"));
-  } finally { resume(); }
+  } finally { resume(); await claiming; }
   assert((await claiming).change.claim);
 })));
 
