@@ -2,9 +2,9 @@ import assert from "node:assert/strict";
 import { readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { gitOutput, runGit } from "../../../src/git.js";
-import { validateMemoryChange } from "../../../src/memory/changeset.js";
-import { concept, fixture } from "../../helpers/embedded-continuation.js";
+import { gitOutput, runGit } from "../src/git.js";
+import { validateMemoryChange } from "../src/memory/changeset.js";
+import { concept, fixture } from "./helpers/embedded-continuation.js";
 
 for (const state of ["missing-master", "unrelated", "multiple-bases", "unmerged"] as const) {
   test(`Embedded validation rejects ${state} without a HEAD fallback or side effects`, async () => fixture(async f => {

@@ -121,7 +121,15 @@ test("merge master, amend and rebase retain full Memory changes and the same ID"
   await runGit(["add", "upstream.txt"], { cwd: f.main }); await runGit(["commit", "-m", "upstream"], { cwd: f.main });
   await runGit(["rebase", "master"]);
   const rebased = await validateMemoryChange(); assert.equal(rebased.changeId, first.changeId); assert.notEqual(rebased.baseRevision, first.baseRevision);
-  await runGit(["merge", "master"]); assert.equal((await validateMemoryChange()).changeId, first.changeId);
+  await writeFile(join(f.main, "memory/concepts/upstream.yaml"), concept("Upstream only", "upstream"));
+  await runGit(["add", "memory"], { cwd: f.main }); await runGit(["commit", "-m", "upstream Memory"], { cwd: f.main });
+  await runGit(["merge", "--no-ff", "master", "-m", "merge divergent master"]);
+  assert.equal((await gitOutput(["rev-list", "--parents", "-n", "1", "HEAD"])).split(" ").length, 3);
+  const merged = await validateMemoryChange(); assert.equal(merged.changeId, first.changeId);
+  assert.equal(merged.baseRevision, await gitOutput(["rev-parse", "master"]));
+  const record = await readMemoryChange({ home: f.home, project: "embedded", changeId: first.changeId });
+  assert.deepEqual(record.targets.map(t => t.path), ["concepts/example.yaml"]);
+  assert.equal(await readFile(join(f.memory, "concepts/upstream.yaml"), "utf8"), concept("Upstream only", "upstream"));
   await runGit(["merge", "--squash", "feature"], { cwd: f.main }); await runGit(["commit", "-m", "squash"], { cwd: f.main });
   assert.equal((await readMemoryChange({ home: f.home, project: "embedded", changeId: first.changeId })).status, "completed");
 }));

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { runGit } from "../../../src/git.js";
+import { gitOutput, runGit } from "../../../src/git.js";
 import { claimMemoryChange, readMemoryChange, validateMemoryChange } from "../../../src/memory/changeset.js";
 import { EmbeddedClaimWriteError } from "../../../src/memory/embedded-claim.js";
 import { concept, fixture, claimFixture } from "../../helpers/embedded-continuation.js";
@@ -48,8 +48,9 @@ for (const acknowledged of [false, true]) {
 
 test("claim holds context admission through writes and metadata so validate cannot publish between them", { timeout: 30_000 }, async t => fixture(async f => claimFixture(f, async (id, root) => {
   let resume!: () => void, entered!: () => void;
+  let allowWrite = false;
   const gate = new Promise<void>(resolve => { resume = resolve; }), ready = new Promise<void>(resolve => { entered = resolve; });
-  const claiming = claimMemoryChange({ changeId: id, beforeWrite: async (_, index) => { if (!index) { entered(); await gate; } } });
+  const claiming = claimMemoryChange({ changeId: id, beforeWrite: async (_, index) => { if (!index) { entered(); await gate; t.signal.throwIfAborted(); if (!allowWrite) throw new Error("Claim test cancelled before write"); } } });
   let deadline: ReturnType<typeof setTimeout> | undefined;
   const releaseOnAbort = () => resume();
   t.signal.addEventListener("abort", releaseOnAbort, { once: true });
@@ -59,7 +60,8 @@ test("claim holds context admission through writes and metadata so validate cann
     await writeFile(join(root, "memory/concepts/third.yaml"), concept("Third", "third"));
     await assert.rejects(validateMemoryChange(id), { code: "MEMORY_PUBLISH_BUSY" });
     assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Base"));
-  } finally { clearTimeout(deadline); t.signal.removeEventListener("abort", releaseOnAbort); resume(); await claiming; }
+    allowWrite = true;
+  } finally { clearTimeout(deadline); t.signal.removeEventListener("abort", releaseOnAbort); resume(); if (allowWrite) await claiming; else await assert.rejects(claiming); }
   assert((await claiming).change.claim);
 })));
 
@@ -97,3 +99,67 @@ test("process exit after claim metadata leaves complete bindings and releases na
   assert((await claimMemoryChange({ changeId: id })).change.claim);
   assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Later user edit"));
 })));
+
+test("cancelling a claim at its first write boundary drains rejection without new bytes or metadata", { timeout: 30_000 }, async () => fixture(async f => claimFixture(f, async (id, root) => {
+  const controller = new AbortController();
+  let release!: () => void, enter!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const ready = new Promise<void>(resolve => { enter = resolve; });
+  const metadata = join(f.changes, id, "change.json"), before = await readFile(metadata);
+  const claiming = claimMemoryChange({ changeId: id, beforeWrite: async (_, index) => {
+    if (!index) { enter(); await gate; controller.signal.throwIfAborted(); }
+  } });
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([ready, claiming.then(() => { throw new Error("Unexpected early completion"); }),
+      new Promise<never>((_, reject) => { deadline = setTimeout(() => reject(new Error("Write boundary not reached")), 10_000); })]);
+    controller.abort(new Error("controlled cancellation")); release();
+    await assert.rejects(claiming, error => {
+      assert(error instanceof EmbeddedClaimWriteError); assert.deepEqual(error.details.writtenPaths, []);
+      assert.equal(error.details.metadataConfirmed, false); assert.match(error.message, /controlled cancellation/); return true;
+    });
+    assert.deepEqual(await readFile(metadata), before);
+    assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Base"));
+    await assert.rejects(readFile(join(root, "memory/concepts/second.yaml")), { code: "ENOENT" });
+  } finally { clearTimeout(deadline); controller.abort(); release(); await claiming.catch(() => undefined); }
+})));
+
+for (const evidence of ["record-missing", "context-missing", "generation-unavailable", "same-root-recycled"] as const) {
+  test(`unverified existing claim requires force: ${evidence}`, async () => fixture(async f => {
+    const owner = join(f.home, "owner");
+    await runGit(["worktree", "add", "--detach", owner]); process.chdir(owner);
+    await writeFile(join(owner, "memory/concepts/example.yaml"), concept("Claimed candidate"));
+    const first = await validateMemoryChange(); await claimMemoryChange({ changeId: first.changeId });
+    const metadata = join(f.changes, first.changeId, "change.json");
+    const filesystem = (await import("node:fs/promises")).default;
+    const { syncBuiltinESMExports } = await import("node:module");
+    const originalStat = filesystem.stat;
+    try {
+      if (evidence === "same-root-recycled") {
+        process.chdir(f.main); await runGit(["worktree", "remove", "--force", owner]);
+        await runGit(["worktree", "add", "--detach", owner]); process.chdir(owner);
+      } else {
+        const record = JSON.parse(await readFile(metadata, "utf8"));
+        if (evidence !== "context-missing") for (const binding of record.bindings.worktrees) delete binding.generation;
+        await writeFile(metadata, JSON.stringify(record));
+        if (evidence === "generation-unavailable" || evidence === "context-missing") {
+          const admin = await gitOutput(["rev-parse", "--absolute-git-dir"]);
+          filesystem.stat = (async (path: unknown, options: unknown) => {
+            const result = await (originalStat as Function)(path, options);
+            if (path === admin && (options as { bigint?: boolean })?.bigint) result.birthtimeNs = 0n;
+            return result;
+          }) as typeof originalStat;
+          syncBuiltinESMExports();
+        }
+      }
+      const before = await readFile(metadata), body = await readFile(join(owner, "memory/concepts/example.yaml"));
+      const candidate = join(f.changes, first.changeId, "checkpoints", first.checkpointDigest, "memory/concepts/example.yaml");
+      const frozen = await readFile(candidate);
+      await assert.rejects(validateMemoryChange(first.changeId), /claim ownership cannot be confirmed/);
+      await assert.rejects(claimMemoryChange({ changeId: first.changeId }), /use --force/);
+      assert.deepEqual(await readFile(metadata), before); assert.deepEqual(await readFile(candidate), frozen);
+      assert.deepEqual(await readFile(join(owner, "memory/concepts/example.yaml")), body);
+      assert((await claimMemoryChange({ changeId: first.changeId, force: true })).change.claim);
+    } finally { filesystem.stat = originalStat; syncBuiltinESMExports(); }
+  }));
+}

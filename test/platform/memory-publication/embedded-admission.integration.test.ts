@@ -5,7 +5,7 @@ import test from "node:test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runGit } from "../../../src/git.js";
-import { validateMemoryChange, withMemoryChangeDetailSnapshot } from "../../../src/memory/changeset.js";
+import { readMemoryChange, validateMemoryChange, withMemoryChangeDetailSnapshot } from "../../../src/memory/changeset.js";
 import { concept, fixture } from "../../helpers/embedded-continuation.js";
 
 for (const mutation of ["head", "master", "branch", "body", "untracked", "attributes"] as const) {
@@ -72,4 +72,25 @@ test("process exit before publication leaves the old checkpoint and the next pro
   assert.equal(await readFile(metadata, "utf8"), before);
   assert.equal((await validateMemoryChange()).changeId, first.changeId);
   assert.deepEqual((await readdir(f.changes)).filter(id => id.startsWith("change-")), [first.changeId]);
+}));
+
+test("legacy reconciliation refuses to overwrite a concurrently published v2 record", async () => fixture(async f => {
+  const file = join(f.memory, "concepts/example.yaml");
+  await writeFile(file, concept("Legacy")); const first = await validateMemoryChange();
+  const metadata = join(f.changes, first.changeId, "change.json");
+  const legacy = JSON.parse(await readFile(metadata, "utf8")); delete legacy.bindings;
+  await writeFile(metadata, JSON.stringify(legacy));
+  await runGit(["add", "memory"]); await runGit(["commit", "-m", "legacy candidate"]);
+  let published = "";
+  await assert.rejects(readMemoryChange({ home: f.home, project: "embedded", changeId: first.changeId,
+    beforeReconcileCommit: async () => {
+      await writeFile(file, concept("New v2 candidate"));
+      await validateMemoryChange(first.changeId);
+      published = await readFile(metadata, "utf8");
+    } }), { code: "CHECKPOINT_CONFLICT" });
+  assert(published); assert.equal(await readFile(metadata, "utf8"), published);
+  const current = JSON.parse(published);
+  assert(current.bindings); assert.equal(current.status, "active");
+  assert.notEqual(current.checkpoint.digest, first.checkpointDigest);
+  assert.equal(await readFile(join(f.changes, first.changeId, "checkpoints", current.checkpoint.digest, "memory/concepts/example.yaml"), "utf8"), concept("New v2 candidate"));
 }));

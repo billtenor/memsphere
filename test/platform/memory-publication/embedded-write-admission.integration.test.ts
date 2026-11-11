@@ -29,14 +29,16 @@ async function marketCandidate(home: string, root: string) {
 test("ordinary claim excludes dedicated apply before either can overwrite the other's write", { timeout: 30_000 }, async t => fixture(async f => claimFixture(f, async (id, root) => {
   const market = await marketCandidate(f.home, root), boundary = writeBoundary();
   const metadata = join(f.changes, market.change.id, "change.json"), before = await readFile(metadata);
-  const claiming = claimMemoryChange({ changeId: id, beforeWrite: async (_, index) => { if (!index) { boundary.enter(); await boundary.gate; } } });
+  let allowWrite = false;
+  const claiming = claimMemoryChange({ changeId: id, beforeWrite: async (_, index) => { if (!index) { boundary.enter(); await boundary.gate; t.signal.throwIfAborted(); if (!allowWrite) throw new Error("Claim test cancelled before write"); } } });
   t.signal.addEventListener("abort", boundary.release, { once: true });
   try {
     await boundary.reached(claiming);
     await assert.rejects(publishMemoryChange(market.change.id), { code: "MEMORY_PUBLISH_BUSY" });
     assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Base"));
     assert.deepEqual(await readFile(metadata), before);
-  } finally { boundary.release(); await claiming; t.signal.removeEventListener("abort", boundary.release); }
+    allowWrite = true;
+  } finally { boundary.release(); if (allowWrite) await claiming; else await assert.rejects(claiming); t.signal.removeEventListener("abort", boundary.release); }
   assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Changed"));
 })));
 

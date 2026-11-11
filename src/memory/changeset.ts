@@ -463,7 +463,10 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
       }
       await cp(baseRoot, previewRoot, { recursive: true });
       const materializedRevisions = new Map<string, string>();
-      for (const scope of change.bindings ? [] : change.scope) {
+      for (const scope of change.scope) {
+        // Ordinary scope selects review context; current net targets supply edits.
+        // Keep the comparison-base body when it exists, rather than an old edit.
+        if (change.bindings && await exists(join(baseRoot, scope.path))) continue;
         const revision = scope.added_revision ?? change.base_revision;
         if (revision === change.base_revision) continue;
         let revisionRoot = materializedRevisions.get(revision);
@@ -498,7 +501,7 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
         }
       }
       const targetsByPath = new Map(change.targets.map((target) => [target.destination_path ?? target.path, target]));
-      const scopeByPath = new Map((change.bindings && change.checkpoint ? [] : change.scope).map((scope) => [scope.path, scope]));
+      const scopeByPath = new Map(change.scope.map((scope) => [scope.path, scope]));
       for (const target of change.targets) {
         const path = target.destination_path ?? target.path;
         if (!scopeByPath.has(path)) {
@@ -1720,7 +1723,7 @@ function isOrdinaryEmbedded(change: MemoryChangeSet): boolean {
   return change.store_type === "embedded" && change.intent === undefined;
 }
 function embeddedClaimMatches(change: MemoryChangeSet, context: EmbeddedDevelopmentContext): boolean {
-  return change.claim?.instance_key === context.instanceKey && change.claim.root === context.root
+  return Boolean(context.instanceGeneration) && change.claim?.instance_key === context.instanceKey && change.claim.root === context.root
     && Boolean(change.bindings?.worktrees.some(worktree =>
       worktree.instance_key === context.instanceKey && worktree.root === context.root && worktree.generation === context.instanceGeneration));
 }
@@ -2080,13 +2083,14 @@ export async function readMemoryChange(input: {
   project: string;
   memoryScope?: "workspace" | "canonical";
   changeId: string;
+  beforeReconcileCommit?: () => Promise<void>;
 }): Promise<MemoryChangeSet> {
   const context = await resolveProjectContext({
     home: input.home,
     project: input.project,
     memoryScope: input.memoryScope
   });
-  return (() => readReconciledChange(context.primary, input.changeId))();
+  return (() => readReconciledChange(context.primary, input.changeId, input.beforeReconcileCommit))();
 }
 
 export async function createViewMemoryChange(input: {
@@ -3368,11 +3372,12 @@ async function readOrdinaryChange(project: ResolvedProject, id: string): Promise
   return readReconciledChange(project, id);
 }
 
-async function readReconciledChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
+async function readReconciledChange(project: ResolvedProject, id: string, beforeCommit?: () => Promise<void>): Promise<MemoryChangeSet> {
   const change = await readChange(project, id);
   const reconciled = await reconcileEmbeddedChange(project, change);
   if (reconciled !== change) {
     changeReadTokens.set(reconciled, changeReadTokens.get(change)!);
+    await beforeCommit?.();
     await writeChange(project, reconciled);
   }
   return reconciled;
@@ -3391,7 +3396,7 @@ async function writeChange(project: ResolvedProject, change: MemoryChangeSet, in
       throw error;
     });
     const expected = changeReadTokens.get(change);
-    if (isOrdinaryEmbedded(change) && change.bindings && expected && (!current || checkpointRecordToken(current) !== expected)) {
+    if (isOrdinaryEmbedded(change) && expected && (!current || checkpointRecordToken(current) !== expected)) {
       throw Object.assign(new Error(`ChangeSet ${change.id} changed during this operation; retry`), { code: "CHECKPOINT_CONFLICT" });
     }
     if (current && !invalidateCheckpoint) {
