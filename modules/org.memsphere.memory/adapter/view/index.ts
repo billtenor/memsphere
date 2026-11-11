@@ -902,10 +902,12 @@ function createMemoryPageMounts(
           element.replaceChildren();
         };
       }
+      mountPortal.append(portal!);
       app!.attachDetail(element);
       await updateRoute(context.route);
       return () => {
         app?.detachDetail(element);
+        if (portal?.parentElement === mountPortal) portal.remove();
         clearHeaderActions();
         element.classList.remove("memory-surface", `memory-${surface}-surface`);
         element.replaceChildren();
