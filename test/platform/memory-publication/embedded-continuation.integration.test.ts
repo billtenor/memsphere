@@ -3,6 +3,8 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { resolveWorkspaceIdentity } from "../../../src/project/workspace.js";
 import { gitOutput, runGit } from "../../../src/git.js";
 import { claimMemoryChange, readMemoryChange, validateMemoryChange, queryActiveEmbeddedChanges, withMemoryChangeDetailSnapshot, createViewMemoryChange } from "../../../src/memory/changeset.js";
@@ -339,3 +341,45 @@ test("gh real transport propagates nonzero, malformed output and bounded timeout
   const bounded = (args: string[], cwd: string) => transport(args, cwd, 40);
   assert.equal((await discoverPullRequests(f.linked, "refs/heads/feature", [], bounded)).discovery.status, "unknown");
 }));
+
+test("fork pushurl and renamed push ref discover parent PR even without an upstream remote", async () => fixture(async f => {
+  await runGit(["switch", "-c", "local"]);
+  await runGit(["remote", "add", "origin", "https://github.com/fetch-only/repo.git"]);
+  await runGit(["config", "remote.origin.pushurl", "git@github.com:fork/repo.git"]);
+  await runGit(["config", "remote.origin.push", "refs/heads/local:refs/heads/feature"]);
+  const script = join(f.home, "fork-gh.cjs");
+  await writeFile(script, `const endpoint=process.argv.at(-1); if(endpoint.includes('/pulls?')) {
+    if(!endpoint.includes('head=fork%3Afeature'))process.exit(9);
+    console.log(JSON.stringify([[{number:153,head:{ref:'feature',repo:{full_name:'fork/repo'}},base:{ref:'master',repo:{full_name:'parent/repo'}}}]]));
+  } else console.log(JSON.stringify({full_name:'fork/repo',fork:true,parent:{full_name:'parent/repo'},source:{full_name:'parent/repo'}}));`);
+  const transport = createGhTransport(process.execPath, [script]);
+  const result = await discoverPullRequests(f.linked, "refs/heads/local", [], transport);
+  assert.equal(result.discovery.status, "found"); assert.deepEqual(result.pullRequests, [{ host: "github.com", repository: "parent/repo", number: 153 }]);
+  await runGit(["config", "--add", "remote.origin.pushurl", "git@github.com:another/repo.git"]);
+  assert.equal((await discoverPullRequests(f.linked, "refs/heads/local", [], transport)).discovery.status, "unknown");
+}));
+
+test("process exit before publication leaves the old checkpoint and the next process continues the same record", async () => fixture(async f => {
+  await writeFile(join(f.memory, "concepts/example.yaml"), concept("First")); const first = await validateMemoryChange();
+  const metadata = join(f.changes, first.changeId, "change.json"), before = await readFile(metadata, "utf8");
+  await writeFile(join(f.memory, "concepts/example.yaml"), concept("Next"));
+  const worker = join(f.home, "before-publication.mts");
+  await writeFile(worker, `import {validateMemoryChange} from ${JSON.stringify(new URL("../../../src/memory/changeset.ts", import.meta.url).href)};
+    await validateMemoryChange(${JSON.stringify(first.changeId)},{onPrepared:async()=>{process.exit(23)}});`);
+  await assert.rejects(promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), worker], { cwd: f.linked, env: process.env }), { code: 23 });
+  assert.equal(await readFile(metadata, "utf8"), before);
+  assert.equal((await validateMemoryChange()).changeId, first.changeId);
+  assert.deepEqual((await readdir(f.changes)).filter(id => id.startsWith("change-")), [first.changeId]);
+}));
+
+test("process exit after claim metadata leaves complete bindings and releases native admission", async () => fixture(async f => claimFixture(f, async (id, root) => {
+  const worker = join(f.home, "after-claim.mts");
+  await writeFile(worker, `import {claimMemoryChange} from ${JSON.stringify(new URL("../../../src/memory/changeset.ts", import.meta.url).href)};
+    await claimMemoryChange({changeId:${JSON.stringify(id)},afterMetadataCommit:async()=>{process.exit(24)}});`);
+  await assert.rejects(promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), worker], { cwd: root, env: process.env }), { code: 24 });
+  const saved = await readMemoryChange({ home: f.home, project: "embedded", changeId: id });
+  assert(saved.claim); assert.equal(saved.bindings?.worktrees.length, 2);
+  await writeFile(join(root, "memory/concepts/example.yaml"), concept("Later user edit"));
+  assert((await claimMemoryChange({ changeId: id })).change.claim);
+  assert.equal(await readFile(join(root, "memory/concepts/example.yaml"), "utf8"), concept("Later user edit"));
+})));
