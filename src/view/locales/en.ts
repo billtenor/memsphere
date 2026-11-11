@@ -21,7 +21,8 @@ export const enViewPluralMessages = {
 
 export const enViewMessages = {
   "change.emptyCandidate": "No net changes in this round; the ChangeSet remains active.",
-  "change.bindings": "Linked development context",
+  "change.bindings": "Related information",
+  "change.branch": "Branch",
   "settings.runners": "Runner Agents",
   "settings.runnerIdentity": "Enable Agent identity",
   "settings.runnerAsync": "Enable asynchronous execution",
