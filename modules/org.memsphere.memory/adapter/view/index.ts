@@ -108,6 +108,8 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "change.select": "选择一个记忆变更。",
   "change.search": "搜索记忆变更",
   "change.empty": "没有记忆变更。",
+  "change.emptyCandidate": "本轮没有净变更；ChangeSet 仍可继续修改。",
+  "change.bindings": "关联的开发上下文",
   "change.comments": "修改意见",
   "change.collapseComments": "收起意见",
   "change.expandComments": "展开意见",
@@ -1150,11 +1152,9 @@ class MemoryApplication {
               baseMemory: base
             } as MemorySummary;
           });
-          if (targets.length) {
-            this.#memories = targets;
-            this.#selectedId = targets.some(item => item.id === this.#selectedId) ? this.#selectedId : targets[0]?.id ?? "";
-            this.#reviewedMemoryIds = this.readReviewedMemories(route.changeId);
-          }
+          this.#memories = targets;
+          this.#selectedId = targets.some(item => item.id === this.#selectedId) ? this.#selectedId : targets[0]?.id ?? "";
+          this.#reviewedMemoryIds = this.readReviewedMemories(route.changeId);
         } catch (error) {
           this.#changeDetail = { error: errorMessage(error), change: this.#changes.find(item => item.id === route.changeId) ?? { id: route.changeId, status: "unavailable" } };
         }
@@ -1426,7 +1426,7 @@ class MemoryApplication {
       label: text(title),
       header: this.listHeader(title, refresh),
       filter: this.listFilter(this.t("change.search")),
-      empty: { title: text(this.t("change.empty")) },
+      empty: { title: text(this.t(change?.emptyCandidate ? "change.emptyCandidate" : "change.empty")) },
       sections: [{
         id: "change-targets",
         items: visible.map(memory => {
@@ -1855,6 +1855,15 @@ class MemoryApplication {
     const layout = el("div", `memory-change-layout${this.#commentsCollapsed ? " comments-collapsed" : ""}`);
     if (!this.#commentsCollapsed) layout.dataset.memPageLayoutEdge = "";
     const main = el("div", "memory-change-main");
+    const bindings = change.bindings as JsonRecord | undefined;
+    if (bindings) {
+      const associations = el("section", "memory-panel");
+      associations.append(el("h3", "", this.t("change.bindings")));
+      for (const pr of array(bindings.pull_requests)) associations.append(el("p", "", `${pr.host}/${pr.repository}#${pr.number}`));
+      for (const branch of array(bindings.branches)) associations.append(el("p", "", String(branch.ref)));
+      workspace.append(associations);
+    }
+    if (change.emptyCandidate) main.append(el("p", "memory-list-empty", this.t("change.emptyCandidate")));
     const selected = this.#memories.find(memory => memory.id === this.#selectedId);
     if (selected) {
       const viewbar = el("div", "memory-change-viewbar");

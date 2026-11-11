@@ -173,6 +173,8 @@ export const zhCNViewMessages = {
   "change.subtitle": "当前项目中已验证的记忆变更",
   "change.select": "请选择一个记忆变更。",
   "change.empty": "还没有记忆变更。",
+  "change.emptyCandidate": "本轮没有净变更；ChangeSet 仍可继续修改。",
+  "change.bindings": "关联的开发上下文",
   "change.label": "记忆变更",
   "change.identity": "身份：{identity}",
   "change.addMemory": "添加记忆",

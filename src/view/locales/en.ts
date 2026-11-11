@@ -20,6 +20,8 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "change.emptyCandidate": "No net changes in this round; the ChangeSet remains active.",
+  "change.bindings": "Linked development context",
   "settings.runners": "Runner Agents",
   "settings.runnerIdentity": "Enable Agent identity",
   "settings.runnerAsync": "Enable asynchronous execution",

@@ -40,6 +40,7 @@ import { RunMemoryProvider } from "../memory/run-provider.js";
 import { readRun } from "../run/store.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 import { parseListLimit, type PaginationOptions } from "../pagination.js";
+import { EmbeddedChangeAmbiguityError } from "../memory/embedded-bindings.js";
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -248,7 +249,7 @@ export async function memoryRenameCommand(reference: string, newName: string, op
 }
 
 function logMemoryChangeValidateNext(changeId: string): void {
-  console.log(`Next: memsphere memory change validate ${changeId}`);
+  console.log(`Next: memsphere memory change validate --change ${changeId}`);
 }
 
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
@@ -298,7 +299,18 @@ export async function memoryChangeValidateCommand(
   options: { format?: string } = {}
 ): Promise<void> {
   const format = parseOutput(options.format ?? "text", ["text", "json"] as const, "memory change validate");
-  const result = await validateMemoryChange(changeId);
+  let result: Awaited<ReturnType<typeof validateMemoryChange>>;
+  try { result = await validateMemoryChange(changeId); }
+  catch (error) {
+    if (!(error instanceof EmbeddedChangeAmbiguityError)) throw error;
+    if (format === "json") process.stdout.write(`${JSON.stringify({ valid: false, error: { code: error.code, message: error.message, candidates: error.candidates } }, null, 2)}\n`);
+    else {
+      console.error(error.message);
+      for (const candidate of error.candidates) console.error(`${candidate.id}\t${JSON.stringify(candidate.bindings ?? {})}\t${candidate.references.join(", ")}`);
+    }
+    process.exitCode = 1;
+    return;
+  }
   const preview = await memoryChangePreview(result.changeId);
   const reviewCommand = `memsphere memory change show ${result.changeId} --checkpoint ${result.checkpointDigest}`;
   if (format === "json") {
@@ -319,6 +331,9 @@ export async function memoryChangeValidateCommand(
   console.log(`Store: ${result.storeType}`);
   console.log(`Base Revision: ${result.baseRevision}`);
   console.log(`Checkpoint Digest: ${result.checkpointDigest}`);
+  if (result.bindings) console.log(`Bindings: ${JSON.stringify(result.bindings)}`);
+  if (result.empty) console.log("This round has no net Memory changes; the ChangeSet remains active.");
+  if (result.prDiscovery?.status === "unknown") console.warn(`PR not verified: ${result.prDiscovery.reason}`);
   console.log(`Review materials: ${reviewCommand} --part summary`);
   console.log("Use --part diff|validation, or --part memory --reference <reference> --side before|after.");
   console.log(`memoryRoot: ${result.memoryRoot}`);

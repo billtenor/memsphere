@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { validateMemoryRoot, validateMemoryStore } from "../validation.js";
 
-const memoryChangeValidateCommand = "memsphere memory change validate [change-id]";
+const memoryChangeValidateCommand = "memsphere memory change validate [--change <id>]";
 
 export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json" } = {}): Promise<void> {
   const validationScope = options.memoryRoot ? "memory-root" : "project-store";
