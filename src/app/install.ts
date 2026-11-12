@@ -18,6 +18,8 @@ import { checkCli, cliCatalog } from "../tools/registry.js";
 import { DefaultMemoryCatalog } from "../memory/catalog.js";
 import { AppMemoryProvider } from "./memory-provider.js";
 import { resolveViewPackageComposition } from "../module/package-registry.js";
+import { withSharedStoreLock } from "../project/shared-store-lock.js";
+import { projectStoreBinding, updateProjectStoreGenerations, validateProjectStores } from "./project-stores.js";
 
 function bindings(app: AppInstallation, project: AppProject): AppInstallation["bindings"] {
   const result: AppInstallation["bindings"] = {};
@@ -38,7 +40,7 @@ export async function installApp(context: ProjectContext, directory: string, con
   assertWritableAppTarget(context, project);
   const pkg = await readAppPackage(directory);
   const configuration = await validateAppConfig(pkg.root, pkg.manifest, config);
-  return withAppLock(project, async () => {
+  const install = () => withAppLock(project, async () => {
     const state = await readAppState(project);
     const installed = state.installations[pkg.manifest.id];
     if (installed) {
@@ -103,6 +105,8 @@ export async function installApp(context: ProjectContext, directory: string, con
     const app: AppInstallation = { manifest: pkg.manifest, packageDigest: pkg.packageDigest, packageRoot: cache,
       installedAt: new Date().toISOString(), enabled: false, config: configuration, memories: operation.memories,
       descriptors: pkg.descriptors, bindings: {}, operationId: operation.id };
+    updateProjectStoreGenerations(app);
+    await validateProjectStores(project, app, true);
     app.bindings = bindings(app, project);
     await (async () => {
       // Check the current targets before recording this App operation.
@@ -161,6 +165,7 @@ export async function installApp(context: ProjectContext, directory: string, con
       throw error;
     }
   });
+  return withSharedStoreLock(project.paths.root, install);
 }
 export async function checkApp(project: AppProject, id: string) {
   const state = await readAppState(project), app = requireApp(state, id);
@@ -230,26 +235,33 @@ export async function checkApp(project: AppProject, id: string) {
     try { const check = await checkCli(project, cli, id, { allowDisabled: true }); add(`cli:${cli}`, check.status === "available", JSON.stringify(check.items)); }
     catch (error) { add(`cli:${cli}`, false, String(error)); }
   }
+  for (const declaration of app.manifest.projectStores) {
+    try { const binding = await projectStoreBinding(project, app, declaration.key); add(`project-store:${declaration.key}`, true, binding.storeId); }
+    catch (error) { add(`project-store:${declaration.key}`, false, String(error)); }
+  }
   return { id, status: items.every(i => i.available) ? "available" : "unavailable", items };
 }
 export async function configureApp(context: ProjectContext, id: string, config: unknown, target = context.primary) {
   assertWritableAppTarget(context, target);
-  return withAppLock(target, async () => {
+  return withSharedStoreLock(target.paths.root, () => withAppLock(target, async () => {
     const state = await readAppState(target), app = requireApp(state, id);
+    const previous = app.config;
     app.config = await validateAppConfig(app.packageRoot, app.manifest, config);
+    updateProjectStoreGenerations(app, previous);
+    await validateProjectStores(target, app);
     app.bindings = bindings(app, target);
     for (const [key, binding] of Object.entries(app.bindingOverrides ?? {})) if (app.bindings[key]) app.bindings[key] = { ...app.bindings[key], ...binding };
     await writeAppState(target, state);
     return { id, status: "configured", restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length) };
-  });
+  }));
 }
 export async function setAppEnabled(context: ProjectContext, id: string, enabled: boolean, target = context.primary) {
   assertWritableAppTarget(context, target);
-  return withAppLock(target, async () => {
+  return withSharedStoreLock(target.paths.root, () => withAppLock(target, async () => {
     const state = await readAppState(target), app = requireApp(state, id);
     if (enabled) { const check = await checkApp(target, id); if (check.status !== "available") throw new AppError("APP_NOT_READY", "App dependencies are not ready", check); }
     app.enabled = enabled;
     await writeAppState(target, state);
     return { id, enabled, restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length) };
-  });
+  }));
 }

@@ -14,6 +14,7 @@ import { assertModelOperationStamp, readModelOperationStamp, optionalFileBytes, 
 import { JsonPayloadSerializer } from "../data/extensions/json-serializer/index.js";
 import { bytesContent } from "../data/extensions/shared/payload.js";
 import { withConfigFileLock } from "../config-file-lock.js";
+import { withSharedStoreLock } from "./shared-store-lock.js";
 import { modelDefinitionStore } from "./system-model-store.js";
 import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
 import { atomicWriteJson } from "../persistence.js";
@@ -169,7 +170,7 @@ export async function mutateModel(context: Context, root: string, operation: "cr
     }
     return { operation: `model.${operation}`, modelRef: ref, ...(operation !== "delete" ? { registration } : {}), ...(input.dryRun ? { dryRun: true, files: changes.map(change => change.path) } : {}) };
   };
-  return execute();
+  return input.dryRun ? execute() : withSharedStoreLock(root, execute, context.signal);
 }
 type ModelValidationOptions = { source?: string; check?: ModelCheck; checkData?: boolean; stores?: string[] };
 export function validateModel(context: Context, root: string, ref: string, options: ModelValidationOptions = {}) {

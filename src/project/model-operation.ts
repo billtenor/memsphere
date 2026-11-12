@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { withConfigFileLock } from "../config-file-lock.js";
+import { withSharedStoreLock } from "./shared-store-lock.js";
 import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, rm, rmdir, lstat } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
@@ -77,6 +78,19 @@ export async function withConsistentModelRead<T>(read: () => Promise<T>): Promis
 // inode permanent: the journal itself is atomically replaced on every phase.
 const maintenance = new AsyncLocalStorage<{ root: string; active: boolean }>();
 async function withJournalClaim<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  root = await canonicalPath(root);
+  if (maintenance.getStore()?.active && maintenance.getStore()?.root === root) return action();
+  const claim = join(root, ".runtime/model-operation.claim");
+  await mkdir(dirname(claim), { recursive: true });
+  try { await withNativeFileLock(claim, async () => undefined, { timeoutMs: 0, signal }); }
+  catch (error) {
+    if ((error as { code?: string }).code === "LOCK_TIMEOUT")
+      throw failure("MODEL_OPERATION_BUSY", "A model maintenance operation or recovery is running; retry after it finishes", { record: statePath(root) });
+    throw error;
+  }
+  return withSharedStoreLock(root, () => withJournalClaimLocked(root, action, signal), signal);
+}
+async function withJournalClaimLocked<T>(root: string, action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   signal?.throwIfAborted();
   root = await canonicalPath(root);
   const parent = maintenance.getStore();

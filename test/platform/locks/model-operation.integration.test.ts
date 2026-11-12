@@ -192,7 +192,7 @@ for (const running of ["write", "recover"] as const) {
     }
     const active = await worker(t, f.root, { mode: running, pause: "pending" });
     active.start(); await active.next("paused");
-    const heldClaims = [".runtime/model-operation.claim", ".runtime/config.json.lock"];
+    const heldClaims = [".runtime/model-operation.claim", ".runtime/config.json.lock", ".runtime/shared-store.lock"];
     const before = await snapshotTree(f.root, heldClaims);
     const alias = join(f.directory, "active-alias");
     await symlink(f.root, alias, process.platform === "win32" ? "junction" : "dir");
