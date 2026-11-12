@@ -225,7 +225,7 @@ memsphere project create my-project --bind
 
 ```bash
 memsphere memory edit concepts/example
-memsphere memory change validate <change-id>
+memsphere memory change validate --change <id>
 memsphere memory publish --change <change-id>
 ```
 
@@ -263,6 +263,8 @@ memsphere memory change validate
 git add .memsphere/memory
 git commit -m "更新 Memory"
 ```
+
+普通 Embedded 的首次校验自动创建 ChangeSet；跨 commit、amend 和 rebase 继续同一轮修改。校验以本地 `git merge-base master HEAD` 为基线，覆盖最终工作树的完整净修改。自动按 PR、分支、未建分支时的 worktree 识别；有歧义时使用 `--change <id>`。旧位置写法 `validate <id>` 已移除，参数可查 `memory change validate --help`。
 
 Embedded Memory 不使用 `memsphere memory publish`；Memsphere 不会替你提交 Git。
 

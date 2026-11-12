@@ -1,4 +1,8 @@
 import { checkpointRecordToken, publishCheckpoint, withCheckpointRecordLock } from "./checkpoint-publication.js";
+import { embeddedBindingsSchema, mergeEmbeddedBindings, selectEmbeddedChange, withEmbeddedContextLocks } from "./embedded-bindings.js";
+import { readEmbeddedDevelopmentContext, readEmbeddedGitFacts, readEmbeddedWorktreeGeneration, type EmbeddedDevelopmentContext, type PrDiscovery, type GhTransport } from "./embedded-context.js";
+import { captureOrdinaryEmbeddedTargets, inspectOrdinaryEmbeddedTargets, embeddedAttributesFingerprint } from "./embedded-capture.js";
+import { prepareEmbeddedClaim, EmbeddedClaimWriteError } from "./embedded-claim.js";
 import { createHash, randomBytes } from "node:crypto";
 import { withMemoryWriteAccess } from "./write-access.js";
 import { withConfigFileLock } from "../config-file-lock.js";
@@ -33,7 +37,8 @@ const changeTargetSchema = z.object({
   path: z.string().min(1).refine(isSafeMemoryPath, "invalid or escaping Memory path"),
   destination_path: z.string().min(1).refine(isSafeMemoryPath, "invalid or escaping Memory path").optional(),
   base_digest: z.string().min(1).optional(),
-  added_revision: z.string().min(1)
+  added_revision: z.string().min(1),
+  candidate_blob_digest: z.string().regex(/^[a-f0-9]{40,64}$/).optional()
 }).strict();
 
 const persistedValidationIssueSchema = z.object({
@@ -134,6 +139,7 @@ export const memoryChangeSetSchema = z.object({
   merge_parent: z.string().min(1).optional(),
   store_type: z.enum(["managed", "embedded"]),
   source_worktree: sourceWorktreeSchema.optional(),
+  bindings: embeddedBindingsSchema.optional(),
   checkpoint: changeCheckpointSchema.optional(),
   failure: changeFailureSchema.optional(),
   targets: z.array(changeTargetSchema),
@@ -183,10 +189,7 @@ export const memoryChangeSetSchema = z.object({
   }
 });
 
-const checkpointDescriptionSchema = z.object({
-  format_version: z.literal(1),
-  content_digest: z.string().regex(/^[a-f0-9]{64}$/),
-  material: z.object({
+const checkpointMaterialSchema = z.object({
     id: z.string().min(1), project: z.string().min(1),
     store_type: z.enum(["managed", "embedded"]),
     status: z.enum(["active", "completed", "abandoned"]),
@@ -195,9 +198,25 @@ const checkpointDescriptionSchema = z.object({
     targets: z.array(changeTargetSchema), scope: z.array(changeScopeSchema),
     app_ownership: appOwnershipSchema.optional(),
     validation: changeCheckpointSchema.omit({ digest: true })
-  }).strict()
+  }).strict();
+const embeddedGitContextSchema = z.object({
+  head_revision: z.string().min(1), master_revision: z.string().min(1), comparison_base: z.string().min(1),
+  attributes_fingerprint: z.string().regex(/^[a-f0-9]{64}$/), attributes_paths: z.array(z.string())
 }).strict();
+const checkpointDescriptionSchema = z.discriminatedUnion("format_version", [
+  z.object({ format_version: z.literal(1), content_digest: z.string().regex(/^[a-f0-9]{64}$/), material: checkpointMaterialSchema }).strict(),
+  z.object({ format_version: z.literal(2), content_digest: z.string().regex(/^[a-f0-9]{64}$/),
+    material: checkpointMaterialSchema.extend({ git_context: embeddedGitContextSchema }).strict() }).strict()
+]);
 type CheckpointDescription = z.infer<typeof checkpointDescriptionSchema>;
+function assertCheckpointEvidence(description: CheckpointDescription): void {
+  if (description.format_version !== 2) return;
+  if (description.material.store_type !== "embedded"
+    || description.material.git_context.comparison_base !== description.material.base_revision
+    || description.material.targets.some(target => target.operation !== "delete" && !target.candidate_blob_digest)) {
+    throw new Error("Ordinary Embedded checkpoint requires complete target Git blob and comparison context evidence");
+  }
+}
 const changeReadTokens = new WeakMap<object, string>();
 
 export type MemoryChangeSet = z.infer<typeof memoryChangeSetSchema>;
@@ -230,6 +249,9 @@ export type MemoryChangeValidationResult = {
   checkpointDigest: string;
   completedChangeIds: string[];
   issues: ValidationIssue[];
+  bindings?: z.infer<typeof embeddedBindingsSchema>;
+  prDiscovery?: PrDiscovery;
+  empty?: boolean;
 };
 
 export type MemoryChangePreview = {
@@ -442,6 +464,9 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
       await cp(baseRoot, previewRoot, { recursive: true });
       const materializedRevisions = new Map<string, string>();
       for (const scope of change.scope) {
+        // Ordinary scope selects review context; current net targets supply edits.
+        // Keep the comparison-base body when it exists, rather than an old edit.
+        if (change.bindings && await exists(join(baseRoot, scope.path))) continue;
         const revision = scope.added_revision ?? change.base_revision;
         if (revision === change.base_revision) continue;
         let revisionRoot = materializedRevisions.get(revision);
@@ -1219,7 +1244,7 @@ export async function resumeMemoryChange(changeId: string): Promise<string> {
 export async function publishMemoryChange(
   changeId: string,
   message?: string,
-  options: { expectedKind?: "regular" | "sync"; context?: ProjectContext } = {}
+  options: { expectedKind?: "regular" | "sync"; context?: ProjectContext; afterEmbeddedApply?: () => Promise<void> } = {}
 ): Promise<MemoryChangeSet> {
   const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = initialContext.workspace;
@@ -1230,7 +1255,7 @@ export async function publishMemoryChange(
       if ((change.intent !== "market_import" && change.intent !== "app_install")) {
         throw new Error("Managed Memory ChangeSets are not available for an Embedded Project");
       }
-      return applyEmbeddedMarketChange(context.primary, change, workspace);
+      return applyEmbeddedMarketChange(context.primary, change, workspace, options.afterEmbeddedApply);
     }
     assertManaged(context.primary);
     assertDraftOwner(change, context.primary.name, workspace.key);
@@ -1275,8 +1300,9 @@ export async function failMemoryChange(
 
 export async function validateMemoryChange(
   changeId?: string,
-  options: { onLockWait?: () => void; context?: ProjectContext } = {}
+  options: { onLockWait?: () => void; context?: ProjectContext; prTransport?: GhTransport; onPrepared?: () => Promise<void> } = {}
 ): Promise<MemoryChangeValidationResult> {
+  if (changeId !== undefined) assertSafeId(changeId);
   const initialContext = options.context ?? await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   const workspace = initialContext.workspace;
   {
@@ -1291,7 +1317,7 @@ export async function validateMemoryChange(
         const resolvedId = changeId ?? await resolveSingleManagedActive(context.primary, workspace);
         const change = await readReconciledChange(context.primary, resolvedId);
         if (change.intent === "system_upgrade") {
-          if (!changeId) throw new Error(`Use memsphere memory change validate ${change.id} for this system_upgrade candidate`);
+          if (!changeId) throw new Error(`Use memsphere memory change validate --change ${change.id} for this system_upgrade candidate`);
           return validateSystemUpgradeLocked(context, change);
         }
         assertDraftOwner(change, context.primary.name, workspace.key);
@@ -1394,7 +1420,7 @@ export async function validateMemoryChange(
         }
       }
     }
-    const captured = await captureEmbeddedWorkingChange(context.primary, workspace, changeId);
+    const captured = await captureEmbeddedWorkingChange(context.primary, workspace, changeId, options);
     try {
       const issues = await validateEmbeddedEffectiveMemory(captured.change, captured.candidateRoot);
       const checkpointRoot = await persistValidatedCheckpoint(
@@ -1405,9 +1431,10 @@ export async function validateMemoryChange(
         issues,
         captured.memoryRoot,
         captured.candidateRoot,
-        captured.expectedToken
+        captured.expectedToken,
+        captured.ordinary
       );
-      return validationResult(
+      return { ...validationResult(
         captured.change,
         captured.memoryRoot,
         checkpointRoot,
@@ -1415,7 +1442,7 @@ export async function validateMemoryChange(
         captured.change.base_revision,
         issues,
         captured.completedChangeIds
-      );
+      ), bindings: captured.change.bindings, prDiscovery: captured.ordinary.context.discovery, empty: captured.change.targets.length === 0 };
     } finally {
       await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
     }
@@ -1517,7 +1544,8 @@ async function persistValidatedCheckpoint(
   issues: ValidationIssue[],
   effectiveMemoryRoot: string,
   issueCandidateRoot = candidateRoot,
-  expectedToken: string | null = changeReadTokens.get(change) ?? null
+  expectedToken: string | null = changeReadTokens.get(change) ?? null,
+  ordinary?: OrdinaryCheckpoint
 ): Promise<string> {
   change.app_ownership = { ...await captureAppOwnership(project, change.app_install?.operationId), ...(change.intent === "app_install" ? change.app_ownership : {}) };
   if (!Object.keys(change.app_ownership).length) delete change.app_ownership;
@@ -1526,7 +1554,7 @@ async function persistValidatedCheckpoint(
     issues: issues.map(issue => persistedValidationIssue(issue, effectiveMemoryRoot, issueCandidateRoot))
   };
   let source = change.source_worktree;
-  if (change.checkpoint && source) {
+  if (!ordinary && change.checkpoint && source) {
     const previousDirectory = dirname(checkpointMemoryRoot(project, change.id, change.checkpoint.digest));
     if (await exists(join(previousDirectory, "checkpoint.json"))) {
       const previous = await readCheckpointDescription(project, change.id, change.checkpoint.digest, previousDirectory);
@@ -1536,17 +1564,24 @@ async function persistValidatedCheckpoint(
     }
   }
   const description = checkpointDescriptionSchema.parse({
-    format_version: 1,
+    format_version: ordinary ? 2 : 1,
     content_digest: await checkpointDigest(change.targets, candidateRoot, change.app_ownership),
     material: { id: change.id, project: change.project, store_type: change.store_type, status: change.status,
       base_revision: change.base_revision, source_worktree: source,
-      targets: change.targets, scope: change.scope, app_ownership: change.app_ownership, validation }
+      targets: change.targets, scope: change.scope, app_ownership: change.app_ownership, validation,
+      ...(ordinary ? { git_context: { head_revision: ordinary.context.head, master_revision: ordinary.context.master,
+        comparison_base: ordinary.context.base, attributes_fingerprint: ordinary.attributesFingerprint, attributes_paths: ordinary.attributePaths } } : {}) }
   });
+  assertCheckpointEvidence(description);
   const digest = checkpointVersionDigest(description);
   const root = checkpointsRoot(project, change.id);
-  const result = await publishCheckpoint({
+  let expectedSaved: string | undefined;
+  const result = await publishCheckpoint<CheckpointDescription>({
     runtimeRoot: project.paths.runtimeRoot, changeId: change.id, checkpointsRoot: root,
     digest, candidateRoot, description, expectedToken,
+    retainHistory: Boolean(ordinary), commitSameDigest: Boolean(ordinary),
+    ...(ordinary ? { withAdmission: ordinary.withAdmission,
+      confirmCommit: async () => expectedSaved !== undefined && JSON.stringify(await readChange(project, change.id)) === expectedSaved } : {}),
     readCurrent: async () => {
       const current = await readChange(project, change.id).catch(error => {
         if (isCode(error, "ENOENT")) return undefined;
@@ -1559,7 +1594,11 @@ async function persistValidatedCheckpoint(
       const changed = change.checkpoint?.digest !== digest;
       change.checkpoint = { digest, ...stored.material.validation };
       if (changed && change.store_type === "embedded") delete change.candidate_revision;
-      change.updated_at = new Date().toISOString();
+      const currentRecord = ordinary ? await readChange(project, change.id).catch(error => {
+        if (isCode(error, "ENOENT")) return undefined; throw error;
+      }) : undefined;
+      if (!ordinary || !currentRecord || JSON.stringify(change) !== JSON.stringify(currentRecord)) change.updated_at = new Date().toISOString();
+      expectedSaved = JSON.stringify(memoryChangeSetSchema.parse(change));
       const commit = async () => {
         try { await writeChangeUnlocked(project, change); }
         catch (error) {
@@ -1580,11 +1619,12 @@ function checkpointVersionDigest(description: CheckpointDescription): string {
   const identity = structuredClone(description);
   // Repeated validation of identical evidence retains the first published time.
   identity.material.validation.created_at = "";
-  return createHash("sha256").update("memsphere-checkpoint-v1\0").update(JSON.stringify(identity)).digest("hex");
+  return createHash("sha256").update(`memsphere-checkpoint-v${description.format_version}\0`).update(JSON.stringify(identity)).digest("hex");
 }
 
 async function readCheckpointDescription(project: ResolvedProject, changeId: string, digest: string, directory: string): Promise<CheckpointDescription> {
   const description = checkpointDescriptionSchema.parse(JSON.parse(await readFile(join(directory, "checkpoint.json"), "utf8")));
+  assertCheckpointEvidence(description);
   if (description.material.id !== changeId || description.material.project !== project.name
     || description.material.store_type !== project.config.store.type || checkpointVersionDigest(description) !== digest
     || await checkpointDigest(description.material.targets, join(directory, "memory"), description.material.app_ownership) !== description.content_digest) {
@@ -1669,115 +1709,93 @@ function validationResult(
   };
 }
 
-type EmbeddedCapture = {
-  change: MemoryChangeSet;
-  candidateRoot: string;
-  memoryRoot: string;
-  completedChangeIds: string[];
-  expectedToken: string | null;
+type OrdinaryCheckpoint = {
+  context: EmbeddedDevelopmentContext;
+  attributesFingerprint: string;
+  attributePaths: string[];
+  withAdmission<T>(commit: () => Promise<T>): Promise<T>;
 };
-
-async function captureEmbeddedWorkingChange(
-  project: ResolvedProject,
-  workspace: WorkspaceIdentity,
-  requestedId?: string
-): Promise<EmbeddedCapture> {
-  if (project.config.store.type !== "embedded") throw new Error("Embedded ChangeSet capture requires an Embedded Project");
-  if (workspace.kind !== "git") throw new Error("Embedded ChangeSet validation must run inside a Git worktree");
-  const configuredRepository = await resolveWorkspaceIdentity(project.config.store.repository_path);
-  if (configuredRepository.kind !== "git" || configuredRepository.key !== workspace.key) {
-    throw new Error(`Embedded Project "${project.name}" does not belong to the current Git repository`);
+type EmbeddedCapture = {
+  change: MemoryChangeSet; candidateRoot: string; memoryRoot: string; completedChangeIds: string[];
+  expectedToken: string | null; ordinary: OrdinaryCheckpoint;
+};
+function isOrdinaryEmbedded(change: MemoryChangeSet): boolean {
+  return change.store_type === "embedded" && change.intent === undefined;
+}
+function embeddedClaimMatches(change: MemoryChangeSet, context: EmbeddedDevelopmentContext): boolean {
+  return Boolean(context.instanceGeneration) && change.claim?.instance_key === context.instanceKey && change.claim.root === context.root
+    && Boolean(change.bindings?.worktrees.some(worktree =>
+      worktree.instance_key === context.instanceKey && worktree.root === context.root && worktree.generation === context.instanceGeneration));
+}
+/** Only unarchived metadata is loaded. No checkpoint or reconciliation side effects. */
+export async function queryActiveEmbeddedChanges(project: ResolvedProject, repositoryKey: string): Promise<MemoryChangeSet[]> {
+  const listed = await listProjectChangesBestEffort(project, false);
+  await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
+  return listed.changes.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === repositoryKey);
+}
+/** Completion is an explicit write operation, separate from the binding query. */
+async function reconcileOrdinaryEmbeddedChanges(project: ResolvedProject, repositoryKey: string, candidates?: MemoryChangeSet[]): Promise<string[]> {
+  const active = candidates ?? await queryActiveEmbeddedChanges(project, repositoryKey);
+  const completed: string[] = [];
+  for (const candidate of active.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === repositoryKey)) {
+    if ((await readReconciledChange(project, candidate.id)).status === "completed") completed.push(candidate.id);
   }
-  const memoryPath = project.config.store.memory_path;
-  const memoryRoot = project.memoryRoot;
+  return completed;
+}
+async function captureEmbeddedWorkingChange(project: ResolvedProject, workspace: WorkspaceIdentity, requestedId?: string, options: { prTransport?: GhTransport; onPrepared?: () => Promise<void> } = {}): Promise<EmbeddedCapture> {
+  if (project.config.store.type !== "embedded" || workspace.kind !== "git") throw new Error("Embedded validation requires its Git worktree");
+  const configured = await resolveWorkspaceIdentity(project.config.store.repository_path);
+  if (configured.key !== workspace.key) throw new Error(`Embedded Project "${project.name}" does not belong to the current Git repository`);
+  const memoryPath = project.config.store.memory_path, memoryRoot = project.memoryRoot;
   if (!await exists(memoryRoot)) throw new Error(`Embedded Memory root is missing in the current worktree: ${memoryRoot}`);
-  const baseRevision = await gitOutput(["rev-parse", "HEAD"], workspace.path);
-  const source = {
-    instance_key: workspace.instanceKey,
-    root: workspace.path,
-    repository_root: configuredRepository.path,
-    memory_path: memoryPath
-  };
-  const captured = await captureEmbeddedTargets(workspace.path, memoryRoot, memoryPath, baseRevision);
-  if (captured.targets.length === 0) {
-    await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
-    throw new Error("no Embedded Memory changes were found relative to the current HEAD");
+  const raw = await listProjectChangesBestEffort(project, false);
+  await assertEmbeddedCaptureFailuresAreTerminal(project, raw.failures);
+  const upgrades = raw.changes.filter(c => c.status === "active" && c.intent === "system_upgrade" && c.system_upgrade?.instance_key === workspace.instanceKey);
+  if (upgrades.length && !requestedId) throw new Error(`Use memsphere memory change validate --change ${upgrades[0].id} for this system_upgrade worktree`);
+  const knownPrs = raw.changes.filter(c => isOrdinaryEmbedded(c) && c.status === "active" && c.workspace_key === workspace.key).flatMap(c => c.bindings?.pull_requests ?? []);
+  const context = await readEmbeddedDevelopmentContext(workspace, knownPrs, options.prTransport);
+  const completedChangeIds = await reconcileOrdinaryEmbeddedChanges(project, workspace.key, raw.changes);
+  const active = await queryActiveEmbeddedChanges(project, workspace.key);
+  let change = requestedId ? await readChange(project, requestedId) : selectEmbeddedChange(active, context);
+  if (change) {
+    assertDraftOwner(change, project.name, workspace.key);
+    if (!isOrdinaryEmbedded(change)) throw new Error(`ChangeSet ${change.id} requires its dedicated validation path`);
+    if (change.claim && !embeddedClaimMatches(change, context)) throw new Error(`ChangeSet ${change.id} is claimed by ${change.claim.root}; claim ownership cannot be confirmed for this worktree`);
   }
-
-  let change: MemoryChangeSet;
+  const initialId = change?.id;
+  const captured = await captureOrdinaryEmbeddedTargets(workspace.path, memoryRoot, memoryPath, context.base);
   try {
-    if (requestedId) {
-      change = await readReconciledChange(project, requestedId);
-      assertDraftOwner(change, project.name, workspace.key);
-      if (change.store_type !== "embedded") throw new Error(`ChangeSet ${change.id} is not an Embedded ChangeSet`);
-      if (change.base_revision !== baseRevision) {
-        if (change.origin !== "view") {
-          throw new Error(`Embedded ChangeSet ${change.id} belongs to another Git base revision`);
-        }
-        await forwardEmbeddedViewBase(change, workspace.path, memoryPath, baseRevision);
-      }
-    } else {
-      const listed = await listProjectChangesBestEffort(project);
-      await assertEmbeddedCaptureFailuresAreTerminal(project, listed.failures);
-      const projectChanges = listed.changes;
-      const completedChangeIds: string[] = [];
-      const upgrades = projectChanges.filter(candidate => candidate.intent === "system_upgrade" && candidate.status === "active" && candidate.system_upgrade?.instance_key === workspace.instanceKey);
-      if (upgrades.length) throw new Error(`Use memsphere memory change validate <change-id> for this system_upgrade worktree: ${upgrades.map(change => change.id).join(", ")}`);
-      const matches = projectChanges.filter((candidate) => (
-        candidate.intent !== "system_upgrade" && candidate.intent !== "market_import" && candidate.intent !== "app_install"
-        &&
-        candidate.status === "active"
-        && candidate.store_type === "embedded"
-        && candidate.workspace_key === workspace.key
-        && candidate.base_revision === baseRevision
-      ));
-      if (matches.length > 1) {
-        const digest = await checkpointDigest(captured.targets, captured.candidateRoot, await captureAppOwnership(project));
-        const exact: MemoryChangeSet[] = [];
-        for (const candidate of matches) {
-          if (!candidate.checkpoint) continue;
-          try {
-            const frozen = await readCheckpointChange(project, candidate);
-            const content = await checkpointDigest(frozen.targets, checkpointMemoryRoot(project, candidate.id, candidate.checkpoint.digest), frozen.app_ownership);
-            if (content === digest) exact.push(candidate);
-          } catch {
-            // An unavailable/corrupt version is divergent, never an auto-removable duplicate.
-          }
-        }
-        exact.sort((left, right) => left.created_at.localeCompare(right.created_at));
-        if (exact.length !== matches.length) {
-          throw new Error(`multiple divergent Embedded ChangeSets were found for the current repository and Git base: ${matches.map((item) => item.id).sort().join(", ")}`);
-        }
-        change = exact[0];
-        for (const duplicate of matches) {
-          if (duplicate.id === change.id) continue;
-          if (duplicate.comments.length > 0 || duplicate.scope.length > 0 || duplicate.claim || duplicate.origin === "view") {
-            throw new Error(`duplicate Embedded ChangeSet ${duplicate.id} contains user data and must be resolved explicitly`);
-          }
-          duplicate.status = "abandoned";
-          duplicate.updated_at = new Date().toISOString();
-          await writeChange(project, duplicate);
-        }
-      } else {
-        change = matches[0] ?? newChange(project, workspace.key);
-      }
-      const expectedToken = changeReadTokens.get(change) ?? null;
-      change.store_type = "embedded";
-      change.base_revision = baseRevision;
-      change.source_worktree = source;
-      change.targets = captured.targets;
-      return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds, expectedToken };
-    }
+    if (!change && captured.targets.length === 0) throw new Error(`no Embedded Memory changes were found relative to merge-base${completedChangeIds.length ? `; completed: ${completedChangeIds.join(", ")}` : ""}`);
+    change ??= newChange(project, workspace.key);
     const expectedToken = changeReadTokens.get(change) ?? null;
-    change.store_type = "embedded";
-    change.base_revision = baseRevision;
-    change.source_worktree = source;
-    change.targets = captured.targets;
-    return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds: [], expectedToken };
-  } catch (error) {
-    await rm(resolve(captured.candidateRoot, ".."), { recursive: true, force: true });
-    throw error;
-  }
+    change.base_revision = context.base;
+    change.source_worktree = { instance_key: workspace.instanceKey, root: workspace.path,
+      repository_root: configured.path, memory_path: memoryPath };
+    change.targets = captured.targets.map(target => changeTargetSchema.parse(target));
+    change.bindings = mergeEmbeddedBindings(change.bindings, context);
+    const selected = change;
+    const ordinary: OrdinaryCheckpoint = { context, attributesFingerprint: captured.attributesFingerprint, attributePaths: captured.files.map(f => f.repositoryPath),
+      withAdmission: async commit => {
+        await options.onPrepared?.();
+        return withMemoryWriteAccess(memoryRoot, () => withEmbeddedContextLocks(project.paths.runtimeRoot, context, async () => {
+        const facts = await readEmbeddedGitFacts(workspace.path);
+        if (facts.head !== context.head || facts.master !== context.master || facts.branch !== context.branch || facts.base !== context.base
+          || await readEmbeddedWorktreeGeneration(workspace.path) !== context.instanceGeneration) throw new Error("Git context changed during validation; validate again");
+        const current = await inspectOrdinaryEmbeddedTargets(workspace.path, memoryRoot, memoryPath, context.base);
+        if (current.fingerprint !== captured.fingerprint) throw new Error("Memory or Git attributes changed during validation; validate again");
+        const candidates = await queryActiveEmbeddedChanges(project, workspace.key);
+        if (requestedId) {
+          const live = candidates.find(c => c.id === selected.id);
+          if (!live) throw new Error(`ChangeSet ${selected.id} is no longer active or available`);
+          if (live.claim && !embeddedClaimMatches(live, context)) throw new Error(`ChangeSet ${selected.id} is claimed by another or unverified worktree`);
+        } else if (selectEmbeddedChange(candidates, context)?.id !== initialId) {
+          throw new Error("Embedded associations changed during validation; validate again");
+        }
+        return commit();
+        }));
+      } };
+    return { change, candidateRoot: captured.candidateRoot, memoryRoot, completedChangeIds, expectedToken, ordinary };
+  } catch (error) { await rm(dirname(captured.candidateRoot), { recursive: true, force: true }); throw error; }
 }
 
 async function captureEmbeddedTargets(
@@ -1966,7 +1984,7 @@ async function listProjectChanges(project: ResolvedProject, reconcile = false): 
   return changes;
 }
 
-async function listProjectChangesBestEffort(project: ResolvedProject): Promise<{
+async function listProjectChangesBestEffort(project: ResolvedProject, reconcile = true): Promise<{
   changes: MemoryChangeSet[];
   failures: Array<{ id: string; error: string }>;
 }> {
@@ -1982,7 +2000,7 @@ async function listProjectChangesBestEffort(project: ResolvedProject): Promise<{
   for (const entry of entries) {
     if (!entry.isDirectory() || !/^change-[a-zA-Z0-9-]+$/.test(entry.name)) continue;
     try {
-      changes.push(await readReconciledChange(project, entry.name));
+      changes.push(await (reconcile ? readReconciledChange(project, entry.name) : readChange(project, entry.name)));
     } catch (error) {
       if (!(error instanceof MemoryChangeIntegrityError)) throw error;
       failures.push({
@@ -2065,13 +2083,14 @@ export async function readMemoryChange(input: {
   project: string;
   memoryScope?: "workspace" | "canonical";
   changeId: string;
+  beforeReconcileCommit?: () => Promise<void>;
 }): Promise<MemoryChangeSet> {
   const context = await resolveProjectContext({
     home: input.home,
     project: input.project,
     memoryScope: input.memoryScope
   });
-  return (() => readReconciledChange(context.primary, input.changeId))();
+  return (() => readReconciledChange(context.primary, input.changeId, input.beforeReconcileCommit))();
 }
 
 export async function createViewMemoryChange(input: {
@@ -2085,6 +2104,33 @@ export async function createViewMemoryChange(input: {
     project: input.project,
     memoryScope: "canonical"
   });
+  if (context.primary.config.store.type === "embedded") {
+    const project = context.primary;
+    const store = context.primary.config.store;
+    const workspace = await resolveWorkspaceIdentity(store.repository_path);
+    const active = await queryActiveEmbeddedChanges(project, workspace.key);
+    const development = await readEmbeddedDevelopmentContext(workspace, active.flatMap(c => c.bindings?.pull_requests ?? []));
+    await reconcileOrdinaryEmbeddedChanges(project, workspace.key, active);
+    const target = await resolveTarget(project, input.reference, "edit", undefined, development.base);
+    if (target.operation !== "update" || !target.base_digest) throw new Error("View can only create a ChangeSet from an existing Memory");
+    return withEmbeddedContextLocks(project.paths.runtimeRoot, development, async () => {
+      const facts = await readEmbeddedGitFacts(workspace.path);
+      if (facts.head !== development.head || facts.master !== development.master || facts.branch !== development.branch
+        || await readEmbeddedWorktreeGeneration(workspace.path) !== development.instanceGeneration) throw new Error("Git context changed during ChangeSet creation; retry");
+      const change = selectEmbeddedChange(await queryActiveEmbeddedChanges(project, workspace.key), development)
+        ?? newChange(project, workspace.key, { origin: "view", actor: memoryChangeActorSchema.parse(input.actor), baseRevision: development.base });
+      assertMutableChange(change);
+      if (change.claim) throw new Error("cannot add Memory while the ChangeSet is claimed");
+      if (!change.scope.some(scope => scope.path === target.path)) change.scope.push({ reference: target.reference, path: target.path,
+        base_digest: target.base_digest!, added_revision: target.added_revision, added_at: new Date().toISOString() });
+      change.bindings = mergeEmbeddedBindings(change.bindings, development);
+      change.source_worktree = { instance_key: workspace.instanceKey, root: workspace.path,
+        repository_root: store.repository_path, memory_path: store.memory_path };
+      change.updated_at = new Date().toISOString();
+      await writeChange(project, change);
+      return change;
+    });
+  }
   {
     const project = (await resolveProjectContext({
       home: input.home,
@@ -2190,10 +2236,10 @@ export async function archiveMemoryChange(input: {
     })).primary;
     const change = await readReconciledChange(project, input.changeId);
     if (change.status === "active") throw new Error("only terminal ChangeSets can be archived");
-    return archiveChangeDirectory({
-      archiveRoot: project.paths.archiveRoot,
-      changesRoot: project.paths.changesRoot,
-      id: change.id
+    return withCheckpointRecordLock(project.paths.runtimeRoot, change.id, async () => {
+      const current = await readChange(project, change.id);
+      if (current.status === "active") throw new Error("only terminal ChangeSets can be archived");
+      return archiveChangeDirectory({ archiveRoot: project.paths.archiveRoot, changesRoot: project.paths.changesRoot, id: change.id });
     });
   }
 }
@@ -2320,11 +2366,15 @@ export async function deleteMemoryChangeComment(input: {
 export async function claimMemoryChange(input: {
   changeId: string;
   force?: boolean;
+  beforeWrite?: (path: string, index: number) => Promise<void>;
+  beforeMetadataCommit?: () => Promise<void>;
+  afterMetadataCommit?: () => Promise<void>;
 }): Promise<{ change: MemoryChangeSet; candidateRoot: string; warnings: string[] }> {
   const workspace = await resolveWorkspaceIdentity();
   {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     const change = await readOrdinaryChange(context.primary, input.changeId);
+    if (isOrdinaryEmbedded(change)) return claimOrdinaryEmbedded(context, change.id, input);
     if (change.status !== "active") throw new Error(`ChangeSet ${change.id} is already ${change.status}`);
     if (change.project !== context.primary.name) throw new Error(`ChangeSet belongs to Project "${change.project}"`);
     if (change.claim && change.claim.instance_key !== workspace.instanceKey && !input.force) {
@@ -2372,6 +2422,58 @@ export async function claimMemoryChange(input: {
       warnings
     };
   }
+}
+
+async function claimOrdinaryEmbedded(context: ProjectContext, id: string, options: { force?: boolean; beforeWrite?: (path: string, index: number) => Promise<void>; beforeMetadataCommit?: () => Promise<void>; afterMetadataCommit?: () => Promise<void> }) {
+  const project = context.primary, workspace = context.workspace;
+  if (project.config.store.type !== "embedded") throw new Error("Ordinary Embedded claim requires an Embedded Project");
+  const store = project.config.store;
+  const initial = await readChange(project, id);
+  const development = await readEmbeddedDevelopmentContext(workspace, initial.bindings?.pull_requests);
+  // Shared physical admission comes first, matching market/App apply. Context
+  // and record locks then guard the ordinary ChangeSet's metadata and writes.
+  return withMemoryWriteAccess(project.memoryRoot, () => withEmbeddedContextLocks(project.paths.runtimeRoot, development, () => withCheckpointRecordLock(project.paths.runtimeRoot, id, async () => {
+    const change = await readChange(project, id);
+    assertDraftOwner(change, project.name, workspace.key);
+    if (await readEmbeddedWorktreeGeneration(workspace.path) !== development.instanceGeneration) throw new Error("Worktree identity changed during claim; retry");
+    if (change.claim && !embeddedClaimMatches(change, development) && !options.force) throw new Error(`ChangeSet ${id} is already claimed by ${change.claim.root}; use --force to take over an unverified or different worktree claim`);
+    if (embeddedClaimMatches(change, development) && await exists(project.memoryRoot)) return { change, candidateRoot: project.memoryRoot, warnings: ["ChangeSet is already claimed by this Workspace; the existing candidate was preserved"] };
+    let checkpointRoot: string | undefined;
+    if (change.checkpoint) {
+      const frozen = await readCheckpointChange(project, change, true);
+      checkpointRoot = checkpointMemoryRoot(project, id, change.checkpoint.digest);
+      const descriptionFile = join(dirname(checkpointRoot), "checkpoint.json");
+      if (await exists(descriptionFile)) {
+        const description = await readCheckpointDescription(project, id, change.checkpoint.digest, dirname(checkpointRoot));
+        if (description.format_version === 2 && await embeddedAttributesFingerprint(workspace.path, description.material.git_context.attributes_paths) !== description.material.git_context.attributes_fingerprint) {
+          throw new Error(`Git attributes changed since checkpoint; validate --change ${id} before claim`);
+        }
+      }
+      change.targets = frozen.targets;
+    }
+    const prepared = await prepareEmbeddedClaim({ change, root: project.memoryRoot, repositoryRoot: workspace.path,
+      memoryPath: store.memory_path, checkpointRoot });
+    const facts = await readEmbeddedGitFacts(workspace.path);
+    if (facts.head !== development.head || facts.master !== development.master || facts.branch !== development.branch
+      || await readEmbeddedWorktreeGeneration(workspace.path) !== development.instanceGeneration) throw new Error("Git context changed during claim preflight; retry");
+    const written = await prepared.apply(options.beforeWrite);
+    const now = new Date().toISOString();
+    change.bindings = mergeEmbeddedBindings(change.bindings, development);
+    change.source_worktree = { instance_key: workspace.instanceKey, root: workspace.path, repository_root: store.repository_path, memory_path: store.memory_path };
+    change.claim = { workspace_key: workspace.key, instance_key: workspace.instanceKey, root: workspace.path, claimed_at: now };
+    for (const comment of change.comments) if (comment.status === "pending") { comment.status = "processing"; comment.updated_at = now; }
+    change.updated_at = now;
+    const expected = JSON.stringify(memoryChangeSetSchema.parse(change));
+    const warnings: string[] = [];
+    try { await options.beforeMetadataCommit?.(); await writeChangeUnlocked(project, change); await options.afterMetadataCommit?.(); }
+    catch (cause) {
+      const actual = await readChange(project, id).catch(() => undefined);
+      const confirmed = actual !== undefined && JSON.stringify(actual) === expected;
+      if (!confirmed) throw new EmbeddedClaimWriteError({ changeId: id, checkpointDigest: change.checkpoint?.digest, writtenPaths: written, pendingPaths: [], metadataConfirmed: false }, cause);
+      warnings.push("Claim metadata was saved; its acknowledgement failed and was confirmed by re-reading the record");
+    }
+    return { change, candidateRoot: project.memoryRoot, warnings };
+  })));
 }
 
 export async function finishMemoryChange(input: {
@@ -2810,7 +2912,8 @@ async function readSyncConflictCandidate(root: string, path: string): Promise<Bu
 async function applyEmbeddedMarketChange(
   project: ResolvedProject,
   change: MemoryChangeSet,
-  workspace: WorkspaceIdentity
+  workspace: WorkspaceIdentity,
+  afterApply?: () => Promise<void>
 ): Promise<MemoryChangeSet> {
   if (project.config.store.type !== "embedded") throw new Error("Embedded market apply requires an Embedded Project");
   const embeddedStore = project.config.store;
@@ -2854,6 +2957,7 @@ async function applyEmbeddedMarketChange(
       snapshots.set(target.path, { source, mode });
     }
     await applyTargets(project.memoryRoot, checkpointRoot, pendingTargets);
+    await afterApply?.();
     const formalValidation = await validateMemoryRoot(project.memoryRoot);
     if (formalValidation.issues.length > 0) {
       throw new Error(`Embedded market apply validation failed: ${formalValidation.issues[0]?.path}: ${formalValidation.issues[0]?.message}`);
@@ -3268,10 +3372,14 @@ async function readOrdinaryChange(project: ResolvedProject, id: string): Promise
   return readReconciledChange(project, id);
 }
 
-async function readReconciledChange(project: ResolvedProject, id: string): Promise<MemoryChangeSet> {
+async function readReconciledChange(project: ResolvedProject, id: string, beforeCommit?: () => Promise<void>): Promise<MemoryChangeSet> {
   const change = await readChange(project, id);
   const reconciled = await reconcileEmbeddedChange(project, change);
-  if (reconciled !== change) await writeChange(project, reconciled);
+  if (reconciled !== change) {
+    changeReadTokens.set(reconciled, changeReadTokens.get(change)!);
+    await beforeCommit?.();
+    await writeChange(project, reconciled);
+  }
   return reconciled;
 }
 
@@ -3287,6 +3395,10 @@ async function writeChange(project: ResolvedProject, change: MemoryChangeSet, in
       if (isCode(error, "ENOENT")) return undefined;
       throw error;
     });
+    const expected = changeReadTokens.get(change);
+    if (isOrdinaryEmbedded(change) && expected && (!current || checkpointRecordToken(current) !== expected)) {
+      throw Object.assign(new Error(`ChangeSet ${change.id} changed during this operation; retry`), { code: "CHECKPOINT_CONFLICT" });
+    }
     if (current && !invalidateCheckpoint) {
       if (change.checkpoint?.digest !== current.checkpoint?.digest) {
         if (current.candidate_revision) change.candidate_revision = current.candidate_revision;
@@ -3395,9 +3507,10 @@ async function revisionMatchesCheckpoint(
     }
     const candidatePath = join(candidateRoot, target.path);
     if (!await exists(candidatePath)) return false;
-    const candidateDigest = await gitOutput(
-      ["hash-object", "--", candidatePath],
-      source.repository_root
+    const candidateDigest = target.candidate_blob_digest ?? await gitHashObject(
+      // v1 ordinary evidence only proved the raw candidate bytes. Applying today's
+      // path filters would invent a historical blob and could falsely complete X.
+      await readFile(candidatePath), source.repository_root, isOrdinaryEmbedded(change) ? undefined : destinationPath
     ).catch(() => undefined);
     if (!candidateDigest || destinationDigest !== candidateDigest) return false;
     if (target.operation === "rename") {

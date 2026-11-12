@@ -92,6 +92,7 @@ import {
   type MemoryChangeSet
 } from "../memory/changeset.js";
 import { readBundledSystemMemories } from "../reserved/store.js";
+import { EmbeddedChangeAmbiguityError } from "../memory/embedded-bindings.js";
 import {
   countMemoryMarket,
   listMemoryMarket,
@@ -1910,6 +1911,8 @@ async function memoryChangeSummary(change: MemoryChangeSet): Promise<unknown> {
     issues: change.checkpoint?.issues ?? [],
     counts,
     targetCount: change.targets.length,
+    bindings: change.bindings,
+    emptyCandidate: Boolean(change.checkpoint) && change.targets.length === 0 && change.bindings !== undefined,
     scopeCount: change.scope.length,
     memoryPaths: [...new Set([
       ...change.scope.map((item) => item.path),
@@ -1979,6 +1982,10 @@ function normalizeMemoryChangeLocation(input: unknown): { anchor: string; line?:
 
 function sendMemoryChangeError(response: ServerResponse, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof EmbeddedChangeAmbiguityError) {
+    sendJson(response, 409, { code: error.code, error: message, candidates: error.candidates });
+    return;
+  }
   if (error instanceof MemoryChangeIntegrityError) {
     sendJson(response, 500, { code: error.code, error: message });
     return;

@@ -193,13 +193,15 @@ defines:
 
 Managed 删除/改名使用 `memory delete <references...>`、`memory rename <reference> <new-canonical-name>`，需要时用 `--change <id>` 追加同一候选；改 canonical 不自动移动物理文件。当前这两个命令不支持 Embedded：在其有效 worktree 中审阅并删除文件或修改 YAML 的 names，必要的文件移动走正常 Git 操作，然后统一变更级校验与集成。Mounted 不可写。
 
-本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [change-id]`，记录 ChangeSet ID、checkpoint digest、校验状态和 View 入口；后续再改则重新校验。校验回执提供实际 reviewCommand，评审材料列出它及相关逻辑引用，按需使用 part 读取证据；无需将 Memory 全文复制进 Artifact 或访问内部存储文件。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet，稀疏 candidate/checkpoint 不是完整 Memory Root，不能拿它调用 `validate --memory-root`。
+普通 Embedded 的首次 `memory change validate` 自动建立 ChangeSet；后续 commit、amend、rebase 或合并 master 继续同一轮修改，不要求独立 create/finish/commit 操作。校验比较本地 `merge-base master HEAD` 与最终工作树。按 PR、分支、未建分支时的 worktree 识别 active ChangeSet；出现歧义时阅读候选并用 `--change <id>` 选择，不能按 HEAD 相同或 worktree 路径猜归属；临时 worktree 关联须核实目录及创建身份，Git 回收目录后重建的工作区不得静默继承旧记录。旧 `validate <id>` 位置写法已移除。PR 发现 unknown 不妨碍本地校验；已有记录撤回为空候选仍 active，invalid 修复沿用同 ID，确认合入 master 才完成。
+
+本轮只要创建、编辑、移动、重命名或删除任何 Memory，评审、提交或交付前都必须对最终内容执行 `memsphere memory change validate [--change <id>]`，记录 ChangeSet ID、checkpoint digest、校验状态和 View 入口；后续再改则重新校验。校验回执提供实际 reviewCommand，评审材料列出它及相关逻辑引用，按需使用 part 读取证据；无需将 Memory 全文复制进 Artifact 或访问内部存储文件。`memsphere validate` 只校验 Store，不能代替变更级校验。没有 Memory 差异不建空 ChangeSet，稀疏 candidate/checkpoint 不是完整 Memory Root，不能拿它调用 `validate --memory-root`。
 
 Managed 通过校验后 `memory publish --change <id>` 发布并完成 ChangeSet；远端推送和上游同步按需用 `memory push`、`memory sync` 及对应 publish，冲突按回执处理，不强推。Embedded 普通变更走所在仓库的 commit/PR/集成流程；commit、push、PR 不等于 completed，进入 master 后才完成。专用系统升级按“升级与维护”执行。
 
 ### 处理 ChangeSet 修改意见
 
-Human 可在 View 的 ChangeSet 中添加 Memory 与 Comment；这些是修改意见，不是 Artifact Review 的 Round/Vote。接手其 ID 时先读 `memsphere-changeset-comment-processing`，在当前 Workspace `memory change claim <id>`。已有 claim 时不抢占，只有 Human 明确要求接手才用 `--force`。逐条判断，合理则改候选并 `memory change validate <id>`；不合理则保留原内容并说明理由。
+Human 可在 View 的 ChangeSet 中添加 Memory 与 Comment；这些是修改意见，不是 Artifact Review 的 Round/Vote。接手其 ID 时先读 `memsphere-changeset-comment-processing`，在当前 Workspace `memory change claim <id>`。已有 claim 时不抢占，只有 Human 明确要求接手才用 `--force`。逐条判断，合理则改候选并 `memory change validate --change <id>`；不合理则保留原内容并说明理由。
 
 `memory change finish <id> --comment <全部 processing Comment ID...> --reason fixed` 要求当前候选校验通过，并一次完成全部 processing 意见、释放 claim；全部拒绝时使用 rejected，不伪造内容变更。当前 CLI 对整个批次只接受一个 reason，不能分批逐条 finish；若同时有 fixed/rejected 两类结论，保留现场、说明该限制并请 Human 决定，不伪造统一结论或手改状态。无实际差异且意见均完成时可 `memory change complete <id>`；存在实际修改时按 Store 类型发布或集成，不能把 finish 当作发布完成。
 
@@ -286,7 +288,7 @@ Agent Actor 指向 Home ACP Provider 实例和可选 model，Provider 当前支�
 Managed 系统升级使用专用 ChangeSet，校验后发布，无差异不创建空记录。Embedded 系统升级按以下路径完成：
 
 1. 保留原工作区，在目标仓库从 `refs/heads/master` 建独立升级分支和 linked worktree；未绑定时用显式项目名。缺 master 时说明当前限制，不擅自创建或改名集成分支。模型与登记仍是 Project 共享状态。
-2. 在升级 worktree 执行 `project upgrade <name> --output json`，检查各阶段、专用 ChangeSet ID、校验与 View 入口。失败须说明已完成部分，修正后在同 worktree 用 `project upgrade <name> --change <id>` 重试；仅重新校验可用 `memory change validate <id>`。不通过 claim、添加无关范围或手动 complete 操作专用升级记录。
+2. 在升级 worktree 执行 `project upgrade <name> --output json`，检查各阶段、专用 ChangeSet ID、校验与 View 入口。失败须说明已完成部分，修正后在同 worktree 用 `project upgrade <name> --change <id>` 重试；仅重新校验可用 `memory change validate --change <id>`。不通过 claim、添加无关范围或手动 complete 操作专用升级记录。
 3. 审阅差异与 index，按已有授权只提交本次升级目标，记录分支、worktree、ChangeSet 和 commit；无变化不空提交。按仓库流程提交 PR、合入 master，未授权的合入由 Human 决定；冲突解决后重新验证最终 Memory。
 4. `integrationStatus=pending` 表示准备/校验及模型阶段成功，committed 表示已提交，integrated 才表示已集成。创建 PR 不代表主分支完成升级；专用 ChangeSet 在内容匹配且进入 master 后才 completed。
 
