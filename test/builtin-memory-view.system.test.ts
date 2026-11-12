@@ -184,7 +184,7 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
       return json(response, { comment: { id: `comment-${submittedComments.length}`, ...submittedComment } });
     }
     if (url.pathname === "/api/changes/change-diff") return json(response, {
-      change: { id: "change-diff", status: "active", valid: true, baseRevision: "1234567890", digest: "abcdef1234", memoryPaths: ["statements/delivery.yaml", "procedures/delivery.yaml"] },
+      change: { id: "change-diff", status: "active", valid: true, baseRevision: "1234567890", digest: "abcdef1234", bindings: { pull_requests: [{ host: "github.com", repository: "billtenor/memsphere", number: 155 }], branches: [{ ref: "refs/heads/codex/issue-153-embedded-changeset" }] }, memoryPaths: ["statements/delivery.yaml", "procedures/delivery.yaml"] },
       targetMemories: [{
         reference: "statements/delivery",
         operation: "update",
@@ -260,7 +260,19 @@ test("Memory builtin compares a real ChangeSet with the existing Memory renderer
     const removedPlus = removedSuggestion.locator(".memory-inline-plus");
     assert.equal(await removedPlus.count(), 0, "baseline-only content cannot target a candidate Comment");
     const viewbar = page.locator(".memory-change-viewbar");
-    assert.match(await viewbar.innerText(), /Diff\s+Full content\s+base\s+1234567\s+candidate\s+abcdef1/);
+    assert.match(await viewbar.innerText(), /Diff\s+Full content\s+1234567\s+abcdef1/);
+    const associations = viewbar.locator("details");
+    assert.equal(await associations.getAttribute("open"), null, "ChangeSet associations start collapsed");
+    assert.equal(await viewbar.locator(".memory-panel").count(), 0);
+    await associations.locator("summary").focus();
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => document.querySelector<HTMLDetailsElement>(".memory-change-associations")?.open);
+    assert.deepEqual(await associations.locator("dt").allTextContents(), ["MR", "Branch"]);
+    assert.equal(await associations.getByRole("link").getAttribute("href"), "https://github.com/billtenor/memsphere/pull/155");
+    assert.doesNotMatch(await associations.innerText(), /refs\/heads\//);
+    await page.keyboard.press("Enter");
+    await page.waitForFunction(() => !document.querySelector<HTMLDetailsElement>(".memory-change-associations")?.open);
+
     assert.equal(await viewbar.evaluate(node => node.getBoundingClientRect().top < (node.nextElementSibling?.getBoundingClientRect().top ?? 0)), true);
     const breadcrumbButtons = page.locator(".view-shell-breadcrumbs button");
     assert.deepEqual(await breadcrumbButtons.allTextContents(), ["Memory", "ChangeSets"]);

@@ -92,7 +92,7 @@ flow:
           - 人工参与者描述自己的流程时，第一次修改创建或定位记忆变更集；后续修改继续使用同一个记忆变更集。
           - 人工参与者提供记忆市场导入生成的记忆变更集 ID 时，认领并使用这个记忆变更集，不得另建记忆变更集。
           - 有待处理修改意见时，先认领当前记忆变更集，根据修改意见修改候选内容，重新校验，再完成已处理的修改意见。
-          - 使用 `memsphere memory change validate [change-id]`；普通 `memsphere validate` 不能代替。
+          - 使用 `memsphere memory change validate [--change <id>]`；普通 `memsphere validate` 不能代替。
           - 智能体负责编辑 YAML，人工参与者不需要查看或手写 YAML。
         artifact: !artifact
           name: 已校验的个性化流程记忆

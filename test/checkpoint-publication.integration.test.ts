@@ -80,3 +80,22 @@ test("A stale validation token rejects publication without overwriting updated c
   assert.deepEqual(JSON.parse(await readFile(f.record, "utf8")), { digest: f.d0, scope: ["new-scope"] });
   await f.verify(join(f.versions, f.d0));
 });
+
+test("ordinary publication retains history and same-digest binding metadata still requires the current token", async t => {
+  const f = await fixture(t);
+  await publishCheckpoint({ ...f.input(f.d1), retainHistory: true, commitSameDigest: true });
+  assert.equal(await readFile(join(f.versions, f.d0, "memory/body.yaml"), "utf8"), "Old");
+  const current = await f.readCurrent();
+  await writeFile(f.record, JSON.stringify({ digest: f.d1, bindings: ["concurrent"] }));
+  await assert.rejects(publishCheckpoint({ ...f.input(f.d1), expectedToken: current.token, commitSameDigest: true, retainHistory: true }), { code: "CHECKPOINT_CONFLICT" });
+  assert.deepEqual(JSON.parse(await readFile(f.record, "utf8")).bindings, ["concurrent"]);
+});
+
+test("same digest cannot confirm failed binding metadata solely from the checkpoint pointer", async t => {
+  const f = await fixture(t);
+  await publishCheckpoint({ ...f.input(f.d1), retainHistory: true });
+  const current = await f.readCurrent();
+  await assert.rejects(publishCheckpoint({ ...f.input(f.d1), expectedToken: current.token, commitSameDigest: true, retainHistory: true,
+    commit: async () => { throw new Error("binding metadata failed"); }, confirmCommit: async () => false }), /binding metadata failed/);
+  assert.equal((await f.readCurrent()).digest, f.d1);
+});

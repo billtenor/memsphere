@@ -108,6 +108,9 @@ const fallbackMessages: Readonly<Record<string, string>> = Object.freeze({
   "change.select": "选择一个记忆变更。",
   "change.search": "搜索记忆变更",
   "change.empty": "没有记忆变更。",
+  "change.emptyCandidate": "本轮没有净变更；ChangeSet 仍可继续修改。",
+  "change.bindings": "关联信息",
+  "change.branch": "分支",
   "change.comments": "修改意见",
   "change.collapseComments": "收起意见",
   "change.expandComments": "展开意见",
@@ -388,11 +391,21 @@ const memoryStyles = `
   .memory-change-layout { display:grid; min-width:0; grid-template-columns:minmax(0,1fr) minmax(220px,260px); gap:14px; align-items:start; }
   .memory-change-main { width:100%; min-width:0; justify-self:stretch; }
   .memory-diff-toolbar { display:inline-grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:3px; margin:2px 0 14px; padding:3px; border:1px solid var(--line); border-radius:7px; background:var(--soft); }
-  .memory-change-viewbar { display:flex; min-width:0; align-items:center; justify-content:center; gap:14px; margin:0 0 12px; flex-wrap:wrap; }
+  .memory-change-viewbar { display:flex; min-width:0; align-items:center; justify-content:space-between; gap:14px; margin:0 0 16px; flex-wrap:wrap; }
   .memory-change-viewbar .memory-diff-toolbar { flex:0 0 auto; margin:0; }
   .memory-change-revisions { display:flex; min-width:0; align-items:center; justify-content:center; gap:9px; color:var(--muted); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
-  .memory-change-revision { display:grid; gap:1px; }
-  .memory-change-revision span { font-size:var(--memory-page-text-meta); letter-spacing:.03em; }
+  .memory-change-associations { min-width:0; max-width:100%; margin-left:auto; }
+  .memory-change-associations summary { display:flex; align-items:center; justify-content:flex-end; gap:18px; cursor:pointer; list-style:none; }
+  .memory-change-associations summary::-webkit-details-marker { display:none; }
+  .memory-change-associations summary:focus-visible { outline:2px solid var(--mem-view-color-focus-ring); outline-offset:4px; border-radius:4px; }
+  .memory-change-associations-label { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:var(--memory-page-text-label); white-space:nowrap; }
+  .memory-change-associations-label::after { content:""; width:6px; height:6px; border-right:1px solid currentColor; border-bottom:1px solid currentColor; transform:rotate(45deg); margin-top:-3px; }
+  .memory-change-associations[open] .memory-change-associations-label::after { transform:rotate(225deg); margin-top:3px; }
+  .memory-change-associations-body { display:grid; grid-template-columns:auto minmax(0,1fr); gap:8px 14px; margin:14px 0 0; padding-top:12px; border-top:1px solid var(--line); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-body); }
+  .memory-change-associations-body dt { color:var(--muted); }
+  .memory-change-associations-body dd { margin:0; overflow-wrap:anywhere; }
+  .memory-change-associations-body a { color:var(--accent); text-decoration:none; }
+  .memory-change-associations-body a:hover { text-decoration:underline; }
   .memory-change-revision code { color:var(--muted); font-family:var(--memory-page-font-mono); font-size:var(--memory-page-text-meta); line-height:var(--memory-page-line-compact); }
   .memory-change-revision-arrow { width:12px; height:12px; opacity:.62; transform:rotate(-90deg); }
   .memory-diff-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); background:var(--mem-view-color-subtle); padding:9px 11px; color:var(--muted); font-size:var(--memory-page-text-label); line-height:var(--memory-page-line-compact); }
@@ -462,7 +475,7 @@ const memoryStyles = `
   .memory-comment-target:hover { color:var(--accent); text-decoration:underline; text-underline-offset:2px; }
   .memory-comment-body { margin:8px 0 0; color:var(--text); font-size:var(--memory-page-text-body); line-height:var(--memory-page-line-body); white-space:pre-wrap; overflow-wrap:anywhere; }
   .memory-comment-actions { display:flex; justify-content:flex-end; gap:6px; margin-top:9px; padding-top:8px; border-top:1px solid var(--mem-view-color-border); }
-  @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-change-layout{display:block}.memory-change-main{width:auto}.memory-change-viewbar{align-items:flex-start;flex-direction:column}.memory-comments{position:static;top:auto;height:auto;max-height:none;margin:14px 0 0;border:1px solid var(--line);border-radius:var(--memory-page-radius-section)}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
+  @media(max-width:820px){.memory-layout{display:block}.memory-sidebar{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line)}.memory-change-layout{display:block}.memory-change-main{width:auto}.memory-change-viewbar{align-items:stretch;flex-direction:column}.memory-comments{position:static;top:auto;height:auto;max-height:none;margin:14px 0 0;border:1px solid var(--line);border-radius:var(--memory-page-radius-section)}.memory-section-body{padding:4px 12px 14px}.memory-flow-head{display:grid}.memory-artifact-row{margin-left:0}}
   @container mem-page-layout (max-width:560px) {
     .memory-change-layout { display:block; }
     .memory-panel { padding:12px; }
@@ -471,7 +484,9 @@ const memoryStyles = `
     .memory-review-complete .mem-view-button { white-space:normal; }
     .memory-collapsible-list>summary { min-width:0; flex-wrap:wrap; }
 
-    .memory-change-viewbar { align-items:flex-start; flex-direction:column; }
+    .memory-change-viewbar { align-items:stretch; flex-direction:column; }
+    .memory-change-associations { margin-left:0; }
+    .memory-change-associations summary { justify-content:space-between; gap:10px; }
     .memory-comments { position:static; top:auto; height:auto; max-height:none; margin:14px 0 0; border:1px solid var(--line); border-radius:var(--memory-page-radius-section); }
   }
 `;
@@ -900,10 +915,12 @@ function createMemoryPageMounts(
           element.replaceChildren();
         };
       }
+      mountPortal.append(portal!);
       app!.attachDetail(element);
       await updateRoute(context.route);
       return () => {
         app?.detachDetail(element);
+        if (portal?.parentElement === mountPortal) portal.remove();
         clearHeaderActions();
         element.classList.remove("memory-surface", `memory-${surface}-surface`);
         element.replaceChildren();
@@ -966,6 +983,7 @@ class MemoryApplication {
   #generation = 0;
   #fatalError: unknown = null;
   readonly #expandedRelated = new Set<string>();
+  readonly #expandedChangeAssociations = new Set<string>();
   readonly #disclosures = new DisclosureState();
   readonly #graphRuleDisclosures = new DisclosureState();
   readonly #disclosureShapes = new Map<string, { signature: string; version: number }>();
@@ -1150,11 +1168,9 @@ class MemoryApplication {
               baseMemory: base
             } as MemorySummary;
           });
-          if (targets.length) {
-            this.#memories = targets;
-            this.#selectedId = targets.some(item => item.id === this.#selectedId) ? this.#selectedId : targets[0]?.id ?? "";
-            this.#reviewedMemoryIds = this.readReviewedMemories(route.changeId);
-          }
+          this.#memories = targets;
+          this.#selectedId = targets.some(item => item.id === this.#selectedId) ? this.#selectedId : targets[0]?.id ?? "";
+          this.#reviewedMemoryIds = this.readReviewedMemories(route.changeId);
         } catch (error) {
           this.#changeDetail = { error: errorMessage(error), change: this.#changes.find(item => item.id === route.changeId) ?? { id: route.changeId, status: "unavailable" } };
         }
@@ -1426,7 +1442,7 @@ class MemoryApplication {
       label: text(title),
       header: this.listHeader(title, refresh),
       filter: this.listFilter(this.t("change.search")),
-      empty: { title: text(this.t("change.empty")) },
+      empty: { title: text(this.t(change?.emptyCandidate ? "change.emptyCandidate" : "change.empty")) },
       sections: [{
         id: "change-targets",
         items: visible.map(memory => {
@@ -1855,21 +1871,54 @@ class MemoryApplication {
     const layout = el("div", `memory-change-layout${this.#commentsCollapsed ? " comments-collapsed" : ""}`);
     if (!this.#commentsCollapsed) layout.dataset.memPageLayoutEdge = "";
     const main = el("div", "memory-change-main");
+    if (change.emptyCandidate) main.append(el("p", "memory-list-empty", this.t("change.emptyCandidate")));
     const selected = this.#memories.find(memory => memory.id === this.#selectedId);
+    const viewbar = el("div", "memory-change-viewbar");
     if (selected) {
-      const viewbar = el("div", "memory-change-viewbar");
       const mode = this.#ui.segmentedControl({label:text(this.t("change.title")),selectedId:this.#changeContentMode,items:[{id:"diff",label:text(this.t("change.diff"))},{id:"candidate",label:text(this.t("change.candidateContent"))}],onSelect:id=>{this.#changeContentMode=id as "diff"|"candidate";this.render();}});
       mode.classList.add("memory-diff-toolbar");
-      const revisions = el("div", "memory-change-revisions");
-      revisions.append(changeRevision("base", String(change.baseRevision ?? "")));
-      const arrow = document.createElement("img");
-      arrow.className = "memory-change-revision-arrow";
-      arrow.src = "/assets/system-icons/caret-down.svg";
-      arrow.alt = "";
-      revisions.append(arrow, changeRevision("candidate", String(change.candidateRevision ?? change.digest ?? "")));
-      viewbar.append(mode, revisions);
-      main.append(viewbar);
+      viewbar.append(mode);
     }
+    const revisions = el("div", "memory-change-revisions");
+    revisions.append(changeRevision("base", String(change.baseRevision ?? "")));
+    const arrow = document.createElement("img");
+    arrow.className = "memory-change-revision-arrow";
+    arrow.src = "/assets/system-icons/caret-down.svg";
+    arrow.alt = "";
+    revisions.append(arrow, changeRevision("candidate", String(change.candidateRevision ?? change.digest ?? "")));
+    const bindings = change.bindings as JsonRecord | undefined;
+    const pullRequests = array(bindings?.pull_requests);
+    const branches = array(bindings?.branches);
+    if (pullRequests.length || branches.length) {
+      const associations = document.createElement("details");
+      associations.className = "memory-change-associations";
+      const associationKey = JSON.stringify([this.#currentProject, change.id]);
+      associations.open = this.#expandedChangeAssociations.has(associationKey);
+      associations.addEventListener("toggle", () => {
+        if (!associations.isConnected) return;
+        if (associations.open) this.#expandedChangeAssociations.add(associationKey);
+        else this.#expandedChangeAssociations.delete(associationKey);
+      });
+      const summary = document.createElement("summary");
+      summary.append(revisions, el("span", "memory-change-associations-label", this.t("change.bindings")));
+      const body = el("dl", "memory-change-associations-body");
+      for (const pr of pullRequests) {
+        const value = el("dd");
+        const link = document.createElement("a");
+        link.textContent = `${pr.repository}#${pr.number}`;
+        link.href = `https://${pr.host}/${pr.repository}/pull/${pr.number}`;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        value.append(link);
+        body.append(el("dt", "", "MR"), value);
+      }
+      for (const branch of branches) body.append(el("dt", "", this.t("change.branch")), el("dd", "", String(branch.ref).replace(/^refs\/heads\//, "")));
+      associations.append(summary, body);
+      viewbar.append(associations);
+    } else {
+      viewbar.append(revisions);
+    }
+    main.prepend(viewbar);
     if (selected?.error) main.append(errorWorkspace(memoryName(selected), errorMessage(selected.error)));
     else if (selected) {
       const panel = el("section", "memory-panel"); panel.append(el("h3", "", memoryName(selected)), renderMeta(selected));
@@ -3103,7 +3152,8 @@ function appendStringList(parent: HTMLElement, key: string, values: unknown[], p
 
 function changeRevision(label: string, revision: string): HTMLElement {
   const item = el("span", "memory-change-revision");
-  item.append(el("span", "", label), el("code", "", revision.slice(0, 7) || "—"));
+  item.setAttribute("aria-label", `${label}: ${revision || "—"}`);
+  item.append(el("code", "", revision.slice(0, 7) || "—"));
   return item;
 }
 
