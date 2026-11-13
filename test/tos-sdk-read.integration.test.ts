@@ -4,7 +4,7 @@ import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
 import { bindTosClient } from "../src/data/extensions/tos-datastore/client.js";
 import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
 import { readAll } from "../src/data/extensions/shared/payload.js";
-import { fixture, gate } from "./support/tos-sdk-http.js";
+import { fixture, gate, responseChunk } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
 const config = (mode: "raw" | "revision") => ({ mode, region:"cn-beijing",endpoint:"tos-cn-beijing.volces.com",bucket:"probe-bucket",prefix:"test/",credentials:{source:"settings" as const,id:"fixture"} });
@@ -48,18 +48,18 @@ for (const operation of ["get","has","delete"] as const) for (const disappears o
 
 for (const operation of ["get","has","delete"] as const) for (const cancellation of ["signal","deadline"] as const) {
   test(`SDK raw ${operation}: diagnostic error body ${cancellation} closes without DELETE`,settings,async t=>{
-    const first=gate(),closed=gate(),methods:string[]=[];
+    const first=gate(),closed=gate(),methods:string[]=[],consumed=responseChunk(t,"diagnostic-body");
     const f=await fixture(t,(request,response)=>{
       methods.push(request.method!);
       if(request.method === "HEAD") {response.writeHead(404);response.end();return;}
-      response.once("close",closed.resolve);response.writeHead(403,{"content-type":"application/json"});response.write('{"Code":"AccessDenied",');first.resolve();
+      response.once("close",closed.resolve);response.writeHead(403,{"content-type":"application/json","x-tos-request-id":"diagnostic-body"});response.write('{"Code":"AccessDenied",');first.resolve();
     });
     const controller=f.controller();
     if(cancellation === "deadline") t.mock.timers.enable({apis:["setTimeout"]});
     try {
       const store=new TosDataStore("store","file.json",config("raw"),bindTosClient(f.sdk,"probe-bucket"));
       const rejected=assert.rejects(invoke(store,operation,{signal:controller.signal}),{code:cancellation === "signal" ? "ABORTED" : "TOS_DEADLINE"});
-      await first.promise;if(cancellation === "signal") controller.abort();else t.mock.timers.tick(120001);
+      await Promise.all([first.promise,consumed]);if(cancellation === "signal") controller.abort();else t.mock.timers.tick(120001);
       await rejected;await closed.promise;assert.deepEqual(methods,["HEAD","GET"]);
     } finally {controller.abort();if(cancellation === "deadline") t.mock.timers.reset();}
   });

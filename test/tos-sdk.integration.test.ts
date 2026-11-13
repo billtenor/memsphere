@@ -3,7 +3,7 @@ import test, { type TestContext } from "node:test";
 import { Readable } from "node:stream";
 import { ContextTosSdk, readBounded } from "../src/data/extensions/tos-datastore/context-sdk.js";
 
-import { fixture, gate } from "./support/tos-sdk-http.js";
+import { fixture, gate, responseChunk } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
 
@@ -56,6 +56,7 @@ test("only abort closes returned Payload and connection before fallback cleanup"
 
 for (const status of [200, 403]) for (const cancel of ["signal", "deadline"] as const) {
   test(`SDK ${status === 200 ? "LIST JSON" : "error body"} reading honours ${cancel} and isolates its peer`, settings, async t => {
+    const consumed = responseChunk(t,"local-body");
     const first = gate(), closed = gate(), peerStarted = gate(); let requested = 0, peerClosed = false;
     const f = await fixture(t, (request, response) => {
       requested++;
@@ -81,7 +82,7 @@ for (const status of [200, 403]) for (const cancel of ["signal", "deadline"] as 
       const peer = await f.sdk.operate({}, [200], () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "peer" }),
         { responseStream: value => value.data.content as Readable, timeoutMs: 240_000 });
       const peerBody = readBounded(f.track(peer.data.content as Readable), 10);
-      await Promise.all([first.promise, peerStarted.promise]);
+      await Promise.all([first.promise, peerStarted.promise, consumed]);
       if (cancel === "signal") controller.abort(); else t.mock.timers.tick(120_000);
       await rejected;
       await closed.promise;

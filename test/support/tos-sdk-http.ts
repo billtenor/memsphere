@@ -40,3 +40,15 @@ export async function fixture(t: TestContext, handle: http.RequestListener, cred
     track(stream: Readable) { streams.push(stream); stream.on("error", () => undefined); return stream; }
   };
 }
+
+
+/** Observe actual client consumption without completing or replacing the body. */
+export function responseChunk(t: TestContext, requestId: string) {
+  const consumed = gate(), read = http.IncomingMessage.prototype.read;
+  t.mock.method(http.IncomingMessage.prototype, "read", function(this: http.IncomingMessage, ...args: Parameters<typeof read>) {
+    const chunk = read.apply(this,args);
+    if (this.headers["x-tos-request-id"] === requestId && chunk?.length) consumed.resolve();
+    return chunk;
+  });
+  return consumed.promise;
+}
