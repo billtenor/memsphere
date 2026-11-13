@@ -20,7 +20,7 @@ export function parseTosConfig(config: Config): TosConfig {
   const raw = config.json;
   fields(raw, ["region", "endpoint", "bucket", "prefix", "mode", "credentials"]);
   const region = text(raw.region, "region"), endpoint = text(raw.endpoint, "endpoint"), bucket = text(raw.bucket, "bucket"), prefix = text(raw.prefix, "prefix");
-  if (!/^[a-z][a-z0-9-]+$/.test(region) || !/^tos-[a-z0-9-]+\.(?:i?volces\.com)$/.test(endpoint)) throw new TypeError("Invalid native TOS region/endpoint");
+  if (!/^[a-z][a-z0-9-]+$/.test(region) || ![`tos-${region}.volces.com`, `tos-${region}.ivolces.com`].includes(endpoint)) throw new TypeError("Invalid native TOS region/endpoint");
   if (!/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket)) throw new TypeError("Invalid TOS bucket");
   if (Buffer.byteLength(prefix, "utf8") >= 1024) throw new TypeError("TOS prefix leaves no room for a record key");
   if (!prefix.endsWith("/")) throw new TypeError("TOS prefix must end with /");

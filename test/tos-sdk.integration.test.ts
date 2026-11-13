@@ -1,46 +1,9 @@
-// @integration-platform: native — verifies the official SDK over real local HTTP sockets.
 import assert from "node:assert/strict";
-import http from "node:http";
-import type { Socket } from "node:net";
 import test, { type TestContext } from "node:test";
 import { Readable } from "node:stream";
 import { ContextTosSdk, readBounded } from "../src/data/extensions/tos-datastore/context-sdk.js";
 
-function gate() {
-  let resolve!: () => void;
-  const promise = new Promise<void>(done => { resolve = done; });
-  return { promise, resolve };
-}
-
-async function fixture(t: TestContext, handle: http.RequestListener, credentials: { stsToken?: string } = {}) {
-  const sockets = new Set<Socket>();
-  const server = http.createServer(handle);
-  const controllers: AbortController[] = [];
-  const streams: Readable[] = [];
-  const gates: ReturnType<typeof gate>[] = [];
-  server.on("connection", socket => { sockets.add(socket); socket.once("close", () => sockets.delete(socket)); });
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  t.after(async () => {
-    for (const controller of controllers) controller.abort();
-    for (const value of gates) value.resolve();
-    for (const stream of streams) stream.destroy();
-    const closing = [...sockets].map(socket => new Promise<void>(resolve => socket.once("close", () => resolve())));
-    for (const socket of sockets) socket.destroy();
-    await new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
-    await Promise.all(closing);
-    assert.equal(sockets.size, 0);
-  });
-  const address = server.address();
-  assert.ok(address && typeof address !== "string");
-  const sdk = new ContextTosSdk({ ...credentials, accessKeyId: "fake-ak", accessKeySecret: "fake-sk", region: "cn-beijing",
-    endpoint: `127.0.0.1:${address.port}`, secure: false, maxRetryCount: 0, requestTimeout: 5000, connectionTimeout: 5000 });
-  return {
-    sdk,
-    gate() { const value = gate(); gates.push(value); return value; },
-    controller() { const value = new AbortController(); controllers.push(value); return value; },
-    track(stream: Readable) { streams.push(stream); stream.on("error", () => undefined); return stream; }
-  };
-}
+import { fixture, gate } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
 
@@ -93,11 +56,13 @@ test("only abort closes returned Payload and connection before fallback cleanup"
 
 for (const status of [200, 403]) for (const cancel of ["signal", "deadline"] as const) {
   test(`SDK ${status === 200 ? "LIST JSON" : "error body"} reading honours ${cancel} and isolates its peer`, settings, async t => {
-    const first = gate(), closed = gate(); let requested = 0;
+    const first = gate(), closed = gate(), peerStarted = gate(); let requested = 0, peerClosed = false;
     const f = await fixture(t, (request, response) => {
       requested++;
       if (request.url!.includes("peer")) {
-        response.setHeader("etag", '"peer"'); response.end("peer"); return;
+        response.on("close", () => { peerClosed = true; });
+        response.setHeader("etag", '\"peer\"'); response.write("pe"); peerStarted.resolve();
+        void peerGate.promise.then(() => response.end("er")); return;
       }
       response.on("close", closed.resolve);
       response.writeHead(status, { "content-type": "application/json", "x-tos-request-id": "local-body" });
@@ -105,6 +70,7 @@ for (const status of [200, 403]) for (const cancel of ["signal", "deadline"] as 
       first.resolve(); // Remaining body deliberately never finishes before cancellation.
     });
     const controller = f.controller();
+    const peerGate = f.gate();
     if (cancel === "deadline") t.mock.timers.enable({ apis: ["setTimeout"] });
     try {
       const action = status === 200
@@ -112,13 +78,16 @@ for (const status of [200, 403]) for (const cancel of ["signal", "deadline"] as 
         : () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "denied" });
       const operation = f.sdk.operate({ signal: controller.signal }, [200], action, { timeoutMs: 120_000 });
       const rejected = assert.rejects(operation, { code: cancel === "signal" ? "ABORTED" : "TOS_DEADLINE" });
-      await first.promise;
+      const peer = await f.sdk.operate({}, [200], () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "peer" }),
+        { responseStream: value => value.data.content as Readable, timeoutMs: 240_000 });
+      const peerBody = readBounded(f.track(peer.data.content as Readable), 10);
+      await Promise.all([first.promise, peerStarted.promise]);
       if (cancel === "signal") controller.abort(); else t.mock.timers.tick(120_000);
       await rejected;
       await closed.promise;
-      const peer = await f.sdk.operate({}, [200], () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "peer" }),
-        { responseStream: value => value.data.content as Readable });
-      assert.equal((await readBounded(f.track(peer.data.content as Readable), 10)).toString(), "peer");
+      assert.equal(peerClosed, false, "Cancelling A must leave the in-flight B response open");
+      peerGate.resolve();
+      assert.equal((await peerBody).toString(), "peer");
       assert.equal(requested, 2);
     } finally { if (cancel === "deadline") t.mock.timers.reset(); }
   });
@@ -143,25 +112,40 @@ test("production object client sends only one conditional PUT and owns the compl
   assert.deepEqual(methods, ["PUT"]);
 });
 
-for (const status of [200, 403, 412]) test(`early ${status} response cannot acknowledge a stalled Payload and closes its upstream`, settings, async t => {
+async function assertEarlyResponse(t: TestContext, status: number, waitForEof = true) {
   const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
-  const started = gate(), cancelled = gate(), replied = gate();
-  const f = await fixture(t, (_request, response) => { response.writeHead(status); response.end(status === 412 ? JSON.stringify({ Code: "PreconditionFailed" }) : status === 403 ? JSON.stringify({ Code: "AccessDenied" }) : ""); replied.resolve(); });
-  const data = { id: "item", model: "file.json", payload: { contentType: "text/plain", content: { stream: () => new ReadableStream<Uint8Array>({ pull() { started.resolve(); return new Promise<void>(() => undefined); }, cancel() { cancelled.resolve(); } }) } } };
-  const body = f.track(createTosUploadBody({}, data, Buffer.from("header")));
+  const started = gate(), cancelled = gate(), handled = gate();
+  const f = await fixture(t, (request, response) => { request.once("data", () => {
+    response.writeHead(status); response.end(status === 412 ? JSON.stringify({ Code: "PreconditionFailed" }) : status === 403 ? JSON.stringify({ Code: "AccessDenied" }) : "");
+  }); });
+  let supplied = false;
+  const data = { id: "item", model: "file.json", payload: { contentType: "text/plain", content: { stream: () => new ReadableStream<Uint8Array>({
+    pull(output) { if (!supplied) { supplied = true; output.enqueue(Buffer.from("first")); started.resolve(); return; } return new Promise<void>(() => undefined); },
+    cancel() { cancelled.resolve(); }
+  }) } } };
+  const body = f.track(createTosUploadBody({}, data));
   const controller = f.controller();
   let fulfilled = false;
-  const writing = f.sdk.operate({ signal: controller.signal }, [200], () => f.sdk.putObject({ bucket: "probe-bucket", key: "item", body }), { body }).then(() => { fulfilled = true; });
+  const writing = f.sdk.operate({ signal: controller.signal }, [200], async () => {
+    try { return await f.sdk.putObject({ bucket: "probe-bucket", key: "item", body }); }
+    finally { handled.resolve(); } // Actual SDK response processing, not server response.end.
+  }, waitForEof ? { body } : {}).then(() => { fulfilled = true; });
   const observed = writing.catch(error => error);
-  await Promise.all([started.promise, replied.promise]);
-  if (status === 200) {
-    assert.equal(fulfilled, false);
-    controller.abort();
-    assert.equal((await observed).code, "ABORTED");
-  } else assert.equal((await observed).code, status === 412 ? "PreconditionFailed" : "AccessDenied");
-  await cancelled.promise;
-  assert.equal(body.destroyed, true);
-  assert.equal(fulfilled, false);
+  try {
+    await Promise.all([started.promise, handled.promise]);
+    // Cross an event-loop turn after SDK resolution so all result microtasks have run.
+    await new Promise<void>(resolve => setImmediate(resolve));
+    if (status === 200) {
+      assert.equal(fulfilled, false, "A processed 200 cannot acknowledge a source without EOF");
+      controller.abort(); assert.equal((await observed).code, "ABORTED");
+    } else assert.equal((await observed).code, status === 412 ? "PreconditionFailed" : "AccessDenied");
+    await cancelled.promise;
+    assert.equal(body.destroyed, true); assert.equal(fulfilled, false);
+  } finally { controller.abort(); body.destroy(); await observed; }
+}
+for (const status of [200, 403, 412]) test(`processed early ${status} cannot acknowledge a stalled Payload and closes its upstream`, settings, t => assertEarlyResponse(t,status));
+test("early-response oracle detects removing the normal-EOF wait", settings, async t => {
+  await assert.rejects(assertEarlyResponse(t, 200, false), /processed 200 cannot acknowledge/);
 });
 
 test("upload byte limit fails without acknowledging a partial source or retaining its stream", settings, async t => {

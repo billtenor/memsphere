@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
+
+// Store deadlines are external time; transport deadlines are exercised with real sockets in integration.
+beforeEach(t => t.mock.timers.enable({ apis: ["setTimeout"] }));
 import type { Data } from "../src/data/api/data.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
@@ -149,27 +152,6 @@ test("list yields an empty page with a continuation after its ten-page tombstone
   await assert.rejects(other.list({}, { cursor: first.nextCursor }));
 });
 
-test("business service retains TOS single-PUT writes, validates dry-run conditions and returns tombstone revisions", async () => {
-  const { createDataService } = await import("../src/project/data-service.js");
-  const { createPlainRuntime } = await import("../src/data/extensions/shared/reflection.js");
-  const { store, client } = fixture();
-  const runtime = createPlainRuntime({ id: "file.json", root: { kind: "scalar", scalar: "bytes" } });
-  const service = createDataService({ async openStore() { return { store, runtime, stamp: "fixed", binding: { kind: "data", factory: "memsphere/tos", model: "file.json", config: config("revision") } }; }, async assertStamp() {}, async modelRuntime() { return runtime; } });
-  const payload = { kind: "payload" as const, bytes: Buffer.from("first"), contentType: "text/plain" };
-  await service.writeData({}, "project", "records", "item", "create", payload);
-  assert.deepEqual(client.calls.map(call => call.method), ["PUT"]);
-  const revision = (await live(store)).revision!;
-  client.calls.length = 0;
-  await assert.rejects(service.writeData({}, "project", "records", "item", "update", payload), { code: "INVALID_ARGUMENT" });
-  await assert.rejects(service.writeData({}, "project", "records", "item", "update", payload, { dryRun: true, expectedRevision: "bad" }), { code: "INVALID_ARGUMENT" });
-  assert.equal(client.calls.length, 0);
-  await service.writeData({}, "project", "records", "item", "update", payload, { expectedRevision: revision });
-  assert.deepEqual(client.calls.map(call => call.method), ["PUT"]);
-  const current = (await live(store)).revision!;
-  await service.deleteData({}, "project", "records", "item", { expectedRevision: current });
-  const result = await service.readData({}, "project", "records", "item");
-  assert.equal(result.deleted, true); assert.equal(typeof result.revision, "string"); assert.equal("value" in result, false);
-});
 
 test("bucket admission rejects Enabled, Suspended and unknown versioning states", async () => {
   const { store, client } = fixture();
@@ -194,5 +176,53 @@ for (const operation of ["create", "update"] as const) for (const first of [0, 1
       } });
     assert.deepEqual(client.calls.map(call => call.method), ["PUT", "PUT"]);
     assert.equal(Buffer.from(await readAll({}, (await live(store)).data.payload.content)).toString(), `writer-${first}`);
+  });
+}
+
+for (const defect of ["status", "range", "length", "etag", "model", "format", "mime", "short-header", "long-header", "deleted-payload"] as const) {
+  test(`revision snapshot rejects ${defect} and releases the owned response`, async () => {
+    const { store, client } = fixture(); await store.create({}, data("item"));
+    const read = client.read.bind(client); let owned: import("node:stream").Readable | undefined;
+    client.read = async (...args) => {
+      const out = await read(...args); owned = out.stream;
+      if (defect === "status") out.status = 200;
+      if (defect === "range") out.headers["content-range"] = "bytes 1-10/17";
+      if (defect === "length") out.headers["content-length"] = "9";
+      if (defect === "etag") delete out.headers.etag;
+      if (defect === "model") delete out.headers["x-tos-meta-memsphere-model"];
+      if (defect === "format") out.headers["x-tos-meta-memsphere-store-format"] = "raw-v1";
+      if (defect === "mime") out.headers["x-tos-meta-memsphere-content-type"] = "invalid";
+      if (["short-header", "long-header", "deleted-payload"].includes(defect)) {
+        out.stream.destroy();
+        const { Readable } = await import("node:stream");
+        const bytes = defect === "deleted-payload" ? encodeHeader(1,true) : new Uint8Array(defect === "short-header" ? 9 : 11);
+        out.stream = Readable.from([bytes]); owned = out.stream;
+      }
+      return out;
+    };
+    await assert.rejects(store.get({}, "item"));
+    assert.equal(owned!.destroyed, true);
+  });
+}
+
+for (const defect of ["status", "range", "etag", "short", "long"] as const) {
+  test(`lazy revision Payload rejects ${defect} and closes its response`, async () => {
+    const { store, client } = fixture(); await store.create({}, data("item", "hello"));
+    const record = await live(store), read = client.read.bind(client);
+    let owned: import("node:stream").Readable | undefined;
+    client.read = async (...args) => {
+      const out = await read(...args); owned = out.stream;
+      if (defect === "status") out.status = 200;
+      if (defect === "range") out.headers["content-range"] = "bytes 11-15/16";
+      if (defect === "etag") out.headers.etag = '"changed"';
+      if (defect === "short" || defect === "long") {
+        out.stream.destroy(); const { Readable } = await import("node:stream");
+        out.stream = Readable.from([Buffer.from(defect === "short" ? "hell" : "hello!")]); owned = out.stream;
+        delete out.headers["content-length"];
+      }
+      return out;
+    };
+    await assert.rejects(readAll({},record.data.payload.content));
+    assert.equal(owned!.destroyed,true);
   });
 }

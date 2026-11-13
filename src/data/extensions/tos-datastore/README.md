@@ -13,6 +13,8 @@
 }
 ```
 
+The endpoint must match the configured region (`tos-<region>.volces.com` or `tos-<region>.ivolces.com`). Public and internal endpoints identify the same regional bucket; within a Project, Store prefixes in that bucket must not overlap.
+
 Project hosts resolve saved credentials. Standalone factories default to environment references, for example `{ "source":"env", "accessKeyIdEnv":"TOS_ACCESS_KEY_ID", "accessKeySecretEnv":"TOS_ACCESS_KEY_SECRET", "stsTokenEnv":"TOS_SECURITY_TOKEN" }`. The final token reference is optional. Do not pass credentials as Store configuration fields.
 
 - `raw`: exact original Payload bytes, create without overwrite, physical delete. Updates and `expectedRevision` are rejected.

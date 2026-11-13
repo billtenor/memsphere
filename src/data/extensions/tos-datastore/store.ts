@@ -144,7 +144,7 @@ export class TosDataStore implements DataStore {
             if (!reader) {
               const response = await this.client.read({ signal }, key, { ifMatch: snapshot.etag, ...(start ? { range: "bytes=10-" } : {}) });
               try {
-                if (response.headers.etag !== snapshot.etag ||
+                if (response.status !== (start ? 206 : 200) || response.headers.etag !== snapshot.etag ||
                   (response.headers["content-length"] !== undefined && lengthOf(response.headers["content-length"]) !== expected) ||
                   (start && response.headers["content-range"] !== `bytes 10-${snapshot.length - 1}/${snapshot.length}`)) responseError();
                 reader = (Readable.toWeb(response.stream) as ReadableStream<Uint8Array>).getReader();

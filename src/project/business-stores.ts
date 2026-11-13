@@ -46,7 +46,7 @@ export async function validateBusinessBindings(root: string, project: ProjectCon
   }
   const protectedPaths = await Promise.all(protectedInputs.map(canonicalPath));
   const directories = new Map<string, string>();
-  const remote: Array<{ id: string; endpoint: string; bucket: string; prefix: string }> = [];
+  const remote: Array<{ id: string; region: string; bucket: string; prefix: string }> = [];
   for (const [id, input] of Object.entries(project.dataStores ?? {})) {
     assertBusinessStoreId(id);
     const binding = businessStoreBindingSchema.parse(input);
@@ -54,7 +54,7 @@ export async function validateBusinessBindings(root: string, project: ProjectCon
     const config = new Config(binding.config);
     if (binding.factory === "memsphere/tos") {
       const parsed = parseTosConfig(config);
-      if (remote.some(other => other.endpoint === parsed.endpoint && other.bucket === parsed.bucket &&
+      if (remote.some(other => other.region === parsed.region && other.bucket === parsed.bucket &&
         (other.prefix.startsWith(parsed.prefix) || parsed.prefix.startsWith(other.prefix)))) throw serviceError("STORE_PATH_CONFLICT", `TOS Store ${id} overlaps another prefix`);
       remote.push({ id, ...parsed }); continue;
     }
