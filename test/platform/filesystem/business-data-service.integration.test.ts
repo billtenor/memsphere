@@ -75,7 +75,7 @@ test("an edit completes in its opened Store after the binding changes", async (t
     };
     return store;
   });
-  assert.equal((await editData({}, root, "records", "item", [{ op: "replace", path: "/count", value: 2 }])).revision, 2);
+  assert.equal((await editData({}, root, "records", "item", [{ op: "replace", path: "/count", value: 2 }])).revision, "2");
   assert.equal(switched, true);
   assert.deepEqual((await oldStore.store.get({}, "item") as { value: unknown }).value, { name: "old", count: 2 });
   assert.equal((await hasData({}, root, "records", "item")).exists, false);
@@ -100,9 +100,9 @@ test("filesystem business CRUD persists object and falsy scalar roots through ex
   for (const [name, _schema, initial, changed] of examples) {
     await fixture.createStore(name, `${name}.json`);
     assert.equal((await validateData({}, fixture.root, { modelRef: `${name}.json`, value: initial, hasValue: true })).valid, true);
-    assert.equal((await writeData({}, fixture.root, name, "item", "create", { kind: "value", value: initial })).revision, 1);
+    assert.equal((await writeData({}, fixture.root, name, "item", "create", { kind: "value", value: initial })).revision, "1");
     assert.deepEqual((await readData({}, fixture.root, name, "item")).value, initial);
-    assert.equal((await writeData({}, fixture.root, name, "item", "update", { kind: "value", value: changed }, { expectedRevision: 1 })).revision, 2);
+    assert.equal((await writeData({}, fixture.root, name, "item", "update", { kind: "value", value: changed }, { expectedRevision: "1" })).revision, "2");
     assert.deepEqual((await readData({}, fixture.root, name, "item")).value, changed);
     const exported = join(fixture.directory, `${name}-export.json`);
     await exportData({}, fixture.root, name, "item", "json", exported);
@@ -110,7 +110,7 @@ test("filesystem business CRUD persists object and falsy scalar roots through ex
     assert.equal((await validateData({}, fixture.root, { id: "item", storeId: name })).valid, true);
     assert.deepEqual(await listData({}, fixture.root, name), { items: [{ id: "item" }] });
     assert.equal((await hasData({}, fixture.root, name, "item")).exists, true);
-    assert.equal((await deleteData({}, fixture.root, name, "item", { expectedRevision: 2 })).deleted, true);
+    assert.equal((await deleteData({}, fixture.root, name, "item", { expectedRevision: "2" })).deleted, true);
     assert.equal((await deleteData({}, fixture.root, name, "item")).deleted, false);
     await assert.rejects(readData({}, fixture.root, name, "item"), { code: "NOT_FOUND" });
   }
@@ -120,7 +120,7 @@ test("edit validates only the final isolated value and failures preserve bytes a
   const { root, createStore } = await businessFixture(t); await createStore();
   await writeData({}, root, "records", "item", "create", { kind: "value", value: { name: "before", count: 1 } });
   const edited = await editData({}, root, "records", "item", [{ op: "remove", path: "/name" }, { op: "add", path: "/name", value: "after" }]);
-  assert.equal(edited.revision, 2);
+  assert.equal(edited.revision, "2");
   assert.deepEqual((await readData({}, root, "records", "item")).value, { name: "after", count: 1 });
   const before = await fs.readFile(join(root, "data/records/item.json"));
   for (const patch of [
@@ -130,9 +130,9 @@ test("edit validates only the final isolated value and failures preserve bytes a
     await assert.rejects(editData({}, root, "records", "item", patch));
     assert.deepEqual(await fs.readFile(join(root, "data/records/item.json")), before);
   }
-  await assert.rejects(editData({}, root, "records", "item", [], { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
-  await assert.rejects(writeData({}, root, "records", "item", "update", { kind: "value", value: { name: "lost", count: 0 } }, { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
-  assert.equal((await readData({}, root, "records", "item")).revision, 2);
+  await assert.rejects(editData({}, root, "records", "item", [], { expectedRevision: "1" }), { code: "REVISION_CONFLICT" });
+  await assert.rejects(writeData({}, root, "records", "item", "update", { kind: "value", value: { name: "lost", count: 0 } }, { expectedRevision: "1" }), { code: "REVISION_CONFLICT" });
+  assert.equal((await readData({}, root, "records", "item")).revision, "2");
 });
 
 test("filesystem business reads pass the decoded record to JSONPath and preserve missing-record errors", async (t) => {
@@ -155,7 +155,7 @@ test("Store removal retains data and deletion history for explicit re-registrati
   assert.deepEqual(await snapshotTree(join(root, "data/records")), dataBefore);
   await createStore();
   assert.deepEqual((await readData({}, root, "records", "kept")).value, input.value);
-  assert.equal((await writeData({}, root, "records", "item", "create", input)).revision, 2);
+  assert.equal((await writeData({}, root, "records", "item", "create", input)).revision, "2");
 });
 
 test("both filesystem Store kinds retain data in explicitly configured absolute directories outside the Project", async (t) => {
@@ -208,7 +208,7 @@ test("read and every data/Store dry-run preserve the complete Project filesystem
   await createStore("planned", "record.json", "value", { directory: "new/nested/data" }, true);
   await removeBusinessStore({}, root, "records", true);
   await writeData({}, root, "records", "new", "create", input, { dryRun: true });
-  await writeData({}, root, "records", "item", "update", input, { dryRun: true, expectedRevision: 1 });
+  await writeData({}, root, "records", "item", "update", input, { dryRun: true, expectedRevision: "1" });
   await editData({}, root, "records", "item", [{ op: "replace", path: "/count", value: 3 }], { dryRun: true });
   await deleteData({}, root, "records", "item", { dryRun: true });
   await readData({}, root, "records", "item"); await hasData({}, root, "records", "missing"); await listData({}, root, "records");
@@ -323,7 +323,7 @@ test("opaque DataStore bytes and MIME survive export and re-registration without
   assert.equal(metadata.contentType, "application/x-ndjson"); assert.equal("revision" in metadata, false); assert.equal("value" in metadata, false);
   await assert.rejects(readData({}, root, "payloads", "opaque.jsonl"), { code: "UNSUPPORTED_CAPABILITY" });
   await assert.rejects(editData({}, root, "payloads", "opaque.jsonl", []), { code: "UNSUPPORTED_CAPABILITY" });
-  await assert.rejects(deleteData({}, root, "payloads", "opaque.jsonl", { expectedRevision: 1 }), { code: "UNSUPPORTED_CAPABILITY" });
+  await assert.rejects(deleteData({}, root, "payloads", "opaque.jsonl", { expectedRevision: "1" }), { code: "UNSUPPORTED_CAPABILITY" });
   const target = join(directory, "export.bin");
   await exportData({}, root, "payloads", "opaque.jsonl", "payload", target);
   assert.deepEqual(await fs.readFile(target), Buffer.from(bytes));
@@ -359,7 +359,7 @@ test("business reads remain valid while a direct Factory has staged an atomic re
   const { root, createStore } = await businessFixture(t); await createStore();
   const initial = { name: "original", count: 0 };
   await writeData({}, root, "records", "item", "create", { kind: "value", value: initial });
-  const worker = await filesystemWorker(t, join(root, "data/records"), { operation: "update", expectedRevision: 1, pause: "before-publish", value: { name: "published", count: 1 } });
+  const worker = await filesystemWorker(t, join(root, "data/records"), { operation: "update", expectedRevision: "1", pause: "before-publish", value: { name: "published", count: 1 } });
   worker.send("start"); await worker.next("paused");
   try {
     assert.deepEqual((await readData({}, root, "records", "item")).value, initial);
@@ -376,7 +376,7 @@ test("JSON DataStore supports structured values and queries without advertising 
   assert.deepEqual((await readData({}, root, "files", "item.json", { path: "$.count" })).value, [1]);
   assert.equal((await validateData({}, root, { id: "item.json", storeId: "files" })).valid, true);
   const before = await fs.readFile(join(root, "data/files/item.json"));
-  await assert.rejects(writeData({}, root, "files", "item.json", "update", { kind: "value", value: { name: "ignored", count: 2 } }, { expectedRevision: 1 }), { code: "UNSUPPORTED_CAPABILITY" });
+  await assert.rejects(writeData({}, root, "files", "item.json", "update", { kind: "value", value: { name: "ignored", count: 2 } }, { expectedRevision: "1" }), { code: "UNSUPPORTED_CAPABILITY" });
   assert.deepEqual(await fs.readFile(join(root, "data/files/item.json")), before);
 });
 
@@ -403,4 +403,18 @@ test("already configured JSON ValueStores reject the same incompatible raw Runti
   const before = await snapshotTree(root);
   await assert.rejects(openBusinessStore({}, root, "raw-values"), { code: "STORE_INCOMPATIBLE" });
   assert.deepEqual(await snapshotTree(root), before);
+});
+
+test("streaming Payload export publishes only complete bytes and preserves existing targets", async t => {
+  const { root, directory, createStore } = await businessFixture(t);
+  await createStore("files", "record.json", "data");
+  const parts = [Buffer.alloc(128 * 1024, 1), Buffer.alloc(128 * 1024, 2)];
+  await writeData({}, root, "files", "item.json", "create", { kind: "payload-stream", contentType: "application/json", content: { stream: () => new ReadableStream<Uint8Array>({ start(output) { for (const part of parts) output.enqueue(part); output.close(); } }) } });
+  const target = join(directory, "streamed.json");
+  const receipt = await exportData({}, root, "files", "item.json", "payload", target);
+  assert.equal(receipt?.bytes, 256 * 1024);
+  assert.deepEqual(await fs.readFile(target), Buffer.concat(parts));
+  await assert.rejects(exportData({}, root, "files", "item.json", "payload", target), { code: "EEXIST" });
+  assert.deepEqual(await fs.readFile(target), Buffer.concat(parts));
+  assert.deepEqual((await fs.readdir(directory)).filter(name => name.startsWith(".memsphere-export-")), []);
 });

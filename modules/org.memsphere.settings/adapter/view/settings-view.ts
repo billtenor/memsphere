@@ -4,7 +4,7 @@ import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models";
+type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models" | "stores" | "tos-credentials";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -24,6 +24,8 @@ interface ScopeState {
 const tokenKey = "memsphere.settingsToken.v1";
 const detectionKey = "memsphere.settings.acp-provider-detection";
 const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
+  stores: { scope: "project", module: "stores" },
+  "tos-credentials": { scope: "global", module: "tos-credentials" },
   overview: { scope: "global", module: "general" },
   general: { scope: "global", module: "general" },
   view: { scope: "global", module: "view" },
@@ -110,6 +112,8 @@ class SettingsApplication {
   #expandedParticipants = new Set<string>();
   #viewPackages: JsonObject = { installed: [], instances: [], diagnostics: [] };
   #packagePathDraft = "";
+  #tosDraft: JsonObject = { id: "", model: "", region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "", prefix: "", mode: "revision", source: "settings", credentialId: "", accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET", stsTokenEnv: "" };
+  #tosCredential: JsonObject = { id: "", accessKeyId: "", accessKeySecret: "", stsToken: "" };
   readonly #scopes: Record<ScopeName, ScopeState>;
 
   constructor(root: HTMLElement, options: SettingsViewOptions, signal: AbortSignal, scopes: Record<ScopeName, ScopeState>, route: Readonly<RouteLocation>) {
@@ -250,11 +254,13 @@ class SettingsApplication {
         ["view", this.t("settings.viewService", "界面服务")],
         ["appearance", this.t("settings.appearance", "界面与主题")],
         ["runners", this.t("settings.runners", "Runner Agent")],
-        ["providers", this.t("settings.providers", "ACP 提供方")]
+        ["providers", this.t("settings.providers", "ACP 提供方")],
+        ["tos-credentials", this.t("settings.tosCredentials", "TOS 凭据")]
       ]],
       ["project", `${this.t("navigation.project", "项目")} · ${this.#currentProject}`, [
         ["project", this.t("settings.overview", "概览")],
         ["models", this.t("settings.models", "模型存储")],
+        ["stores", this.t("settings.businessStores", "业务 Store")],
         ["participants", this.t("settings.participants", "参与者配置")]
       ]]
     ];
@@ -278,6 +284,8 @@ class SettingsApplication {
       runners: this.t("settings.runners", "Runner Agent"),
       providers: this.t("settings.providers", "模型提供商"),
       project: this.t("navigation.project", "当前项目"),
+      stores: this.t("settings.businessStores", "业务 Store"),
+      "tos-credentials": this.t("settings.tosCredentials", "TOS 凭据"),
       models: this.t("settings.models", "模型存储"),
       participants: this.t("settings.participants", "参与者")
     };
@@ -315,11 +323,56 @@ class SettingsApplication {
       : this.#module === "runners" ? this.runnersHtml(scope)
       : this.#module === "providers" ? this.providersHtml(scope)
       : this.#module === "participants" ? this.participantsHtml(scope)
+      : this.#module === "stores" ? this.storesHtml(scope)
+      : this.#module === "tos-credentials" ? this.tosCredentialsHtml(scope)
       : this.#module === "models" ? this.modelsHtml(scope)
       : this.overviewHtml(scope);
-    const actions = ["general", "view", "runners", "providers", "participants", "models"].includes(this.#module)
+    const actions = ["general", "view", "runners", "providers", "participants", "models", "stores"].includes(this.#module)
       ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button>${this.#module === "models" ? `<button class="btn" data-action="discard-project">${escapeHtml(this.t("settings.discard", "放弃修改"))}</button>` : ""}<button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
     return `<div class="settings-layout">${status}${notice}${panel}${actions}</div>`;
+  }
+
+  tosReferenceHtml(path: string, ref: JsonObject): string {
+    return selectField(`${path}.source`, this.t("settings.tosCredentialSource", "凭据来源"), ref.source, [["settings", this.t("settings.tosSavedCredential", "已保存凭据")], ["env", this.t("settings.tosEnvironment", "环境变量")]]) +
+      (ref.source === "settings" ? inputField(`${path}.id`, this.t("settings.tosCredentialId", "凭据名称"), ref.id ?? "") :
+        ["accessKeyIdEnv", "accessKeySecretEnv", "stsTokenEnv"].map(key => inputField(`${path}.${key}`, key, ref[key] ?? "")).join(""));
+  }
+
+  storesHtml(scope: ScopeState): string {
+    const entries = Object.entries(scope.draft!.dataStores ?? {}).filter(([id]) => !/^context_control\/(runs|steps|artifacts|externals|reviews)$/.test(id)) as Array<[string, JsonObject]>;
+    const existing = entries.map(([id, binding]) => `<section class="settings-section"><h3>${escapeHtml(id)}</h3><p class="mono">${escapeHtml(`${binding.model} · ${binding.factory}`)}</p>
+      ${binding.factory === "memsphere/tos" ? `<p class="mono">${escapeHtml(`${binding.config.region} · ${binding.config.endpoint} · ${binding.config.bucket}/${binding.config.prefix} · ${binding.config.mode}`)}</p>${this.tosReferenceHtml(`tosRef.${encodeURIComponent(id).replaceAll(".", "%2E")}`, binding.config.credentials)}` : `<p class="mono">${escapeHtml(binding.config.directory)}</p>`}
+      <button class="btn" data-remove-store="${escapeAttr(id)}">${escapeHtml(this.t("settings.unbindStore", "解除绑定（保留数据）"))}</button></section>`).join("");
+    const draft = this.#tosDraft;
+    return `${existing}<section class="settings-section"><h3>${escapeHtml(this.t("settings.addTosStore", "新增 TOS Store"))}</h3>
+      ${["id", "model", "region", "endpoint", "bucket", "prefix"].map(key => inputField(`tosDraft.${key}`, this.t(`settings.tos.${key}`, key), draft[key])).join("")}
+      ${selectField("tosDraft.mode", this.t("settings.tos.mode", "模式"), draft.mode, [["revision", this.t("settings.tosRevision", "带 revision")], ["raw", this.t("settings.tosRaw", "不带 revision")]])}
+      ${this.tosReferenceHtml("tosDraft.credentials", this.tosDraftReference())}
+      <p class="settings-help">${escapeHtml(this.t("settings.tosStoreHelp", "使用已有桶及专用 prefix（以 / 结尾）。新增后模型、模式和位置固定。保存时检查桶及已有数据兼容性。"))}</p>
+      <button class="btn" data-action="add-tos-store">${escapeHtml(this.t("settings.addStore", "添加存储"))}</button>${this.errorsHtml(scope)}</section>`;
+  }
+
+  tosDraftReference(): JsonObject {
+    const draft = this.#tosDraft;
+    return draft.source === "settings" ? { source: "settings", id: draft.credentialId } : { source: "env", accessKeyIdEnv: draft.accessKeyIdEnv, accessKeySecretEnv: draft.accessKeySecretEnv, ...(draft.stsTokenEnv ? { stsTokenEnv: draft.stsTokenEnv } : {}) };
+  }
+
+  tosCredentialsHtml(scope: ScopeState): string {
+    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.tosCredentials", "TOS 凭据"))}</h3>
+      <p>${escapeHtml((scope.data?.tosCredentialIds ?? []).join(", ") || this.t("settings.tosNoCredentials", "尚未保存凭据"))}</p>
+      ${["id", "accessKeyId", "accessKeySecret", "stsToken"].map(key => inputField(`tosCredential.${key}`, this.t(`settings.tosCredential.${key}`, key), this.#tosCredential[key], { type: key === "id" ? "text" : "password" })).join("")}
+      <p class="settings-help">${escapeHtml(this.t("settings.tosCredentialHelp", "首次保存 AK/SK 必填；同名保存时留空保留原值，填写新值则替换。临时凭据另填 STS Token。凭据加密保存，密钥也在本机设置中，不能防止设置文件被完整读取。"))}</p>
+      <button class="btn primary" data-action="save-tos-credential">${escapeHtml(this.t("settings.saveTosCredential", "保存凭据"))}</button>${this.errorsHtml(scope)}</section>`;
+  }
+
+  async saveTosCredential(): Promise<void> {
+    const scope = this.#scopes.global;
+    if (JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config)) throw new Error(this.t("settings.saveBeforeCredential", "请先保存或取消 Home 配置修改，再保存凭据。"));
+    const { id, accessKeyId, accessKeySecret, stsToken } = this.#tosCredential;
+    const response = await this.settingsFetch("/api/settings/global/tos-credentials", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, expectedRevision: scope.data!.diskRevision, credentials: { accessKeyId, accessKeySecret, ...(stsToken ? { stsToken } : {}) } }) });
+    if (!response.ok) { const payload = await response.json() as JsonObject; throw new Error(payload.error ?? this.t("settings.saveFailed", "保存失败")); }
+    this.#tosCredential = { id: "", accessKeyId: "", accessKeySecret: "", stsToken: "" };
+    await this.load("global"); scope.notice = this.t("settings.tosCredentialSaved", "凭据已保存。"); this.render();
   }
 
   tokenHtml(): string {
@@ -619,6 +672,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     }, { signal: this.#signal });
     root.querySelectorAll<HTMLInputElement>("[data-permission]").forEach(input => input.addEventListener("change", () => this.updatePermission(input), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => void this.action(button.dataset.action!), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-store]").forEach(button => button.addEventListener("click", () => { delete this.state.draft!.dataStores[button.dataset.removeStore!]; this.state.confirmation = null; this.render(); }, { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-remove-participant]").forEach(button => button.addEventListener("click", () => this.removeParticipant(button.dataset.removeParticipant!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
     root.querySelector<HTMLInputElement>("#settings-package-path")?.addEventListener("input", event => { this.#packagePathDraft = (event.currentTarget as HTMLInputElement).value; }, { signal: this.#signal });
@@ -659,6 +713,13 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
         }
       }
       else if (name === "reload-appearance") { await this.load("global"); await this.load("project"); }
+      else if (name === "save-tos-credential") await this.saveTosCredential();
+      else if (name === "add-tos-store") {
+        const form = this.#tosDraft, stores = this.state.draft!.dataStores ??= {};
+        if (!form.id.trim() || form.id === "__proto__" || Object.hasOwn(stores, form.id)) throw new Error(this.t("settings.tosInvalidStoreId", "请输入尚未使用的 Store ID。"));
+        stores[form.id] = { kind: "data", factory: "memsphere/tos", model: form.model, config: { region: form.region, endpoint: form.endpoint, bucket: form.bucket, prefix: form.prefix, mode: form.mode, credentials: this.tosDraftReference() } };
+        form.id = ""; this.state.confirmation = null; this.render();
+      }
       else if (name === "validate") await this.validate();
       else if (name === "validate-global") await this.validateScope("global");
       else if (name === "validate-project") await this.validateScope("project");
@@ -708,6 +769,20 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   ): void {
     const scope = this.#scopes[scopeName];
     const draft = scope.draft!;
+    if (path.startsWith("tosCredential.")) { this.#tosCredential[path.slice(14)] = value; return; }
+    if (path.startsWith("tosDraft.")) {
+      const key = path.slice(9);
+      this.#tosDraft[key === "credentials.id" ? "credentialId" : key.replace("credentials.", "")] = value;
+      if (structural) this.render(); return;
+    }
+    if (path.startsWith("tosRef.")) {
+      const [, encodedId, key] = path.split(".");
+      const config = draft.dataStores[decodeURIComponent(encodedId)].config;
+      if (key === "source") config.credentials = value === "settings" ? { source: value, id: "" } : { source: value, accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET" };
+      else if (key === "stsTokenEnv" && !value) delete config.credentials[key];
+      else config.credentials[key] = value;
+      scope.confirmation = null; if (structural) this.render(); else this.refreshStatus(scopeName); return;
+    }
     if (path.startsWith("runner.")) {
       const [, agent, key] = path.split(".");
       const options = (draft.runner_agents ??= {})[agent] ??= { identity_enabled: false, async_enabled: false };

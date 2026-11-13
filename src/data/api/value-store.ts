@@ -2,7 +2,7 @@ import type { Config } from "./config.js";
 import type { Context } from "./context.js";
 import type { DataId, ModelRef } from "./data.js";
 import type { ModelRuntime } from "./model-runtime.js";
-import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "./store.js";
+import type { DeleteOptions, ListOptions, ListResult, Revision, StoreId, UpdateOptions } from "./store.js";
 
 /**
  * 直接接收和返回模型的值实例，不要求调用方构造 Payload，不保存反射操作对象 Value。
@@ -56,7 +56,7 @@ export type StoredValue = {
   /** 模型的值实例，可交给对应 Runtime 的 reflect() 使用。 */
   value: unknown;
   /** 该存储记录的版本，用于并发更新检查，不是模型版本。 */
-  revision?: number;
+  revision?: Revision;
   /** 创建时间，Unix 时间戳，单位为毫秒；更新时保留。 */
   createdAt?: number;
   /** 可信创建主体 ID；未知时可省略或为 null，更新时保留。 */

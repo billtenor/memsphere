@@ -30,11 +30,7 @@ export class JsonPayloadSerializer implements PayloadSerializer {
     assertJsonDescriptor(descriptor.root);
     const bytes = await readAll(context, content);
     throwIfAborted(context);
-    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-    // Inspect the complete value, including properties outside the reflection
-    // descriptor, before checking the descriptor's structural and enum rules.
-    assertJsonValue(value);
-    assertPlainValue(descriptor.root, value);
+    const value = decodeJsonBytes(descriptor, bytes);
     throwIfAborted(context);
     return value;
   }
@@ -51,6 +47,16 @@ export class JsonPayloadSerializer implements PayloadSerializer {
     throwIfAborted(context);
     return bytesContent(new TextEncoder().encode(json));
   }
+}
+
+/** Decode already-consumed bytes separately from storage/stream failures. */
+export function decodeJsonBytes(descriptor: Descriptor, bytes: Uint8Array): unknown {
+  assertJsonDescriptor(descriptor.root);
+  const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  // Include unknown properties before checking descriptor structure and enums.
+  assertJsonValue(value);
+  assertPlainValue(descriptor.root, value);
+  return value;
 }
 
 export const jsonSerializerExtension: DataExtension = {

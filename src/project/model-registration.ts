@@ -39,7 +39,7 @@ async function registrationBootstrap(context: Context, directory: string) {
   try {
     const store = modelDefinitionStore(SYSTEM_JSON_SCHEMA_MODELS_STORE, JSON_SCHEMA_DRAFT_07, join(systemRoot, "definitions/json-schema/draft-07"), true);
     const stored = await store.get(context, MODEL_REGISTRATION_MODEL);
-    if (!stored) throw new Error("Missing definition");
+    if (!stored || stored.deleted) throw new Error("Missing definition");
     source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(await readAll(context, stored.data.payload.content));
   }
   catch (error) { throw new TypeError(`Installed system registration definition is missing: ${filename}`, { cause: error }); }
@@ -642,6 +642,14 @@ async function validateUpgradeCandidate(context: Context, input: ProjectModelInp
     for (const [id, binding] of Object.entries(validated.dataStores ?? {})) {
       const runtime = await runtimeFor(binding.model);
       if (binding.kind === "value") assertJsonDescriptor(runtime.descriptor.root);
+      if (binding.factory === "memsphere/tos") {
+        const { TosDataStoreFactory, inspectPhysicalRecords } = await import("../data/extensions/tos-datastore/index.js");
+        const { resolveTosCredentials } = await import("../tos-credentials.js");
+        const { validateTosRecord } = await import("./tos-record-validation.js");
+        const store = await new TosDataStoreFactory(resolveTosCredentials).createStore(context, id, binding.model, new Config(binding.config));
+        for await (const record of inspectPhysicalRecords(context, store)) await validateTosRecord(context, record, runtime);
+        continue;
+      }
       const directory = directories.get(id)!;
       if (!await pathExists(directory)) continue;
       const config = new Config({ ...binding.config, directory });

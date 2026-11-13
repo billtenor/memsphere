@@ -7,6 +7,7 @@ import {
   type DataExtension,
   type DataId,
   type DataStore,
+  type DataStoreReadResult,
   type DataStoreFactory,
   type DeleteOptions,
   type Descriptor,
@@ -52,7 +53,7 @@ const record: StoredData = { data };
 const valueRecord: StoredValue = { id, value: { quantity: 2 } };
 const annotatedRecord: StoredValue = {
   ...valueRecord,
-  revision: 1,
+  revision: "1",
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_001_000,
   createdBy: "user-001",
@@ -86,11 +87,11 @@ const emptyExtension: DataExtension = { id: "test/empty", version: "1.0.0" };
 
 async function exerciseInterfaces(dataStore: DataStore, valueStore: ValueStore): Promise<void> {
   const stream: ReadableStream<Uint8Array> = content.stream();
-  const updateOptions: UpdateOptions = { expectedRevision: 1 };
-  const deleteOptions: DeleteOptions = { expectedRevision: 1 };
+  const updateOptions: UpdateOptions = { expectedRevision: "1" };
+  const deleteOptions: DeleteOptions = { expectedRevision: "1" };
   const listOptions: ListOptions = { limit: 10, cursor: "opaque-cursor" };
 
-  const maybeData: StoredData | undefined = await dataStore.get(context, id);
+  const maybeData: DataStoreReadResult | undefined = await dataStore.get(context, id);
   const hasData: boolean = await dataStore.has(context, id);
   const createdData: void = await dataStore.create(context, data);
   const updatedData: void = await dataStore.update(context, data, updateOptions);
@@ -171,3 +172,6 @@ const directRuntime: DataExtension = { id: "test/invalid", version: "1", modelRu
 const directStore: DataExtension = { id: "test/invalid", version: "1", stores: [] };
 // @ts-expect-error 原始值不是反射操作对象。
 const rawValue: Value = 2;
+
+// @ts-expect-error revision tokens are strings for every Store.
+const numericRevision: UpdateOptions = { expectedRevision: 1 };

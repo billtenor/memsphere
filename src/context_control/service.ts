@@ -110,7 +110,7 @@ export class ContextControl {
     const all=(await Promise.all(stepIds.map(id=>this.record<Step>("step",runId,id)))).flatMap(row=>row?[row.value]:[]);
     const selected=surface==="action"?all.filter(s=>s.source?.actionId===actionId):all;
     let artifacts:Artifact[]=[];
-    const selectedRevisions = new Map<string, number | undefined>();
+    const selectedRevisions = new Map<string, string | undefined>();
     if(surface!=="overview"){
       const ids=new Set<string>();
       for(const step of selected){if(step.writing)ids.add(step.writing.draftId);if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}

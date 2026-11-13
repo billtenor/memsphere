@@ -13,11 +13,11 @@ test("full hierarchical keys coordinate CAS across processes without locking equ
   const runtime = createPlainRuntime({ id: "test/record.json", root: { kind: "object", fields: [], field: () => undefined } });
   const store = await new FilesystemJsonValueStoreFactory().openExisting({}, "records", runtime, new Config({ directory }));
   await store.create({}, "run-a/item", { value: "old" }); await store.create({}, "run-b/item", { value: "independent" });
-  const first = await filesystemWorker(t, directory, { operation: "update", id: "run-a/item", expectedRevision: 1, pause: "before-publish", value: { value: "first" } });
+  const first = await filesystemWorker(t, directory, { operation: "update", id: "run-a/item", expectedRevision: "1", pause: "before-publish", value: { value: "first" } });
   first.send("start"); await first.next("paused");
-  const stale = await filesystemWorker(t, directory, { operation: "update", id: "run-a/item", expectedRevision: 1, value: { value: "stale" } });
+  const stale = await filesystemWorker(t, directory, { operation: "update", id: "run-a/item", expectedRevision: "1", value: { value: "stale" } });
   stale.send("start"); await stale.next("waiting");
-  const independent = await filesystemWorker(t, directory, { operation: "update", id: "run-b/item", expectedRevision: 1, value: { value: "other" } });
+  const independent = await filesystemWorker(t, directory, { operation: "update", id: "run-b/item", expectedRevision: "1", value: { value: "other" } });
   independent.send("start"); assert.equal((await independent.next("result")).ok, true);
   first.send("continue"); assert.equal((await first.next("result")).ok, true);
   assert.equal((await stale.next("result")).code, "REVISION_CONFLICT");

@@ -29,7 +29,10 @@
     "./data/extensions/json-schema-metamodel": "./dist/data/extensions/json-schema-metamodel/index.js",
     "./data/extensions/raw": "./dist/data/extensions/raw/index.js",
     "./data/extensions/json-serializer": "./dist/data/extensions/json-serializer/index.js",
-    "./data/extensions/filesystem-json-valuestore": "./dist/data/extensions/filesystem-json-valuestore/index.js"
+    "./data/extensions/filesystem-json-valuestore": "./dist/data/extensions/filesystem-json-valuestore/index.js",
+    "./data/extensions/tos-datastore": "./dist/data/extensions/tos-datastore/index.js",
+    "./tos": "./dist/data/extensions/tos-datastore/index.js",
+    "./tos-datastore": "./dist/data/extensions/tos-datastore/index.js"
   },
   "files": [
     "dist",
@@ -72,9 +75,11 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
     "@phosphor-icons/core": "^2.1.1",
+    "@volcengine/tos-sdk": "2.9.1",
     "ajv": "^8.20.0",
     "commander": "^12.1.0",
     "cross-spawn": "^7.0.6",
+    "debug": "4.4.3",
     "elkjs": "0.12.0",
     "fs-native-extensions": "1.5.1",
     "handlebars": "^4.7.9",

@@ -5,18 +5,21 @@ import type { ValueStore } from "./value-store.js";
 /** 由业务指定的 Store 身份，与模型 ID、数据 ID 和物理存储位置无关。 */
 export type StoreId = string;
 
+/** Store-issued opaque token; callers return it unchanged. */
+export type Revision = string;
+
 export type UpdateOptions = {
-  /** 预期的当前记录版本，必须为正整数；不匹配时报冲突。 */
-  expectedRevision?: number;
+  /** 预期的当前记录版本，须原样传回；不匹配时报冲突。 */
+  expectedRevision?: Revision;
 };
 
 export type DeleteOptions = {
-  /** 预期的当前记录版本，必须为正整数；记录缺失或版本不匹配时报冲突。 */
-  expectedRevision?: number;
+  /** 预期的当前记录版本，须原样传回；记录缺失或版本不匹配时报冲突。 */
+  expectedRevision?: Revision;
 };
 
 export type ListOptions = {
-  /** 本页最多返回的条数，必须为正整数；默认值和上限由 Store 声明。 */
+  /** 本页最多返回的条数，须原样传回；默认值和上限由 Store 声明。 */
   limit?: number;
   /** 同一 Store 上一页返回的续查游标，须原样传回；无效或过期时报错。 */
   cursor?: string;

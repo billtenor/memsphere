@@ -171,7 +171,7 @@ class FilesystemDataStore implements AppendableDataStore {
   }
 }
 
-function rejectRevision(expectedRevision: number | undefined): void {
+function rejectRevision(expectedRevision: string | undefined): void {
   if (expectedRevision === undefined) return;
   requirePositiveInteger(expectedRevision, "expectedRevision");
   throw Object.assign(new Error("Filesystem DataStore does not support expectedRevision"), { code: "UNSUPPORTED_CAPABILITY" });

@@ -6,7 +6,7 @@ import { FilesystemJsonValueStoreFactory } from "../../src/data/extensions/files
 import { createPlainRuntime } from "../../src/data/extensions/shared/reflection.js";
 import { withNativeFileLock } from "../../src/file-lock.js";
 
-type Request = { id?: string; operation: "create" | "update" | "delete" | "lock"; expectedRevision?: number; pause?: "after-lock" | "before-parent-mkdir" | "before-publish" | "after-publish" | "after-history"; timeoutMs?: number; value?: unknown };
+type Request = { id?: string; operation: "create" | "update" | "delete" | "lock"; expectedRevision?: string; pause?: "after-lock" | "before-parent-mkdir" | "before-publish" | "after-publish" | "after-history"; timeoutMs?: number; value?: unknown };
 const directory = await fs.realpath(process.argv[2]);
 const request = JSON.parse(process.argv[3]) as Request;
 const recordId = request.id ?? "item";

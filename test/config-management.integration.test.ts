@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { withNativeFileLock } from "../src/file-lock.js";
 import type { MemsphereConfig } from "../src/config.js";
-import { ConfigRevisionConflictError, editableGlobalConfigDraft, editableProjectConfigDraft, readGlobalConfigDocument, readProjectConfigDocument, validateGlobalConfigDraft, validateProjectConfigDraft, writeGlobalConfigDraft, writeGlobalOperatorToken, writeProjectConfigDraft } from "../src/config-management.js";
+import { ConfigDraftValidationError, ConfigRevisionConflictError, editableGlobalConfigDraft, editableProjectConfigDraft, readGlobalConfigDocument, readProjectConfigDocument, validateGlobalConfigDraft, validateProjectConfigDraft, writeGlobalConfigDraft, writeGlobalOperatorToken, writeProjectConfigDraft } from "../src/config-management.js";
 
 async function fixtureConfig() {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-config-management-"));
@@ -356,4 +356,40 @@ test("Runner Agent settings persist independently of ACP and Project permissions
     assert.equal(await readFile(fixture.configPath, "utf8"), originalProject);
     assert.equal(validateGlobalConfigDraft(updated, { ...draft, runner_agents: { codex: { identity_enabled: false, async_enabled: true } } }).valid, false);
   } finally { await rm(fixture.dir, { recursive: true, force: true }); }
+});
+
+test("TOS binding drafts expose credential references, preserve omitted bindings and reject identity changes", async () => {
+  const f = await fixtureConfig();
+  try {
+    const binding = { kind: "data", factory: "memsphere/tos", model: "file.json", config: { region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: "records/", mode: "revision", credentials: { source: "settings", id: "test" } } };
+    await writeFile(f.configPath, JSON.stringify({ ...f.projectDocument.raw, dataStores: { images: binding } }));
+    const document = await readProjectConfigDocument(f.configPath, f.resolved);
+    const draft = editableProjectConfigDraft(document);
+    assert.deepEqual(draft.dataStores, { images: binding });
+    const valid = validateProjectConfigDraft(document, draft, f.globalDocument.raw);
+    assert.equal(valid.valid, true);
+    assert.ok(valid.normalizedJson?.includes('"images"'));
+    const omitted = structuredClone(draft); delete omitted.dataStores;
+    assert.deepEqual(validateProjectConfigDraft(document, omitted, f.globalDocument.raw).candidate?.dataStores, draft.dataStores);
+    const credentials = structuredClone(draft); (credentials.dataStores!.images.config as any).credentials.id = "replacement";
+    assert.equal(validateProjectConfigDraft(document, credentials, f.globalDocument.raw).valid, true);
+    for (const [field, value] of [["mode", "raw"], ["bucket", "other-bucket"], ["prefix", "elsewhere/"]]) {
+      const changed = structuredClone(draft); (changed.dataStores!.images.config as any)[field] = value;
+      assert.equal(validateProjectConfigDraft(document, changed, f.globalDocument.raw).valid, false);
+    }
+    const removed = { ...draft, dataStores: {} };
+    assert.equal(validateProjectConfigDraft(document, removed, f.globalDocument.raw).valid, true);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
+test("invalid Home JSON diagnostics never include parser excerpts from the credential vault", async () => {
+  const f = await fixtureConfig();
+  try {
+    await writeFile(f.globalConfigPath, "private-vault-material");
+    await assert.rejects(readGlobalConfigDocument(f.globalConfigPath), error => {
+      assert.ok(error instanceof ConfigDraftValidationError);
+      assert.ok(!JSON.stringify(error).includes("private-vault-material"));
+      assert.match(error.errors[0].message, /not valid JSON/); return true;
+    });
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
 });

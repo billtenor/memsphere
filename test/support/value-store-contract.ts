@@ -47,7 +47,8 @@ export function valueStoreContract(name: string, fixture: (t: TestContext) => Pr
     const current = await store.update({}, "item", { name: "changed" });
     await second.delete({}, "item");
     const recreated = await store.create({}, "item", { name: "recreated" });
-    assert.ok(recreated.revision! > current.revision!);
+    assert.equal(typeof recreated.revision, "string");
+    assert.notEqual(recreated.revision, current.revision);
   });
   test(`${name}: input and returned snapshots cannot mutate the stored value`, async t => {
     const { store, reopen } = await fixture(t);

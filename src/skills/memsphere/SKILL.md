@@ -236,10 +236,15 @@ memsphere data read order-001 --store orders --output json
 ```
 
 - model update 修改定义或登记，`--unset` 移除允许的登记字段；delete 可先 dry-run。创建/更新同时要求定义合法和 Runtime 支持，不把只读 definition 诊断当准入豁免。不支持跨模型引用，本模型内部引用可用；unavailable 模型先读诊断，不删规则让它勉强通过。
-- `config.json.dataStores` 显式登记业务 Store 与模型；支持 `value + memsphere/filesystem-json` 和 `data + memsphere/filesystem`。配置文件例如 `{"directory":"data/orders"}`，相对 Project 根解析；目录不得与管理资源、其他业务 Store 或 Embedded 各 worktree Memory 重叠，不复用保留 Store ID。
+- `config.json.dataStores` 显式登记业务 Store 与模型；支持 `value + memsphere/filesystem-json`、`data + memsphere/filesystem` 和 `data + memsphere/tos`。配置文件例如 `{"directory":"data/orders"}`，相对 Project 根解析；目录不得与管理资源、其他业务 Store 或 Embedded 各 worktree Memory 重叠，不复用保留 Store ID。
 - ValueStore 的 update/delete 可用 `--expected-revision` 条件写；遇到冲突重新读取并判断，不盲目重试。`data edit --patch-file` 使用 JSON Patch，在副本校验后条件保存；`data read --path` 使用 JSONPath，结果为匹配数组。`data upsert` 整条写入，不支持条件 revision 或 patch。
-- DataStore 保存原始 Payload，支持文件/MIME 校验和导出，不支持条件写、edit 或对二进制做 JSON 路径查询。`data export --out <file>` 的文件目标须不存在，`--out -` 只输出原始正文，不是 JSON 回执；`data store remove` 只解绑，不删除记录或 revision 历史。重新绑定非空目录需通过格式与模型兼容检查。
+- DataStore 保存 Payload，支持文件/MIME 校验及流式导出，不支持 edit 或对二进制做 JSON 路径查询；条件写由 Store 能力决定，filesystem DataStore 不支持。`data export --out <file>` 的文件目标须不存在，`--out -` 只输出原始正文，不是 JSON 回执；`data store remove` 只解绑，不删除记录或 revision 历史。重新绑定非空目录需通过格式与模型兼容检查。
 - 模型写入中断时按诊断重试原写命令以恢复一致状态；外部改动冲突保留新内容，不以 initialize 代替所有恢复。业务 Store 的 revision 与 Run 历史快照分别管理。
+
+- 所有 Store 的公开 revision/expectedRevision 都是不透明字符串，读取后原样传回；不要转数字或自行递增。filesystem JSON ValueStore 的磁盘计数仍为数字，公开 token 为十进制字符串。
+- TOS Store 先读 `memsphere-data-store`。使用已有 bucket、专用 prefix、region、endpoint 和固定 raw/revision 模式，凭据只引用 Home 保存的名称或 AK/SK/可选 STS Token 环境变量。View 的 Home TOS 凭据页保存身份，Project 业务 Store 页创建绑定；已有 Store 只改凭据引用，首版不切换或迁移。
+- TOS raw 模式保存原始 Payload，create 不覆盖，拒绝 update/expectedRevision，delete 物理删除。revision 模式必须在 update/delete 携带读取的 token，单次条件 PUT；删除态 read 返回 deleted 和 revision，普通 update 带该 token 及新 Payload 重新写入，没有 restore 命令。has 包含删除态，普通 list 隐藏；空 items 仍可能有 nextCursor。
+- TOS 使用官方 SDK，首版仅接入从未启用版本控制的桶，普通上传最多 5 GiB（带头 Payload 少十字节），不支持分片。失败明确报错，无本地回退、自动重试或自动删除补偿；超时后先重读确认。只有 TOS Store 的数据在云端，不表示整个 Project 备份。
 
 ### 从模型市场导入
 

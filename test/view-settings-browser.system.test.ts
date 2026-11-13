@@ -613,3 +613,134 @@ test("Runner settings require installation detection and preserve identity/async
     assert.deepEqual(saved.acp_providers, { codex: { idle_timeout_ms: 90000 } });
   } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
 });
+
+test("TOS settings save credentials and a Store binding through real settings APIs", { timeout: 30_000 }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-settings-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
+  await initializeProjectModelRegistrations({}, { root: config.scopeRoot });
+  const { useTosService } = await import("./support/tos-sdk-service.js");
+  const service = useTosService(t);
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.setDefaultTimeout(5000);
+    const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    await page.goto(`${origin}/projects/demo/settings/tos-credentials`, { waitUntil: "networkidle" });
+    await page.locator('[data-field="tosCredential.id"]').fill("test");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("fixture-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("fixture-secret");
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').getAttribute("type"), "password");
+    await page.getByRole("button", { name: "保存凭据", exact: true }).click();
+    await page.getByText("凭据已保存。", { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(), "");
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button", { name: "业务 Store", exact: true }).click();
+    const values = { id: "assets", model: "memsphere/run/artifact.json", bucket: "test-bucket", prefix: "assets/" };
+    for (const [key, value] of Object.entries(values)) await page.locator(`[data-field="tosDraft.${key}"]`).fill(value);
+    await page.locator('[data-field="tosDraft.credentials.id"]').fill("test");
+    await page.getByRole("button", { name: "添加存储", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("button", { name: "确认保存", exact: true }).waitFor();
+    assert.equal(service.calls.length, 0, "Pure validation must not contact or scan TOS");
+    const saving = page.waitForResponse(response => response.url().endsWith("/settings/project") && response.request().method() === "PUT");
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    const savedResponse = await saving;
+    assert.equal(savedResponse.status(), 200, await savedResponse.text());
+    await page.locator('[data-field="tosRef.assets.id"]').waitFor();
+    assert.equal(service.calls.filter(call => call.method === "VERSIONING").length, 1); assert.equal(service.calls.filter(call => call.method === "LIST").length, 1);
+    const saved = JSON.parse(await readFile(config.configPath, "utf8"));
+    assert.equal(saved.dataStores.assets.config.credentials.id, "test");
+    assert.equal(saved.dataStores.assets.config.mode, "revision");
+    assert.equal(await page.locator('[data-field="tosRef.assets.id"]').inputValue(), "test");
+    assert.equal(await page.locator('[data-field="tosRef.assets.mode"]').count(), 0);
+    await page.reload();
+    await page.locator('[data-field="tosRef.assets.id"]').waitFor();
+    assert.equal(await page.locator('[data-field="tosRef.assets.id"]').inputValue(), "test");
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button", {name:"TOS 凭据",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').fill("alternate");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("fixture-other-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("fixture-other-secret");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    await page.getByText("凭据已保存。",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button",{name:"业务 Store",exact:true}).click();
+    await page.locator('[data-field="tosRef.assets.id"]').fill("alternate");
+    await page.getByRole("button",{name:"保存",exact:true}).click();
+    await page.getByRole("button",{name:"确认保存",exact:true}).click();
+    await page.locator('[data-field="tosRef.assets.id"]').waitFor();
+    await page.reload();await page.locator('[data-field="tosRef.assets.id"]').waitFor();
+    assert.equal(await page.locator('[data-field="tosRef.assets.id"]').inputValue(),"alternate");
+    assert.equal(JSON.parse(await readFile(config.configPath,"utf8")).dataStores.assets.config.credentials.id,"alternate");
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
+});
+
+test("TOS raw/env settings survive reload and preserve an unsaved reference after a real CAS conflict",{timeout:30_000},async t=>{
+  const dir=await mkdtemp(join(tmpdir(),"memsphere-tos-raw-browser-"));
+  const config=await settingsConfigFixture(dir,"127.0.0.1");
+  const { initializeProjectModelRegistrations }=await import("../src/project/model-registration.js");
+  await initializeProjectModelRegistrations({}, {root:config.scopeRoot});
+  const { useTosService }=await import("./support/tos-sdk-service.js");useTosService(t);
+  const names=["BROWSER_TOS_AK","BROWSER_TOS_SK","BROWSER_TOS_AK_UPDATED"];
+  const previous=names.map(name=>process.env[name]);names.forEach(name=>{process.env[name]="fixture-value";});
+  const server=createViewServer(config);await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
+  const browser=await browserScope();
+  try{
+    const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(5000);
+    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
+    for(const [key,value] of Object.entries({id:"raw-assets",model:"memsphere/run/artifact.json",bucket:"test-bucket",prefix:"raw-assets/"})) await page.locator(`[data-field="tosDraft.${key}"]`).fill(value);
+    await page.locator('[data-select-field="tosDraft.mode"]').click();await page.getByRole("option",{name:"不带 revision",exact:true}).click();
+    await page.locator('[data-select-field="tosDraft.credentials.source"]').click();await page.getByRole("option",{name:"环境变量",exact:true}).click();
+    await page.locator('[data-field="tosDraft.credentials.accessKeyIdEnv"]').fill(names[0]);
+    await page.locator('[data-field="tosDraft.credentials.accessKeySecretEnv"]').fill(names[1]);
+    await page.getByRole("button",{name:"添加存储",exact:true}).click();
+    await page.getByRole("button",{name:"保存",exact:true}).click();await page.getByRole("button",{name:"确认保存",exact:true}).click();
+    await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').waitFor();
+    await page.reload();await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').waitFor();
+    const saved=JSON.parse(await readFile(config.configPath,"utf8"));assert.equal(saved.dataStores["raw-assets"].config.mode,"raw");
+    assert.deepEqual(saved.dataStores["raw-assets"].config.credentials,{source:"env",accessKeyIdEnv:names[0],accessKeySecretEnv:names[1]});
+    await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').fill(names[2]);
+    await page.getByRole("button",{name:"保存",exact:true}).click();await page.getByRole("button",{name:"确认保存",exact:true}).waitFor();
+    const external=saved;await writeFile(config.configPath,JSON.stringify(external)+"\n\n");
+    const response=page.waitForResponse(r=>r.url().endsWith("/settings/project") && r.request().method()==="PUT");
+    await page.getByRole("button",{name:"确认保存",exact:true}).click();assert.equal((await response).status(),409);
+    assert.deepEqual(JSON.parse(await readFile(config.configPath,"utf8")),external);
+    await page.getByText("保存失败：配置文件已被其他进程修改，请重新读取。",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').inputValue(),names[2]);
+    await page.getByRole("button",{name:"重新读取",exact:true}).click();
+    await page.waitForFunction(name=>(document.querySelector('[data-field="tosRef.raw-assets.accessKeyIdEnv"]') as HTMLInputElement)?.value === name,names[0]);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
+  }finally{
+    await browser.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));
+    names.forEach((name,i)=>{if(previous[i]===undefined)delete process.env[name];else process.env[name]=previous[i];});
+    await rm(dir,{recursive:true,force:true});
+  }
+});
+
+test("TOS credential settings reject unauthenticated writes and recover through the operation-token UI",{timeout:30_000},async()=>{
+  const dir=await mkdtemp(join(tmpdir(),"memsphere-tos-auth-browser-"));
+  const config=await settingsConfigFixture(dir,"0.0.0.0"),homeFile=join(config.homeRoot!,"config.json");
+  const before=await readFile(homeFile,"utf8");
+  const server=createViewServer(config,{settingsToken:"fixture-operation-token"});
+  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));const browser=await browserScope();
+  try{
+    const page=await browser.newPage();page.setDefaultTimeout(5000);
+    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/tos-credentials`,{waitUntil:"domcontentloaded",timeout:15000});
+    const unauthorized=await page.evaluate(async()=>{
+      const response=await fetch("/api/settings/global/tos-credentials",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({id:"forbidden",expectedRevision:"bad",credentials:{accessKeyId:"fixture-ak",accessKeySecret:"fixture-secret"}})});
+      return {status:response.status,text:await response.text()};
+    });
+    assert.equal(unauthorized.status,401);assert.ok(!unauthorized.text.includes("fixture-secret"));assert.equal(await readFile(homeFile,"utf8"),before);
+    await page.getByLabel("操作令牌",{exact:true}).fill("wrong-token");await page.getByRole("button",{name:"进入配置中心",exact:true}).click();
+    await page.getByText("操作令牌不正确，请检查后重试。",{exact:true}).waitFor();
+    assert.equal(await readFile(homeFile,"utf8"),before);
+    await page.getByLabel("操作令牌",{exact:true}).fill("fixture-operation-token");await page.getByRole("button",{name:"进入配置中心",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
+  }finally{await browser.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(dir,{recursive:true,force:true});}
+});

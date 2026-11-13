@@ -32,7 +32,8 @@
       "concepts/memsphere-app.yaml",
       "statements/memsphere-app-usage-rules.yaml",
       "statements/memsphere-exploration-artifact-rules.yaml",
-      "concepts/memsphere-runner.yaml"
+      "concepts/memsphere-runner.yaml",
+      "concepts/memsphere-data-store.yaml"
     ],
     "remove": [
       {

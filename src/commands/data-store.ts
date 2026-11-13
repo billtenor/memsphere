@@ -53,18 +53,18 @@ export function registerDataStoreCommands(data: Command) {
       const host = await createProjectModelHost({}, { root: config.scopeRoot, ...state.project });
       const model = (await host.list()).find(model => model.id === state.binding.model);
       const value = state.binding.kind === "value";
-      const extensions = value ? undefined : parseFilesystemDataStoreConfig(new Config(state.binding.config)).extensions;
+      const extensions = state.binding.factory !== "memsphere/filesystem" ? undefined : parseFilesystemDataStoreConfig(new Config(state.binding.config)).extensions;
       const mapping = extensions ? Object.fromEntries([...new Set(extensions.map(([, mime]) => mime))]
         .map(mime => [mime, extensions.filter(([, type]) => type === mime).map(([suffix]) => suffix)])) : undefined;
       const stateOfModel = await boundModelStatus(host, state.binding, model);
       let { jsonValue } = stateOfModel;
-      if (!value && !Object.hasOwn(mapping!, "application/json")) jsonValue = false;
+      if (mapping && !Object.hasOwn(mapping, "application/json")) jsonValue = false;
       const { jsonValue: _jsonValue, ...status } = stateOfModel;
       await assertModelOperationStamp(config.scopeRoot, state.stamp);
       emitCommandResult({ project: config.project?.name, storeId: id, ...state.binding, directory: state.directory,
         ...status,
-        idRule: value ? "single portable record name; .json is a physical suffix" : "portable relative path including a MIME-mapped suffix",
-        capabilities: { value: jsonValue, payload: !value && status.status === "available", conditionalWrite: value && jsonValue, edit: value && jsonValue }, ...(mapping ? { contentTypeExtensions: mapping } : {}) }, options.output);
+        idRule: value ? "single portable record name; .json is a physical suffix" : state.binding.factory === "memsphere/tos" ? "portable relative path; no filename suffix required" : "portable relative path including a MIME-mapped suffix",
+        capabilities: { value: jsonValue, payload: !value && status.status === "available", conditionalWrite: value && jsonValue || status.status === "available" && state.binding.factory === "memsphere/tos" && state.binding.config.mode === "revision", ...(state.binding.factory === "memsphere/tos" ? { update: status.status === "available" && state.binding.config.mode === "revision" } : {}), edit: value && jsonValue }, ...(mapping ? { contentTypeExtensions: mapping } : {}) }, options.output);
     });
   output(store.command("create <store-id>").requiredOption("--model <ref>")
     .addOption(new Option("--kind <kind>").choices(["data", "value"]).makeOptionMandatory())
@@ -72,7 +72,7 @@ export function registerDataStoreCommands(data: Command) {
     .action(async (id, options) => {
       assertBusinessStoreId(id); assertModelRef(options.model);
       const expectedFactory = options.kind === "value" ? "memsphere/filesystem-json" : "memsphere/filesystem";
-      if (options.factory !== expectedFactory) throw serviceError("UNSUPPORTED_CAPABILITY", `Store kind ${options.kind} requires Factory ${expectedFactory}`);
+      if (options.factory !== expectedFactory && !(options.kind === "data" && options.factory === "memsphere/tos")) throw serviceError("UNSUPPORTED_CAPABILITY", `Store kind ${options.kind} requires Factory ${expectedFactory}`);
       const config = await readConfig();
       const input = parseJsonInput(await readInputText(options.configFile));
       emitCommandResult({ project: config.project?.name, ...await createBusinessStore({}, config.scopeRoot, id, { model: options.model, kind: options.kind, factory: options.factory, config: input }, options.dryRun) }, options.output);

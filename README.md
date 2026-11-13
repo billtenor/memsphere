@@ -405,9 +405,11 @@ memsphere data export one --store counters --as json --out one.json --output jso
 
 `--path <path>` 本轮使用 RFC 9535 JSONPath。传入时 `value` 始终为匹配值数组：未命中 `[]`，命中 null 为 `[null]`，命中数组不展开；省略时返回整条值。JSON Patch 的 `path/from` 使用 RFC 6901 JSON Pointer，和读取路径不同。文件参数中的 `-` 从 stdin 读取一次；JSON 输入接受 UTF-8 BOM，拒绝无效 UTF-8 或 JSON。
 
-业务数据必须显式选择已登记的 Store，不会通过模型名猜测，也不会访问 Run、归档或系统模型存储。Store 配置中的 directory 可以是绝对路径或相对路径：绝对路径按指定位置使用，相对路径以 Registry Project 根目录解析；两者都检查存储重叠和内容兼容性。ValueStore 使用 `memsphere/filesystem-json`，记录 ID 不带物理文件后缀；DataStore 使用 `memsphere/filesystem`，ID 包含 MIME 映射后缀，Payload 输入只适用于 DataStore。`update` 是整条替换；ValueStore 的 update/edit/delete 可带 `--expected-revision` 防止覆盖旧版本，DataStore 不支持该选项和 edit。模型没有面向用户的修订号或 CAS 参数。
+业务数据必须显式选择已登记的 Store，不会通过模型名猜测，也不会访问 Run、归档或系统模型存储。Store 配置中的 directory 可以是绝对路径或相对路径：绝对路径按指定位置使用，相对路径以 Registry Project 根目录解析；两者都检查存储重叠和内容兼容性。ValueStore 使用 `memsphere/filesystem-json`，记录 ID 不带物理文件后缀；DataStore 使用 `memsphere/filesystem`，ID 包含 MIME 映射后缀，Payload 输入只适用于 DataStore。`update` 是整条替换；ValueStore 的 update/edit/delete 可带 `--expected-revision` 防止覆盖旧版本，filesystem DataStore 不支持该选项和 edit；TOS 的 revision 模式支持条件更新和逻辑删除，raw 模式拒绝覆盖。公开 revision 均为不透明字符串，读取后原样回传。模型没有面向用户的修订号或 CAS 参数。
 
 模型、数据和 Store 的写命令支持 `--dry-run`，只检查拟议变更；export 例外，只写显式指定的导出目标，已有目标拒绝覆盖。`--out -` 输出原始内容，与 `--output json` 回执互斥。普通读取不创建目录、修复登记或更新业务状态。文件写入通过本机跨进程锁协调，进程退出后由系统释放；锁文件可保留，不能当成过期锁删除。保护范围是通过该协议访问的本地文件系统，不承诺网络文件系统锁或外部程序直接改文件时的并发一致性；平台不支持锁时明确失败。
+
+TOS Store 在“设置 → TOS 凭据”保存 AK/SK（可选 STS Token），再在当前 Project 的“业务 Store”选择模型、已有 bucket、专用 prefix、region/endpoint 和 raw/revision 模式；也可用 `data store create ... --kind data --factory memsphere/tos --config-file tos.json`。配置示例及限制见 [TOS DataStore](src/data/extensions/tos-datastore/README.md)。保存后模型、位置和模式固定，凭据引用可修改。只有接入 TOS 的 Store 数据在云端。revision 模式读取的删除态仍含 revision，以普通 update 携该版本及新 Payload 即可重新写入；没有额外恢复命令。首版最多 5 GiB 总对象大小，无分片，仅支持从未启用版本控制的桶。
 
 全部六种 `list`（model、data、data store、project、memory、archive）都支持 `--limit <n>` 和 `--cursor <token>`，默认 100，范围 1–1000。先筛选再分页；JSON/YAML 输出为 `{ "items": [...], "nextCursor": "..." }`，末页省略 nextCursor，空页为 items 空数组。继续时可改 limit，必须保持命令、Project/Store/Run、筛选条件及 Memory 父节点等查询范围。Memory 子节点保持声明顺序；Reviewer 列表继续使用 Session 绑定的 Project 与冻结 Run。
 

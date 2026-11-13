@@ -29,7 +29,7 @@ export function modelDefinitionStore(id: string, model: string, directory: strin
     id, model, kind: "DataStore",
     async get(context, ref) {
       const stored = await (await open(context))?.get(context, filename(ref));
-      return stored && { ...stored, data: { ...stored.data, id: ref } };
+      return stored && !stored.deleted ? { ...stored, data: { ...stored.data, id: ref } } : undefined;
     },
     async has(context, ref) { return await (await open(context))?.has(context, filename(ref)) ?? false; },
     async create(context, data) { await (await open(context, true))!.create(context, { ...data, id: filename(data.id) }); },

@@ -17,13 +17,13 @@ for (const [name, schema, initial, changed] of roots) {
   });
   test(`business create/read preserves a ${name} root and its initial revision`, async () => {
     const { service: s, root } = await businessDataModule(schema);
-    assert.equal((await s.writeData({}, root, "records", "item", "create", { kind: "value", value: initial })).revision, 1);
+    assert.equal((await s.writeData({}, root, "records", "item", "create", { kind: "value", value: initial })).revision, "1");
     assert.deepEqual((await s.readData({}, root, "records", "item")).value, initial);
   });
   test(`business update/read preserves a ${name} root and advances its revision`, async () => {
     const { service: s, root, seedValue } = await businessDataModule(schema);
     await seedValue("item", initial);
-    assert.equal((await s.writeData({}, root, "records", "item", "update", { kind: "value", value: changed }, { expectedRevision: 1 })).revision, 2);
+    assert.equal((await s.writeData({}, root, "records", "item", "update", { kind: "value", value: changed }, { expectedRevision: "1" })).revision, "2");
     assert.deepEqual((await s.readData({}, root, "records", "item")).value, changed);
   });
   test(`business export serializes a ${name} root as complete JSON`, async () => {
@@ -51,7 +51,7 @@ for (const [name, schema, initial, changed] of roots) {
   test(`business delete removes a record containing a ${name} root`, async () => {
     const { service: s, root, seedValue } = await businessDataModule(schema);
     await seedValue("item", initial);
-    assert.equal((await s.deleteData({}, root, "records", "item", { expectedRevision: 1 })).deleted, true);
+    assert.equal((await s.deleteData({}, root, "records", "item", { expectedRevision: "1" })).deleted, true);
     await assert.rejects(s.readData({}, root, "records", "item"), { code: "NOT_FOUND" });
   });
 }
@@ -74,7 +74,7 @@ test("business edits validate the final complete value rather than intermediate 
   const { service: s, root } = await existingBusinessItem();
   await s.editData({}, root, "records", "item", [{ op: "remove", path: "/name" }, { op: "add", path: "/name", value: "after" }]);
   const after = await s.readData({}, root, "records", "item");
-  assert.equal(after.revision, 2);
+  assert.equal(after.revision, "2");
   assert.deepEqual(after.value, { name: "after", count: 1 });
 });
 
@@ -94,7 +94,7 @@ for (const operation of ["edit", "update"] as const) test(`business ${operation}
   const { service: s, root, input } = await existingBusinessItem();
   await s.upsertData({}, root, "records", "item", input);
   const before = await s.readData({}, root, "records", "item");
-  const stale = { expectedRevision: 1 };
+  const stale = { expectedRevision: "1" };
   await assert.rejects(operation === "edit"
     ? s.editData({}, root, "records", "item", [], stale)
     : s.writeData({}, root, "records", "item", "update", input, stale), { code: "REVISION_CONFLICT" });
@@ -109,7 +109,7 @@ test("business upsert replaces an existing complete value and advances its revis
   const input = { kind: "value" as const, value: { name: "replacement", count: 3 } };
   await s.upsertData({}, root, "records", "item", input);
   const after = await s.readData({}, root, "records", "item");
-  assert.equal(after.revision, 2);
+  assert.equal(after.revision, "2");
   assert.deepEqual(after.value, input.value);
 });
 
@@ -150,7 +150,7 @@ test("business dry-run delete leaves the stored record unchanged", async () => {
   const f = await existingBusinessItem(), s = f.service;
   const before = await s.readData({}, f.root, "records", "item");
   await s.deleteData({}, f.root, "records", "item", { dryRun: true });
-  assert.equal((await s.readData({}, f.root, "records", "item")).revision, 1);
+  assert.equal((await s.readData({}, f.root, "records", "item")).revision, "1");
   assert.deepEqual(await s.readData({}, f.root, "records", "item"), before);
 });
 
@@ -172,6 +172,6 @@ for (const operation of ["update", "edit"] as const) test(`raw business Store re
   const { service: s, root } = await businessDataModule(objectSchema, "data");
   const input = { kind: "value" as const, value: { name: "raw", count: 1 } };
   await assert.rejects(operation === "update"
-    ? s.writeData({}, root, "records", "item.json", "update", input, { expectedRevision: 1 })
+    ? s.writeData({}, root, "records", "item.json", "update", input, { expectedRevision: "1" })
     : s.editData({}, root, "records", "item.json", []), { code: "UNSUPPORTED_CAPABILITY" });
 });

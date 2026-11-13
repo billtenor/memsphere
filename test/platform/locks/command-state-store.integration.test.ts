@@ -66,12 +66,12 @@ test("same-session concurrent creation is idempotent through ValueStore and pres
   const { openCommandStates } = await import("../../../src/home/command-state-store.js");
   const store = (await openCommandStates(false, f.home))!;
   const row = (await store.get({}, "codex-same-session"))!;
-  assert.equal(row.revision, 1, "concurrent duplicate creation must not rewrite the winning record");
+  assert.equal(row.revision, "1", "concurrent duplicate creation must not rewrite the winning record");
   const value = row.value as import("../../../src/home/command-state-store.js").CommandState;
   await store.update({}, row.id, { ...value, state: { reads: { "artifact:A": { readAt: new Date().toISOString() } } } }, { expectedRevision: row.revision });
   await Promise.all([f.run("same-session"), f.run("same-session")]);
   const current = (await store.get({}, row.id))!;
-  assert.equal(current.revision, 2);
+  assert.equal(current.revision, "2");
   assert.deepEqual(Object.keys((current.value as typeof value).state.reads!), ["artifact:A"]);
   const { stat } = await import("node:fs/promises");
   await assert.rejects(stat(join(f.home, ".runtime", "runner-sessions.lock")), { code: "ENOENT" });
@@ -102,6 +102,6 @@ test("a concurrent different binding is reported as a conflict rather than overw
   const { openCommandStates } = await import("../../../src/home/command-state-store.js");
   const store = (await openCommandStates(false, f.home))!;
   const row = (await store.get({}, "codex-same-session"))!;
-  assert.equal(row.revision, 2);
+  assert.equal(row.revision, "2");
   assert.equal((row.value as { groupId: string }).groupId, "winning-run");
 });

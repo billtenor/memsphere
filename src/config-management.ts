@@ -1,6 +1,9 @@
+import { Config } from "./data/api/config.js";
+import { parseTosConfig } from "./data/extensions/tos-datastore/config.js";
 import { withConfigFileLock } from "./config-file-lock.js";
+import { isDeepStrictEqual } from "node:util";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { ZodError, type z } from "zod";
 import { globalConfigSchema, type MemsphereConfig } from "./config.js";
@@ -10,7 +13,7 @@ import {
   type ProjectControlPlaneConfigFile
 } from "./control-plane/index.js";
 import { atomicWriteJson } from "./persistence.js";
-import { readModelOperationStamp } from "./project/model-operation.js";
+import { assertModelOperationStamp, readModelOperationStamp } from "./project/model-operation.js";
 import { projectConfigSchema, type ProjectConfigFile } from "./project/model.js";
 import {
   normalizeInstalledViewPackagePaths,
@@ -59,6 +62,7 @@ export type EditableGlobalConfigDraft = {
 };
 
 export type EditableProjectConfigDraft = {
+  dataStores?: ProjectConfigFile["dataStores"];
   modelsDirectory?: string;
   modelRegistration?: ProjectConfigFile["modelRegistration"];
   control_plane?: ProjectControlPlaneConfigFile;
@@ -155,6 +159,7 @@ export function editableGlobalConfigDraft(document: GlobalConfigDocument): Edita
 
 export function editableProjectConfigDraft(document: ProjectConfigDocument): EditableProjectConfigDraft {
   return {
+    ...(document.raw.dataStores === undefined ? {} : { dataStores: structuredClone(document.raw.dataStores) }),
     ...(document.raw.modelsDirectory === undefined ? {} : { modelsDirectory: document.raw.modelsDirectory }),
     ...(document.raw.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(document.raw.modelRegistration) }),
     ...(document.raw.control_plane === undefined
@@ -170,6 +175,7 @@ export function validateGlobalConfigDraft(
   projects: ProjectConfigReference[] = []
 ): GlobalConfigDraftValidation {
   const candidateInput = {
+    ...(document.raw.tosCredentials === undefined ? {} : { tosCredentials: structuredClone(document.raw.tosCredentials) }),
     ...(draft.runner_agents === undefined ? {} : { runner_agents: structuredClone(draft.runner_agents) }),
     ...(draft.language === undefined ? {} : { language: draft.language }),
     ...(draft.view === undefined ? {} : { view: {
@@ -209,7 +215,7 @@ export function validateProjectConfigDraft(
 ): ProjectConfigDraftValidation {
   const candidateInput = {
     store: structuredClone(document.raw.store),
-    ...(document.raw.dataStores === undefined ? {} : { dataStores: structuredClone(document.raw.dataStores) }),
+    ...((draft.dataStores ?? document.raw.dataStores) === undefined ? {} : { dataStores: structuredClone(draft.dataStores ?? document.raw.dataStores) }),
     ...(draft.modelsDirectory === undefined ? {} : { modelsDirectory: draft.modelsDirectory }),
     ...(draft.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(draft.modelRegistration) }),
     ...(draft.control_plane === undefined ? {} : { control_plane: structuredClone(draft.control_plane) }),
@@ -218,6 +224,26 @@ export function validateProjectConfigDraft(
 
   try {
     const candidate = projectConfigSchema.parse(candidateInput);
+    for (const id of new Set([...Object.keys(document.raw.dataStores ?? {}), ...Object.keys(candidate.dataStores ?? {})])) {
+      if (/^context_control\/(runs|steps|artifacts|externals|reviews)$/.test(id) && !isDeepStrictEqual(document.raw.dataStores?.[id], candidate.dataStores?.[id]))
+        throw new ConfigDraftValidationError([{ path: `dataStores.${id}`, message: "Context control Store bindings are managed by the Project initialization commands" }]);
+    }
+    for (const [id, binding] of Object.entries(candidate.dataStores ?? {})) {
+      if (!id.trim() || /^(?:models|runs?|archives?)(?:\/|$)/.test(id) || /^(?:memsphere\/model-registrations|memsphere\/run)(?:\/|$)/.test(id))
+        throw new ConfigDraftValidationError([{ path: `dataStores.${id}`, message: "Reserved or invalid Store ID" }]);
+      if (binding.factory === "memsphere/tos") {
+        try { parseTosConfig(new Config(binding.config)); }
+        catch { throw new ConfigDraftValidationError([{ path: `dataStores.${id}.config`, message: "Invalid TOS Store configuration" }]); }
+      }
+    }
+    for (const [id, previous] of Object.entries(document.raw.dataStores ?? {})) {
+      const next = candidate.dataStores?.[id];
+      if (!next) continue; // Removing a binding retains the data.
+      const identity = (binding: typeof previous) => binding.factory === "memsphere/tos"
+        ? { ...binding, config: { ...binding.config, credentials: undefined } } : binding;
+      if (!isDeepStrictEqual(identity(previous), identity(next)))
+        throw new ConfigDraftValidationError([{ path: `dataStores.${id}`, message: "Existing Store identity, model, mode and location cannot be changed; only TOS credential references are editable" }]);
+    }
     // Retained roots are internal isolation state; editing a draft cannot expose old envelopes.
     if (document.raw.modelRegistration?.excludedDirectories?.length) {
       candidate.modelRegistration ??= structuredClone(document.raw.modelRegistration);
@@ -289,24 +315,70 @@ export async function writeProjectConfigDraft(input: {
   globalConfigPath: string;
   migrateModelRegistrations?: boolean;
 }): Promise<ProjectConfigDocument> {
-  // Registration migration is performed after the operator has stopped writes.
+  const [baseline, globalBaseline] = await Promise.all([
+    readProjectConfigDocument(input.document.configPath, input.document.resolved),
+    readGlobalConfigDocument(input.globalConfigPath)
+  ]);
+  assertExpectedRevision(input.expectedRevision, baseline.revision);
+  const validation = validateProjectConfigDraft(baseline, input.draft, globalBaseline.raw);
+  if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
+  const candidate = validation.candidate;
+  const stamp = await readModelOperationStamp(baseline.scopeRoot);
+  const { validateBusinessBindings, preflightBusinessBinding } = await import("./project/business-stores.js");
+  const directories = await validateBusinessBindings(baseline.scopeRoot, candidate);
+  const added = Object.entries(candidate.dataStores ?? {}).filter(([id]) => !Object.hasOwn(baseline.raw.dataStores ?? {}, id));
+  if (added.length) {
+    const { createProjectModelHost } = await import("./project/models.js");
+    const host = await createProjectModelHost({}, { root: baseline.scopeRoot, ...candidate });
+    for (const [id, binding] of added) {
+      const runtime = await host.runtime(binding.model);
+      if (binding.kind === "value") {
+        const { assertJsonDescriptor } = await import("./data/extensions/json-serializer/index.js");
+        assertJsonDescriptor(runtime.descriptor.root);
+      }
+      await preflightBusinessBinding({}, baseline.scopeRoot, id, binding, runtime, directories.get(id), async ref => {
+        if (ref.source === "env") { const { resolveEnvironmentCredentials } = await import("./data/extensions/tos-datastore/config.js"); return resolveEnvironmentCredentials(ref); }
+        const { decryptTosCredential } = await import("./tos-credential-codec.js");
+        return decryptTosCredential(ref.id, globalBaseline.raw.tosCredentials);
+      });
+    }
+  }
+  // Network reads have finished. Hold only short local config CAS locks while publishing.
   return withConfigFileLock(input.globalConfigPath, () => withConfigFileLock(input.document.configPath, async () => {
-    await readModelOperationStamp(input.document.scopeRoot);
     const [latest, global] = await Promise.all([
       readProjectConfigDocument(input.document.configPath, input.document.resolved),
       readGlobalConfigDocument(input.globalConfigPath)
     ]);
-    assertExpectedRevision(input.expectedRevision, latest.revision);
-    const validation = validateProjectConfigDraft(latest, input.draft, global.raw);
-    if (!validation.valid || !validation.candidate) throw new ConfigDraftValidationError(validation.errors);
+    assertExpectedRevision(baseline.revision, latest.revision);
+    assertExpectedRevision(globalBaseline.revision, global.revision);
+    await assertModelOperationStamp(baseline.scopeRoot, stamp);
     const { validateModelStoragePaths } = await import("./project/model-storage-paths.js");
-    await validateModelStoragePaths({ root: latest.scopeRoot, modelsDirectory: validation.candidate.modelsDirectory, modelRegistration: validation.candidate.modelRegistration });
-    const { validateBusinessBindings } = await import("./project/business-stores.js");
-    await validateBusinessBindings(latest.scopeRoot, validation.candidate);
+    await validateModelStoragePaths({ root: latest.scopeRoot, modelsDirectory: candidate.modelsDirectory, modelRegistration: candidate.modelRegistration });
+    await validateBusinessBindings(latest.scopeRoot, candidate);
     const { prepareModelRegistrationMigration, DEFAULT_MODEL_REGISTRATION_CONFIG } = await import("./project/model-registration.js");
-    const migration = await prepareModelRegistrationMigration({}, { root: latest.scopeRoot, modelsDirectory: latest.raw.modelsDirectory, modelRegistration: latest.raw.modelRegistration }, validation.candidate.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG, { migrate: input.migrateModelRegistrations });
-    if (migration.migrated) validation.candidate.modelRegistration = { ...(validation.candidate.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG)), excludedDirectories: migration.excludedDirectories };
-    await atomicWriteJson(latest.configPath, validation.candidate);
+    const migration = await prepareModelRegistrationMigration({}, { root: latest.scopeRoot, modelsDirectory: latest.raw.modelsDirectory, modelRegistration: latest.raw.modelRegistration }, candidate.modelRegistration ?? DEFAULT_MODEL_REGISTRATION_CONFIG, { migrate: input.migrateModelRegistrations });
+    if (migration.migrated) candidate.modelRegistration = { ...(candidate.modelRegistration ?? structuredClone(DEFAULT_MODEL_REGISTRATION_CONFIG)), excludedDirectories: migration.excludedDirectories };
+    const created: string[] = [];
+    try {
+      for (const [id] of added) {
+        const directory = directories.get(id);
+        if (!directory) continue;
+        let parent = directory;
+        while (true) {
+          try { await stat(parent); break; }
+          catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+          created.push(parent); parent = dirname(parent);
+        }
+        await mkdir(directory, { recursive: true });
+      }
+      await atomicWriteJson(latest.configPath, candidate);
+    } catch (error) {
+      // A rename may have committed even when subsequent durability work failed.
+      const saved = await readProjectConfigDocument(latest.configPath, latest.resolved);
+      if (JSON.stringify(saved.raw) === JSON.stringify(candidate)) return saved;
+      for (const path of created) { try { await rmdir(path); } catch { /* Never remove a nonempty or replaced directory. */ } }
+      throw error;
+    }
     return readProjectConfigDocument(latest.configPath, latest.resolved);
   }));
 }
@@ -365,6 +437,8 @@ function parseGlobalConfigSource(source: string): GlobalConfigFile {
   try {
     return globalConfigSchema.parse(JSON.parse(source));
   } catch (error) {
+    // JSON parser excerpts can contain an encryption key or ciphertext.
+    if (error instanceof SyntaxError) throw new ConfigDraftValidationError([{ path: "", message: "Home configuration is not valid JSON" }]);
     throw parseConfigError(error);
   }
 }
@@ -393,6 +467,7 @@ function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDra
 
 function normalizeProjectDraft(project: ProjectConfigFile): EditableProjectConfigDraft {
   return {
+    ...(project.dataStores === undefined ? {} : { dataStores: structuredClone(project.dataStores) }),
     ...(project.modelsDirectory === undefined ? {} : { modelsDirectory: project.modelsDirectory }),
     ...(project.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(project.modelRegistration) }),
     ...(project.control_plane === undefined

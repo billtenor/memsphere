@@ -16,7 +16,7 @@ import { readDeletedRevision, retainDeletedRevision, validateFilesystemJsonStore
 export { FILESYSTEM_JSON_METADATA_DIRECTORY } from "../shared/filesystem.js";
 export { validateFilesystemJsonStoreMetadata } from "./revision-state.js";
 
-type JsonRecord = StoredValue & { revision: number; createdAt: number; updatedAt: number };
+type JsonRecord = Omit<StoredValue, "revision"> & { revision: number; createdAt: number; updatedAt: number };
 
 /**
  * Each record is readable, formatted JSON at `${directory}/${id}.json`:
@@ -60,7 +60,8 @@ class FilesystemJsonValueStore implements ValueStore {
 
   async get(context: Context, id: DataId): Promise<StoredValue | undefined> {
     const filename = recordFilename(id);
-    return this.read(context, id, filename);
+    const record = await this.read(context, id, filename);
+    return record && storedValue(record);
   }
 
   async has(context: Context, id: DataId): Promise<boolean> {
@@ -77,7 +78,7 @@ class FilesystemJsonValueStore implements ValueStore {
       const now = Date.now();
       const record: JsonRecord = { id, revision: revision + 1, createdAt: now, updatedAt: now, value: snapshot };
       await this.publish(context, filename, record, "create");
-      return record;
+      return storedValue(record);
     });
   }
 
@@ -93,7 +94,7 @@ class FilesystemJsonValueStore implements ValueStore {
       const record: JsonRecord = { id, revision: revision + 1, createdAt: previous?.createdAt ?? now, updatedAt: now, value: snapshot };
       if (previous && Object.hasOwn(previous, "createdBy")) record.createdBy = previous.createdBy;
       await this.publish(context, filename, record, previous ? "replace" : "create");
-      return record;
+      return storedValue(record);
     });
   }
 
@@ -113,7 +114,7 @@ class FilesystemJsonValueStore implements ValueStore {
       };
       if (Object.hasOwn(previous, "createdBy")) record.createdBy = previous.createdBy;
       await this.publish(context, filename, record, "replace");
-      return record;
+      return storedValue(record);
     });
   }
 
@@ -214,14 +215,17 @@ function recordFilename(id: DataId): string {
 
 function captureRevision(options: UpdateOptions | DeleteOptions | undefined): number | undefined {
   const revision = options?.expectedRevision;
-  if (revision !== undefined) requirePositiveInteger(revision, "expectedRevision");
-  return revision;
+  if (revision === undefined) return undefined;
+  if (typeof revision !== "string" || !/^[1-9][0-9]*$/.test(revision) || !Number.isSafeInteger(Number(revision))) {
+    throw Object.assign(new TypeError("expectedRevision must be a Store-issued revision string"), { code: "INVALID_ARGUMENT" });
+  }
+  return Number(revision);
 }
 
 function checkRevision(id: string, record: JsonRecord | undefined, expected: number | undefined): void {
   if (expected !== undefined && record?.revision !== expected) {
     throw Object.assign(new Error(`Record ${id} revision conflict: expected ${expected}, found ${record?.revision ?? "missing"}`), {
-      code: "REVISION_CONFLICT", details: { id, expectedRevision: expected, actualRevision: record?.revision }
+      code: "REVISION_CONFLICT", details: { id, expectedRevision: String(expected), actualRevision: record && String(record.revision) }
     });
   }
 }
@@ -275,3 +279,8 @@ export const filesystemJsonValueStoreExtension: DataExtension = {
   version: "0.1.0",
   valueStoreFactories: [new FilesystemJsonValueStoreFactory()]
 };
+
+/** Persisted counters remain numeric; the public token never is. */
+function storedValue(record: JsonRecord): StoredValue {
+  return { ...record, revision: String(record.revision) };
+}
