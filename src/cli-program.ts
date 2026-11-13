@@ -216,7 +216,7 @@ program
 This command validates Store/config health and Memory entities. It never creates
 or updates a ChangeSet. To capture and validate unpublished Memory changes in a
 bound Project, run:
-  memsphere memory change validate [change-id]
+  memsphere memory change validate [--change <id>]
 
 The stateless --memory-root mode has no Project or ChangeSet context.
 `)
@@ -321,9 +321,11 @@ memoryChange.command("complete")
 
 memoryChange.command("validate")
   .description("Capture and validate the current Managed or Embedded Working Change.")
-  .argument("[change-id]", "ChangeSet id; inferred when the current Working Change is unambiguous")
+  .allowExcessArguments(false)
+  .showHelpAfterError("Use 'memsphere memory change validate --help' for --change <id>.")
+  .option("--change <id>", "ChangeSet id; inferred when the current Working Change is unambiguous")
   .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
-  .action(memoryChangeValidateCommand);
+  .action(options => memoryChangeValidateCommand(options.change, options));
 
 const view = program
   .command("view")

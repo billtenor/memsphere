@@ -16,7 +16,7 @@ for (const damage of ["directory", "body", "description", "legacy", "version"] a
     if (damage === "legacy") await rm(join(f.versionRoot(), "checkpoint.json"));
     if (damage === "version") {
       const file = join(f.versionRoot(), "checkpoint.json");
-      const value = JSON.parse(await readFile(file, "utf8")); value.format_version = 2;
+      const value = JSON.parse(await readFile(file, "utf8")); value.format_version = 999;
       await writeFile(file, JSON.stringify(value));
     }
     const diagnostic = { directory: /checkpoint is missing/, body: /checkpoint digest does not match/,
