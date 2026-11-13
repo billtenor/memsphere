@@ -112,7 +112,7 @@ test("physical compatibility enumeration includes deleted records hidden from li
 });
 
 test("raw existence needs NoSuchKey confirmation; bucket and permission errors cannot trigger DELETE", async () => {
-  const { TosRequestError } = await import("../src/data/extensions/tos-datastore/context-sdk.js");
+  const { TosRequestError } = await import("../src/data/extensions/tos-datastore/response.js");
   for (const [code, status] of [["NoSuchBucket", 404], ["AccessDenied", 403]] as const) {
     const { store, client } = fixture("raw");
     client.read = async () => { client.calls.push({ method: "GET" }); throw new TosRequestError(code, status); };
@@ -122,7 +122,7 @@ test("raw existence needs NoSuchKey confirmation; bucket and permission errors c
 });
 
 test("raw ambiguous HEAD confirms a present object then permits exactly one fresh HEAD", async () => {
-  const { TosRequestError } = await import("../src/data/extensions/tos-datastore/context-sdk.js");
+  const { TosRequestError } = await import("../src/data/extensions/tos-datastore/response.js");
   const { store, client } = fixture("raw"); await store.create({}, data("item")); client.calls.length = 0;
   const head = client.head.bind(client); let calls = 0;
   client.head = async (context, key) => { if (++calls === 1) { client.calls.push({ method: "HEAD" }); throw new TosRequestError("HTTP_404", 404); } return head(context, key); };

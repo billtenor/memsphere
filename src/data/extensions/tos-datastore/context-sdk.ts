@@ -1,22 +1,18 @@
 import { createRequire } from "node:module";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import { finished } from "node:stream/promises";
 import { TosClient, CancelToken } from "@volcengine/tos-sdk";
 import type { AxiosResponse } from "axios";
 import type { TosResponse } from "@volcengine/tos-sdk/dist/methods/base.js";
 import type { Context } from "../../api/context.js";
 
+import { TosRequestError, readBounded } from "./response.js";
+export { TosRequestError, readBounded } from "./response.js";
+
 // Use debug's public gate, without changing process-wide logging or SDK internals.
 const sdkDebug = createRequire(import.meta.url)("debug") as { enabled(namespace: string): boolean };
 
-export class TosRequestError extends Error {
-  constructor(readonly code: string, readonly status?: number, readonly requestId?: string) {
-    // Do not retain Axios cause/config/request: these contain credentials.
-    super(`TOS request failed: ${code}${status === undefined ? "" : ` (${status})`}`);
-    this.name = "TosRequestError";
-  }
-}
 
 type Operation = {
   readonly cancelToken: ReturnType<typeof CancelToken.source>["token"];
@@ -139,18 +135,4 @@ export class ContextTosSdk extends TosClient {
     const decoded = options?.handleResponse ? options.handleResponse({ ...response, data } as AxiosResponse<T>) : data;
     return { ...raw, data: decoded as T };
   }
-}
-
-export async function readBounded(stream: Readable, limit: number): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  try {
-    for await (const chunk of stream) {
-      if (!(chunk instanceof Uint8Array)) throw new TosRequestError("INVALID_RESPONSE");
-      size += chunk.byteLength;
-      if (size > limit) throw new TosRequestError("RESPONSE_TOO_LARGE");
-      chunks.push(Buffer.from(chunk));
-    }
-    return Buffer.concat(chunks, size);
-  } finally { stream.destroy(); }
 }

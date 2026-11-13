@@ -56,7 +56,7 @@ for (const operation of ["read","validate","export-json"] as const) for (const f
   test(`TOS active JSON ${operation} retains its lazy ${failure} failure`,async()=>{
     const { createDataService }=await import("../src/project/data-service.js");
     const { createPlainRuntime }=await import("../src/data/extensions/shared/reflection.js");
-    const { TosRequestError }=await import("../src/data/extensions/tos-datastore/context-sdk.js");
+    const { TosRequestError }=await import("../src/data/extensions/tos-datastore/response.js");
     const {store,client}=fixture();const input=data("item",'"first"');input.payload.contentType="application/json";await store.create({},input);
     const runtime=createPlainRuntime({id:"file.json",root:{kind:"scalar",scalar:"string"}});
     let published=false;

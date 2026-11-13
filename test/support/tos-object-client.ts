@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Readable } from "node:stream";
 import type { Context } from "../../src/data/api/context.js";
 import type { ObjectHeaders, TosObjectClient } from "../../src/data/extensions/tos-datastore/client.js";
-import { TosRequestError } from "../../src/data/extensions/tos-datastore/context-sdk.js";
+import { TosRequestError } from "../../src/data/extensions/tos-datastore/response.js";
 
 type StoredObject = { bytes: Buffer; headers: ObjectHeaders };
 /** Commits compare conditions against the current object, after body consumption. */

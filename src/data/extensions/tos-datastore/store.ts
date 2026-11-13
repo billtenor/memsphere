@@ -7,7 +7,7 @@ import type { DeleteOptions, ListOptions, ListResult, UpdateOptions } from "../.
 import { throwIfAborted } from "../shared/payload.js";
 import type { TosConfig } from "./config.js";
 import type { ObjectHeaders, TosObjectClient } from "./client.js";
-import { TosRequestError, readBounded } from "./context-sdk.js";
+import { TosRequestError, readBounded } from "./response.js";
 import { HEADER_SIZE, MAX_OBJECT_BYTES, encodeHeader, decodeHeader } from "./header.js";
 import { assertEtag, decodeRevision, encodeRevision } from "./revision.js";
 import { objectKey, cursorScope, encodeCursor, decodeCursor } from "./keys.js";
