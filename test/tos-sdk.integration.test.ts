@@ -143,10 +143,10 @@ test("production object client sends only one conditional PUT and owns the compl
   assert.deepEqual(methods, ["PUT"]);
 });
 
-for (const status of [200, 412]) test(`early ${status} response cannot acknowledge a stalled Payload and closes its upstream`, settings, async t => {
+for (const status of [200, 403, 412]) test(`early ${status} response cannot acknowledge a stalled Payload and closes its upstream`, settings, async t => {
   const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
   const started = gate(), cancelled = gate(), replied = gate();
-  const f = await fixture(t, (_request, response) => { response.writeHead(status); response.end(status === 412 ? JSON.stringify({ Code: "PreconditionFailed" }) : ""); replied.resolve(); });
+  const f = await fixture(t, (_request, response) => { response.writeHead(status); response.end(status === 412 ? JSON.stringify({ Code: "PreconditionFailed" }) : status === 403 ? JSON.stringify({ Code: "AccessDenied" }) : ""); replied.resolve(); });
   const data = { id: "item", model: "file.json", payload: { contentType: "text/plain", content: { stream: () => new ReadableStream<Uint8Array>({ pull() { started.resolve(); return new Promise<void>(() => undefined); }, cancel() { cancelled.resolve(); } }) } } };
   const body = f.track(createTosUploadBody({}, data, Buffer.from("header")));
   const controller = f.controller();
@@ -158,7 +158,7 @@ for (const status of [200, 412]) test(`early ${status} response cannot acknowled
     assert.equal(fulfilled, false);
     controller.abort();
     assert.equal((await observed).code, "ABORTED");
-  } else assert.equal((await observed).code, "PreconditionFailed");
+  } else assert.equal((await observed).code, status === 412 ? "PreconditionFailed" : "AccessDenied");
   await cancelled.promise;
   assert.equal(body.destroyed, true);
   assert.equal(fulfilled, false);
@@ -238,4 +238,66 @@ test("official SDK signs optional STS credentials and reports expiry without ech
   await assert.rejects(f.sdk.operate({}, [200], () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "expired" })), error => {
     assert.equal((error as { code: string }).code, "ExpiredToken"); assert.ok(!String(error).includes(token)); return true;
   });
+});
+
+for (const scenario of [
+  { operation: "create", first: 0 }, { operation: "create", first: 1 },
+  { operation: "update", first: 0 }, { operation: "update", first: 1 },
+  { operation: "update", first: 0, ignoreConditions: true }
+] as const) test(`controlled SDK ${scenario.operation} first=${scenario.first}${"ignoreConditions" in scenario ? " detects server ignoring conditions" : " preserves original conditions"}`, settings, async t => {
+  const { bindTosClient } = await import("../src/data/extensions/tos-datastore/client.js");
+  const { TosDataStore } = await import("../src/data/extensions/tos-datastore/store.js");
+  const { bytesContent } = await import("../src/data/extensions/shared/payload.js");
+  const { controlledPutPair } = await import("./support/tos-cas-barrier.js");
+  let body: Buffer | undefined = scenario.operation === "update" ? Buffer.from("old") : undefined;
+  let etag = '"original"', commits = 0;
+  const methods: string[] = [];
+  const f = await fixture(t, (request, response) => {
+    methods.push(request.method!); const chunks: Buffer[] = [];
+    request.on("data", chunk => chunks.push(chunk));
+    request.on("end", () => {
+      const conflict = scenario.operation === "create" ? request.headers["if-none-match"] !== "*" || body !== undefined : request.headers["if-match"] !== etag;
+      if (conflict && !("ignoreConditions" in scenario)) { response.writeHead(412, { "content-type": "application/json" }); response.end(JSON.stringify({ Code: "PreconditionFailed" })); return; }
+      body = Buffer.concat(chunks); etag = `"committed-${++commits}"`;
+      response.writeHead(200, { etag }); response.end();
+    });
+  });
+  const client = bindTosClient(f.sdk, "probe-bucket");
+  const config = { region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "probe-bucket", prefix: "test/", mode: scenario.operation === "create" ? "raw" as const : "revision" as const, credentials: { source: "settings" as const, id: "test" } };
+  const run = () => controlledPutPair({ client, key: "test/item", first: scenario.first,
+    condition: scenario.operation === "create" ? { create: true } : { ifMatch: '"original"' },
+    conflictCode: scenario.operation === "create" ? "ALREADY_EXISTS" : "REVISION_CONFLICT",
+    write: (gated, context, index) => {
+      const store = new TosDataStore("store", "file.json", config, gated);
+      const data = { id: "item", model: "file.json", payload: { contentType: "text/plain", content: bytesContent(Buffer.from(`writer-${index}`)) } };
+      return scenario.operation === "create" ? store.create(context, data) : store.update(context, data, { expectedRevision: '00000001:"original"' });
+    } });
+  if ("ignoreConditions" in scenario) { await assert.rejects(run(), /Exactly one conditional writer may commit/); assert.equal(commits, 2); }
+  else {
+    await run(); assert.equal(commits, 1);
+    assert.equal(body!.subarray(scenario.operation === "update" ? 10 : 0).toString(), `writer-${scenario.first}`);
+  }
+  assert.deepEqual(methods, ["PUT", "PUT"]);
+});
+
+test("deadline after the server commits reports uncertainty without retrying or deleting the object", settings, async t => {
+  const committed = gate(), closed = gate();
+  let stored: Buffer | undefined;
+  const methods: string[] = [];
+  const f = await fixture(t, (request, response) => {
+    methods.push(request.method!); const chunks: Buffer[] = [];
+    response.on("close", closed.resolve);
+    request.on("data", chunk => chunks.push(chunk));
+    request.on("end", () => { stored = Buffer.concat(chunks); committed.resolve(); /* Withhold acknowledgment. */ });
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const body = f.track(Readable.from([Buffer.from("committed")]));
+  const writing = f.sdk.operate({}, [200], () => f.sdk.putObject({ bucket: "probe-bucket", key: "item", body }), { body, timeoutMs: 5000 });
+  const result = writing.catch(error => error);
+  await committed.promise;
+  t.mock.timers.tick(5001);
+  assert.equal((await result).code, "TOS_DEADLINE");
+  await closed.promise;
+  assert.equal(stored!.toString(), "committed");
+  assert.deepEqual(methods, ["PUT"]);
 });

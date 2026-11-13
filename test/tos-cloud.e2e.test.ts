@@ -8,6 +8,8 @@ import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
 import { validateCredentials, type TosConfig } from "../src/data/extensions/tos-datastore/config.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 
+import { controlledPutPair } from "./support/tos-cas-barrier.js";
+
 const credentialFile = process.env.MEMSPHERE_TOS_TEST_CREDENTIALS_FILE;
 
 test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !credentialFile, timeout: 180_000 }, async t => {
@@ -67,9 +69,12 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   await assert.rejects(raw.create(context, input("符号%+ 空间/图像 one", "overwrite")), { code: "ALREADY_EXISTS" });
   assert.equal(await raw.delete(context, "符号%+ 空间/图像 one"), true);
   assert.equal(await raw.delete(context, "符号%+ 空间/图像 one"), false);
-  const creating = await Promise.allSettled([raw.create(context, input("符号%+ 空间/图像 one", "")), raw.create(context, input("符号%+ 空间/图像 one", ""))]);
-  assert.equal(creating.filter(result => result.status === "fulfilled").length, 1);
-  assert.equal((creating.find(result => result.status === "rejected") as PromiseRejectedResult).reason.code, "ALREADY_EXISTS");
+  await controlledPutPair({ client, key: `${config.prefix}符号%+ 空间/图像 one`, context, first: 0, condition: { create: true }, conflictCode: "ALREADY_EXISTS",
+    write: (gated, ctx, index) => new TosDataStore("probe-raw", model, config, gated).create(ctx, input("符号%+ 空间/图像 one", index === 0 ? "first" : "second")) });
+  const createdWinner = await raw.get(context, "符号%+ 空间/图像 one"); assert.ok(createdWinner && !createdWinner.deleted);
+  assert.equal(Buffer.from(await readAll(context, createdWinner.data.payload.content)).toString(), "first");
+  await raw.delete(context, "符号%+ 空间/图像 one");
+  await raw.create(context, input("符号%+ 空间/图像 one", ""));
   const emptyRaw = await raw.get(context, "符号%+ 空间/图像 one"); assert.ok(emptyRaw && !emptyRaw.deleted);
   assert.equal((await readAll(context, emptyRaw.data.payload.content)).byteLength, 0);
   await revision.create(context, input("item", ""));
@@ -81,11 +86,12 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   await revision.update(context, input("item", "back"), { expectedRevision: repeated.revision });
   await assert.rejects(revision.update(context, input("item", "stale"), { expectedRevision: deleted.revision }), { code: "REVISION_CONFLICT" });
   const current = await revision.get(context, "item"); assert.ok(current && !current.deleted);
-  const competing = await Promise.allSettled([revision.update(context, input("item", "A"), { expectedRevision: current.revision }), revision.update(context, input("item", "B"), { expectedRevision: current.revision })]);
-  assert.equal(competing.filter(result => result.status === "fulfilled").length, 1);
-  assert.equal((competing.find(result => result.status === "rejected") as PromiseRejectedResult).reason.code, "REVISION_CONFLICT");
+  await controlledPutPair({ client, key: `${base}revision/item`, context, first: 1, condition: { ifMatch: current.revision!.slice(9) }, conflictCode: "REVISION_CONFLICT",
+    write: (gated, ctx, index) => new TosDataStore("probe-revision", model, { ...config, prefix: `${base}revision/`, mode: "revision" }, gated)
+      .update(ctx, input("item", index === 0 ? "A" : "B"), { expectedRevision: current.revision }) });
   await assert.rejects(readAll(context, current.data.payload.content), { code: "REVISION_CONFLICT" });
   const winner = await revision.get(context, "item"); assert.ok(winner && !winner.deleted);
+  assert.equal(Buffer.from(await readAll(context, winner.data.payload.content)).toString(), "B");
   const unknownLength = input("item", "");
   unknownLength.payload.content = { stream: () => new ReadableStream<Uint8Array>({ start(output) { output.enqueue(Buffer.from("stream-")); output.enqueue(Buffer.from("EOF")); output.close(); } }) };
   await revision.update(context, unknownLength, { expectedRevision: winner.revision });

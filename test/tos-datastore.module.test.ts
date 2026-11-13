@@ -177,3 +177,22 @@ test("bucket admission rejects Enabled, Suspended and unknown versioning states"
   for (const state of ["Enabled", "Suspended", "unknown"]) { client.version = state; await assert.rejects(store.checkBucket({}), { code: "STORE_INCOMPATIBLE" }); }
   assert.ok(client.calls.every(call => call.method === "VERSIONING"));
 });
+
+for (const operation of ["create", "update"] as const) for (const first of [0, 1] as const) {
+  test(`fake TOS ${operation} honours controlled original conditions when writer ${first} commits first`, async () => {
+    const { controlledPutPair } = await import("./support/tos-cas-barrier.js");
+    const mode = operation === "create" ? "raw" : "revision";
+    const { store, client } = fixture(mode);
+    if (operation === "update") await store.create({}, data("item", "old"));
+    const expectedRevision = operation === "update" ? (await live(store)).revision! : undefined;
+    client.calls.length = 0;
+    await controlledPutPair({ client, key: "records/item", first, condition: operation === "create" ? { create: true } : { ifMatch: decodeRevision(expectedRevision!).etag },
+      conflictCode: operation === "create" ? "ALREADY_EXISTS" : "REVISION_CONFLICT",
+      write: (gated, context, index) => {
+        const target = new TosDataStore("records", "file.json", config(mode), gated);
+        return operation === "create" ? target.create(context, data("item", `writer-${index}`)) : target.update(context, data("item", `writer-${index}`), { expectedRevision });
+      } });
+    assert.deepEqual(client.calls.map(call => call.method), ["PUT", "PUT"]);
+    assert.equal(Buffer.from(await readAll({}, (await live(store)).data.payload.content)).toString(), `writer-${first}`);
+  });
+}

@@ -33,3 +33,17 @@ test("credential vault encrypts values, authenticates the id and detects tamperi
   assert.notDeepEqual(vault.entries.first, replaced.entries.first);
   assert.deepEqual(decryptTosCredential("first", vault), credentials);
 });
+
+test("upload boundary counts the physical header and accepts exactly the limit", async () => {
+  const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
+  const { MAX_OBJECT_BYTES } = await import("../src/data/extensions/tos-datastore/header.js");
+  const { bytesContent } = await import("../src/data/extensions/shared/payload.js");
+  assert.equal(MAX_OBJECT_BYTES, 5 * 1024 ** 3);
+  for (const header of [undefined, encodeHeader(1, false)]) for (const excess of [0, 1]) {
+    const data = { id: "item", model: "file.json", payload: { contentType: "application/octet-stream", content: bytesContent(Buffer.alloc(20 - (header?.length ?? 0) + excess)) } };
+    const body = createTosUploadBody({}, data, header, 20);
+    const consume = async () => { let size = 0; for await (const chunk of body) size += chunk.length; return size; };
+    if (excess) await assert.rejects(consume(), { code: "PAYLOAD_TOO_LARGE" });
+    else assert.equal(await consume(), 20);
+  }
+});
