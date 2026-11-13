@@ -14,6 +14,9 @@ import { objectKey, cursorScope, encodeCursor, decodeCursor } from "./keys.js";
 
 type Snapshot = { headers: ObjectHeaders; length: number; etag: string; counter?: number; deleted: boolean; contentType?: string };
 export function storeError(code: string, message: string): Error & { code: string } { return Object.assign(new Error(message), { code }); }
+function isMissingObject(error: unknown): boolean {
+  return error instanceof TosRequestError && error.status === 404 && error.code === "NoSuchKey";
+}
 function responseError(): never { throw storeError("INVALID_RESPONSE", "Invalid TOS object response"); }
 function lengthOf(value: string | undefined): number {
   if (value === undefined || !/^\d+$/.test(value)) responseError();
@@ -79,7 +82,7 @@ export class TosDataStore implements DataStore {
         const confirmation = await this.client.read(context, key);
         confirmation.stream.destroy();
       } catch (diagnosis) {
-        if (diagnosis instanceof TosRequestError && diagnosis.code === "NoSuchKey") return undefined;
+        if (isMissingObject(diagnosis)) return undefined;
         throw diagnosis;
       }
       try { return await this.client.head(context, key); }
@@ -99,7 +102,7 @@ export class TosDataStore implements DataStore {
     }
     let response;
     try { response = await this.client.read(context, key, { range: "bytes=0-9" }); }
-    catch (error) { if (error instanceof TosRequestError && error.code === "NoSuchKey") return undefined; throw error; }
+    catch (error) { if (isMissingObject(error)) return undefined; throw error; }
     try {
       const { headers } = response;
       const match = /^bytes 0-9\/(\d+)$/.exec(headers["content-range"] ?? "");
@@ -177,7 +180,7 @@ export class TosDataStore implements DataStore {
     return key;
   }
   private writeError(error: unknown, create: boolean): unknown {
-    if (error instanceof TosRequestError && (error.status === 412 || error.code === "NoSuchKey" || (create && error.status === 409))) {
+    if (error instanceof TosRequestError && (error.status === 412 || (!create && isMissingObject(error)) || (create && error.status === 409))) {
       return storeError(create ? "ALREADY_EXISTS" : "REVISION_CONFLICT", "TOS record conflicts with the supplied condition");
     }
     return error;

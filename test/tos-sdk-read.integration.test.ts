@@ -3,7 +3,7 @@ import test from "node:test";
 import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
 import { bindTosClient } from "../src/data/extensions/tos-datastore/client.js";
 import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
-import { readAll } from "../src/data/extensions/shared/payload.js";
+import { readAll, bytesContent } from "../src/data/extensions/shared/payload.js";
 import { fixture, gate, responseChunk } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
@@ -91,5 +91,35 @@ for(const defect of ["ignored-range","bad-range","missing-etag","missing-model",
     await assert.rejects(async()=>{const out=await store.get({},"item");assert.ok(out && !out.deleted);await readAll({},out.data.payload.content);});
     await Promise.all(closed);assert.ok(methods.every(method=>method === "GET"));
     assert.equal(methods.length,defect.startsWith("payload-") ? 2 : 1);
+  });
+}
+
+for (const mode of ["raw","revision"] as const) for (const operation of ["get","has","list",...(mode === "raw" ? ["delete" as const] : [])] as const) for (const status of [403,503]) {
+  test(`SDK ${mode} ${operation} preserves contradictory ${status}/NoSuchKey as failure`,settings,async t=>{
+    const methods:string[]=[];
+    const f=await fixture(t,(request,response)=>{
+      methods.push(request.method!);
+      if(new URL(request.url!,"http://fixture").searchParams.has("list-type")){response.setHeader("content-type","application/json");response.end(JSON.stringify({Contents:[{Key:"test/item"}],IsTruncated:false}));return;}
+      if(request.method === "HEAD"){response.writeHead(404);response.end();return;}
+      response.writeHead(status,{"content-type":"application/json","x-tos-request-id":"contradictory"});response.end(JSON.stringify({Code:"NoSuchKey"}));
+    });
+    const store=new TosDataStore("store","file.json",config(mode),bindTosClient(f.sdk,"probe-bucket"));
+    await assert.rejects(operation === "list" ? store.list({}) : invoke(store,operation),{code:"NoSuchKey",status,requestId:"contradictory"});
+    assert.ok(methods.every(method=>method === "GET" || method === "HEAD"));
+  });
+}
+for(const operation of ["create","update","delete"] as const) for(const status of [403,404,503]){
+  test(`SDK ${operation} maps NoSuchKey only for a missing conditional target at HTTP ${status}`,settings,async t=>{
+    const methods:string[]=[];
+    const f=await fixture(t,(request,response)=>{
+      methods.push(request.method!);request.resume();request.once("end",()=>{response.writeHead(status,{"content-type":"application/json","x-tos-request-id":"write-error"});response.end(JSON.stringify({Code:"NoSuchKey"}));});
+    });
+    const store=new TosDataStore("store","file.json",config("revision"),bindTosClient(f.sdk,"probe-bucket"));
+    const data={id:"item",model:"file.json",payload:{contentType:"text/plain",content:bytesContent(Buffer.from("body"))}};
+    const options={expectedRevision:'00000001:"original"'};
+    const operationResult=operation === "create" ? store.create({},data) : operation === "update" ? store.update({},data,options) : store.delete({},"item",options);
+    if(status === 404 && operation !== "create")await assert.rejects(operationResult,{code:"REVISION_CONFLICT"});
+    else await assert.rejects(operationResult,{code:"NoSuchKey",status,requestId:"write-error"});
+    assert.deepEqual(methods,["PUT"]);
   });
 }

@@ -286,3 +286,37 @@ test("deadline after the server commits reports uncertainty without retrying or 
   assert.equal(stored!.toString(), "committed");
   assert.deepEqual(methods, ["PUT"]);
 });
+
+for(const failure of ["source-error","byte-limit"] as const){
+  test(`processed early 200 followed by ${failure} cannot commit success or retain owned streams`,settings,async t=>{
+    const {createTosUploadBody}=await import("../src/data/extensions/tos-datastore/store.js");
+    const first=gate(),handled=gate(),stopped=gate(),requestClosed=gate(),methods:string[]=[];
+    const f=await fixture(t,(request,response)=>{
+      methods.push(request.method!);request.socket.once("close",requestClosed.resolve);
+      request.once("data",()=>{response.writeHead(200,{etag:'"early"'});response.end();});
+    });
+    const release=f.gate(),controller=f.controller();let pulls=0,fulfilled=false;
+    const data={id:"item",model:"file.json",payload:{contentType:"text/plain",content:{stream:()=>new ReadableStream<Uint8Array>({
+      pull(output){
+        if(pulls++ === 0){output.enqueue(Buffer.alloc(8));first.resolve();return;}
+        if(pulls === 2)return release.promise.then(()=>{
+          if(failure === "source-error"){stopped.resolve();throw Error("private producer diagnostic");}
+          output.enqueue(Buffer.alloc(16));
+        });
+        return new Promise<void>(()=>undefined);
+      },cancel(){stopped.resolve();release.resolve();}
+    })}}};
+    const body=f.track(createTosUploadBody({},data,undefined,16));
+    const writing=f.sdk.operate({signal:controller.signal},[200],async()=>{try{return await f.sdk.putObject({bucket:"probe-bucket",key:"item",body});}finally{handled.resolve();}},{body}).then(()=>{fulfilled=true;});
+    const observed=writing.catch(error=>error);
+    try{
+      await Promise.all([first.promise,handled.promise]);t.diagnostic("client handled 200 and source produced first chunk");await new Promise<void>(resolve=>setImmediate(resolve));
+      assert.equal(fulfilled,false,"SDK handled 200 while source has not reached EOF");
+      release.resolve();const error=await observed;t.diagnostic("operation rejected: "+error.code);
+      assert.equal(error.code,failure === "source-error" ? "PAYLOAD_READ_ERROR" : "PAYLOAD_TOO_LARGE");
+      assert.ok(!String(error).includes("private producer"));
+      await stopped.promise;t.diagnostic("source stopped");await requestClosed.promise;t.diagnostic("server socket closed");assert.equal(body.destroyed,true);assert.equal(fulfilled,false);
+      assert.deepEqual(methods,["PUT"]);
+    }finally{controller.abort();release.resolve();body.destroy();await observed;}
+  });
+}

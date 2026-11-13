@@ -8,8 +8,8 @@ import type { PayloadContent } from "../data/api/payload.js";
 import type { Context } from "../data/api/context.js";
 import type { StoredValue } from "../data/api/value-store.js";
 import type { StoredData, DataStoreReadResult } from "../data/api/data-store.js";
-import { JsonPayloadSerializer, encodeJsonValue } from "../data/extensions/json-serializer/index.js";
-import { bytesContent, consumeContent, readAll } from "../data/extensions/shared/payload.js";
+import { JsonPayloadSerializer, decodeJsonBytes, assertJsonDescriptor, encodeJsonValue } from "../data/extensions/json-serializer/index.js";
+import { bytesContent, consumeContent, readAll, throwIfAborted } from "../data/extensions/shared/payload.js";
 import { parseFilesystemDataStoreConfig } from "../data/extensions/filesystem-datastore/index.js";
 import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
 import { Config } from "../data/api/config.js";
@@ -119,11 +119,18 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
     if ("deleted" in record && record.deleted) throw serviceError("DATA_DELETED", "Record is deleted", { revision: record.revision });
     if ("value" in record) return record.value;
     if (record.data.payload.contentType !== "application/json") throw serviceError("UNSUPPORTED_CAPABILITY", "Payload cannot be decoded as a value; use metadata-only or export");
-    try {
-      const value = await new JsonPayloadSerializer().deserialize(context, opened.runtime.descriptor, record.data.payload.content);
-      opened.runtime.reflect(value);
-      return value;
-    } catch (cause) { throw serviceError("UNSUPPORTED_CAPABILITY", "Payload cannot be decoded and validated; use metadata-only or export", { cause: String(cause) }); }
+    const incompatible = (cause: unknown) => serviceError("UNSUPPORTED_CAPABILITY", "Payload cannot be decoded and validated; use metadata-only or export", { cause: String(cause) });
+    throwIfAborted(context);
+    try { assertJsonDescriptor(opened.runtime.descriptor.root); } catch (cause) { throw incompatible(cause); }
+    // A conditional GET, permission failure or cancellation is a storage fact,
+    // not evidence that the JSON model is unsupported.
+    const bytes = await readAll(context, record.data.payload.content);
+    throwIfAborted(context);
+    let value: unknown;
+    try { value = decodeJsonBytes(opened.runtime.descriptor, bytes); opened.runtime.reflect(value); }
+    catch (cause) { throwIfAborted(context); throw incompatible(cause); }
+    throwIfAborted(context);
+    return value;
   }
   function contentTypeFor(opened: Opened, id: string): string | undefined {
     if (opened.binding.factory === "memsphere/tos") return undefined;
