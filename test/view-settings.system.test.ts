@@ -615,3 +615,13 @@ test("TOS credentials settings save through authenticated CAS and never expose v
     assert.deepEqual(decryptTosCredential("test", disk.tosCredentials), credentials);
   });
 });
+
+test("malformed TOS credential JSON never echoes request material", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin, globalConfigPath }) => {
+    const before = await readFile(globalConfigPath, "utf8");
+    const response = await fetch(`${origin}/api/settings/global/tos-credentials`, { method: "PUT", headers: { "content-type": "application/json", origin, "sec-fetch-site": "same-origin" }, body: "my-secret-material" });
+    assert.equal(response.status, 400);
+    assert.ok(!(await response.text()).includes("my-secret-material"));
+    assert.equal(await readFile(globalConfigPath, "utf8"), before);
+  });
+});

@@ -437,6 +437,8 @@ function parseGlobalConfigSource(source: string): GlobalConfigFile {
   try {
     return globalConfigSchema.parse(JSON.parse(source));
   } catch (error) {
+    // JSON parser excerpts can contain an encryption key or ciphertext.
+    if (error instanceof SyntaxError) throw new ConfigDraftValidationError([{ path: "", message: "Home configuration is not valid JSON" }]);
     throw parseConfigError(error);
   }
 }

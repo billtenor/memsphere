@@ -6,7 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { withNativeFileLock } from "../src/file-lock.js";
 import type { MemsphereConfig } from "../src/config.js";
-import { ConfigRevisionConflictError, editableGlobalConfigDraft, editableProjectConfigDraft, readGlobalConfigDocument, readProjectConfigDocument, validateGlobalConfigDraft, validateProjectConfigDraft, writeGlobalConfigDraft, writeGlobalOperatorToken, writeProjectConfigDraft } from "../src/config-management.js";
+import { ConfigDraftValidationError, ConfigRevisionConflictError, editableGlobalConfigDraft, editableProjectConfigDraft, readGlobalConfigDocument, readProjectConfigDocument, validateGlobalConfigDraft, validateProjectConfigDraft, writeGlobalConfigDraft, writeGlobalOperatorToken, writeProjectConfigDraft } from "../src/config-management.js";
 
 async function fixtureConfig() {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-config-management-"));
@@ -379,5 +379,17 @@ test("TOS binding drafts expose credential references, preserve omitted bindings
     }
     const removed = { ...draft, dataStores: {} };
     assert.equal(validateProjectConfigDraft(document, removed, f.globalDocument.raw).valid, true);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});
+
+test("invalid Home JSON diagnostics never include parser excerpts from the credential vault", async () => {
+  const f = await fixtureConfig();
+  try {
+    await writeFile(f.globalConfigPath, "private-vault-material");
+    await assert.rejects(readGlobalConfigDocument(f.globalConfigPath), error => {
+      assert.ok(error instanceof ConfigDraftValidationError);
+      assert.ok(!JSON.stringify(error).includes("private-vault-material"));
+      assert.match(error.errors[0].message, /not valid JSON/); return true;
+    });
   } finally { await rm(f.dir, { recursive: true, force: true }); }
 });

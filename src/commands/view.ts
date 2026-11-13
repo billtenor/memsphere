@@ -802,8 +802,10 @@ async function handleRequest(
     const { listTosCredentials, saveTosCredential } = await import("../tos-credentials.js");
     const document = await readGlobalSettingsDocument(config);
     if (request.method === "GET") { sendJson(response, 200, await listTosCredentials(document.configPath)); return; }
-    const body = await readJsonBody<{ id?: unknown; expectedRevision?: unknown; credentials?: unknown }>(request, 32 * 1024);
-    if (typeof body.id !== "string" || typeof body.expectedRevision !== "string" || !body.credentials || typeof body.credentials !== "object" || Array.isArray(body.credentials)) {
+    let body: { id?: unknown; expectedRevision?: unknown; credentials?: unknown };
+    try { body = await readJsonBody(request, 32 * 1024); }
+    catch { sendJson(response, 400, { code: "invalid_request", error: "Invalid TOS credential request" }); return; }
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.id !== "string" || typeof body.expectedRevision !== "string" || !body.credentials || typeof body.credentials !== "object" || Array.isArray(body.credentials)) {
       sendJson(response, 400, { code: "invalid_request", error: "id, expectedRevision and credentials are required" }); return;
     }
     try {
