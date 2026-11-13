@@ -114,7 +114,7 @@ async function transferRun(input: RunArchiveInput, direction: "archive" | "resto
     for (const ref of manifest) {
       const from = await runDataStore(sourceRoot, ref.kind);
       const stored = await from.get({}, ref.id);
-      if (!stored) {
+      if (!stored || stored.deleted) {
         if (ref.required) throw new Error(`Run content not found: ${ref.id}`);
         continue;
       }
@@ -126,7 +126,7 @@ async function transferRun(input: RunArchiveInput, direction: "archive" | "resto
     for (const ref of present) {
       const from = await (await runDataStore(sourceRoot, ref.kind)).get({}, ref.id);
       const to = await (await runDataStore(targetRoot, ref.kind)).get({}, ref.id);
-      if (!from || !to) throw new Error(`Run content disappeared during transfer: ${ref.id}`);
+      if (!from || !to || from.deleted || to.deleted) throw new Error(`Run content disappeared during transfer: ${ref.id}`);
       if (from.data.payload.contentType !== to.data.payload.contentType
         || await contentDigest(from.data.payload.content) !== await contentDigest(to.data.payload.content)) throw new Error(`Run content verification failed: ${ref.id}`);
     }
@@ -147,7 +147,7 @@ async function transferRun(input: RunArchiveInput, direction: "archive" | "resto
   // After status commit, the target is authoritative. Never copy stale source remnants back.
   for (const ref of manifest) {
     const stored = await (await runDataStore(targetRoot, ref.kind)).get({}, ref.id);
-    if (!stored) {
+    if (!stored || stored.deleted) {
       if (ref.required || await (await runDataStore(sourceRoot, ref.kind)).has({}, ref.id)) throw new Error(`Committed Run content is missing: ${ref.id}; source retained`);
       continue;
     }

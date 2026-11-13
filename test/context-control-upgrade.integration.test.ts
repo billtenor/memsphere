@@ -142,7 +142,7 @@ test("known archivedAt candidate converts only archived rows and preserves untou
   assert.deepEqual(await reopened.stores.run.get({}, active.id), activeBefore);
   const migrated = await reopened.stores.run.get({}, ended.id);
   assert.equal(migrated!.value.archived, true); assert.equal(migrated!.value.archivedAt, undefined);
-  assert.equal(migrated!.revision, row.revision + 1); assert.equal(migrated!.createdAt, row.createdAt);
+  assert.equal(migrated!.revision, String(row.revision + 1)); assert.equal(migrated!.createdAt, row.createdAt);
   assert.equal((await withModelMaintenance(f.root, () => upgradeContextControlOutputs(f.root)))?.changed, false);
 });
 
@@ -245,4 +245,22 @@ test("explicit Schema model upgrade preserves existing records and rejects impli
   assert.deepEqual(await reopened.stores.run.get({}, run.id), before.run);
   assert.deepEqual(await reopened.stores.step.get({}, `${run.id}/${reported.step.id}`), before.step);
   assert.deepEqual(await reopened.stores.artifact.get({}, `${run.id}/${reported.artifact.id}`), before.artifact);
+});
+
+test("known numeric draft revision is converted by the explicit context model upgrade", async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const run = await service.start("legacy draft revision");
+  const reported = await service.report(run.id, { name: "draft", content: textContent("draft") });
+  const id = `${run.id}/${reported.artifact.stepId}`;
+  const path = join(f.root, "data/context_control/steps", `${id}.json`);
+  const persisted = JSON.parse(await readFile(path, "utf8"));
+  persisted.value.validation = { checkedAt: new Date().toISOString(), status: "failed", issues: [], draftRevision: 7 };
+  await writeFile(path, JSON.stringify(persisted));
+  await publishFixtureDefinition(f.root, "memsphere/context_control/step.json", await readFile(new URL("./fixtures/context-control-step-before-string-revision.json", import.meta.url), "utf8"));
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
+  assert.equal((await upgradeContextControlOutputs(f.root))?.records, 1);
+  const updated = JSON.parse(await readFile(path, "utf8"));
+  assert.equal(updated.value.validation.draftRevision, "7");
+  assert.equal(updated.revision, persisted.revision + 1);
+  assert.ok(await openContextControl(f.root));
 });

@@ -43,3 +43,5 @@ of retained internal state for explicit directory registration. It accepts only
 this implementation's metadata and temporary-file protocol and never repairs or
 deletes evidence. `parseFilesystemJsonValueStoreConfig(config)` checks and returns
 a configuration snapshot without I/O.
+
+Public `revision` and `expectedRevision` are opaque strings (`"1"`, `"2"`, …). The existing on-disk envelope and high-water metadata retain numeric counters. Numeric API arguments are rejected; callers should pass the token returned by the Store unchanged.

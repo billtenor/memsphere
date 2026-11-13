@@ -1,3 +1,4 @@
+import { tosCredentialVaultSchema } from "./tos-credential-codec.js";
 import { scopedConfigRead } from "./config-read-scope.js";
 import { runnerAgentsSchema } from "./runner/identity.js";
 import { readFile, stat, realpath } from "node:fs/promises";
@@ -85,6 +86,7 @@ export async function readConfigAt(configPath: string): Promise<MemsphereConfig>
 }
 
 export const globalConfigSchema = z.object({
+  tosCredentials: tosCredentialVaultSchema.optional(),
   language: z.enum(promptLocales).optional(),
   acp_providers: acpProviderConfigSchema.optional(),
   runner_agents: runnerAgentsSchema.optional(),

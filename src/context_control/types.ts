@@ -31,7 +31,7 @@ export type Step = {
   source?: { memoryRef: string; actionId: string };
   inputs?: Record<string, Ref[]>; artifact?: StepResult;
   reviewRounds?: ReviewRound[];
-  validation?: { draftRevision?: number; sha256?: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
+  validation?: { draftRevision?: string; sha256?: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
   frames?: Array<{ id: string; type: "submission"; submissionFrame: SubmissionFrame }>;
   writing?: { draftId: string; baseSubmittedArtifactId?: string };
   reads?: Record<string, { readAt: string }>;
@@ -82,6 +82,6 @@ export type GraphFrame = {
 };
 export type SubmissionFrame = { draft?: { id: string; token: string }; artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
 export type GraphContract = { procedure: GraphProcedureMemory; artifactSpecs: Record<string, GraphArtifactSpec>; rules: Record<string, { asserts: EffectiveRuleTree; suggests: EffectiveRuleTree }> };
-export type Snapshot = { artifactRevisions?: Record<string, number>; run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
+export type Snapshot = { artifactRevisions?: Record<string, string>; run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
 export type ReportInput = Body & { target?: string; name?: string; revisedFrom?: string; revisedSummary?: string; tags?: string[]; dependencies?: Ref[]; dependsOn?: string[] };
 export const textContent = (content: string, contentType = "text/plain"): Content => ({ model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType, content } });

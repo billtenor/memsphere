@@ -7,3 +7,5 @@ export { JsonPayloadSerializer, jsonSerializerExtension } from "./json-serialize
 export { FilesystemJsonValueStoreFactory, filesystemJsonValueStoreExtension } from "./filesystem-json-valuestore/index.js";
 
 export { SchemaModelRuntime, SchemaModelRuntimeFactory, MEMSPHERE_SCHEMA_MODEL } from "./memsphere-schema/index.js";
+
+export { TosDataStoreFactory, tosDataStoreExtension } from "./tos-datastore/index.js";

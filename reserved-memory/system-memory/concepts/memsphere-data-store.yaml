@@ -1,0 +1,16 @@
+!concept
+syntax: memsphere-20261027-stable
+names:
+  - memsphere-data-store
+  - 业务数据存储
+defines:
+  - 业务 Store 是 Project 中通过 config.json.dataStores 显式绑定模型、存储实现和位置的数据入口；它与 Memory、模型登记、Run 和归档存储分开。只有绑定到 TOS 的 Store 数据进入云端，不表示整个 Project 已备份。
+  - DataStore 保存带模型身份和 MIME 的 Payload 字节；ValueStore 保存由 Runtime 校验的值实例。模型 ID 不是 Store 的隐式选择条件，解除绑定保留数据。
+  - revision 是 Store 发出的不透明非空字符串，调用方从读取结果取得并原样作为 expectedRevision 交回。它表示条件写入的前提，不提供历史内容恢复，也不是模型版本；不同 Store 的 token 不可比较大小或互换。
+  - filesystem JSON ValueStore 的公开 revision 是十进制字符串；本地持久化计数仍为数字，删除后同 ID 重建延续计数。原始 filesystem DataStore 不维护 revision。
+  - TOS DataStore 使用官方火山云 SDK 访问已有桶及专用 prefix；位置、模型和 raw/revision 模式在创建时固定，凭据引用可更新。首版只接受从未启用版本控制的桶，使用普通上传，对象总大小最多 5 GiB，不支持分片、历史迁移和离线回退。
+  - TOS raw 模式直接保存原始 Payload，只允许不覆盖的创建和物理删除；拒绝更新和 expectedRevision。删除后可以重新创建同 ID。
+  - TOS revision 模式在 Payload 前保存十字节协议头，包含格式版本、删除标记和四字节计数器；公开 token 合并计数器与原始 ETag。更新和逻辑删除用 token 内的 ETag 作条件，递增计数后执行一次 PUT，不为写入预读对象；计数器允许回绕，因此有限计数不承诺永久消除 ABA。
+  - TOS revision 模式的删除态只保存协议头。读取返回已删除及当前 revision，不伪造 Payload；普通列表隐藏删除态，has 仍表示物理对象存在。重新写入使用普通 update，携带删除态 revision 和新 Payload；再次删除也递增计数。普通创建遇到删除态仍冲突，没有独立恢复操作。
+  - TOS Payload 通过可取消的流逐块传输；带协议头的对象由 Store 去除头后交付原始字节。请求超时或取消后可能已经提交，调用方重新读取判断，Store 不自动重试、覆盖或删除补偿。
+  - View 设置的 Home TOS 凭据以加密内容持久化，密钥位于同一本地设置文件；这不保护被完整读取的设置文件。Project 只保存凭据名称或环境变量名称，界面不回填已存密钥。临时凭据也可通过环境变量引用。

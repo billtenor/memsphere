@@ -591,3 +591,27 @@ test("Project Settings rejects Human prompt fields before saving and preserves d
     }
   });
 });
+
+test("TOS credentials settings save through authenticated CAS and never expose vault contents", async () => {
+  await withSettingsServer("0.0.0.0", async ({ origin, globalConfigPath, token }) => {
+    const endpoint = `${origin}/api/settings/global/tos-credentials`;
+    assert.equal((await fetch(endpoint)).status, 401);
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", origin, "sec-fetch-site": "same-origin" };
+    const before = await (await fetch(endpoint, { headers })).json();
+    const credentials = { accessKeyId: "fixture-ak", accessKeySecret: "fixture-secret", stsToken: "fixture-token" };
+    const saved = await fetch(endpoint, { method: "PUT", headers, body: JSON.stringify({ id: "test", credentials, expectedRevision: before.revision }) });
+    assert.equal(saved.status, 200);
+    const result = await saved.json();
+    assert.deepEqual(result.items, [{ id: "test" }]);
+    const stale = await fetch(endpoint, { method: "PUT", headers, body: JSON.stringify({ id: "test", credentials, expectedRevision: before.revision }) });
+    assert.equal(stale.status, 409);
+    const global = await (await fetch(`${origin}/api/settings/global`, { headers })).json();
+    assert.deepEqual(global.tosCredentialIds, ["test"]);
+    const exposed = JSON.stringify([result, global, await (await fetch(endpoint, { headers })).json()]);
+    const disk = JSON.parse(await readFile(globalConfigPath, "utf8"));
+    for (const secret of [...Object.values(credentials), disk.tosCredentials.key, disk.tosCredentials.entries.test.ciphertext]) assert.ok(!exposed.includes(secret));
+    assert.ok(!JSON.stringify(disk).includes(credentials.accessKeySecret));
+    const { decryptTosCredential } = await import("../src/tos-credential-codec.js");
+    assert.deepEqual(decryptTosCredential("test", disk.tosCredentials), credentials);
+  });
+});

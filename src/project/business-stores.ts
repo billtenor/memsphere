@@ -1,3 +1,7 @@
+import { TosDataStoreFactory, inspectPhysicalRecords, parseTosConfig } from "../data/extensions/tos-datastore/index.js";
+import { resolveTosCredentials } from "../tos-credentials.js";
+import { validateTosRecord } from "./tos-record-validation.js";
+import { ConfigRevisionConflictError, configRevision } from "../config-management.js";
 import { withConfigFileLock } from "../config-file-lock.js";
 import { mkdir, readFile, readdir, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
@@ -42,11 +46,18 @@ export async function validateBusinessBindings(root: string, project: ProjectCon
   }
   const protectedPaths = await Promise.all(protectedInputs.map(canonicalPath));
   const directories = new Map<string, string>();
+  const remote: Array<{ id: string; endpoint: string; bucket: string; prefix: string }> = [];
   for (const [id, input] of Object.entries(project.dataStores ?? {})) {
     assertBusinessStoreId(id);
     const binding = businessStoreBindingSchema.parse(input);
     assertModelRef(binding.model);
     const config = new Config(binding.config);
+    if (binding.factory === "memsphere/tos") {
+      const parsed = parseTosConfig(config);
+      if (remote.some(other => other.endpoint === parsed.endpoint && other.bucket === parsed.bucket &&
+        (other.prefix.startsWith(parsed.prefix) || parsed.prefix.startsWith(other.prefix)))) throw serviceError("STORE_PATH_CONFLICT", `TOS Store ${id} overlaps another prefix`);
+      remote.push({ id, ...parsed }); continue;
+    }
     if (binding.kind === "data") parseFilesystemDataStoreConfig(config);
     else parseFilesystemJsonValueStoreConfig(config);
     const directory = await canonicalPath(resolve(root, binding.config.directory));
@@ -66,7 +77,11 @@ export async function getBusinessBinding(root: string, id: string) {
   const binding = project.dataStores && Object.hasOwn(project.dataStores, id) ? project.dataStores[id] : undefined;
   if (!binding) throw serviceError("STORE_NOT_FOUND", `Business Store not found: ${id}`);
   await assertModelOperationStamp(root, stamp);
-  return { project, binding, directory: directories.get(id)!, stamp };
+  const directory = directories.get(id);
+  const location = binding.factory === "memsphere/tos"
+    ? { kind: "tos" as const, bucket: binding.config.bucket, prefix: binding.config.prefix }
+    : { kind: "filesystem" as const, directory: directory! };
+  return { project, binding, directory, location, stamp };
 }
 export function openBusinessStore(context: Context, root: string, id: string, options: { write?: boolean; runtime?: ModelRuntime } = {}) {
   return withConsistentModelRead(() => openBusinessStoreOnce(context, root, id, options));
@@ -78,8 +93,13 @@ async function openBusinessStoreOnce(context: Context, root: string, id: string,
     try { assertJsonDescriptor(runtime.descriptor.root); }
     catch (cause) { throw serviceError("STORE_INCOMPATIBLE", "filesystem JSON ValueStore requires a JSON-compatible model", { cause: String(cause) }); }
   }
-  const config = new Config({ ...state.binding.config, directory: state.directory });
-  await assertDirectoryProtocol(context, state.directory, state.binding);
+  if (state.binding.factory === "memsphere/tos") {
+    const store = await new TosDataStoreFactory(resolveTosCredentials).createStore(context, id, state.binding.model, new Config(state.binding.config));
+    await assertModelOperationStamp(root, state.stamp);
+    return { ...state, store, runtime };
+  }
+  const config = new Config({ ...state.binding.config, directory: state.directory! });
+  await assertDirectoryProtocol(context, state.directory!, state.binding);
   const factory = state.binding.kind === "value" ? new FilesystemJsonValueStoreFactory() : new FilesystemDataStoreFactory();
   let store: ValueStore | DataStore;
   if (factory instanceof FilesystemJsonValueStoreFactory) store = await factory.openExisting(context, id, runtime, config);
@@ -88,6 +108,7 @@ async function openBusinessStoreOnce(context: Context, root: string, id: string,
   return { ...state, store, runtime };
 }
 async function assertDirectoryProtocol(context: Context, directory: string, binding: BusinessStoreBinding) {
+  if (binding.factory === "memsphere/tos") throw new TypeError("A remote Store has no local directory");
   const extensions = binding.kind === "data" ? parseFilesystemDataStoreConfig(new Config(binding.config)).extensions : undefined;
   const visit = async (folder: string, prefix = ""): Promise<void> => {
     for (const file of await readdir(folder, { withFileTypes: true })) {
@@ -115,6 +136,7 @@ async function assertDirectoryProtocol(context: Context, directory: string, bind
   await visit(directory);
 }
 async function validateExistingDirectory(context: Context, id: string, directory: string, binding: BusinessStoreBinding, runtime: ModelRuntime) {
+  if (binding.factory === "memsphere/tos") throw new TypeError("A remote Store has no local directory");
   try { if (!(await stat(directory)).isDirectory()) throw new TypeError(`Not a directory: ${directory}`); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
   await assertDirectoryProtocol(context, directory, binding);
@@ -143,48 +165,61 @@ async function validateExistingDirectory(context: Context, id: string, directory
     cursor = page.nextCursor;
   } while (cursor !== undefined);
 }
+/** Explicit preflight only; ordinary settings validation must not scan cloud data. */
+export async function preflightBusinessBinding(context: Context, root: string, id: string, binding: BusinessStoreBinding, runtime: ModelRuntime, directory?: string, credentialsResolver = resolveTosCredentials): Promise<void> {
+  if (binding.factory === "memsphere/tos") {
+    const store = await new TosDataStoreFactory(credentialsResolver).createStore(context, id, binding.model, new Config(binding.config));
+    for await (const record of inspectPhysicalRecords(context, store)) await validateTosRecord(context, record, runtime);
+  } else {
+    if (!directory) throw new TypeError("Local Store directory is missing");
+    await validateExistingDirectory(context, id, directory, binding, runtime);
+  }
+}
+
 export async function createBusinessStore(context: Context, root: string, id: string, input: unknown, dryRun = false) {
   assertBusinessStoreId(id);
   const binding = businessStoreBindingSchema.parse(input);
-  const execute = async () => {
-    await readModelOperationStamp(root);
-    const project = await readBusinessProject(root);
-    if (project.dataStores && Object.hasOwn(project.dataStores, id)) throw serviceError("ALREADY_EXISTS", `Store already exists: ${id}`);
-    const next = { ...project, dataStores: { ...project.dataStores, [id]: binding } };
-    const directories = await validateBusinessBindings(root, next);
-    const directory = directories.get(id)!;
-    const host = await createProjectModelHost(context, { root, ...project });
-    const runtime = await host.runtime(binding.model);
-    if (binding.kind === "value") {
-      try { assertJsonDescriptor(runtime.descriptor.root); }
-      catch (cause) { throw serviceError("STORE_INCOMPATIBLE", "filesystem JSON ValueStore requires a JSON-compatible model", { cause: String(cause) }); }
-    }
-    await validateExistingDirectory(context, id, directory, binding, runtime);
-    if (dryRun) return { operation: "data.store.create", storeId: id, binding, directory, dryRun: true };
+  const path = join(root, "config.json"), source = await readFile(path, "utf8"), stamp = await readModelOperationStamp(root);
+  const project = projectConfigSchema.parse(JSON.parse(source));
+  if (project.dataStores && Object.hasOwn(project.dataStores, id)) throw serviceError("ALREADY_EXISTS", `Store already exists: ${id}`);
+  const next = { ...project, dataStores: { ...project.dataStores, [id]: binding } };
+  const directories = await validateBusinessBindings(root, next), directory = directories.get(id);
+  const host = await createProjectModelHost(context, { root, ...project }), runtime = await host.runtime(binding.model);
+  if (binding.kind === "value") {
+    try { assertJsonDescriptor(runtime.descriptor.root); }
+    catch { throw serviceError("STORE_INCOMPATIBLE", "filesystem JSON ValueStore requires a JSON-compatible model"); }
+  }
+  // Cloud I/O and compatibility reads occur before the short config CAS lock.
+  await preflightBusinessBinding(context, root, id, binding, runtime, directory);
+  const location = binding.factory === "memsphere/tos" ? { kind: "tos" as const, bucket: binding.config.bucket, prefix: binding.config.prefix }
+    : { kind: "filesystem" as const, directory: directory! };
+  if (dryRun) return { operation: "data.store.create", storeId: id, binding, location, ...(directory ? { directory } : {}), dryRun: true };
+  return withConfigFileLock(path, async () => {
+    const current = await readFile(path, "utf8");
+    if (current !== source) throw new ConfigRevisionConflictError(configRevision(source), configRevision(current));
+    await assertModelOperationStamp(root, stamp);
     const absent: string[] = [];
-    let ancestor = directory;
-    while (true) {
-      try { await stat(ancestor); break; }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-      absent.push(ancestor); ancestor = dirname(ancestor);
+    if (directory) {
+      let ancestor = directory;
+      while (true) {
+        try { await stat(ancestor); break; }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+        absent.push(ancestor); ancestor = dirname(ancestor);
+      }
     }
-    try {
-      await mkdir(directory, { recursive: true });
-      await atomicWriteJson(join(root, "config.json"), next);
-    } catch (error) {
-      // Atomic rename may have committed even if a subsequent durability check failed.
+    try { if (directory) await mkdir(directory, { recursive: true }); await atomicWriteJson(path, next); }
+    catch (error) {
       try {
-        if (JSON.stringify(JSON.parse(await readFile(join(root, "config.json"), "utf8"))) === JSON.stringify(next))
-          return { operation: "data.store.create", storeId: id, binding, directory, pendingCleanup: true };
-      } catch { /* Preserve the original error and attempt only our own empty directories. */ }
+        if (JSON.stringify(JSON.parse(await readFile(path, "utf8"))) === JSON.stringify(next))
+          return { operation: "data.store.create", storeId: id, binding, location, ...(directory ? { directory } : {}), pendingCleanup: true };
+      } catch { /* Keep the failure and clean only our empty local directories. */ }
       const remaining: string[] = [];
-      for (const path of absent) try { await rmdir(path); } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") remaining.push(path); }
-      if (remaining.length) throw serviceError("STORE_CLEANUP_REQUIRED", "Store creation failed; retained directories require attention", { directories: remaining, cause: String(error) });
+      for (const folder of absent) try { await rmdir(folder); } catch (cause) { if ((cause as NodeJS.ErrnoException).code !== "ENOENT") remaining.push(folder); }
+      if (remaining.length) throw serviceError("STORE_CLEANUP_REQUIRED", "Store creation failed; retained directories require attention", { directories: remaining });
       throw error;
     }
-    return { operation: "data.store.create", storeId: id, binding, directory };
-  };
-  return dryRun ? execute() : withConfigFileLock(join(root, "config.json"), execute, context.signal);
+    return { operation: "data.store.create", storeId: id, binding, location, ...(directory ? { directory } : {}) };
+  }, context.signal);
 }
 export async function removeBusinessStore(context: Context, root: string, id: string, dryRun = false) {
   const execute = async () => {

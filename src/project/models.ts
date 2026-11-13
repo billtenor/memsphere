@@ -108,7 +108,7 @@ export async function createProjectModelHost(context: Context, input: ProjectMod
           await assertModelPath(sourceDirectory, id, storeId === MODEL_DEFINITIONS_STORE ? paths.excludedDirectories : []);
         }
         const stored = await sourceStore.get(context, id);
-        if (!stored)
+        if (!stored || stored.deleted)
           throw Object.assign(new Error(`Model not found: ${id}`), { code: "MODEL_NOT_FOUND" });
         const bytes = await readAll(context, stored.data.payload.content);
         const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);

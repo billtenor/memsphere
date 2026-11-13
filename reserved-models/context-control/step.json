@@ -372,8 +372,8 @@
           }
         },
         "draftRevision": {
-          "type": "integer",
-          "minimum": 1
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [

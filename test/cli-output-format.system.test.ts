@@ -84,7 +84,7 @@ test("actual model/data/Store reads use YAML text by default and preserve specia
   assert.deepEqual(model.definition, schema);
   const data = await representations(f, ["data", "read", "a", "--store", "records"]);
   assert.deepEqual(data.value, value);
-  assert.equal(data.revision, 1);
+  assert.equal(data.revision, "1");
   const query = cli(f, ["data", "read", "a", "--store", "records", "--path", "$.nested.nil"], "json");
   assert.equal(query.status, 0, query.stderr);
   assert.deepEqual(JSON.parse(query.stdout).value, [null]);

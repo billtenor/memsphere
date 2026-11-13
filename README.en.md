@@ -527,3 +527,5 @@ memsphere run step enter --run R --step <replacementStepId>
 ```
 
 Enter the new pending target explicitly. Dependent work is rebuilt, independent branches remain, and superseded Steps reject submissions. Recover saved operations with status on the same Run. Rewind does not undo code or external side effects.
+
+TOS business DataStores (`memsphere/tos`) use the official SDK with an existing bucket and dedicated prefix. Configure credentials in Home settings and create a binding in Project business Store settings, or use `data store create --kind data --factory memsphere/tos --config-file tos.json`. Raw mode preserves original bytes and rejects overwrite; revision mode supports conditional updates and logical deletion using opaque string tokens. See [TOS DataStore](src/data/extensions/tos-datastore/README.md) for configuration, limits and SDK maintenance. All public Store revision tokens, including filesystem JSON ValueStore tokens, are strings. Only records bound to TOS are stored in the cloud.

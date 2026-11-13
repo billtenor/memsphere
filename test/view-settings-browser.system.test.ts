@@ -613,3 +613,57 @@ test("Runner settings require installation detection and preserve identity/async
     assert.deepEqual(saved.acp_providers, { codex: { idle_timeout_ms: 90000 } });
   } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
 });
+
+test("TOS settings save credentials and a Store binding through real settings APIs", { timeout: 30_000 }, async t => {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-settings-browser-"));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
+  await initializeProjectModelRegistrations({}, { root: config.scopeRoot });
+  const { ContextTosSdk } = await import("../src/data/extensions/tos-datastore/context-sdk.js");
+  let versionChecks = 0, listChecks = 0;
+  // Replace the external SDK operation boundary; settings, credential resolution,
+  // model admission and persistence remain real. SDK wire behavior has separate tests.
+  t.mock.method(ContextTosSdk.prototype, "operate", async () => {
+    const data = versionChecks === 0 ? (versionChecks++, {}) : (listChecks++, { Contents: [], IsTruncated: false });
+    return { data, statusCode: 200, headers: {}, requestId: "fixture" };
+  });
+  const server = createViewServer(config);
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  const browser = await browserScope();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    page.setDefaultTimeout(5000);
+    const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    await page.goto(`${origin}/projects/demo/settings/tos-credentials`, { waitUntil: "networkidle" });
+    await page.locator('[data-field="tosCredential.id"]').fill("test");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("fixture-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("fixture-secret");
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').getAttribute("type"), "password");
+    await page.getByRole("button", { name: "保存凭据", exact: true }).click();
+    await page.getByText("凭据已保存。", { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(), "");
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button", { name: "业务 Store", exact: true }).click();
+    const values = { id: "assets", model: "memsphere/run/artifact.json", bucket: "test-bucket", prefix: "assets/" };
+    for (const [key, value] of Object.entries(values)) await page.locator(`[data-field="tosDraft.${key}"]`).fill(value);
+    await page.locator('[data-field="tosDraft.credentials.id"]').fill("test");
+    await page.getByRole("button", { name: "添加存储", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("button", { name: "确认保存", exact: true }).waitFor();
+    assert.equal(versionChecks, 0, "Pure validation must not contact or scan TOS");
+    const saving = page.waitForResponse(response => response.url().endsWith("/settings/project") && response.request().method() === "PUT");
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    const savedResponse = await saving;
+    assert.equal(savedResponse.status(), 200, await savedResponse.text());
+    await page.locator('[data-field="tosRef.assets.id"]').waitFor();
+    assert.equal(versionChecks, 1); assert.equal(listChecks, 1);
+    const saved = JSON.parse(await readFile(config.configPath, "utf8"));
+    assert.equal(saved.dataStores.assets.config.credentials.id, "test");
+    assert.equal(saved.dataStores.assets.config.mode, "revision");
+    assert.equal(await page.locator('[data-field="tosRef.assets.id"]').inputValue(), "test");
+    assert.equal(await page.locator('[data-field="tosRef.assets.mode"]').count(), 0);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.deepEqual(errors, []);
+  } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
+});

@@ -278,7 +278,7 @@ interface DataStore {
   /** 此 Store 唯一绑定的模型。 */
   readonly model: ModelRef;
 
-  get(context: Context, id: DataId): Promise<StoredData | undefined>;
+  get(context: Context, id: DataId): Promise<DataStoreReadResult | undefined>;
   has(context: Context, id: DataId): Promise<boolean>;
   create(context: Context, data: Data): Promise<void>;
   update(
@@ -295,13 +295,13 @@ interface DataStore {
 }
 
 type UpdateOptions = {
-  /** 预期的当前记录版本，必须为正整数。 */
-  expectedRevision?: number;
+  /** Store 发出的不透明字符串，调用方从读取结果原样回传。 */
+  expectedRevision?: string;
 };
 
 type DeleteOptions = {
-  /** 预期的当前记录版本，必须为正整数。 */
-  expectedRevision?: number;
+  /** Store 发出的不透明字符串，调用方从读取结果原样回传。 */
+  expectedRevision?: string;
 };
 
 type ListOptions = {
@@ -331,14 +331,14 @@ DataStore 保存四项信息：
 
 持续传输不代表 EOF 前内容已对其他读取者可见，可见性由实现声明。操作报错也不通用地保证没有任何写入，调用方不能在来源已被消费后直接重试。
 
-DataStore 按 ID 读到记录时返回 StoredData。其中的 `data` 保留完整的模型 ID、内容类型和内容字节；其余字段是存储管理信息：
+DataStore 按 ID 读到活跃记录时返回 StoredData；删除态返回 `DeletedStoredData = {id:DataId, model:ModelRef, deleted:true, revision:string}`，两者组成 DataStoreReadResult，删除态不携 Payload。其中的 `data` 保留完整的模型 ID、内容类型和内容字节；其余字段是存储管理信息：
 
 ```ts
 type StoredData = {
   /** 完整 Data，包含 id、model 和 payload。 */
   data: Data;
   /** 该存储记录的版本，用于并发更新检查。 */
-  revision?: number;
+  revision?: string;
   /** 该记录的创建时间，Unix 时间戳，单位为毫秒。 */
   createdAt?: number;
   /** 创建该记录的操作主体 ID。 */
@@ -420,7 +420,7 @@ type StoredValue = {
   /** 模型的值实例，可交给对应 Runtime 的 reflect() 使用。 */
   value: unknown;
   /** 该存储记录的版本，用于并发更新检查。 */
-  revision?: number;
+  revision?: string;
   /** 该记录的创建时间，Unix 时间戳，单位为毫秒。 */
   createdAt?: number;
   /** 创建该记录的操作主体 ID。 */
@@ -480,7 +480,7 @@ DataStore 和 ValueStore 提供以下基本操作。DataStore 的 `create/update
 
 数据不变且游标有效时，连续翻页应完整、不重复地枚举当前 Store 的记录。并发修改时不保证跨页快照；基础列表不提供总数、任意排序或业务字段过滤。
 
-`update` 替换完整 Data 内容或完整值实例，不做字段合并。`expectedRevision` 可选，仅用于检查当前记录版本，必须为正整数；指定版本不匹配时报冲突，省略时仍要求记录存在。`delete` 不带版本条件且记录不存在时返回 false，带条件时记录不存在或版本不匹配均报冲突。
+`update` 替换完整 Data 内容或完整值实例，不做字段合并。`expectedRevision` 是读取返回的不透明非空字符串，只用于检查当前记录版本；是否必填取决于 Store 能力。filesystem JSON ValueStore 的公开 token 为正整数的十进制字符串，TOS revision 模式必须携带 token。指定版本不匹配时报冲突。`delete` 不带版本条件且记录不存在时返回 false，带条件时记录不存在或版本不匹配均报冲突。
 
 创建不得覆盖已有记录。Store 支持版本条件时，条件检查与对应写入或删除必须在其声明的并发范围内原子执行，不能用调用方先 `has()` 再写入的方式代替；不支持版本条件时应明确报错。无版本条件的更新与删除竞争由实现说明，例如文件 DataStore 使用无锁原子替换，不提供存在性检查与替换之间的事务保证。删除成功只表示源记录已删除，不表示业务读视图已同步。
 
@@ -937,3 +937,11 @@ const extension: DataExtension = {
 - [Protobuf-ES Descriptor 源码](https://github.com/bufbuild/protobuf-es/blob/46413996599f4193f9678722c620d524d182c1e9/packages/protobuf/src/descriptors.ts)
 - [Protobuf-ES 反射接口](https://github.com/bufbuild/protobuf-es/blob/46413996599f4193f9678722c620d524d182c1e9/packages/protobuf/src/reflect/reflect-types.ts)
 - [Protobuf-ES Registry 构建](https://github.com/bufbuild/protobuf-es/blob/46413996599f4193f9678722c620d524d182c1e9/packages/protobuf/src/registry.ts)
+
+### TOS DataStore
+
+`memsphere/tos` 通过官方 SDK 使用已有桶和专用 prefix。raw 模式保存原始 Payload，只允许 create（不得覆盖）和物理 delete；revision 模式使用 `MSDT | formatVersion:u8 | flags:u8 | counter:u32be` 十字节头。公开 revision 为 `counter` 的八位小写十六进制、冒号与原始 ETag；解析固定分隔位置，保留 ETag 引号及内部冒号。counter 从 1 开始，允许 uint32 回绕。
+
+update/delete 从 expectedRevision 解析条件，递增 counter，以 If-Match 执行单次 PUT。删除只写 header；再次删除也递增。读取删除态返回 `{id, model, deleted:true, revision}`，普通 update 携新 Payload 和该 revision 即可重新写入，不提供 restore API。has 包含墓碑，普通 list 隐藏；兼容性及模型升级检查使用物理枚举，仍校验墓碑。
+
+Payload 采用背压和取消控制逐块传输。revision 读取先以 Range 0–9 取得同一响应中的 header/ETag/metadata，后续按该 ETag 条件读取 Payload。每次列表最多检查十个后台页、每页最多 128 个候选、并发最多 8；空页可能仍有 cursor。首版普通上传最多 5 GiB 总对象大小，带头 Payload 最多 5 GiB−10 字节；不支持分片，只接入从未启用版本控制的桶。

@@ -34,7 +34,7 @@ export function createContextRunReader(projectRoot: string, options: { isolateCo
           throw failure("MODEL_INCOMPATIBLE", `Context control models need an explicit upgrade: memsphere project models initialize (${asset.id})`);
         }
         const opened = await openBusinessStore({}, root, storeId("run"));
-        if (opened.store.kind !== "ValueStore" || opened.binding.model !== modelId("run")) {
+        if (opened.store.kind !== "ValueStore" || opened.binding.model !== modelId("run") || !opened.directory) {
           throw failure("STORE_INCOMPATIBLE", `Wrong context control Store: ${storeId("run")}`);
         }
         store = opened.store;directory=opened.directory;

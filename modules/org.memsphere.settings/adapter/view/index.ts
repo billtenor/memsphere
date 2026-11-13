@@ -38,7 +38,7 @@ export default defineViewPlugin<SettingsViewConfig>({
           title: { text: settingsSectionLabel(config, selected) },
           subtitle: { text: selected === "appearance"
             ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
-            : ["project", "participants", "models"].includes(selected)
+            : ["project", "participants", "models", "stores"].includes(selected)
             ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
             : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
         }
@@ -71,7 +71,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         title: { text: settingsSectionLabel(config, initialSection) },
         subtitle: { text: initialSection === "appearance"
           ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
-          : ["project", "participants", "models"].includes(initialSection)
+          : ["project", "participants", "models", "stores"].includes(initialSection)
           ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
           : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
       }
@@ -91,7 +91,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         async search({ query }) {
           const entries = [
             ["general", "常规"], ["view", "界面服务"], ["appearance", "界面与主题"],
-            ["providers", "ACP 提供方"], ["participants", "参与者配置"]
+            ["providers", "ACP 提供方"], ["participants", "参与者配置"], ["stores", text(config, "settings.businessStores", "业务 Store")], ["tos-credentials", text(config, "settings.tosCredentials", "TOS 凭据")]
           ] as const;
           const needle = query.trim().toLowerCase();
           return entries.filter(([, label]) => !needle || label.toLowerCase().includes(needle)).map(([module, label]) => ({
@@ -112,6 +112,8 @@ function settingsSecondaryItems(config: SettingsViewConfig, section: RouteToken,
     ["runners", text(config, "settings.runners", "Runner Agent"), "user"],
     ["providers", text(config, "settings.providers", "模型提供商"), "sparkle"],
     ["participants", text(config, "settings.participants", "参与者"), "user"],
+    ["stores", text(config, "settings.businessStores", "业务 Store"), "stack"],
+    ["tos-credentials", text(config, "settings.tosCredentials", "TOS 凭据"), "gear-six"],
     ["models", text(config, "settings.models", "模型存储"), "stack"],
   ] as const;
   return entries.map(([id, label, icon]) => ({
@@ -132,6 +134,8 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
     providers: text(config, "settings.providers", "模型提供商"),
     project: text(config, "navigation.project", "当前项目"),
     participants: text(config, "settings.participants", "参与者"),
+    stores: text(config, "settings.businessStores", "业务 Store"),
+    "tos-credentials": text(config, "settings.tosCredentials", "TOS 凭据"),
     models: text(config, "settings.models", "模型存储")
   };
   return labels[section] ?? labels.general;

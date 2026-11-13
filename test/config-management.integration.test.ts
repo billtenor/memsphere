@@ -357,3 +357,27 @@ test("Runner Agent settings persist independently of ACP and Project permissions
     assert.equal(validateGlobalConfigDraft(updated, { ...draft, runner_agents: { codex: { identity_enabled: false, async_enabled: true } } }).valid, false);
   } finally { await rm(fixture.dir, { recursive: true, force: true }); }
 });
+
+test("TOS binding drafts expose credential references, preserve omitted bindings and reject identity changes", async () => {
+  const f = await fixtureConfig();
+  try {
+    const binding = { kind: "data", factory: "memsphere/tos", model: "file.json", config: { region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: "records/", mode: "revision", credentials: { source: "settings", id: "test" } } };
+    await writeFile(f.configPath, JSON.stringify({ ...f.projectDocument.raw, dataStores: { images: binding } }));
+    const document = await readProjectConfigDocument(f.configPath, f.resolved);
+    const draft = editableProjectConfigDraft(document);
+    assert.deepEqual(draft.dataStores, { images: binding });
+    const valid = validateProjectConfigDraft(document, draft, f.globalDocument.raw);
+    assert.equal(valid.valid, true);
+    assert.ok(valid.normalizedJson?.includes('"images"'));
+    const omitted = structuredClone(draft); delete omitted.dataStores;
+    assert.deepEqual(validateProjectConfigDraft(document, omitted, f.globalDocument.raw).candidate?.dataStores, draft.dataStores);
+    const credentials = structuredClone(draft); (credentials.dataStores!.images.config as any).credentials.id = "replacement";
+    assert.equal(validateProjectConfigDraft(document, credentials, f.globalDocument.raw).valid, true);
+    for (const [field, value] of [["mode", "raw"], ["bucket", "other-bucket"], ["prefix", "elsewhere/"]]) {
+      const changed = structuredClone(draft); (changed.dataStores!.images.config as any)[field] = value;
+      assert.equal(validateProjectConfigDraft(document, changed, f.globalDocument.raw).valid, false);
+    }
+    const removed = { ...draft, dataStores: {} };
+    assert.equal(validateProjectConfigDraft(document, removed, f.globalDocument.raw).valid, true);
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
+});

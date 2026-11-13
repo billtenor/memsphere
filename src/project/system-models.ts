@@ -35,7 +35,7 @@ export async function installBundledSystemModels(context: Context, input: Projec
         || record.registration.package !== model.registration.package)
         throw new TypeError(`System model registration conflict or missing: ${ref}`);
       const stored = await systemStore(systemRoot, model.metaModel).get(context, ref);
-      if (!stored || !Buffer.from(await readAll(context, stored.data.payload.content)).equals(Buffer.from(model.source)))
+      if (!stored || stored.deleted || !Buffer.from(await readAll(context, stored.data.payload.content)).equals(Buffer.from(model.source)))
         throw new TypeError(`System model definition conflict or missing: ${ref}`);
     }
   }
@@ -52,7 +52,7 @@ export async function installBundledSystemModels(context: Context, input: Projec
       const data = { id: model.registration.modelRef, model: model.metaModel, payload: { contentType: "application/json", content: bytesContent(Buffer.from(model.source)) } };
       await store.create(context, data);
       const saved = await store.get(context, data.id);
-      if (!saved || !Buffer.from(await readAll(context, saved.data.payload.content)).equals(Buffer.from(model.source)))
+      if (!saved || saved.deleted || !Buffer.from(await readAll(context, saved.data.payload.content)).equals(Buffer.from(model.source)))
         throw new Error(`System model byte verification failed: ${data.id}`);
       const recordId = randomUUID();
       await records.create(context, recordId, structuredClone(model.registration));

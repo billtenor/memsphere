@@ -26,7 +26,7 @@ test("deletion history I/O failure preserves the original record and revision", 
     if (String(target) === state) throw Object.assign(new Error("disk failure"), { code: "EIO" });
     return link(source, target);
   });
-  await assert.rejects(store.delete({}, "item", { expectedRevision: 1 }), { code: "EIO" });
+  await assert.rejects(store.delete({}, "item", { expectedRevision: "1" }), { code: "EIO" });
   failing.mock.restore();
   assert.deepEqual(await store.get({}, "item"), original);
   assert.deepEqual(await fs.readdir(join(directory, FILESYSTEM_JSON_METADATA_DIRECTORY)), [`${recordStateKey("item.json")}.lock`]);
@@ -40,13 +40,13 @@ test("failed unlink retains conservative history without advancing the visible r
     if (String(path) === join(directory, "item.json")) throw Object.assign(new Error("disk failure"), { code: "EIO" });
     return unlink(path);
   });
-  await assert.rejects(store.delete({}, "item", { expectedRevision: 1 }), { code: "EIO" });
+  await assert.rejects(store.delete({}, "item", { expectedRevision: "1" }), { code: "EIO" });
   failing.mock.restore();
   assert.equal(JSON.parse(await fs.readFile(state, "utf8")).revision, 1);
   assert.deepEqual(await store.get({}, "item"), original);
-  assert.equal((await store.update({}, "item", { valid: "updated" }, { expectedRevision: 1 })).revision, 2);
+  assert.equal((await store.update({}, "item", { valid: "updated" }, { expectedRevision: "1" })).revision, "2");
   assert.equal(await store.delete({}, "item"), true);
-  assert.equal((await store.create({}, "item", { recreated: true })).revision, 3);
+  assert.equal((await store.create({}, "item", { recreated: true })).revision, "3");
 });
 
 test("corrupt deletion history blocks recreation instead of resetting its revision", async (t) => {
