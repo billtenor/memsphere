@@ -12,7 +12,7 @@ function gate() {
   return { promise, resolve };
 }
 
-async function fixture(t: TestContext, handle: http.RequestListener) {
+async function fixture(t: TestContext, handle: http.RequestListener, credentials: { stsToken?: string } = {}) {
   const sockets = new Set<Socket>();
   const server = http.createServer(handle);
   const controllers: AbortController[] = [];
@@ -32,7 +32,7 @@ async function fixture(t: TestContext, handle: http.RequestListener) {
   });
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  const sdk = new ContextTosSdk({ accessKeyId: "fake-ak", accessKeySecret: "fake-sk", region: "cn-beijing",
+  const sdk = new ContextTosSdk({ ...credentials, accessKeyId: "fake-ak", accessKeySecret: "fake-sk", region: "cn-beijing",
     endpoint: `127.0.0.1:${address.port}`, secure: false, maxRetryCount: 0, requestTimeout: 5000, connectionTimeout: 5000 });
   return {
     sdk,
@@ -221,7 +221,21 @@ test("object client omits absent LIST options before SDK signing and passes actu
   });
   const client = bindTosClient(f.sdk, "probe-bucket");
   await client.list({}, { prefix: "test/", limit: 1 });
-  await client.list({}, { prefix: "test/", limit: 1, token: "next:token" });
+  await client.list({}, { prefix: "test/", limit: 1, token: "next:+/=% token" });
   assert.equal(Object.hasOwn(inputs[0], "continuationToken"), false);
-  assert.equal(new URL(queries[1], "http://localhost").searchParams.get("continuation-token"), "next:token");
+  assert.equal(new URL(queries[1], "http://localhost").searchParams.get("continuation-token"), "next:+/=% token");
+});
+
+test("official SDK signs optional STS credentials and reports expiry without echoing the token", settings, async t => {
+  const token = "fixture-sts-token";
+  const f = await fixture(t, (request, response) => {
+    assert.equal(request.headers["x-tos-security-token"], token);
+    if (request.url!.includes("expired")) { response.writeHead(403, { "content-type": "application/json" }); response.end(JSON.stringify({ Code: "ExpiredToken", Message: token })); }
+    else response.end("signed");
+  }, { stsToken: token });
+  const result = await f.sdk.operate({}, [200], () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "live" }), { responseStream: value => value.data.content as Readable });
+  assert.equal((await readBounded(result.data.content as Readable, 32)).toString(), "signed");
+  await assert.rejects(f.sdk.operate({}, [200], () => f.sdk.getObjectV2({ bucket: "probe-bucket", key: "expired" })), error => {
+    assert.equal((error as { code: string }).code, "ExpiredToken"); assert.ok(!String(error).includes(token)); return true;
+  });
 });

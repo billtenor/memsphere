@@ -23,7 +23,7 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   const context = { signal: AbortSignal.any([t.signal, AbortSignal.timeout(150_000)]) };
   assert.equal(await client.versioning(context), "", "Test bucket must never have enabled versioning");
   const marker = `${base}owner`, ownerBytes = Buffer.from(owner);
-  const intentKeys = [`${base}raw/图像 one`, `${base}revision/item`, `${base}revision/second`];
+  const intentKeys = [`${base}raw/符号%+ 空间/图像 one`, `${base}revision/item`, `${base}revision/second`, `${base}revision/cancelled`];
   let markerEtag: string | undefined;
   t.after(async () => {
     const cleanup = { signal: AbortSignal.timeout(30_000) };
@@ -61,14 +61,16 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   const raw = new TosDataStore("probe-raw", model, config, client);
   const revision = new TosDataStore("probe-revision", model, { ...config, prefix: `${base}revision/`, mode: "revision" }, client);
   const input = (id: string, text: string) => ({ id, model, payload: { contentType: "application/octet-stream", content: bytesContent(Buffer.from(text)) } });
-  await raw.create(context, input("图像 one", "original bytes"));
-  const rawRecord = await raw.get(context, "图像 one"); assert.ok(rawRecord && !rawRecord.deleted);
+  await raw.create(context, input("符号%+ 空间/图像 one", "original bytes"));
+  const rawRecord = await raw.get(context, "符号%+ 空间/图像 one"); assert.ok(rawRecord && !rawRecord.deleted);
   assert.equal(Buffer.from(await readAll(context, rawRecord.data.payload.content)).toString(), "original bytes");
-  await assert.rejects(raw.create(context, input("图像 one", "overwrite")), { code: "ALREADY_EXISTS" });
-  assert.equal(await raw.delete(context, "图像 one"), true);
-  assert.equal(await raw.delete(context, "图像 one"), false);
-  await raw.create(context, input("图像 one", ""));
-  const emptyRaw = await raw.get(context, "图像 one"); assert.ok(emptyRaw && !emptyRaw.deleted);
+  await assert.rejects(raw.create(context, input("符号%+ 空间/图像 one", "overwrite")), { code: "ALREADY_EXISTS" });
+  assert.equal(await raw.delete(context, "符号%+ 空间/图像 one"), true);
+  assert.equal(await raw.delete(context, "符号%+ 空间/图像 one"), false);
+  const creating = await Promise.allSettled([raw.create(context, input("符号%+ 空间/图像 one", "")), raw.create(context, input("符号%+ 空间/图像 one", ""))]);
+  assert.equal(creating.filter(result => result.status === "fulfilled").length, 1);
+  assert.equal((creating.find(result => result.status === "rejected") as PromiseRejectedResult).reason.code, "ALREADY_EXISTS");
+  const emptyRaw = await raw.get(context, "符号%+ 空间/图像 one"); assert.ok(emptyRaw && !emptyRaw.deleted);
   assert.equal((await readAll(context, emptyRaw.data.payload.content)).byteLength, 0);
   await revision.create(context, input("item", ""));
   const first = await revision.get(context, "item"); assert.ok(first && !first.deleted);
@@ -82,6 +84,7 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   const competing = await Promise.allSettled([revision.update(context, input("item", "A"), { expectedRevision: current.revision }), revision.update(context, input("item", "B"), { expectedRevision: current.revision })]);
   assert.equal(competing.filter(result => result.status === "fulfilled").length, 1);
   assert.equal((competing.find(result => result.status === "rejected") as PromiseRejectedResult).reason.code, "REVISION_CONFLICT");
+  await assert.rejects(readAll(context, current.data.payload.content), { code: "REVISION_CONFLICT" });
   const winner = await revision.get(context, "item"); assert.ok(winner && !winner.deleted);
   const unknownLength = input("item", "");
   unknownLength.payload.content = { stream: () => new ReadableStream<Uint8Array>({ start(output) { output.enqueue(Buffer.from("stream-")); output.enqueue(Buffer.from("EOF")); output.close(); } }) };
@@ -96,6 +99,31 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   const second = await revision.get(context, "second"); assert.ok(second && !second.deleted);
   await revision.delete(context, "second", { expectedRevision: second.revision });
   assert.deepEqual((await revision.list(context)).items, [{ id: "item" }]);
-  assert.deepEqual((await raw.list(context)).items, [{ id: "图像 one" }]);
+  assert.deepEqual((await raw.list(context)).items, [{ id: "符号%+ 空间/图像 one" }]);
+  let markStarted!: () => void, markCancelled!: () => void;
+  const started = new Promise<void>(resolve => { markStarted = resolve; });
+  const sourceCancelled = new Promise<void>(resolve => { markCancelled = resolve; });
+  const controller = new AbortController();
+  let pulls = 0;
+  const interrupted = input("cancelled", "");
+  interrupted.payload.content = { stream: () => new ReadableStream<Uint8Array>({
+    pull(output) {
+      if (++pulls === 1) { output.enqueue(Buffer.alloc(64 * 1024, 7)); return; }
+      markStarted(); return new Promise<void>(() => undefined);
+    },
+    cancel() { markCancelled(); }
+  }) };
+  const writing = revision.create({ signal: AbortSignal.any([context.signal, controller.signal]) }, interrupted)
+    .then(() => ({ success: true, code: "" }), error => ({ success: false, code: error.code as string }));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([started, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Cloud upload source did not start")), 10_000); })]);
+    clearTimeout(timer); controller.abort();
+    const outcome = await writing;
+    assert.equal(outcome.success, false); assert.equal(outcome.code, "ABORTED");
+    await Promise.race([sourceCancelled, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Cloud upload did not cancel its source")), 5000); })]);
+    assert.equal(await revision.get(context, "cancelled"), undefined);
+    t.diagnostic("Real SDK upload cancelled after source progress, before normal EOF; source cancellation observed");
+  } finally { clearTimeout(timer); controller.abort(); await writing; }
   t.diagnostic(`Official SDK calibration completed: ${base}`);
 });
