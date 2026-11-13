@@ -44,7 +44,8 @@ test("legacy registration hash backfill uses CAS once and preserves metadata and
   const path = join(f.root, "models/json-schema/draft-07/record.json"), bytes = await readFile(path);
   await Promise.all([readModel({}, f.root, "record.json"), readModel({}, f.root, "record.json")]);
   const after = (await registry.get({}, record.id))!;
-  assert.equal(after.revision, before.revision! + 1);
+  assert.equal(before.revision, "2");
+  assert.equal(after.revision, "3");
   assert.deepEqual(after.value, { ...legacy, name: "Keep me", definition_sha256: modelDefinitionHash(bytes) });
   assert.deepEqual(await readFile(path), bytes);
   // The host reuses the bytes it checked even if a subsequent writer replaces the file.
