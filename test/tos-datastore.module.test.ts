@@ -265,3 +265,27 @@ for(const defect of ["missing-writer","early-failure"] as const){
     assert.deepEqual(client.objects.get("records/item")!.bytes,bytes);assert.deepEqual(client.calls,[]);
   });
 }
+
+test("list waits for its cancelled sibling to settle and preserves the original failure", async t => {
+  const {client,store}=fixture();
+  await store.create({},data("bad"));await store.create({},data("stalled"));
+  const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};};
+  const started=deferred(),fail=deferred(),cancelled=deferred(),released=deferred();let count=0;
+  const original=new Error("first candidate failed");
+  t.mock.method(client,"read",async(context:import("../src/data/api/context.js").Context,key:string)=>{
+    if(++count===2)started.resolve();
+    if(key.endsWith("/bad")){await fail.promise;throw original;}
+    await new Promise<void>(resolve=>context.signal!.addEventListener("abort",()=>resolve(),{once:true}));
+    cancelled.resolve();await released.promise;throw new Error("cancelled sibling settled");
+  });
+  const parent=new AbortController();
+  let settled=false;const list=store.list({signal:parent.signal}),observed=list.finally(()=>{settled=true;});void observed.catch(()=>undefined);
+  const rejected=assert.rejects(list,error=>error===original);
+  try{
+    await casPhase(started.promise,"list snapshots started");fail.resolve();
+    await casPhase(cancelled.promise,"list sibling cancelled");
+    await new Promise<void>(resolve=>setImmediate(resolve));
+    assert.equal(settled,false,"List must wait for the cancelled read's asynchronous cleanup");
+    released.resolve();await rejected;
+  }finally{parent.abort();fail.resolve();released.resolve();await Promise.allSettled([list,observed,rejected]);}
+});

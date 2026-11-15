@@ -162,3 +162,45 @@ for(const phase of ["raw-payload","revision-snapshot","revision-payload"] as con
     }finally{controller.abort();if(cancellation === "deadline")t.mock.timers.reset();}
   });
 }
+
+for (const failure of ["bad-header", "access-denied"] as const) {
+  test(`SDK list ${failure} cancels its stalled sibling and leaves an independent list alive`, settings, async t => {
+    const siblingConsumed=responseChunk(t,"list-stalled"), siblingClosed=gate(),badStarted=gate(),peerStarted=gate();
+    let peerClosed=false;
+    const f=await fixture(t,(request,response)=>{
+      const url=new URL(request.url!,"http://fixture"),path=decodeURIComponent(url.pathname);
+      if(url.searchParams.has("list-type")){
+        const keys=url.searchParams.get("prefix")==="peer/"?["peer/item"]:["test/bad","test/stalled"];
+        response.setHeader("content-type","application/json");response.end(JSON.stringify({Contents:keys.map(Key=>({Key})),IsTruncated:false}));return;
+      }
+      const header=encodeHeader(1,false);
+      if(path.endsWith("/test/bad")){
+        badStarted.resolve();
+        void failGate.promise.then(()=>{
+          if(failure==="access-denied"){response.writeHead(403,{"content-type":"application/json"});response.end(JSON.stringify({Code:"AccessDenied"}));}
+          else {response.writeHead(206,{...identity("revision"),"content-range":"bytes 0-9/14","content-length":"10"});header[0]=0;response.end(header);}
+        });return;
+      }
+      response.writeHead(206,{...identity("revision"),"content-range":"bytes 0-9/14","content-length":"10","x-tos-request-id":path.endsWith("/test/stalled")?"list-stalled":"list-peer"});
+      if(path.endsWith("/test/stalled")){request.socket.once("close",siblingClosed.resolve);response.write(header.subarray(0,5));return;}
+      assert.ok(path.endsWith("/peer/item"));
+      response.once("close",()=>{peerClosed=true;});response.write(header.subarray(0,5));peerStarted.resolve();
+      void peerGate.promise.then(()=>response.end(header.subarray(5)));
+    });
+    const failGate=f.gate(),peerGate=f.gate(),parent=f.controller(),peerController=f.controller();
+    const store=new TosDataStore("store","file.json",config("revision"),bindTosClient(f.sdk,"probe-bucket"));
+    const other=new TosDataStore("peer","file.json",{...config("revision"),prefix:"peer/"},bindTosClient(f.sdk,"probe-bucket"));
+    const list=store.list({signal:parent.signal}),rejected=assert.rejects(list,{code:failure==="bad-header"?"STORE_INCOMPATIBLE":"AccessDenied"});
+    const peer=other.list({signal:peerController.signal});void peer.catch(()=>undefined);
+    try{
+      await Promise.all([badStarted.promise,siblingConsumed,peerStarted.promise]);
+      failGate.resolve();await rejected;
+      let timer:ReturnType<typeof setTimeout>|undefined;
+      try {await Promise.race([siblingClosed.promise,new Promise<never>((_,reject)=>{timer=setTimeout(()=>reject(new Error("Failed list left its sibling connection open")),3000);})]);}
+      finally{clearTimeout(timer);}
+      assert.equal(parent.signal.aborted,false,"Batch failure must not cancel its caller's controller");
+      assert.equal(peerClosed,false,"Independent list must remain in flight until explicitly released");
+      peerGate.resolve();assert.deepEqual(await peer,{items:[{id:"item"}]});
+    }finally{parent.abort();peerController.abort();failGate.resolve();peerGate.resolve();await Promise.allSettled([list,peer,rejected]);}
+  });
+}

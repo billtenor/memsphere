@@ -226,7 +226,7 @@ export class TosDataStore implements DataStore {
         const id = key.slice(this.config.prefix.length); this.key(id); return id;
       });
       for (let index = 0; index < ids.length; index += 8) {
-        const records = await Promise.all(ids.slice(index, index + 8).map(id => this.snapshot(context, id)));
+        const records = await this.snapshotBatch(context, ids.slice(index, index + 8));
         records.forEach((record, offset) => { if (record && !record.deleted) items.push({ id: ids[index + offset] }); });
       }
       if (token && result.token === token) throw storeError("STORE_CHANGED", "TOS list cursor made no progress");
@@ -234,6 +234,18 @@ export class TosDataStore implements DataStore {
       if (!token || items.length === limit) break;
     }
     return { items, ...(token ? { nextCursor: encodeCursor(this.scope, token) } : {}) };
+  }
+  /** A failed list batch owns cancellation and settlement of its parallel reads. */
+  private async snapshotBatch(context: Context, ids: string[]): Promise<Array<Snapshot | undefined>> {
+    const controller = new AbortController();
+    const signal = context.signal ? AbortSignal.any([context.signal, controller.signal]) : controller.signal;
+    const pending = ids.map(id => this.snapshot({ ...context, signal }, id));
+    try { return await Promise.all(pending); }
+    catch (error) {
+      controller.abort();
+      await Promise.allSettled(pending);
+      throw error;
+    }
   }
   /** Physical enumeration includes tombstones; used only for compatibility checks. */
   async *inspectPhysicalRecords(context: Context): AsyncGenerator<DataStoreReadResult> {
