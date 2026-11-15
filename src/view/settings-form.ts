@@ -47,9 +47,6 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
             }> = Array.isArray(field.options) ? [...field.options] : [];
             let optionGeneration = 0, optionRequest: AbortController | undefined, optionDraft = "";
             let choiceReady = field.kind !== "projectStore";
-            const issue = document.createElement("p");
-            issue.className = "mem-settings-error";
-            issue.setAttribute("role", "alert");
             let localError = "";
             const edit = (action: () => void) => { try {
                 action();
@@ -89,7 +86,8 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                         : ui.textField({ ...base, value: "", onInput: change });
             const row = document.createElement("div");
             row.className = "mem-settings-field";
-            row.append(control.root, issue);
+            const storeMetadata=document.createElement("p");storeMetadata.className="mem-settings-store-meta";storeMetadata.hidden=field.kind!=="projectStore";
+            row.append(control.root, storeMetadata);
             grid.append(row);
             const update = (s: Readonly<AppSettingsSnapshot>) => {
                 if (context.signal.aborted)
@@ -123,12 +121,10 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                         .finally(() => { clearTimeout(timer); context.signal.removeEventListener("abort", abort); });
                 }
                 row.hidden = field.visible ? !field.visible(s) : false;
-                const disabled = !context.canWrite || schemaReadOnly || s.busy || !choiceReady || Boolean(field.disabled?.(s));
+                const disabled = !context.canWrite || schemaReadOnly || s.busy || !choiceReady || field.kind==="projectStore"&&choices.length===0 || Boolean(field.disabled?.(s));
                 const value = settingsValue(s.draft, path);
                 const buffer = s.textBuffers.find(b => JSON.stringify(b.path) === JSON.stringify(path));
                 const error = localError || buffer?.error || s.issues.find(i => JSON.stringify(i.path) === JSON.stringify(path))?.message;
-                issue.textContent = error ?? "";
-                issue.hidden = !error;
                 const shared = { ...base, disabled, error: error ? { text: error } : undefined };
                 if (field.kind === "boolean")
                     (control as ReturnType<ViewUi["checkboxField"]>).update({ ...shared, checked: value === true, onChange: change });
@@ -157,7 +153,9 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                     path = [result.configKey];
                     choices = result.candidates.map(v => ({ value: v, label: { text: v } }));
                     choiceReady = true;
-                    localError = result.diagnostic ?? "";
+                    const metadata=result as typeof result & {key?:string;model?:string;kind?:string};
+                    storeMetadata.textContent=[metadata.key,metadata.model,metadata.kind].filter(Boolean).join(" · ");
+                    localError = [result.diagnostic, result.candidates.length?undefined:appSettingsText(locale,"noStores")].filter(Boolean).join("；");
                     update(context.getState());
                 }).catch(e => { if (!context.signal.aborted) {
                     localError = String(e);
@@ -172,5 +170,5 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
 }
 export const settingsFormStyles = `
 .mem-view-settings-form{display:grid;gap:20px;color:var(--mem-view-color-text);font:var(--mem-view-font-size-base,14px)/1.5 var(--mem-view-font-sans,system-ui)}
-.mem-view-settings-form *{box-sizing:border-box}.mem-settings-section{border:1px solid var(--mem-view-color-border);background:var(--mem-view-color-surface);border-radius:var(--mem-view-radius-lg,12px);padding:24px}.mem-settings-section h3{margin:0 0 8px;font-size:16px}.mem-settings-description{color:var(--mem-view-color-text-muted);font-size:12px;margin:0 0 20px}.mem-settings-fields{display:grid;gap:20px}.mem-settings-field{min-width:0}.mem-settings-field[hidden]{display:none}.mem-settings-error{font-size:12px;color:var(--mem-view-color-danger);margin:6px 0 0}.mem-settings-error[hidden]{display:none}@media(max-width:640px){.mem-settings-section{padding:16px}}
+.mem-view-settings-form *{box-sizing:border-box}.mem-settings-section{border:1px solid var(--mem-view-color-border);background:var(--mem-view-color-surface);border-radius:var(--mem-view-radius-lg,12px);padding:24px}.mem-settings-section h3{margin:0 0 8px;font-size:16px}.mem-settings-description{color:var(--mem-view-color-text-muted);font-size:12px;margin:0 0 20px}.mem-settings-fields{display:grid;gap:20px}.mem-settings-field{min-width:0}.mem-settings-field[hidden]{display:none}.mem-settings-error{font-size:12px;color:var(--mem-view-color-danger);margin:6px 0 0}.mem-settings-error[hidden]{display:none}.mem-settings-store-meta{font-size:12px;color:var(--mem-view-color-text-muted);margin:6px 0 0}.mem-settings-store-meta[hidden]{display:none}@media(max-width:640px){.mem-settings-section{padding:16px}}
 `;

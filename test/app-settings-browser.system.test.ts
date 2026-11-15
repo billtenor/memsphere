@@ -1,3 +1,4 @@
+import {removeBusinessStore} from "../src/project/business-stores.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { browserScope } from "./helpers/browser.js";
@@ -35,6 +36,7 @@ test("real App Slot preserves invalid input, typed enums, dirty navigation, conf
     await page.getByLabel("数量", { exact: true }).fill("3");
     await page.getByLabel("类型选项", { exact: true }).selectOption({ label: "否" });
     await page.getByLabel("偏好 JSON", { exact: true }).fill('{"hello":');
+    await page.locator("[data-request-errors]").getByText(/prefs:/).waitFor();
     assert.equal(await page.getByRole("button", { name: "保存配置", exact: true }).isDisabled(), true);
     await page.getByLabel("偏好 JSON", { exact: true }).fill('{"hello":true}');
     await page.getByLabel("记录 Store", { exact: true }).selectOption({ label: "second" });
@@ -88,4 +90,8 @@ test("App settings framework follows the active English locale",async t=>{
 
 test("full JSON editing preserves unknown keys and requires confirmation before changing modes",async t=>{
  const {origin,project}=await appSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).click();const editor=page.getByLabel("完整配置（JSON）",{exact:true});await editor.fill('{"name":"JSON","store":"first","extra":{"kept":true}}');await page.getByRole("button",{name:"返回表单",exact:true}).click();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();assert.match(await editor.inputValue(),/kept/);await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();assert.deepEqual((await readAppSettings(project,"example.app")).config.extra,{kept:true});
+});
+
+test("a missing matching Store explains preparation without changing the saved target",async t=>{
+ const {origin,project,f}=await appSettingsServer(t,"127.0.0.1",true);await removeBusinessStore({},f.root,"first");await removeBusinessStore({},f.root,"second");const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);await page.getByText(/请先在当前 Project 登记符合所需模型和类型的 Store/).waitFor();assert.equal(await page.getByLabel("记录 Store",{exact:true}).isDisabled(),true);await page.getByText("records · record.json · ValueStore",{exact:true}).waitFor();assert.equal((await readAppSettings(project,"example.app")).config.store,"first");
 });

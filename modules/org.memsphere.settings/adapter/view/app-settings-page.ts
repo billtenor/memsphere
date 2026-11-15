@@ -133,7 +133,7 @@ export class AppSettingsPage {
                 fields.push({ kind, path: [name], label: { text: schema.title ?? name }, description: schema.description ? { text: schema.description } : undefined, required: detail.schema?.required?.includes(name), ...(schema.enum ? { options: schema.enum.map((value: unknown) => ({ value, label: { text: String(value) } })) } : {}) });
             }
             for (const r of detail.projectStores)
-                fields.push({ kind: "projectStore", key: r.key, label: { text: `${r.key} · ${r.kind}` }, description: { text: this.#t("model", { model: r.model }) }, required: true });
+                fields.push({ kind: "projectStore", key: r.key, label: { text: r.key }, required: true });
             if (!fields.length && !detail.schema && !Object.keys(detail.config).length) {
                 const p = document.createElement("p");
                 p.textContent = this.#t("noFields");
@@ -166,10 +166,11 @@ export class AppSettingsPage {
             reload.disabled = s.busy;
             const old = feedback.querySelector("[data-request-errors]");
             old?.remove();
-            if (s.issues.length) {
+            const messages=[...s.issues.map(i=>i.message),...s.textBuffers.filter(b=>b.error).map(b=>`${b.path.join(".")||"$"}: ${b.error}`)];
+            if (messages.length) {
                 const area = document.createElement("div");
                 area.dataset.requestErrors = "true";
-                area.append(this.ui.feedback({ state: "error", title: { text: s.issues.map(i => i.message).join("；") } }));
+                area.append(this.ui.feedback({ state: "error", title: { text: messages.join("；") } }));
                 feedback.append(area);
             }
         };

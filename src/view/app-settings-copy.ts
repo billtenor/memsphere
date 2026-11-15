@@ -1,4 +1,5 @@
 const copy = {
+    "noStores": {"zh-CN":"没有匹配的业务 Store。请先在当前 Project 登记符合所需模型和类型的 Store，然后重新读取本页。","en":"No matching business Stores. Register a Store with the required model and kind in this Project, then reload this page."},
     "jsonMode":{"zh-CN":"编辑完整 JSON","en":"Edit full JSON"},
     "formMode":{"zh-CN":"返回表单","en":"Return to form"},
     "apps": {
