@@ -802,8 +802,10 @@ test("TOS credential settings reject unauthenticated writes and recover through 
 
 
 async function selectTosSetting(page: Page, path: string, name: string): Promise<void> {
-  await page.locator(`[data-select-field="${path}"]`).click();
-  await page.getByRole("option",{name,exact:true}).click();
+  await page.locator(`[data-select-field="${path}"]`).press("ArrowDown");
+  await page.getByRole("option",{name,exact:true}).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement)?.dataset.selectField),path,"Selection must return keyboard focus to its dropdown");
 }
 
 async function openTosStore(page: Page, id: string): Promise<void> {

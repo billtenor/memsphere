@@ -813,6 +813,11 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     this.updateNamedField(field.dataset.field!, field.value, field instanceof HTMLSelectElement || field.dataset.commit === "true", field, scopeName);
   }
 
+  private renderTosSelection(path: string): void {
+    this.render();
+    this.detailRoot().querySelector<HTMLElement>(`[data-select-field="${CSS.escape(path)}"]`)?.focus();
+  }
+
   updateNamedField(
     path: string,
     value: string,
@@ -826,7 +831,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     if (path.startsWith("tosDraft.")) {
       const key = path.slice(9);
       this.#tosDraft[key === "credentials.id" ? "credentialId" : key.replace("credentials.", "")] = value;
-      if (structural) this.render(); return;
+      if (structural) this.renderTosSelection(path); return;
     }
     if (path.startsWith("tosRef.")) {
       const [, encodedId, key] = path.split(".");
@@ -834,7 +839,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
       if (key === "source") config.credentials = value === "settings" ? { source: value, id: "" } : { source: value, accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET" };
       else if (key === "stsTokenEnv" && !value) delete config.credentials[key];
       else config.credentials[key] = value;
-      scope.confirmation = null; if (structural) this.render(); else this.refreshStatus(scopeName); return;
+      scope.confirmation = null; if (structural) this.renderTosSelection(path); else this.refreshStatus(scopeName); return;
     }
     if (path.startsWith("runner.")) {
       const [, agent, key] = path.split(".");
