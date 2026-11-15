@@ -878,13 +878,51 @@ test("Store deletion is available while collapsed and only unbinds after confirm
     assert.equal(await remove().isVisible(),true);assert.equal(await remove().evaluate(el=>el.closest("details")),null);
     await page.setViewportSize({width:390,height:844});assert.equal(await remove().isVisible(),true);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    assert.equal(await row.locator(".settings-store-type").isVisible(),false);
+    await row.getByRole("button",{name:"配置",exact:true}).click();
+    await row.getByRole("button",{name:"收起",exact:true}).waitFor();
+    assert.equal(await row.locator(".settings-store-type").isVisible(),true);
+    await row.getByRole("button",{name:"收起",exact:true}).click();
+    await row.getByRole("button",{name:"配置",exact:true}).waitFor();
+    assert.equal(await row.locator(".settings-store-type").isVisible(),false);
+    page.once("dialog",dialog=>dialog.dismiss());await remove().click();assert.equal(await row.count(),1);
+    assert.equal(await readFile(config.configPath,"utf8"),before);
+    page.once("dialog",dialog=>dialog.accept());
     await remove().click();assert.equal(await row.count(),0);assert.equal(await readFile(config.configPath,"utf8"),before);
     await page.getByRole("button",{name:"重新读取",exact:true}).click();await remove().waitFor();
+    page.once("dialog",dialog=>dialog.accept());
     await remove().click();await page.getByRole("button",{name:"保存",exact:true}).click();
     await page.getByRole("button",{name:"确认保存",exact:true}).click();await page.getByRole("button",{name:"保存",exact:true}).waitFor();
     assert.equal(JSON.parse(await readFile(config.configPath,"utf8")).dataStores?.assets,undefined);
     assert.equal(await readFile(join(config.homeRoot!,"config.json"),"utf8"),homeBefore);
     await page.reload();await page.getByRole("button",{name:"新增 TOS Store",exact:true}).waitFor();assert.equal(await row.count(),0);
+  });
+});
+
+test("Participant deletion requires confirmation before changing the draft", async () => {
+  await withActorSettingsBrowser(async(page,config)=>{
+    const before=await readFile(config.configPath,"utf8"),person=page.locator('[data-participant="person"]');
+    await person.locator("summary").click();
+    page.once("dialog",dialog=>dialog.dismiss());await person.getByRole("button",{name:"删除",exact:true}).click();
+    assert.equal(await person.count(),1);assert.equal(await readFile(config.configPath,"utf8"),before);
+    page.once("dialog",dialog=>dialog.accept());await person.getByRole("button",{name:"删除",exact:true}).click();
+    assert.equal(await person.count(),0);assert.equal(await readFile(config.configPath,"utf8"),before);
+    await page.getByRole("button",{name:"重新读取",exact:true}).click();await person.waitFor();
+  });
+});
+
+test("View package removal requires confirmation and preserves its files",async t=>{
+  await withTosCredentialPage(t,async(page,config)=>{
+    const homeFile=join(config.homeRoot!,"config.json"),packagePath=join(config.homeRoot!,"fixture-package");
+    await mkdir(packagePath);await writeFile(join(packagePath,"keep.txt"),"keep");
+    const raw=JSON.parse(await readFile(homeFile,"utf8"));raw.view_packages={installed:[{path:packagePath}]};await writeFile(homeFile,JSON.stringify(raw));
+    const before=await readFile(homeFile,"utf8");
+    await page.goto(`${new URL(page.url()).origin}/projects/demo/settings/appearance`,{waitUntil:"networkidle"});
+    const remove=page.getByRole("button",{name:"卸载",exact:true});await remove.waitFor();
+    page.once("dialog",dialog=>dialog.dismiss());await remove.click();assert.equal(await remove.count(),1);
+    assert.equal(await readFile(homeFile,"utf8"),before);
+    page.once("dialog",dialog=>dialog.accept());await remove.click();assert.equal(await remove.count(),0);
+    assert.equal(await readFile(homeFile,"utf8"),before);assert.equal(await readFile(join(packagePath,"keep.txt"),"utf8"),"keep");
   });
 });
 

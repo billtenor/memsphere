@@ -1,4 +1,8 @@
 export const zhCNViewMessages = {
+  "settings.collapseStore": "收起",
+  "settings.deleteStoreConfirm": "删除 Store“{id}”的绑定？数据将保留，点击页面保存后生效。",
+  "settings.deleteParticipantConfirm": "删除参与者“{id}”？点击页面保存后生效。",
+  "settings.removeViewPackageConfirm": "卸载此界面包配置？本地文件将保留，点击页面保存后生效。",
   "settings.configureStore": "配置",
   "settings.volcengine": "火山云配置",
   "settings.chooseCredential": "请选择凭据",

@@ -262,7 +262,7 @@ View 的模型市场提供精选模型的显式导入；未导入模型不在 Pr
 
 Home config.json 的 language 支持 zh-CN/en，缺省 zh-CN，同时影响 Agent 工作语言和固定 UI 文案；Run 冻结启动时工作语言，配置保存后的新页面使用新 UI 语言。
 
-配置中心分 Home 与当前 Project：Home 维护语言、View 服务、ACP Provider、主题/界面组合；Project 维护 Store、Control Plane、Runner 和 Human/Agent Actor。按 scope 审阅 diff 后保存；host/port 或界面组合变化需重启 View，语言保存后下一次加载生效。Actor 权限使用 Catalog，Memsphere Permission 不等于操作系统或网络授权。
+配置中心分 Home 与当前 Project：Home 维护语言、View 服务、ACP Provider、主题/界面组合；Project 维护 Store、Control Plane、Runner 和 Human/Agent Actor。按 scope 审阅 diff 后保存；host/port 或界面组合变化需重启 View，语言保存后下一次加载生效。Actor 权限使用 Catalog，Memsphere Permission 不等于操作系统或网络授权。 设置页删除和卸载先弹出确认，取消不修改草稿。
 
 Agent Actor 指向 Home ACP Provider 实例和可选 model，Provider 当前支持 traex/qwen/kimi/codex；安装、认证和账户由 Provider 自己负责。Human Actor 不配置 system_prompt。Provider 的非托管参数、非敏感环境变量及 timeout 在 Home 配置，工作目录与托管安全参数由运行时管理。
 

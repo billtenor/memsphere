@@ -20,6 +20,10 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.collapseStore": "Collapse",
+  "settings.deleteStoreConfirm": "Remove the binding for Store “{id}”? Data will be preserved. Save this page to apply.",
+  "settings.deleteParticipantConfirm": "Delete participant “{id}”? Save this page to apply.",
+  "settings.removeViewPackageConfirm": "Uninstall this View package configuration? Local files will be preserved. Save this page to apply.",
   "settings.configureStore": "Configure",
   "settings.volcengine": "Volcengine cloud",
   "settings.chooseCredential": "Choose credentials",

@@ -362,7 +362,7 @@ class SettingsApplication {
     const existing = entries.map(([id, binding]) => {
       const tos = binding.factory === "memsphere/tos", config = binding.config;
       const mode = config.mode === "revision" ? this.t("settings.tosRevision", "带 revision") : this.t("settings.tosRaw", "不带 revision");
-      return `<article class="settings-section settings-store-card"><button class="btn settings-store-delete" data-remove-store="${escapeAttr(id)}" aria-label="${escapeAttr(this.t("settings.deleteNamedStore", "删除 Store {id}", {id}))}" title="${escapeAttr(this.t("settings.unbindStore", "解除绑定（保留数据）"))}">${escapeHtml(this.t("common.delete", "删除"))}</button><details data-business-store="${escapeAttr(id)}"${this.#expandedStores.has(id) ? " open" : ""}><summary class="settings-store-summary"><div><strong>${escapeHtml(id)}</strong><p class="settings-help">${escapeHtml(this.t("settings.tos.model", "模型 ID"))}：${escapeHtml(binding.model)}</p></div><span class="settings-store-summary-end"><span class="settings-store-type">${escapeHtml(tos ? `TOS · ${mode}` : this.t("settings.localFilesystem", "本地文件系统"))}</span><span>${escapeHtml(this.t("settings.configureStore", "配置"))} ⌄</span></span></summary><div class="settings-store-detail">
+      return `<article class="settings-section settings-store-card"><button class="btn settings-store-delete" data-remove-store="${escapeAttr(id)}" aria-label="${escapeAttr(this.t("settings.deleteNamedStore", "删除 Store {id}", {id}))}" title="${escapeAttr(this.t("settings.unbindStore", "解除绑定（保留数据）"))}">${escapeHtml(this.t("common.delete", "删除"))}</button><details data-business-store="${escapeAttr(id)}"${this.#expandedStores.has(id) ? " open" : ""}><summary class="settings-store-summary"><div><strong>${escapeHtml(id)}</strong><p class="settings-help">${escapeHtml(this.t("settings.tos.model", "模型 ID"))}：${escapeHtml(binding.model)}</p></div><span class="settings-store-summary-end"><button type="button" class="btn" data-toggle-store aria-expanded="${this.#expandedStores.has(id)}">${escapeHtml(this.#expandedStores.has(id) ? this.t("settings.collapseStore", "收起") : this.t("settings.configureStore", "配置"))}</button></span></summary><div class="settings-store-detail"><span class="settings-store-type">${escapeHtml(tos ? `TOS · ${mode}` : this.t("settings.localFilesystem", "本地文件系统"))}</span>
         ${this.storeFacts([[this.t("settings.tos.model", "模型 ID"), binding.model], ...(tos ? [[this.t("settings.tos.bucket", "存储桶"), config.bucket], [this.t("settings.tos.prefix", "对象前缀"), config.prefix], [this.t("settings.tos.region", "地域"), config.region], [this.t("settings.tos.endpoint", "访问端点"), config.endpoint]] as Array<[string,string]> : [[this.t("settings.storeDirectory", "存储目录"), config.directory]] as Array<[string,string]> )])}
         ${tos ? `<div class="settings-store-credentials"><h4>${escapeHtml(this.t("settings.storeCredentials", "访问凭据"))}</h4><div class="settings-grid">${this.tosReferenceHtml(`tosRef.${encodeURIComponent(id).replaceAll(".", "%2E")}`, config.credentials)}</div></div>` : ""}
         <div class="settings-store-footer"><span class="settings-help">${escapeHtml(this.t("settings.storeBindingHelp", "位置、模型和模式创建后固定；解除绑定不会删除数据。"))}</span></div></div></details></article>`;
@@ -670,7 +670,15 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   private bindRoot(root: HTMLElement): void {
-    root.querySelectorAll<HTMLDetailsElement>("details[data-business-store]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedStores, item.dataset.businessStore!, item.open), { signal: this.#signal }));
+    root.querySelectorAll<HTMLDetailsElement>("details[data-business-store]").forEach(item => {
+      const button = item.querySelector<HTMLButtonElement>("[data-toggle-store]")!;
+      button.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); item.open = !item.open; }, { signal: this.#signal });
+      item.addEventListener("toggle", () => {
+        toggleSet(this.#expandedStores, item.dataset.businessStore!, item.open);
+        button.textContent = item.open ? this.t("settings.collapseStore", "收起") : this.t("settings.configureStore", "配置");
+        button.setAttribute("aria-expanded", String(item.open));
+      }, { signal: this.#signal });
+    });
     root.querySelectorAll<HTMLDetailsElement>("details[data-provider-id]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedProviders, item.dataset.providerId!, item.open), { signal: this.#signal }));
     root.querySelectorAll<HTMLDetailsElement>("details[data-participant]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedParticipants, item.dataset.participant!, item.open), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-section]").forEach(button => button.addEventListener("click", () => void this.activate(button.dataset.section as SectionName), { signal: this.#signal }));
@@ -734,7 +742,11 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     root.querySelectorAll<HTMLInputElement>("[data-permission]").forEach(input => input.addEventListener("change", () => this.updatePermission(input), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-edit-tos-credential]").forEach(button => button.addEventListener("click", () => this.editTosCredential(button.dataset.editTosCredential!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => void this.action(button.dataset.action!), { signal: this.#signal }));
-    root.querySelectorAll<HTMLButtonElement>("[data-remove-store]").forEach(button => button.addEventListener("click", () => { delete this.state.draft!.dataStores[button.dataset.removeStore!]; this.state.confirmation = null; this.render(); }, { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-store]").forEach(button => button.addEventListener("click", () => {
+      const id = button.dataset.removeStore!;
+      if (!window.confirm(this.t("settings.deleteStoreConfirm", "删除 Store“{id}”的绑定？数据将保留，点击页面保存后生效。", {id}))) return;
+      delete this.state.draft!.dataStores[id]; this.state.confirmation = null; this.render();
+    }, { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-remove-participant]").forEach(button => button.addEventListener("click", () => this.removeParticipant(button.dataset.removeParticipant!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
     root.querySelector<HTMLInputElement>("#settings-package-path")?.addEventListener("input", event => { this.#packagePathDraft = (event.currentTarget as HTMLInputElement).value; }, { signal: this.#signal });
@@ -986,6 +998,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   removeParticipant(id: string): void {
+    if (!window.confirm(this.t("settings.deleteParticipantConfirm", "删除参与者“{id}”？点击页面保存后生效。", {id}))) return;
     delete this.state.draft!.control_plane.actors[id];
     this.#expandedParticipants.delete(id);
     this.render();
@@ -1014,6 +1027,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   removeViewPackage(index: number): void {
+    if (!window.confirm(this.t("settings.removeViewPackageConfirm", "卸载此界面包配置？本地文件将保留，点击页面保存后生效。"))) return;
     (this.#scopes.global.draft?.view_packages?.installed ?? []).splice(index, 1);
     this.render();
   }
@@ -1422,7 +1436,7 @@ const styles = `
   .memsphere-settings .settings-model-info { display:grid; gap:var(--mem-view-space-2); margin:var(--mem-view-space-4) 0 0; min-width:0; }
   .memsphere-settings .settings-model-info dt { margin:0; color:var(--mem-view-color-text-muted); font-size:var(--mem-view-font-size-sm); font-weight:600; }
   .memsphere-settings .settings-model-info dd { margin:0 0 var(--mem-view-space-3); min-width:0; overflow-wrap:anywhere; }
-  .settings-store-card{position:relative}.settings-store-card>.settings-store-delete{position:absolute;right:20px;top:20px}.settings-store-summary{padding-right:84px;display:flex;justify-content:space-between;align-items:center;gap:20px;cursor:pointer;list-style:none}.settings-store-summary::-webkit-details-marker{display:none}.settings-store-summary strong{font-size:16px}.settings-store-summary p{margin:8px 0 0;overflow-wrap:anywhere}.settings-store-summary-end{display:flex;align-items:center;gap:18px;flex:none;font-size:13px}.settings-store-detail{border-top:1px solid var(--line);margin-top:16px;padding-top:4px}
+  .settings-store-card{position:relative}.settings-store-card>.settings-store-delete{position:absolute;right:20px;top:20px}.settings-store-summary{padding-right:84px;display:flex;justify-content:space-between;align-items:center;gap:20px;cursor:pointer;list-style:none}.settings-store-summary::-webkit-details-marker{display:none}.settings-store-summary strong{font-size:16px}.settings-store-summary p{margin:8px 0 0;overflow-wrap:anywhere}.settings-store-summary-end{display:flex;align-items:center;gap:18px;flex:none;font-size:13px}.settings-store-detail>.settings-store-type{display:inline-block;margin-top:12px}.settings-store-detail{border-top:1px solid var(--line);margin-top:16px;padding-top:4px}
   .settings-store-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 24px;margin:16px 0}.settings-store-facts dt{font-size:12px;color:var(--muted);margin-bottom:4px}.settings-store-facts dd{margin:0;overflow-wrap:anywhere}.settings-store-type{font-size:12px;border-radius:16px;background:var(--soft);padding:5px 10px;white-space:nowrap}.settings-store-credentials{border-top:1px solid var(--line);padding-top:16px}.settings-store-credentials h4{margin:0 0 12px}.settings-store-footer{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:12px}.settings-store-group{border:0;border-top:1px solid var(--line);margin:20px 0 0;padding:16px 0 0;min-width:0}.settings-store-group legend{font-weight:600;padding-right:12px}.settings-store-policy{background:var(--soft);border-radius:6px;padding:12px;line-height:1.6}.settings-credential-row{display:flex;justify-content:space-between;align-items:center;gap:20px;padding:14px 0;border-top:1px solid var(--line)}.settings-credential-row>div{flex:1;display:grid;gap:5px;min-width:0;overflow-wrap:anywhere}.settings-credential-row .btn{flex:none}.settings-credential-editor{max-width:760px}.settings-store-form .settings-grid{gap:12px 20px}
   @media(max-width:760px){.settings-store-summary{align-items:flex-start;flex-direction:column;gap:12px}.settings-store-summary-end{width:100%;justify-content:space-between}.settings-store-facts{grid-template-columns:minmax(0,1fr)}.settings-store-footer{align-items:flex-start;flex-direction:column}}
   @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
