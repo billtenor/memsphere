@@ -37,6 +37,12 @@ test("business service retains TOS single-PUT writes, validates dry-run conditio
   await service.deleteData({}, "project", "records", "item", { expectedRevision: current });
   const result = await service.readData({}, "project", "records", "item");
   assert.equal(result.deleted, true); assert.equal(typeof result.revision, "string"); assert.equal("value" in result, false);
+  const read=client.read.bind(client);
+  client.read=async(context,key,options)=>{assert.equal(options?.range,"bytes=0-9","A tombstone has no Payload to consume");return read(context,key,options);};
+  client.calls.length=0;
+  await assert.rejects(service.readData({},"project","records","item",{path:"$.x"}),{code:"DATA_DELETED",details:{revision:result.revision}});
+  assert.deepEqual(client.calls.map(call=>call.method),["GET"]);
+  assert.deepEqual(await service.readData({},"project","records","item",{metadataOnly:true}),result);
 });
 
 

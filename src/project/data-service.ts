@@ -156,6 +156,7 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
     if (!record) throw serviceError("NOT_FOUND", `Record not found: ${id}`);
     if ("deleted" in record && record.deleted) {
       await assertModelOperationStamp(root, opened.stamp);
+      if (options.path !== undefined) throw serviceError("DATA_DELETED", "Record is deleted", { revision: record.revision });
       return { id, modelRef: opened.binding.model, deleted: true as const, revision: record.revision };
     }
     let value: unknown;

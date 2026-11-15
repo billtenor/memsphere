@@ -4,6 +4,7 @@ import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
 import { bindTosClient } from "../src/data/extensions/tos-datastore/client.js";
 import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
 import { readAll, bytesContent } from "../src/data/extensions/shared/payload.js";
+import { TosRequestError } from "../src/data/extensions/tos-datastore/response.js";
 import { fixture, gate, responseChunk } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
@@ -121,5 +122,43 @@ for(const operation of ["create","update","delete"] as const) for(const status o
     if(status === 404 && operation !== "create")await assert.rejects(operationResult,{code:"REVISION_CONFLICT"});
     else await assert.rejects(operationResult,{code:"NoSuchKey",status,requestId:"write-error"});
     assert.deepEqual(methods,["PUT"]);
+  });
+}
+
+for(const phase of ["raw-payload","revision-snapshot","revision-payload"] as const)for(const cancellation of ["deadline","signal"] as const){
+  test(`SDK-to-Store ${phase} retains ${cancellation} after response delivery and isolates its peer`,settings,async t=>{
+    const mode=phase === "raw-payload" ? "raw" : "revision";
+    const consumed=responseChunk(t,"stalled-success"),closed=gate(),peerStarted=gate();let peerClosed=false;
+    const f=await fixture(t,(request,response)=>{
+      if(request.url!.includes("peer")){
+        response.once("close",()=>{peerClosed=true;});response.writeHead(200,{etag:'"peer"'});response.write("pe");peerStarted.resolve();
+        void peerGate.promise.then(()=>response.end("er"));return;
+      }
+      if(request.method === "HEAD"){response.writeHead(200,{...identity(mode),"content-length":"4"});response.end();return;}
+      assert.equal(request.method,"GET");
+      if(request.headers.range === "bytes=0-9"){
+        const header=encodeHeader(1,false);
+        response.writeHead(206,{...identity(mode),"content-range":"bytes 0-9/14","content-length":"10","x-tos-request-id":phase === "revision-snapshot" ? "stalled-success" : "snapshot"});
+        if(phase !== "revision-snapshot"){response.end(header);return;}
+        request.socket.once("close",closed.resolve);response.write(header.subarray(0,5));return;
+      }
+      assert.equal(request.headers["if-match"],'"snapshot"');
+      if(mode === "revision")assert.equal(request.headers.range,"bytes=10-");
+      request.socket.once("close",closed.resolve);
+      response.writeHead(mode === "raw" ? 200 : 206,{...identity(mode),"content-length":"4","x-tos-request-id":"stalled-success",...(mode === "revision" ? {"content-range":"bytes 10-13/14"} : {})});response.write("a");
+    });
+    const peerGate=f.gate(),controller=f.controller();
+    if(cancellation === "deadline")t.mock.timers.enable({apis:["setTimeout"]});
+    try{
+      const store=new TosDataStore("store","file.json",config(mode),bindTosClient(f.sdk,"probe-bucket"));
+      const operation=(async()=>{const record=await store.get({signal:controller.signal},"item");assert.ok(record&&!record.deleted);return readAll({signal:controller.signal},record.data.payload.content);})();
+      const rejected=assert.rejects(operation,{code:cancellation === "deadline" ? "TOS_DEADLINE" : "ABORTED"});
+      const peer=await f.sdk.operate({},[200],()=>f.sdk.getObjectV2({bucket:"probe-bucket",key:"peer"}),{responseStream:value=>value.data.content as import("node:stream").Readable,timeoutMs:240_000});
+      const peerBody=import("../src/data/extensions/tos-datastore/response.js").then(({readBounded})=>readBounded(f.track(peer.data.content as import("node:stream").Readable),10));
+      await Promise.all([consumed,peerStarted.promise]);
+      if(cancellation === "deadline")t.mock.timers.tick(120_000);else controller.abort(new TosRequestError("ABORTED"));
+      await rejected;await closed.promise;
+      assert.equal(peerClosed,false,"The other in-flight response must remain open");peerGate.resolve();assert.equal((await peerBody).toString(),"peer");
+    }finally{controller.abort();if(cancellation === "deadline")t.mock.timers.reset();}
   });
 }

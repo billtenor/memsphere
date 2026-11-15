@@ -9,6 +9,7 @@ import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
 import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
 import { encodeRevision, decodeRevision } from "../src/data/extensions/tos-datastore/revision.js";
 import type { TosConfig } from "../src/data/extensions/tos-datastore/config.js";
+import { casPhase, controlledPutPair } from "./support/tos-cas-barrier.js";
 import { MemoryTosClient } from "./support/tos-object-client.js";
 
 const config = (mode: "raw" | "revision"): TosConfig => ({ mode, region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: "records/",
@@ -79,14 +80,12 @@ test("same old revision competition is decided at server commit, without any pre
   client.calls.length = 0;
   const a = store.update({}, data("item", "A"), { expectedRevision: revision });
   const b = store.update({}, data("item", "B"), { expectedRevision: revision });
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error("Both writers did not reach the commit barrier")), 3000); });
-  try { await Promise.race([ready, deadline]); release(); const result = await Promise.allSettled([a, b]);
+  try { await casPhase(ready, "both writers reach commit", 3000); release(); const result = await Promise.allSettled([a, b]);
     assert.equal(result.filter(r => r.status === "fulfilled").length, 1);
     assert.equal((result.find(r => r.status === "rejected") as PromiseRejectedResult).reason.code, "REVISION_CONFLICT");
     assert.deepEqual(client.calls.map(c => c.method), ["PUT", "PUT"]);
     assert.ok(client.calls.every(c => c.ifMatch === decodeRevision(revision).etag));
-  } finally { clearTimeout(timer); release(); await Promise.allSettled([a, b]); }
+  } finally { release(); await Promise.allSettled([a, b]); }
 });
 
 test("lazy Payload read retains its ETag and rejects concurrent replacement", async () => {
@@ -162,7 +161,6 @@ test("bucket admission rejects Enabled, Suspended and unknown versioning states"
 
 for (const operation of ["create", "update"] as const) for (const first of [0, 1] as const) {
   test(`fake TOS ${operation} honours controlled original conditions when writer ${first} commits first`, async () => {
-    const { controlledPutPair } = await import("./support/tos-cas-barrier.js");
     const mode = operation === "create" ? "raw" : "revision";
     const { store, client } = fixture(mode);
     if (operation === "update") await store.create({}, data("item", "old"));
@@ -224,5 +222,44 @@ for (const defect of ["status", "range", "etag", "short", "long"] as const) {
     };
     await assert.rejects(readAll({},record.data.payload.content));
     assert.equal(owned!.destroyed,true);
+  });
+}
+
+
+for (const scenario of ["same-payload", "update-delete", "delete-delete", "tombstone-delete-delete", "tombstone-update-delete"] as const) for (const first of [0,1] as const) {
+  test(`revision ${scenario} preserves the complete winner when writer ${first} commits first`, async () => {
+    const {store,client}=fixture();await store.create({},data("item","same"));
+    let before=await store.get({},"item");assert.ok(before?.revision);
+    if(scenario.startsWith("tombstone-")){await store.delete({},"item",{expectedRevision:before.revision});before=await store.get({},"item");assert.ok(before?.revision);}
+    const revision=before.revision, counter=decodeRevision(revision).counter;
+    const deletes=scenario.endsWith("delete-delete") ? [true,true] : scenario.endsWith("update-delete") ? [false,true] : [false,false];
+    client.calls.length=0;
+    await controlledPutPair({client,key:"records/item",first,condition:{ifMatch:decodeRevision(revision).etag},conflictCode:"REVISION_CONFLICT",write:async(gated,context,index)=>{
+      const target=new TosDataStore("records","file.json",config("revision"),gated);
+      if(deletes[index])await target.delete(context,"item",{expectedRevision:revision});
+      else await target.update(context,data("item","same"),{expectedRevision:revision});
+    }});
+    assert.deepEqual(client.calls.map(c=>c.method),["PUT","PUT"]);
+    const physical=client.objects.get("records/item")!;
+    assert.deepEqual(physical.bytes,Buffer.concat([encodeHeader(counter+1,deletes[first]),...(deletes[first]?[]:[Buffer.from("same")])]));
+    const winner=await store.get({},"item");assert.ok(winner?.revision);
+    assert.equal(!!winner.deleted,deletes[first]);assert.equal(decodeRevision(winner.revision).counter,counter+1);assert.notEqual(winner.revision,revision);
+    if(!winner.deleted)assert.equal(Buffer.from(await readAll({},winner.data.payload.content)).toString(),"same");
+    const snapshot=Buffer.from(physical.bytes);client.calls.length=0;
+    await assert.rejects(store.update({},data("item","stale"),{expectedRevision:revision}),{code:"REVISION_CONFLICT"});
+    await assert.rejects(store.delete({},"item",{expectedRevision:revision}),{code:"REVISION_CONFLICT"});
+    assert.deepEqual(client.objects.get("records/item")!.bytes,snapshot);
+  });
+}
+
+for(const defect of ["missing-writer","early-failure"] as const){
+  test(`CAS watchdog survives the mocked Store clock and cleans up ${defect}`, {timeout:5000},async()=>{
+    const {client,store}=fixture();await store.create({},data("item"));const revision=(await live(store)).revision!;
+    const bytes=Buffer.from(client.objects.get("records/item")!.bytes);client.calls.length=0;
+    await assert.rejects(controlledPutPair({client,key:"records/item",first:0,condition:{ifMatch:decodeRevision(revision).etag},conflictCode:"REVISION_CONFLICT",timeoutMs:25,write:async(gated,context,index)=>{
+      if(index===1){if(defect === "early-failure")throw Error("controlled failure before PUT");return;}
+      await new TosDataStore("records","file.json",config("revision"),gated).update(context,data("item","new"),{expectedRevision:revision});
+    }}),/CAS barrier deadline: both original conditions prepared/);
+    assert.deepEqual(client.objects.get("records/item")!.bytes,bytes);assert.deepEqual(client.calls,[]);
   });
 }

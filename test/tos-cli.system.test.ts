@@ -27,6 +27,13 @@ test("TOS CLI uses opaque zero/quoted-colon revisions through deletion, normal u
   await run(["delete","item","--store","assets","--expected-revision",first.revision]);
   const deleted=await run(["read","item","--store","assets"]);assert.equal(deleted.deleted,true);assert.equal("value" in deleted,false);
   const tombstone=Buffer.from(service.objects.get("cli/item")!.bytes);
+  service.calls.length=0;
+  await assert.rejects(command(["read","item","--store","assets","--path","$.x"]),error=>{
+    const result=JSON.parse((error as Error & {stderr:string}).stderr).error;
+    assert.equal(result.code,"DATA_DELETED");assert.equal(result.details.revision,deleted.revision);return true;
+  });
+  assert.deepEqual(service.calls.map(call=>call.method),["VERSIONING","GET"]);
+  assert.deepEqual(service.objects.get("cli/item")!.bytes,tombstone);
   await assert.rejects(command(["update","item","--store","assets","--expected-revision",first.revision,"--payload-file",input,"--content-type","application/octet-stream"]),error=>{assert.match(String((error as Error).message),/REVISION_CONFLICT/);return true;});
   assert.deepEqual(service.objects.get("cli/item")!.bytes,tombstone);
   await run(["update","item","--store","assets","--expected-revision",deleted.revision,"--payload-file",input,"--content-type","application/octet-stream"]);

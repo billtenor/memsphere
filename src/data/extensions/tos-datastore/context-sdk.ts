@@ -38,8 +38,13 @@ export class ContextTosSdk extends TosClient {
     const streams = new Set<Readable>();
     const abortParent = () => controller.abort();
     const abort = () => {
+      const reason = context.signal?.aborted
+        ? context.signal.reason instanceof TosRequestError ? context.signal.reason : new TosRequestError("ABORTED")
+        : new TosRequestError(timedOut ? "TOS_DEADLINE" : "PAYLOAD_READ_ERROR");
+      // A returned response is consumed after operate() has resolved. Its stream
+      // must carry the failure; the operation's catch can no longer translate it.
+      for (const stream of streams) stream.destroy(reason);
       source.cancel("TOS operation cancelled");
-      for (const stream of streams) stream.destroy();
     };
     const release = () => {
       clearTimeout(timer);
@@ -114,6 +119,9 @@ export class ContextTosSdk extends TosClient {
     const response = raw.data as AxiosResponse<Readable>;
     const stream = response.data as Readable;
     operation.streams.add(stream);
+    // Own failures even between handing the response back and its consumption.
+    // Consumers still receive the same stream error through their reader.
+    stream.on("error", () => undefined);
     // Register before decoding, so abort also owns an in-flight JSON/error body.
     stream.once("close", () => operation.streams.delete(stream));
     if (operation.signal.aborted) { stream.destroy(); throw new TosRequestError("ABORTED"); }
