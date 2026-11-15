@@ -1,3 +1,4 @@
+import { createSettingsForm } from "./settings-form.js";
 import {
   isActionDescriptor,
   isBadgeDescriptor,
@@ -51,6 +52,7 @@ type UiNavigation = (target: RouteTarget) => Promise<void>;
 export function createViewUi(navigate: UiNavigation, locale: "zh-CN" | "en" = "zh-CN"): ViewUi {
   const ui: ViewUi = {
     version: 1 as const,
+    settingsForm: descriptor => createSettingsForm(ui,descriptor,locale),
     modelDefinition: descriptor => renderModelDefinition(ui, descriptor, locale),
     contentComponent: input => input.defaultRender(),
     contentList(source: ContentListDescriptor | ContentListProvider): ViewMount {

@@ -17,6 +17,7 @@
 | `assets.dataExtensions` | `{id,version,entry}[]`，可信 ESM 的 default export 使用既有 DataExtension 接口。 |
 | `dependencies` | `{kind,id,version?}[]`；kind 为 app、viewPackage、modelPackage、dataExtension、cli 或 memory。version 为 SemVer range；Memory 使用规范逻辑引用。缺项由 check/enable 报告，不联网下载。 |
 | `entrypoints.agent` | Memory 规范引用数组；Concept/Statement/Schema 用于阅读，Procedure 用于启动 Run。 |
+| `entrypoints.settings` | `{packageKey}`，标准 View Package 的 App 配置用途引用。 |
 | `entrypoints.view` | `{packageKey,instanceId,path?,config?}[]`；path 是以 `/` 开头的 Module 相对页面路径，用于 show 的使用入口。 |
 | `configuration` | 配置的 JSON Schema 文件路径，安装/configure 时校验。 |
 | `stores` | `{key,model,kind,factory,config}[]`，kind 为 DataStore 或 ValueStore；复用 DataManager StoreBinding。 |
@@ -93,3 +94,62 @@ export default { operations: {
 enable/configure/disable 改变持久配置；View 使用固定启动组合，需要重启应用界面变更。后端请求读取当前安装配置，停用立即拒绝新请求及新的 Procedure Run，已开始的业务调用不承诺自动回滚。Memory 仍可读，既有 Run 保留冻结内容，外部程序不受宿主启停控制。
 
 首版仅支持可信本地发行，不提供远端下载、升级、卸载、已有 Memory 认领、通用执行网关或热替换。
+
+## App 配置页与 View 扩展
+
+打开 **设置 → App 配置**，选择当前 Project 已安装的 App。停用的 App 仍可配置。配置写入原安装状态，与 `app configure` 使用同一份配置，不保存在浏览器。没有设置扩展时，宿主根据配置 Schema 呈现统一表单；复杂对象/数组使用 JSON 字段，未编辑字段保留。没有配置项时显示明确空态。
+
+需要组织自己的字段时，复用标准 View Package：
+
+```json
+{
+  "assets": {"viewPackages": [{"key":"settings","path":"settings"}]},
+  "entrypoints": {"settings":{"packageKey":"settings"}}
+}
+```
+
+对应 `settings/module.json`：
+
+```json
+{
+  "schemaVersion":1,"id":"org.example.app-settings","version":"1.0.0",
+  "view": {
+    "entry":"./index.js","sdk":"^1.1.0",
+    "contributions":[{"id":"configuration","cell":"org.memsphere.settings.app.configuration@1:app","priority":100}]
+  }
+}
+```
+
+`entrypoints.settings.packageKey` 必须指向已声明的 View Package。每个设置包只声明一个本 App 配置贡献，不声明额外 capability、样式、主题或依赖。宿主绑定 `ctx.module.appId`，将便携 `:app` 单元映射到真实 App ID；同一包被两个 App 复用时会建立两个实例。相同包 ID/版本而内容不同会报冲突，包括与 Home 已安装包的冲突。
+
+```js
+import {defineViewPlugin, portableSlots} from '@memsphere/view-sdk';
+export default defineViewPlugin({
+  apiVersion:1, inject:['slots','ui'], uiVersion:1,
+  apply(ctx) {
+    ctx.slots.register(portableSlots.appSettingsConfiguration, {
+      id:'configuration', key:ctx.module.appId,
+      value:{render(context) {
+        return ctx.ui.settingsForm({context,sections:[{
+          id:'preferences',title:{text:'偏好'},fields:[
+            {kind:'text',path:['title'],label:{text:'标题'}},
+            {kind:'projectStore',key:'expenses',label:{text:'费用账本'}}
+          ]
+        }]});
+      }}
+    });
+  }
+});
+```
+
+`render` 同步返回本次 context 创建的公共 `ui.settingsForm` 根节点。宿主核验组件来源，不接受任意 DOM 或旧展示根。框架负责布局、主题、字段样式、错误和保存动作；业务提供分组、标签、字段路径和选项。字段种类为 `text/number/integer/boolean/select/json/projectStore`；不支持 HTML、CSS、className、style 或自定义字段 DOM。可用 `visible(state)`、`disabled(state)` 添加业务条件，不能放宽只读、busy、Schema 必填与枚举约束。`options` 可为类型化选项数组，或 `(state,{signal}) => options | Promise<options>`；依赖草稿变化会取消旧选项请求，15 秒超时，不自动改选当前配置。
+
+`AppSettingsPresentationContext` 提供当前 `projectId/app/canWrite/signal`，`getState/subscribe`、`setValue/removeValue/setText`、`validate/save/reset` 和当前 App 声明用途的 `getStoreChoices(key)`。路径是属性段数组，空数组表示完整配置；完整配置必须是 JSON object。快照包含 saved、draft、revision、busy、dirty、issues、文本缓冲和 Schema。业务读快照或通过方法改草稿，不另存权威配置。
+
+`setText(path,text,kind?)` 的可选 kind 为 json（默认）、number 或 integer，公共控件按字段类型传入。JSON、数字和整数字段保留原始输入；无效文本也算未保存，阻止任何 validate/save 请求。活动文本路径不能互为祖先或后代；同路径只能继续 `setText`，不能同时以 `setValue/removeValue` 覆盖。保存或显式 reset 才清理缓冲。校验/保存期间，控制器拒绝编辑、reset 和重复请求并返回 `APP_SETTINGS_BUSY`。取消导航保留页面和草稿；确认离开才清理。刷新/关闭使用浏览器原生未保存提醒。
+
+HTTP 使用 `/api/projects/:project/settings/apps`：GET 列表，GET `/:appId` 详情，POST `/:appId/validate` 预览，PUT `/:appId` 保存。两个写请求均提交 `{config,expectedRevision}`。服务端锁内比较每 App 的配置版本；过期返回 409 `APP_CONFIG_CONFLICT`，即使候选等于当前配置也不忽略冲突。无变化保存不改文件或推进版本；旧 CLI 不传版本的完整替换继续可用，但实际变更会推进版本。
+
+鉴权沿用现有 Settings 监听模式：loopback 读取免 token；非 loopback 所有操作需要 Bearer token。validate/PUT 在两种模式下均检查同源 JSON。失败保留草稿；保存 30 秒超时只表示结果未确认，应重新读取核实，不自动重试。已保存与运行中配置分开显示；View 保留启动快照，配置改变后可能需要 `view restart`，不能把写盘成功当扩展已应用。
+
+可运行示例见 `examples/apps/expense/settings`（标准配置 Slot）和 `examples/apps/preferences`（仅 Schema 的通用页）。设置用途的 SDK 为 1.1.0，Plugin/UI 版本仍为 1，兼容已有 ^1.0.0 View Package。

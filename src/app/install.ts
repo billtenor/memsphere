@@ -1,3 +1,5 @@
+import { isViewSdkCompatible } from "../module/manifest.js";
+import { VIEW_SDK_VERSION } from "../view/view-sdk.js";
 import { listAppMemoryEntries } from "./ownership.js";
 import { randomUUID } from "node:crypto";
 import { cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
@@ -13,7 +15,7 @@ import type { ProjectContext, ResolvedProject } from "../project/resolver.js";
 import { AppError, cliBindingSchema } from "./contracts.js";
 import { digest, isMissing, packageDigest, readJson } from "./files.js";
 import { readAppPackage, resolveConfigValues, validateAppConfig } from "./package.js";
-import { assertWritableAppTarget, readAppState, requireApp, withAppLock, writeAppState, type AppInstallation, type AppProject } from "./state.js";
+import { appConfigurationRevision, canonicalAppConfig, assertWritableAppTarget, readAppState, requireApp, withAppLock, writeAppState, type AppInstallation, type AppProject } from "./state.js";
 import { checkCli, cliCatalog } from "../tools/registry.js";
 import { DefaultMemoryCatalog } from "../memory/catalog.js";
 import { AppMemoryProvider } from "./memory-provider.js";
@@ -103,7 +105,7 @@ export async function installApp(context: ProjectContext, directory: string, con
     if (await packageDigest(cache) !== pkg.packageDigest) throw new AppError("APP_CACHE_INVALID", "Cached App content does not match its digest");
     const operation = pending ?? { id: randomUUID(), packageDigest: pkg.packageDigest, memories: pkg.memories.map(({ source, ...m }) => m) };
     const app: AppInstallation = { manifest: pkg.manifest, packageDigest: pkg.packageDigest, packageRoot: cache,
-      installedAt: new Date().toISOString(), enabled: false, config: configuration, memories: operation.memories,
+      installedAt: new Date().toISOString(), configurationRevision: randomUUID(), enabled: false, config: configuration, memories: operation.memories,
       descriptors: pkg.descriptors, bindings: {}, operationId: operation.id };
     updateProjectStoreGenerations(app);
     await validateProjectStores(project, app, true);
@@ -177,6 +179,10 @@ export async function checkApp(project: AppProject, id: string) {
     try { packages.push(await readAppPackage(installed.packageRoot)); }
     catch (error) { if (installed.manifest.id === id) { add("package", false, String(error)); return { id, status: "unavailable", items }; } }
   }
+  if(app.manifest.entrypoints.settings) {
+    const settings=packages.find(pkg=>pkg.manifest.id===id)!.views.find(view=>view.key===app.manifest.entrypoints.settings!.packageKey)!;
+    add("settings-view",isViewSdkCompatible(settings.definition,VIEW_SDK_VERSION),`Host SDK ${VIEW_SDK_VERSION}; required ${settings.definition.view.sdk}`);
+  }
   const catalog = new DefaultMemoryCatalog(new AppMemoryProvider(project.paths.root, project.memoryRoot));
   const entries = await listAppMemoryEntries(catalog);
   for (const entry of app.manifest.entrypoints.agent) {
@@ -227,7 +233,7 @@ export async function checkApp(project: AppProject, id: string) {
         composition: { packages: app.manifest.entrypoints.view.map(entry => {
           const v = own.views.find(v => v.key === entry.packageKey)!;
           return { id: v.definition.id, version: v.definition.version, enabled: true, instance_id: entry.instanceId };
-        }) }, sdkVersion: "1.0.0" });
+        }) }, sdkVersion: VIEW_SDK_VERSION });
       add("view", view.instances.length === app.manifest.entrypoints.view.length && view.diagnostics.every(d => d.state === "resolved"), JSON.stringify(view.diagnostics));
     }
   } catch (error) { add("composition", false, String(error)); }
@@ -241,18 +247,24 @@ export async function checkApp(project: AppProject, id: string) {
   }
   return { id, status: items.every(i => i.available) ? "available" : "unavailable", items };
 }
-export async function configureApp(context: ProjectContext, id: string, config: unknown, target = context.primary) {
+export async function configureApp(context: ProjectContext, id: string, config: unknown, target = context.primary, options: { expectedRevision?: string } = {}) {
   assertWritableAppTarget(context, target);
   return withSharedStoreLock(target.paths.root, () => withAppLock(target, async () => {
     const state = await readAppState(target), app = requireApp(state, id);
+    const revision = appConfigurationRevision(app);
+    if (options.expectedRevision !== undefined && options.expectedRevision !== revision)
+      throw new AppError("APP_CONFIG_CONFLICT", "App configuration changed; reload before saving");
+    if (await packageDigest(app.packageRoot) !== app.packageDigest) throw new AppError("APP_CACHE_INVALID", "Modified App package");
     const previous = app.config;
     app.config = await validateAppConfig(app.packageRoot, app.manifest, config);
     updateProjectStoreGenerations(app, previous);
     await validateProjectStores(target, app);
+    if (canonicalAppConfig(previous) === canonicalAppConfig(app.config)) return { id, status: "configured", revision, restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length), config: app.config };
+    app.configurationRevision = randomUUID();
     app.bindings = bindings(app, target);
     for (const [key, binding] of Object.entries(app.bindingOverrides ?? {})) if (app.bindings[key]) app.bindings[key] = { ...app.bindings[key], ...binding };
     await writeAppState(target, state);
-    return { id, status: "configured", restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length) };
+    return { id, status: "configured", revision: appConfigurationRevision(app), config: app.config, restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length) };
   }));
 }
 export async function setAppEnabled(context: ProjectContext, id: string, enabled: boolean, target = context.primary) {

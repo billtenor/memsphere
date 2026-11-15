@@ -125,7 +125,7 @@ function harness(): string {
       import plugin from "/assets/settings.js";
       window.activeSettingsHost = await startViewHost({ root: document.getElementById("root"), instances: [{
         plugin, config: { locale: "zh-CN", messages: {} }, routeBasePath: "/",
-        routeGrants: [{ id: "section", path: "/settings/:module" }],
+        routeGrants: [{ id: "section", path: "/settings/:module", query: ["app"] }],
         module: { projectId: "memsphere", moduleId: "org.memsphere.settings", moduleVersion: "1.0.0", instanceId: "settings" }
       }]});
     </script></body></html>`;

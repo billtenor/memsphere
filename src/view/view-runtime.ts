@@ -1,3 +1,5 @@
+import { isSettingsForm } from "./settings-form.js";
+import type { AppSettingsPresentationContext } from "./app-settings-contracts.js";
 import {
   createHostRouteActivation,
   createHostRouteProjection,
@@ -184,6 +186,8 @@ export interface ViewHostDiagnosticSnapshot {
 export interface ActiveViewHost {
   activateMainView(key?: string): Promise<void>;
   confirm(confirmation: ConfirmationDescriptor): Promise<boolean>;
+  requestLeave(): Promise<boolean>;
+  navigatePath(path: string): Promise<void>;
   diagnostics(): ViewHostDiagnosticSnapshot;
   dispose(): Promise<void>;
 }
@@ -244,10 +248,17 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     await restore?.();
   };
 
+  let historyIndex = 0;
+  let navigationEpoch = 0;
+  globalThis.history?.replaceState({ ...globalThis.history.state, memsphereViewIndex: historyIndex }, "");
   routeRegistry.setNavigator(async (target, replace, preserveScroll) => {
     const path = routeRegistry.targetPath(target);
     if (path === undefined) throw new Error("Route target was not created by this ViewHost");
-    globalThis.history?.[replace ? "replaceState" : "pushState"]({}, "", path);
+    const epoch = ++navigationEpoch;
+    if (path === browserLocation().pathname + browserLocation().search + browserLocation().hash) return;
+    if (!(await routeRegistry.requestLeave()) || epoch !== navigationEpoch) return;
+    if (!replace) historyIndex++;
+    globalThis.history?.[replace ? "replaceState" : "pushState"]({ memsphereViewIndex: historyIndex }, "", path);
     navigationInProgress = true;
     try {
       await composeCurrentLocation();
@@ -372,7 +383,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         ...(plugin.inject.includes("presentation") ? { presentation } : {}),
         ...(plugin.inject.includes("ui") ? { ui } : {})
       }) as unknown as ViewPluginContext;
-      const applyDisposer = await plugin.apply(context, instanceOptions.config);
+      const applying = Promise.resolve().then(() => plugin.apply(context, instanceOptions.config));
+      void applying.then(disposer => {
+        if (lifecycle.disposed && typeof disposer === "function") void Promise.resolve().then(disposer).catch(() => undefined);
+      }, () => undefined);
+      const applyDisposer = await boundedViewOperation(applying, 10000, "View Plugin apply timed out");
       if (applyDisposer !== undefined) {
         if (typeof applyDisposer !== "function") {
           throw new Error("View Plugin apply() must return void or a disposer");
@@ -721,6 +736,11 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
       await disposeActiveMount(previousOverlay);
       if (!navigationInProgress) await flushPendingOverlayRestore();
     },
+    requestLeave: () => routeRegistry.requestLeave(),
+    async navigatePath(path: string): Promise<void> {
+      if (!path.startsWith("/projects/")) throw new Error("Host navigation must remain in a Project");
+      await routeRegistry.navigate(routeRegistry.createTarget(path));
+    },
     confirm(confirmation: ConfirmationDescriptor): Promise<boolean> {
       return hostUi.confirm(confirmation);
     },
@@ -771,6 +791,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
         errors.push(error);
       }
       globalThis.removeEventListener?.("popstate", handlePopstate);
+      globalThis.removeEventListener?.("beforeunload", handleUnload);
       for (const instance of [...instances].reverse()) {
         errors.push(...await instance.lifecycle.disposeCollectingErrors());
       }
@@ -798,9 +819,28 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     navigationQueue = operation.catch(() => undefined);
     return operation;
   };
-  const handlePopstate = () => {
-    void composeCurrentLocation().catch(error => renderShellNavigationError(options.root, error));
+  let restoringHistory: (() => void) | undefined;
+  let acceptedTraversal = false;
+  const handlePopstate = (event: PopStateEvent) => {
+    if (restoringHistory) { const done = restoringHistory; restoringHistory = undefined; done(); return; }
+    if (acceptedTraversal) { acceptedTraversal = false; historyIndex = event.state?.memsphereViewIndex ?? historyIndex; void composeCurrentLocation().catch(error => renderShellNavigationError(options.root,error)); return; }
+    const epoch=++navigationEpoch;
+    const previous = routeRegistry.location;
+    const destination = browserLocation();
+    const nextIndex = event.state?.memsphereViewIndex;
+    const delta = Number.isInteger(nextIndex) ? historyIndex-nextIndex : 0;
+    const restored = delta ? new Promise<void>(resolve => { restoringHistory=resolve;globalThis.history.go(delta); }) : Promise.resolve();
+    if (!delta) globalThis.history?.replaceState({memsphereViewIndex:historyIndex}, "", previous.pathname+previous.search+previous.hash);
+    void restored.then(()=>routeRegistry.requestLeave()).then(async allowed => {
+      if (!allowed || epoch!==navigationEpoch) return;
+      if (delta) { acceptedTraversal=true; globalThis.history.go(-delta); }
+      else {globalThis.history?.replaceState({memsphereViewIndex:historyIndex}, "", destination.pathname+destination.search+destination.hash); await composeCurrentLocation();}
+    }).catch(error => renderShellNavigationError(options.root, error));
   };
+  const handleUnload = (event: BeforeUnloadEvent) => {
+    if (routeRegistry.hasChanges()) { event.preventDefault(); event.returnValue = ""; }
+  };
+  globalThis.addEventListener?.("beforeunload", handleUnload);
   globalThis.addEventListener?.("popstate", handlePopstate);
 
   if (instances.length === 0) {
@@ -1164,9 +1204,10 @@ class RuntimeLifecycle implements ViewLifecycle {
     if (this.#disposed) return [];
     this.#disposed = true;
     const errors: unknown[] = [];
+    const cleanupDeadline = Date.now() + 1000;
     for (const disposer of [...this.#owned].reverse()) {
       try {
-        await disposer();
+        await boundedViewOperation(Promise.resolve().then(disposer), Math.max(0, cleanupDeadline-Date.now()), "View Plugin cleanup timed out");
       } catch (error) {
         errors.push(error);
       }
@@ -1375,6 +1416,7 @@ class RuntimeSlotTransaction implements SlotRegistry {
     options: RegisterOptions<unknown> | KeyedRegisterOptions<unknown, string>,
   ): Disposer {
     if (this.#state !== "open") throw new Error("View Plugin registration transaction is already closed");
+    if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
     validateSlotRegistration(token, options);
     const extended = options as typeof options & { readonly when?: RouteActivation };
     const key = "key" in options ? options.key : undefined;
@@ -1382,7 +1424,12 @@ class RuntimeSlotTransaction implements SlotRegistry {
     const cell = `${slotIdentity(token)}:${key ?? options.id}`;
     // Package manifests cannot contain a Project-specific runtime route identity.
     // Only this instance's own route keys can use the portable route declaration.
-    const policyCell = slotIdentity(token) === "main.view@1" && typeof key === "string" && key.startsWith(`${owner}:route:`)
+    if (slotIdentity(token) === "org.memsphere.settings.app.configuration@1") {
+      if (!this.#module.settingsOnly || !this.#module.appId || key !== this.#module.appId) throw new Error("App settings Slot ownership mismatch");
+    } else if (this.#module.settingsOnly) throw new Error("Settings Module may only register its App configuration Slot");
+    const policyCell = slotIdentity(token) === "org.memsphere.settings.app.configuration@1"
+      ? `${slotIdentity(token)}:app`
+      : slotIdentity(token) === "main.view@1" && typeof key === "string" && key.startsWith(`${owner}:route:`)
       ? `main.view@1:${key.slice(owner.length + 1)}` : cell;
     if (this.#contributionPolicy?.blockedCells.includes(policyCell)) {
       throw new Error(`View contribution is blocked by an unresolved Project preference: ${cell}`);
@@ -1470,6 +1517,7 @@ class RuntimeSlotTransaction implements SlotRegistry {
           throw new Error("View data renderer returned asynchronously; this cell requires an immediate HTMLElement");
         }
         if (!(element instanceof HTMLElement)) throw new Error("View data renderer must return an HTMLElement");
+        if (slotIdentity(token) === "org.memsphere.settings.app.configuration@1" && !isSettingsForm(element, input as AppSettingsPresentationContext)) throw new Error("App settings renderer must return ui.settingsForm for this presentation");
         if (component) {
           const context = input as ContentComponentContext;
           if (!element.contains(context.content)) throw new Error("Content component must preserve its supplied content");
@@ -1502,6 +1550,20 @@ class RuntimeSlotTransaction implements SlotRegistry {
 }
 
 class RuntimeRouteStore {
+  readonly #guards = new Set<{ guard: () => boolean | Promise<boolean>; hasChanges?: () => boolean }>();
+  #leaving: Promise<boolean> | undefined;
+  beforeLeave(guard: () => boolean | Promise<boolean>, hasChanges?: () => boolean): Disposer {
+    const entry = { guard, hasChanges }; this.#guards.add(entry);
+    return () => { this.#guards.delete(entry); };
+  }
+  hasChanges(): boolean { return [...this.#guards].some(g => g.hasChanges?.()); }
+  requestLeave(): Promise<boolean> {
+    this.#leaving ??= (async () => {
+      for (const entry of this.#guards) if (!(await entry.guard())) return false;
+      return true;
+    })().finally(() => { this.#leaving = undefined; });
+    return this.#leaving;
+  }
   readonly #routes: RuntimeRoute[] = [];
   #location: RouteLocation;
   readonly #activationKeys = new WeakMap<RouteActivation, string>();
@@ -1543,7 +1605,7 @@ class RuntimeRouteStore {
       ...(route ? { routeKey: route.key } : {})
     });
     if (matched && (matched.matchedPath !== route?.path || location.pathname !== canonicalPath || location.search !== canonicalSearch)) {
-      globalThis.history?.replaceState({}, "", canonicalPath + canonicalSearch + location.hash);
+      globalThis.history?.replaceState(globalThis.history.state, "", canonicalPath + canonicalSearch + location.hash);
     }
   }
 
@@ -1745,6 +1807,7 @@ class RuntimeRouteTransaction implements ViewRouter {
   }
 
   register(definition: RouteDefinition): RouteToken {
+    if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
     if (this.#state !== "open") throw new Error("View Plugin registration transaction is already closed");
     validateRouteDefinition(definition);
     if (this.#staged.some(route => route.id === definition.id)) {
@@ -1801,6 +1864,11 @@ class RuntimeRouteTransaction implements ViewRouter {
   project(options: RouteProjectionOptions): RouteProjection {
     if (this.#state !== "open") throw new Error("View Plugin registration transaction is already closed");
     return this.#store.createProjection(options, moduleIdentity(this.#module));
+  }
+
+  beforeLeave(guard: () => boolean | Promise<boolean>, hasChanges?: () => boolean): Disposer {
+    if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
+    return this.#lifecycle.own(this.#store.beforeLeave(guard, hasChanges));
   }
 
   async navigate(target: RouteTarget): Promise<void> {
@@ -2884,4 +2952,10 @@ function diagnosticMessage(error: unknown, cleanupErrors: readonly unknown[]): s
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function boundedViewOperation<T>(operation: Promise<T>, timeout: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try { return await Promise.race([operation, new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(message)), timeout); })]); }
+  finally { clearTimeout(timer); }
 }

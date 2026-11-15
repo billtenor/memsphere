@@ -1,4 +1,5 @@
 export const zhCNViewMessages = {
+  "settings.apps": "App 配置",
   "settings.runners": "Runner Agent",
   "settings.runnerIdentity": "开启 Agent 身份",
   "settings.runnerAsync": "开启 Agent 异步执行",

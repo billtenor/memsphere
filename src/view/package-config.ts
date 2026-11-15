@@ -13,6 +13,7 @@ export const viewPackageCapabilitySchema = z.enum([
 export type ViewPackageCapability = z.infer<typeof viewPackageCapabilitySchema>;
 
 export const portableViewContributionCells = [
+  "org.memsphere.settings.app.configuration@1:app",
   "content.document@1:default",
   "content.flow@1:default",
   "content.disclosure@1:default",

@@ -20,6 +20,7 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.apps": "App configuration",
   "change.emptyCandidate": "No net changes in this round; the ChangeSet remains active.",
   "change.bindings": "Related information",
   "change.branch": "Branch",

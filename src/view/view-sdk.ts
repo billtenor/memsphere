@@ -1,3 +1,6 @@
+export type { AppSettingsPresentationContext, AppSettingsSnapshot, SettingsFormDescriptor, SettingsFieldDescriptor } from "./app-settings-contracts.js";
+import type { AppSettingsPresentationContext, SettingsFormDescriptor } from "./app-settings-contracts.js";
+export const VIEW_SDK_VERSION = "1.1.0";
 export type MaybePromise<T> = T | Promise<T>;
 export type Disposer = () => void | Promise<void>;
 
@@ -89,6 +92,8 @@ export type ViewServiceName =
   | "logger";
 
 export interface ModuleInstanceContext {
+  readonly appId?: string;
+  readonly settingsOnly?: boolean;
   readonly projectId: string;
   readonly moduleId: string;
   readonly moduleVersion: string;
@@ -303,6 +308,8 @@ export interface RouteProjectionOptions {
 }
 
 export interface ViewRouter {
+  /** Guards all Host navigation. Return false to keep the current presentation. */
+  beforeLeave?(guard: () => boolean | Promise<boolean>, hasChanges?: () => boolean): Disposer;
   register(definition: RouteDefinition): RouteToken;
   project(options: RouteProjectionOptions): RouteProjection;
   navigate(target: RouteTarget): Promise<void>;
@@ -624,6 +631,7 @@ export type ContentListProvider = (
 
 export interface ViewUi {
   readonly version: 1;
+  settingsForm(descriptor: SettingsFormDescriptor): HTMLElement;
   modelDefinition(descriptor: ModelDefinitionDescriptor): HTMLElement;
   contentComponent(input: ContentComponentContext): HTMLElement;
   contentList(source: ContentListDescriptor | ContentListProvider): ViewMount;
@@ -1363,6 +1371,7 @@ export const componentSlots = Object.freeze({
 });
 
 export const portableSlots = Object.freeze({
+  appSettingsConfiguration: defineSlot<ViewDataRenderer<AppSettingsPresentationContext>, string>()({ name: "org.memsphere.settings.app.configuration", version: 1, kind: "keyed", scope: "page", render: "descriptor", validate: isViewDataRenderer }),
   memoryPagePresentation: defineSlot<ViewMount, "page">()({
     name: "org.memsphere.memory.page.presentation",
     version: 1,

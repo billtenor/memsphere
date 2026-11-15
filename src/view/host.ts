@@ -242,7 +242,11 @@ export function renderViewHostHtml(
       const instances = await Promise.all(boot.instances.map(async instance => {
         try {
           if (instance.loadError) throw new Error(instance.loadError);
-          const pluginModule = await import(instance.pluginPath);
+          let importTimer;
+          const pluginModule = await Promise.race([
+            import(instance.pluginPath),
+            new Promise((_, reject) => { importTimer = setTimeout(() => reject(new Error("View Package import timed out")), 10000); })
+          ]).finally(() => clearTimeout(importTimer));
           return { ...instance, plugin: pluginModule.default };
         } catch (error) {
           return { ...instance, plugin: { __viewBundleLoadError: error } };
@@ -274,15 +278,13 @@ export function renderViewHostHtml(
       projectHome?.addEventListener("click", event => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
         event.preventDefault();
-        history.pushState({}, "", "/projects/" + encodeURIComponent(currentProjectId));
-        window.dispatchEvent(new PopStateEvent("popstate"));
+        void activeHost.navigatePath("/projects/" + encodeURIComponent(currentProjectId));
       });
       if (projectLabel) projectLabel.textContent = boot.coreShell.project;
       if (settings) {
         settings.textContent = boot.coreShell.settings;
         settings.addEventListener("click", () => {
-          history.pushState({}, "", "/projects/" + encodeURIComponent(currentProjectId) + "/settings/general");
-          window.dispatchEvent(new PopStateEvent("popstate"));
+          void activeHost.navigatePath("/projects/" + encodeURIComponent(currentProjectId) + "/settings/general");
         });
       }
       if (serviceStatus) serviceStatus.textContent = boot.coreShell.healthy;
@@ -312,9 +314,10 @@ export function renderViewHostHtml(
             closeProjectMenu();
             return;
           }
+          if (!(await activeHost.requestLeave())) return;
           const pathParts = location.pathname.split("/");
           const relativePath = pathParts[1] === "projects" ? "/" + pathParts.slice(3).join("/") : location.pathname;
-          if (relativePath.startsWith("/settings/")) {
+          if (relativePath.startsWith("/settings/") && !relativePath.startsWith("/settings/apps")) {
             closeProjectMenu();
             const confirmed = await activeHost.confirm({
               title: { text: boot.coreShell.switchProject },

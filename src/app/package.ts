@@ -32,6 +32,14 @@ export async function readAppPackage(directory: string) {
     await packagePath(path, definition.view.entry.replace(/^\.\//, ""));
     return { key: asset.key, path, definition, digest: await packageDigest(path) };
   }));
+  if (manifest.entrypoints.settings) {
+    const settings = views.find(view => view.key === manifest.entrypoints.settings!.packageKey)!;
+    const v = settings.definition.view;
+    if ((v.capabilities?.length ?? 0) || (v.styles?.length ?? 0) || (v.themes?.length ?? 0) || v.dependencies?.length)
+      throw new AppError("APP_SETTINGS_CAPABILITY", "Settings packages only use framework UI and their own App configuration Slot");
+    if (v.contributions?.length !== 1 || v.contributions[0]!.cell !== "org.memsphere.settings.app.configuration@1:app")
+      throw new AppError("APP_SETTINGS_CONTRIBUTION", "Settings package must declare one App configuration contribution");
+  }
   const models = await Promise.all(manifest.assets.modelPackages.map(async asset => {
     const path = await packagePath(root, asset.path);
     const definition = modelPackageSchema.parse(await readJson(await packagePath(path, "model-package.json")));

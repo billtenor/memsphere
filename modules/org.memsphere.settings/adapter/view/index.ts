@@ -10,7 +10,8 @@ export interface SettingsViewConfig {
 export default defineViewPlugin<SettingsViewConfig>({
   name: "memsphere-settings-view",
   apiVersion: 1,
-  inject: ["router", "slots"],
+  inject: ["router", "slots", "ui"],
+  uiVersion: 1,
   apply(ctx, config) {
     if (!ctx.router) throw new Error("Settings View requires the router service");
 
@@ -48,11 +49,13 @@ export default defineViewPlugin<SettingsViewConfig>({
     ctx.lifecycle.own(() => { void titleLease?.(); void secondaryLease?.(); });
     const views = createSettingsViews({
       config,
+      ui:ctx.ui!, slots:ctx.slots, projectId:ctx.module.projectId,
       route: section,
       navigate: target => ctx.router!.navigate(target),
       onRoute: publishSecondary
     });
     ctx.lifecycle.own(views.dispose);
+    ctx.router.beforeLeave?.(views.beforeLeave, views.hasChanges);
 
     const initialSection = normalizeSettingsSection(ctx.router.location.params.module);
     ctx.slots.register(slots.navigationSecondary, {
@@ -113,7 +116,7 @@ function settingsSecondaryItems(config: SettingsViewConfig, section: RouteToken,
     ["providers", text(config, "settings.providers", "模型提供商"), "sparkle"],
     ["participants", text(config, "settings.participants", "参与者"), "user"],
     ["models", text(config, "settings.models", "模型存储"), "stack"],
-    ["apps", "App 配置", "cube"],
+    ["apps", text(config,"settings.apps","App 配置"), "cube"],
   ] as const;
   return entries.map(([id, label, icon]) => ({
     id,
@@ -133,7 +136,7 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
     providers: text(config, "settings.providers", "模型提供商"),
     project: text(config, "navigation.project", "当前项目"),
     participants: text(config, "settings.participants", "参与者"),
-    apps: "App 配置",
+    apps: text(config,"settings.apps","App 配置"),
     models: text(config, "settings.models", "模型存储")
   };
   return labels[section] ?? labels.general;

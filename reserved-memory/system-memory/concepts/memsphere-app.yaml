@@ -9,3 +9,4 @@ defines:
   - Module 即 View Module；View Package 分发界面模块、主题和样式，Model Package 分发模型定义，包的身份与版本独立于 App。
   - app.json 是可信本地发行目录的组合清单；Project 安装记录保存版本、内容摘要、配置、资产归属和启用状态。
   - 外部 CLI 是独立程序，登记描述说明工具身份与入口，Project 或 App 绑定提供固定参数、工作目录和环境引用；Memsphere 不代理业务命令执行。
+  - "App 配置是当前 Project 中该 App 安装记录的持久配置；View 的 App 配置页与 CLI 编辑同一配置。它不同于 Home 外观偏好，也不同于运行中 View 已捕获的配置快照。"

@@ -1,6 +1,6 @@
-import { AppSettingsPrototype } from "./apps-prototype.js";
+import { AppSettingsPage } from "./app-settings-page.js";
 import { modelRegistrationSetupEnabled } from "../../../shared/model-browser-features.js";
-import type { RouteLocation, RouteTarget, RouteToken, ViewMount } from "@memsphere/view-sdk";
+import type { RouteLocation, RouteTarget, RouteToken, ViewMount, ViewUi, SlotRegistry } from "@memsphere/view-sdk";
 import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
@@ -8,6 +8,9 @@ type ScopeName = "global" | "project";
 type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models" | "apps";
 
 interface SettingsViewOptions {
+  readonly ui:ViewUi;
+  readonly slots:SlotRegistry;
+  readonly projectId:string;
   readonly config: SettingsViewConfig;
   readonly route: RouteToken;
   readonly navigate: (target: RouteTarget) => Promise<void>;
@@ -39,7 +42,7 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   participants: { scope: "project", module: "participants" }
 };
 
-export function createSettingsViews(options: SettingsViewOptions): Readonly<{ list: ViewMount; detail: ViewMount; dispose(): void }> {
+export function createSettingsViews(options: SettingsViewOptions): Readonly<{ list: ViewMount; detail: ViewMount; beforeLeave(): Promise<boolean>; hasChanges(): boolean; dispose(): void }> {
   const scopes: Record<ScopeName, ScopeState> = {
     global: { data: null, draft: null, errors: [], confirmation: null, notice: "" },
     project: { data: null, draft: null, errors: [], confirmation: null, notice: "" }
@@ -82,6 +85,8 @@ export function createSettingsViews(options: SettingsViewOptions): Readonly<{ li
     update: context => updateRoute(context.route)
   });
   return {
+    beforeLeave: () => app?.beforeLeave() ?? Promise.resolve(true),
+    hasChanges: () => app?.hasChanges() ?? false,
     list: surface("list"),
     detail: surface("detail"),
     dispose() { controller.abort(); app?.dispose(); app = undefined; }
@@ -101,7 +106,7 @@ class SettingsApplication {
   #projects: JsonObject[] = [];
   #currentProject = "";
   #loading = true;
-  #appPrototype?: AppSettingsPrototype;
+  #appPage?: AppSettingsPage;
   #token = sessionStorage.getItem(tokenKey) ?? "";
   #tokenError = "";
   #operatorTokenDraft = "";
@@ -135,9 +140,10 @@ class SettingsApplication {
   attachList(root: HTMLElement): void { this.#listRoot = root; this.render(); }
   detachList(root: HTMLElement): void { if (this.#listRoot === root) this.#listRoot = null; }
   attachDetail(root: HTMLElement): void { this.#detailRoot = root; this.render(); }
-  detachDetail(root: HTMLElement): void { if (this.#detailRoot === root) this.#detailRoot = null; }
+  detachDetail(root: HTMLElement): void { if (this.#detailRoot === root) { this.#detailRoot = null; this.#appPage?.dispose(); this.#appPage = undefined; } }
 
   async updateRoute(route: Readonly<RouteLocation>): Promise<void> {
+    this.#appPage?.dispose(); this.#appPage = undefined;
     const destination = destinationFromPath(route.pathname);
     this.#scope = destination.scope;
     this.#module = destination.module;
@@ -153,15 +159,6 @@ class SettingsApplication {
     this.#loading = true;
     this.render();
     try {
-      if (this.#module === "apps") {
-        // Prototype uses demo data only; do not request protected settings.
-        const response = await fetch("/api/projects", {signal:this.#signal});
-        if (!response.ok) throw new Error(await response.text());
-        const projects = await response.json() as JsonObject;
-        this.#currentProject = projects.current ?? "";
-        this.#projects = projects.projects ?? [];
-        return;
-      }
       const [metaResponse, projectResponse, packageResponse] = await Promise.all([
         fetch("/api/settings/meta", { signal: this.#signal }),
         fetch("/api/projects", { signal: this.#signal }),
@@ -223,7 +220,9 @@ class SettingsApplication {
     }
   }
 
-  dispose(): void { this.#appPrototype?.dispose(); }
+  beforeLeave(): Promise<boolean> { return this.#appPage?.beforeLeave() ?? Promise.resolve(true); }
+  hasChanges(): boolean { return Boolean(this.#appPage?.dirty || this.#appPage?.busy); }
+  dispose(): void { this.#appPage?.dispose(); }
 
   render(): void {
     if (this.#signal.aborted) return;
@@ -318,12 +317,11 @@ class SettingsApplication {
   }
 
   contentHtml(scope: ScopeState): string {
-    // This preview only uses labeled browser-local demo data, not protected settings.
-    if (this.#module === "apps") return `<div data-app-settings-prototype></div>`;
     if (this.#meta?.requiresToken && !this.#scopes.global.data) return this.tokenHtml();
     if (!scope.data || !scope.draft) return empty(this.#scope === "project"
       ? this.t("settings.projectUnavailable", "当前没有可管理的项目，但仍可管理 Memsphere 全局设置。")
       : this.t("settings.notLoaded", "配置尚未加载。"));
+    if (this.#module === "apps") return `<div data-app-settings-page></div>`;
     if (this.#module === "appearance") return this.appearanceHtml();
     if (scope.confirmation) return this.confirmationHtml(scope);
     const status = this.statusHtml(scope);
@@ -653,11 +651,13 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   private mountAppPrototype(): void {
-    if (this.#module !== "apps") { this.#appPrototype?.dispose(); this.#appPrototype = undefined; return; }
-    const root = this.detailRoot().querySelector<HTMLElement>("[data-app-settings-prototype]");
+    if (this.#module !== "apps") { this.#appPage?.dispose(); this.#appPage = undefined; return; }
+    const root = this.detailRoot().querySelector<HTMLElement>("[data-app-settings-page]");
     if (!root) return;
-    this.#appPrototype ??= new AppSettingsPrototype(this.#currentProject);
-    this.#appPrototype.mount(root);
+    this.#appPage ??= new AppSettingsPage(this.#options.projectId,this.#options.ui,this.#options.slots,(url,init)=>this.settingsFetch(url,init),async id=>{
+      await this.#options.navigate(this.#options.route.to({module:"apps"},{query:{app:id}}));
+    },this.#config.locale);
+    this.#appPage.mount(root,new URLSearchParams(location.search).get("app")??undefined);
   }
 
   private surfaceRoots(): readonly HTMLElement[] { return [this.#listRoot, this.#detailRoot].filter((root): root is HTMLElement => Boolean(root)).concat(this.#listRoot || this.#detailRoot ? [] : [this.#root]); }
@@ -665,10 +665,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
 
   async activate(sectionName: SectionName): Promise<void> {
     const destination = sections[sectionName];
-    this.#scope = destination.scope;
-    this.#module = destination.module;
     await this.#options.navigate(this.#options.route.to({ module: sectionName }));
-    this.render();
   }
 
   async action(name: string): Promise<void> {
@@ -1171,10 +1168,10 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   settingsFetch(url: string, init: RequestInit = {}): Promise<Response> {
     const headers = new Headers(init.headers);
     if (this.#token) headers.set("authorization", `Bearer ${this.#token}`);
-    const scopedUrl = this.#config.projectApiBase && (url === "/api/models/initialize" || url === "/api/settings/view-packages" || url === "/api/settings/project" || url.startsWith("/api/settings/project/"))
+    const scopedUrl = this.#config.projectApiBase && (url === "/api/models/initialize" || url === "/api/settings/view-packages" || url === "/api/settings/project" || url.startsWith("/api/settings/project/") || url === "/api/settings/apps" || url.startsWith("/api/settings/apps/"))
       ? `${this.#config.projectApiBase}${url.slice(4)}`
       : url;
-    return fetch(scopedUrl, { ...init, headers, signal: this.#signal });
+    return fetch(scopedUrl, { ...init, headers, signal: init.signal ? AbortSignal.any([this.#signal,init.signal]) : this.#signal });
   }
 
   fail(error: unknown): void {
@@ -1287,6 +1284,12 @@ function escapeAttr(value: unknown): string { return escapeHtml(String(value)).r
 function escapeHtml(value: unknown): string { return String(value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;"); }
 
 const styles = `
+  .app-settings-page {display:grid;gap:var(--mem-view-space-4);min-width:0;}
+  .app-settings-page header {display:grid;gap:var(--mem-view-space-3);justify-items:start;}
+  .app-settings-page h2,.app-settings-page h3,.app-settings-page p {margin:0;overflow-wrap:anywhere;}
+  .app-settings-actions {display:flex;flex-wrap:wrap;gap:var(--mem-view-space-2);}
+  .app-settings-item {padding:var(--mem-view-space-5);border:1px solid var(--mem-view-color-border);border-radius:var(--mem-view-radius-lg);background:var(--mem-view-color-surface);display:grid;gap:var(--mem-view-space-3);justify-items:start;}
+
   .memsphere-settings { --surface:var(--mem-view-color-surface);--line:var(--mem-view-color-border);--soft:var(--mem-view-color-subtle);--text:var(--mem-view-color-text);--muted:var(--mem-view-color-text-muted);--accent:var(--mem-view-color-accent);--accent-soft:var(--mem-view-color-accent-soft);--danger:var(--mem-view-color-danger);--shadow:var(--mem-view-shadow-card); display:grid;grid-template-columns:240px minmax(0,1fr);min-height:calc(100vh - 82px);background:var(--mem-view-color-canvas);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-sizing:border-box }
   .memsphere-settings.settings-list-surface,.memsphere-settings.settings-detail-surface{display:block;min-height:100%;background:transparent}.settings-list-surface .settings-sidebar{min-height:100%;border-right:0;background:transparent;padding:0 8px 12px}.settings-detail-surface .settings-content{width:100%;max-width:980px;min-height:100%;margin:0 auto}.settings-detail-surface .settings-page-header{display:none}
   .memsphere-settings * { box-sizing:border-box } .settings-sidebar{padding:24px 16px;border-right:1px solid var(--line);background:var(--mem-view-color-subtle)}.settings-content{min-width:0;padding:22px 28px 48px}.settings-page-header h2{margin:0;font-size:24px}.settings-page-header p{margin:5px 0 22px;color:var(--muted)}
