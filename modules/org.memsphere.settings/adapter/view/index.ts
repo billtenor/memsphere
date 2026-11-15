@@ -91,7 +91,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         async search({ query }) {
           const entries = [
             ["general", "常规"], ["view", "界面服务"], ["appearance", "界面与主题"],
-            ["providers", "ACP 提供方"], ["participants", "参与者配置"], ["stores", text(config, "settings.businessStores", "业务 Store")], ["tos-credentials", text(config, "settings.tosCredentials", "TOS 凭据")]
+            ["providers", "ACP 提供方"], ["participants", "参与者配置"], ["stores", text(config, "settings.businessStores", "业务 Store")], ["volcengine", text(config, "settings.volcengine", "火山云配置")]
           ] as const;
           const needle = query.trim().toLowerCase();
           return entries.filter(([, label]) => !needle || label.toLowerCase().includes(needle)).map(([module, label]) => ({
@@ -113,7 +113,7 @@ function settingsSecondaryItems(config: SettingsViewConfig, section: RouteToken,
     ["providers", text(config, "settings.providers", "模型提供商"), "sparkle"],
     ["participants", text(config, "settings.participants", "参与者"), "user"],
     ["stores", text(config, "settings.businessStores", "业务 Store"), "stack"],
-    ["tos-credentials", text(config, "settings.tosCredentials", "TOS 凭据"), "gear-six"],
+    ["volcengine", text(config, "settings.volcengine", "火山云配置"), "gear-six"],
     ["models", text(config, "settings.models", "模型存储"), "stack"],
   ] as const;
   return entries.map(([id, label, icon]) => ({
@@ -135,13 +135,14 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
     project: text(config, "navigation.project", "当前项目"),
     participants: text(config, "settings.participants", "参与者"),
     stores: text(config, "settings.businessStores", "业务 Store"),
-    "tos-credentials": text(config, "settings.tosCredentials", "TOS 凭据"),
+    volcengine: text(config, "settings.volcengine", "火山云配置"),
     models: text(config, "settings.models", "模型存储")
   };
   return labels[section] ?? labels.general;
 }
 
 function normalizeSettingsSection(section: string | undefined): string {
+  if (section === "tos-credentials") return "volcengine";
   if (section === "packages" || section === "composition") return "appearance";
   return !section || section === "overview" ? "general" : section;
 }

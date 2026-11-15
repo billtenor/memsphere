@@ -15,6 +15,8 @@
 
 The endpoint must match the configured region (`tos-<region>.volces.com` or `tos-<region>.ivolces.com`). Public and internal endpoints identify the same regional bucket; within a Project, Store prefixes in that bucket must not overlap.
 
+View settings group cloud configuration under **Volcengine cloud**. The TOS credentials list supports adding named credential sets and editing an existing set without displaying its saved secrets. Blank secret fields during an edit keep their existing values. Project business Store settings select these names from a dropdown; the creation form separates identity, cloud location, write/delete behavior and credentials. Existing Store configuration is expandable and keeps model, location and mode read-only.
+
 Project hosts resolve saved credentials. Standalone factories default to environment references, for example `{ "source":"env", "accessKeyIdEnv":"TOS_ACCESS_KEY_ID", "accessKeySecretEnv":"TOS_ACCESS_KEY_SECRET", "stsTokenEnv":"TOS_SECURITY_TOKEN" }`. The final token reference is optional. Do not pass credentials as Store configuration fields.
 
 - `raw`: exact original Payload bytes, create without overwrite, physical delete. Updates and `expectedRevision` are rejected.

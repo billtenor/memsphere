@@ -242,7 +242,7 @@ memsphere data read order-001 --store orders --output json
 - 模型写入中断时按诊断重试原写命令以恢复一致状态；外部改动冲突保留新内容，不以 initialize 代替所有恢复。业务 Store 的 revision 与 Run 历史快照分别管理。
 
 - 所有 Store 的公开 revision/expectedRevision 都是不透明字符串，读取后原样传回；不要转数字或自行递增。filesystem JSON ValueStore 的磁盘计数仍为数字，公开 token 为十进制字符串。
-- TOS Store 先读 `memsphere-data-store`。使用已有 bucket、专用 prefix、region、endpoint 和固定 raw/revision 模式，凭据只引用 Home 保存的名称或 AK/SK/可选 STS Token 环境变量。View 的 Home TOS 凭据页保存身份，Project 业务 Store 页创建绑定；已有 Store 只改凭据引用，首版不切换或迁移。
+- TOS Store 先读 `memsphere-data-store`。使用已有 bucket、专用 prefix、region、endpoint 和固定 raw/revision 模式，凭据只引用 Home 保存的名称或 AK/SK/可选 STS Token 环境变量。View 的 Home“火山云配置”内以 TOS 凭据列表新增或编辑命名身份，编辑密钥留空保留原值；Project 业务 Store 页分组创建绑定，从下拉框选择已保存凭据；已有 Store 只改凭据引用，首版不切换或迁移。
 - TOS raw 模式保存原始 Payload，create 不覆盖，拒绝 update/expectedRevision，delete 物理删除。revision 模式必须在 update/delete 携带读取的 token，单次条件 PUT；删除态 read 返回 deleted 和 revision，普通 update 带该 token 及新 Payload 重新写入，没有 restore 命令。has 包含删除态，普通 list 隐藏；空 items 仍可能有 nextCursor。
 - TOS 使用官方 SDK，首版仅接入从未启用版本控制的桶，普通上传最多 5 GiB（带头 Payload 少十字节），不支持分片。失败明确报错，无本地回退、自动重试或自动删除补偿；超时后先重读确认。只有 TOS Store 的数据在云端，不表示整个 Project 备份。
 

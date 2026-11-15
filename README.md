@@ -409,7 +409,7 @@ memsphere data export one --store counters --as json --out one.json --output jso
 
 模型、数据和 Store 的写命令支持 `--dry-run`，只检查拟议变更；export 例外，只写显式指定的导出目标，已有目标拒绝覆盖。`--out -` 输出原始内容，与 `--output json` 回执互斥。普通读取不创建目录、修复登记或更新业务状态。文件写入通过本机跨进程锁协调，进程退出后由系统释放；锁文件可保留，不能当成过期锁删除。保护范围是通过该协议访问的本地文件系统，不承诺网络文件系统锁或外部程序直接改文件时的并发一致性；平台不支持锁时明确失败。
 
-TOS Store 在“设置 → TOS 凭据”保存 AK/SK（可选 STS Token），再在当前 Project 的“业务 Store”选择模型、已有 bucket、专用 prefix、region/endpoint 和 raw/revision 模式；也可用 `data store create ... --kind data --factory memsphere/tos --config-file tos.json`。配置示例及限制见 [TOS DataStore](src/data/extensions/tos-datastore/README.md)。保存后模型、位置和模式固定，凭据引用可修改。只有接入 TOS 的 Store 数据在云端。revision 模式读取的删除态仍含 revision，以普通 update 携该版本及新 Payload 即可重新写入；没有额外恢复命令。首版最多 5 GiB 总对象大小，无分片，仅支持从未启用版本控制的桶。
+TOS Store 在“设置 → 火山云配置 → TOS 凭据”按名称新增或编辑多组 AK/SK（可选 STS Token），再在当前 Project 的“业务 Store”选择模型、已有 bucket、专用 prefix、region/endpoint 和 raw/revision 模式，并从下拉框选择已保存凭据；也可用 `data store create ... --kind data --factory memsphere/tos --config-file tos.json`。配置示例及限制见 [TOS DataStore](src/data/extensions/tos-datastore/README.md)。保存后模型、位置和模式固定，凭据引用可修改。只有接入 TOS 的 Store 数据在云端。revision 模式读取的删除态仍含 revision，以普通 update 携该版本及新 Payload 即可重新写入；没有额外恢复命令。首版最多 5 GiB 总对象大小，无分片，仅支持从未启用版本控制的桶。
 
 全部六种 `list`（model、data、data store、project、memory、archive）都支持 `--limit <n>` 和 `--cursor <token>`，默认 100，范围 1–1000。先筛选再分页；JSON/YAML 输出为 `{ "items": [...], "nextCursor": "..." }`，末页省略 nextCursor，空页为 items 空数组。继续时可改 limit，必须保持命令、Project/Store/Run、筛选条件及 Memory 父节点等查询范围。Memory 子节点保持声明顺序；Reviewer 列表继续使用 Session 绑定的 Project 与冻结 Run。
 
