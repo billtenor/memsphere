@@ -27,9 +27,22 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await managedProjectFixture("project", { bind: true });
+    // These publication/CAS cases create every referenced Memory themselves.
+    // Bundled System Memory installation has its own contract tests; loading it
+    // here makes every candidate validation rescan unrelated shipped documents.
+    await managedProjectFixture("project", { bind: true, systemMemory: false });
     const registry = await readProjectRegistry(home);
     const memoryRoot = join(registry.projects.project.root, "memory");
+    // Git rollback must retain all four kind directories, including empty ones.
+    for (const kind of ["concepts", "statements", "procedures", "schemas"]) {
+      await writeFile(join(memoryRoot, kind, ".gitkeep"), "");
+    }
+    await runGit(["add", "."], { cwd: memoryRoot });
+    await runGit(["commit", "-m", "Retain empty Memory directories"], { cwd: memoryRoot });
+    const fixtureConfigPath = join(registry.projects.project.root, "config.json");
+    const fixtureConfig = JSON.parse(await readFile(fixtureConfigPath, "utf8"));
+    fixtureConfig.store.published_revision = await gitOutput(["rev-parse", "HEAD"], memoryRoot);
+    await writeFile(fixtureConfigPath, JSON.stringify(fixtureConfig));
 
     await assert.rejects(
       editMemories({ references: ["statements/MemoryBase MR 功能交付评审规范"] }),
