@@ -623,9 +623,10 @@ test("TOS settings save credentials and a Store binding through real settings AP
   const { useTosService } = await import("./support/tos-sdk-service.js");
   const service = useTosService(t);
   const server = createViewServer(config);
-  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
-  const browser = await browserScope();
+  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
   try {
+    await new Promise<void>((resolve,reject) => {server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
+    browser = await browserScope();
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     page.setDefaultTimeout(5000);
     const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
@@ -685,7 +686,7 @@ test("TOS settings save credentials and a Store binding through real settings AP
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
-  } finally { try { await browser.close(); } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } }
+  } finally { try { await browser?.close(); } finally { server.closeAllConnections(); if(server.listening)await new Promise<void>(resolve => server.close(() => resolve())); } }
 });
 
 test("TOS raw/env settings survive reload and preserve an unsaved reference after a real CAS conflict",{timeout:30_000},async t=>{
@@ -699,9 +700,11 @@ test("TOS raw/env settings survive reload and preserve an unsaved reference afte
   const previous=names.map(name=>process.env[name]);names.forEach(name=>{process.env[name]="fixture-value";});
   const restoreEnvironment=()=>names.forEach((name,i)=>{if(previous[i]===undefined)delete process.env[name];else process.env[name]=previous[i];});
   t.after(restoreEnvironment);
-  const server=createViewServer(config);await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));
-  const browser=await browserScope();
+  const server=createViewServer(config);
+  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
   try{
+    await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
+    browser=await browserScope();
     const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(5000);
     await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
     await page.getByRole("button",{name:"新增 TOS Store",exact:true}).click();
@@ -734,9 +737,9 @@ test("TOS raw/env settings survive reload and preserve an unsaved reference afte
     await page.waitForFunction(name=>(document.querySelector('[data-field="tosRef.raw-assets.accessKeyIdEnv"]') as HTMLInputElement)?.value === name,names[0]);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
   }finally{
-    try { await browser.close(); }
+    try { await browser?.close(); }
     finally {
-      try { server.closeAllConnections(); await new Promise<void>(resolve=>server.close(()=>resolve())); }
+      try { server.closeAllConnections(); if(server.listening)await new Promise<void>(resolve=>server.close(()=>resolve())); }
       finally { restoreEnvironment(); }
     }
   }
@@ -748,8 +751,10 @@ test("TOS credential settings reject unauthenticated writes and recover through 
   const config=await settingsConfigFixture(dir,"0.0.0.0"),homeFile=join(config.homeRoot!,"config.json");
   const before=await readFile(homeFile,"utf8");
   const server=createViewServer(config,{settingsToken:"fixture-operation-token"});
-  await new Promise<void>(resolve=>server.listen(0,"127.0.0.1",resolve));const browser=await browserScope();
+  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
   try{
+    await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
+    browser=await browserScope();
     const page=await browser.newPage();page.setDefaultTimeout(5000);
     await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/tos-credentials`,{waitUntil:"domcontentloaded",timeout:15000});
     const unauthorized=await page.evaluate(async()=>{
@@ -764,7 +769,7 @@ test("TOS credential settings reject unauthenticated writes and recover through 
     await page.getByRole("button",{name:"新增凭据",exact:true}).click();
     await page.locator('[data-field="tosCredential.id"]').waitFor();
     assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
-  }finally{try{await browser.close();}finally{server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));}}
+  }finally{try{await browser?.close();}finally{server.closeAllConnections();if(server.listening)await new Promise<void>(resolve=>server.close(()=>resolve()));}}
 });
 
 
