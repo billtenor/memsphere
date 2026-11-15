@@ -69,7 +69,8 @@ test("Managed Run can start from a validated active ChangeSet without publishing
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     await runGit(["init", "-b", "master"], { cwd: workspace });
     process.chdir(workspace);
-    await silently(() => managedProjectFixture("managed", { bind: true }));
+    // The candidate supplies the procedure and rule frozen by this Run.
+    await silently(() => managedProjectFixture("managed", { bind: true, systemMemory: false }));
 
     const edited = await editMemories({
       references: ["procedures/candidate-run", "statements/candidate-rule"],

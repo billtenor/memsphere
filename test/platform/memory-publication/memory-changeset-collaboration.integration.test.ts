@@ -28,7 +28,8 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
     process.env.MEMSPHERE_PROJECT = "project";
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await managedProjectFixture("project", { bind: true });
+    // This lifecycle owns its shared/other Memory and needs no bundled documents.
+    await managedProjectFixture("project", { bind: true, systemMemory: false });
     const seed = await editMemories({ references: ["concepts/shared", "concepts/other"] });
     await writeFile(
       join(seed.candidateRoot, "concepts", "shared.yaml"),
