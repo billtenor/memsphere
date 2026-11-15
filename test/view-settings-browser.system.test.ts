@@ -615,22 +615,14 @@ test("Runner settings require installation detection and preserve identity/async
 });
 
 test("TOS settings save credentials and a Store binding through real settings APIs", { timeout: 30_000 }, async t => {
-  const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-settings-browser-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const config = await settingsConfigFixture(dir, "127.0.0.1");
-  const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
-  await initializeProjectModelRegistrations({}, { root: config.scopeRoot });
-  const { useTosService } = await import("./support/tos-sdk-service.js");
-  const service = useTosService(t);
-  const server = createViewServer(config);
-  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
-  try {
-    await new Promise<void>((resolve,reject) => {server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
-    browser = await browserScope();
-    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-    page.setDefaultTimeout(5000);
+  await withTosSettingsPage(t, "memsphere-tos-settings-browser-", async dir => {
+    const config = await settingsConfigFixture(dir, "127.0.0.1");
+    const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
+    await initializeProjectModelRegistrations({ signal: t.signal }, { root: config.scopeRoot });
+    const { useTosService } = await import("./support/tos-sdk-service.js");
+    return { config, service: useTosService(t) };
+  }, async (page, { config, service }, origin) => {
     const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
-    const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     await page.goto(`${origin}/projects/demo/settings/tos-credentials`, { waitUntil: "networkidle" });
     await page.getByRole("button", {name:"新增凭据",exact:true}).click();
     await page.locator('[data-field="tosCredential.id"]').fill("test");
@@ -686,27 +678,22 @@ test("TOS settings save credentials and a Store binding through real settings AP
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
-  } finally { try { await browser?.close(); } finally { server.closeAllConnections(); if(server.listening)await new Promise<void>(resolve => server.close(() => resolve())); } }
+  });
 });
 
 test("TOS raw/env settings survive reload and preserve an unsaved reference after a real CAS conflict",{timeout:30_000},async t=>{
-  const dir=await mkdtemp(join(tmpdir(),"memsphere-tos-raw-browser-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const config=await settingsConfigFixture(dir,"127.0.0.1");
-  const { initializeProjectModelRegistrations }=await import("../src/project/model-registration.js");
-  await initializeProjectModelRegistrations({}, {root:config.scopeRoot});
-  const { useTosService }=await import("./support/tos-sdk-service.js");useTosService(t);
   const names=["BROWSER_TOS_AK","BROWSER_TOS_SK","BROWSER_TOS_AK_UPDATED"];
-  const previous=names.map(name=>process.env[name]);names.forEach(name=>{process.env[name]="fixture-value";});
-  const restoreEnvironment=()=>names.forEach((name,i)=>{if(previous[i]===undefined)delete process.env[name];else process.env[name]=previous[i];});
-  t.after(restoreEnvironment);
-  const server=createViewServer(config);
-  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
-  try{
-    await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
-    browser=await browserScope();
-    const page=await browser.newPage({viewport:{width:390,height:844}});page.setDefaultTimeout(5000);
-    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
+  await withTosSettingsPage(t, "memsphere-tos-raw-browser-", async dir => {
+    const config=await settingsConfigFixture(dir,"127.0.0.1");
+    const { initializeProjectModelRegistrations }=await import("../src/project/model-registration.js");
+    await initializeProjectModelRegistrations({signal:t.signal}, {root:config.scopeRoot});
+    const { useTosService }=await import("./support/tos-sdk-service.js");useTosService(t);
+    const previous=names.map(name=>process.env[name]);
+    names.forEach(name=>{process.env[name]="fixture-value";});
+    return { config, dispose:()=>names.forEach((name,i)=>{if(previous[i]===undefined)delete process.env[name];else process.env[name]=previous[i];}) };
+  }, async(page,{config},origin)=>{
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(`${origin}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
     await page.getByRole("button",{name:"新增 TOS Store",exact:true}).click();
     await page.getByText("请先在火山云配置中新增 TOS 凭据。",{exact:true}).waitFor();
     for(const [key,value] of Object.entries({id:"raw-assets",model:"memsphere/run/artifact.json",bucket:"test-bucket",prefix:"raw-assets/"})) await page.locator(`[data-field="tosDraft.${key}"]`).fill(value);
@@ -736,27 +723,15 @@ test("TOS raw/env settings survive reload and preserve an unsaved reference afte
     await page.getByRole("button",{name:"重新读取",exact:true}).click();
     await page.waitForFunction(name=>(document.querySelector('[data-field="tosRef.raw-assets.accessKeyIdEnv"]') as HTMLInputElement)?.value === name,names[0]);
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
-  }finally{
-    try { await browser?.close(); }
-    finally {
-      try { server.closeAllConnections(); if(server.listening)await new Promise<void>(resolve=>server.close(()=>resolve())); }
-      finally { restoreEnvironment(); }
-    }
-  }
+  });
 });
 
 test("TOS credential settings reject unauthenticated writes and recover through the operation-token UI",{timeout:30_000},async t=>{
-  const dir=await mkdtemp(join(tmpdir(),"memsphere-tos-auth-browser-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const config=await settingsConfigFixture(dir,"0.0.0.0"),homeFile=join(config.homeRoot!,"config.json");
-  const before=await readFile(homeFile,"utf8");
-  const server=createViewServer(config,{settingsToken:"fixture-operation-token"});
-  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
-  try{
-    await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
-    browser=await browserScope();
-    const page=await browser.newPage();page.setDefaultTimeout(5000);
-    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/tos-credentials`,{waitUntil:"domcontentloaded",timeout:15000});
+  await withTosSettingsPage(t, "memsphere-tos-auth-browser-", async dir => {
+    const config=await settingsConfigFixture(dir,"0.0.0.0"),homeFile=join(config.homeRoot!,"config.json");
+    return {config,homeFile,before:await readFile(homeFile,"utf8")};
+  }, async(page,{homeFile,before},origin)=>{
+    await page.goto(`${origin}/projects/demo/settings/tos-credentials`,{waitUntil:"domcontentloaded",timeout:15000});
     const unauthorized=await page.evaluate(async()=>{
       const response=await fetch("/api/settings/global/tos-credentials",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({id:"forbidden",expectedRevision:"bad",credentials:{accessKeyId:"fixture-ak",accessKeySecret:"fixture-secret"}})});
       return {status:response.status,text:await response.text()};
@@ -769,7 +744,7 @@ test("TOS credential settings reject unauthenticated writes and recover through 
     await page.getByRole("button",{name:"新增凭据",exact:true}).click();
     await page.locator('[data-field="tosCredential.id"]').waitFor();
     assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
-  }finally{try{await browser?.close();}finally{server.closeAllConnections();if(server.listening)await new Promise<void>(resolve=>server.close(()=>resolve()));}}
+  }, {settingsToken:"fixture-operation-token"});
 });
 
 
@@ -948,31 +923,93 @@ async function assertSettingActionsAligned(actions: import("playwright").Locator
 }
 
 async function withTosCredentialPage(t: TestContext, action: (page: Page, config: MemsphereConfig) => Promise<void>): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-credential-browser-"));
-  t.after(() => rm(dir, { recursive: true, force: true }));
-  const config = await settingsConfigFixture(dir, "127.0.0.1");
-  const { listTosCredentials, saveTosCredential } = await import("../src/tos-credentials.js");
-  const homeFile = join(config.homeRoot!, "config.json");
-  for (const [id, accessKeyId, accessKeySecret] of [["test", "fixture-ak", "fixture-secret"], ["alternate", "fixture-other-ak", "fixture-other-secret"]]) {
-    const { revision } = await listTosCredentials(homeFile);
-    await saveTosCredential(homeFile, id!, { accessKeyId: accessKeyId!, accessKeySecret: accessKeySecret! }, revision);
-  }
-  const server = createViewServer(config);
-  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
-  try {
-    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-    browser = await browserScope();
-    const page = await browser.newPage({ viewport: {width:1280,height:900} });
-    page.setDefaultTimeout(5000);
+  await withTosSettingsPage(t, "memsphere-tos-credential-browser-", async dir => {
+    const config = await settingsConfigFixture(dir, "127.0.0.1");
+    const { listTosCredentials, saveTosCredential } = await import("../src/tos-credentials.js");
+    const homeFile = join(config.homeRoot!, "config.json");
+    for (const [id, accessKeyId, accessKeySecret] of [["test", "fixture-ak", "fixture-secret"], ["alternate", "fixture-other-ak", "fixture-other-secret"]]) {
+      t.signal.throwIfAborted();
+      const { revision } = await listTosCredentials(homeFile);
+      t.signal.throwIfAborted();
+      await saveTosCredential(homeFile, id!, { accessKeyId: accessKeyId!, accessKeySecret: accessKeySecret! }, revision);
+    }
+    return {config};
+  }, async(page,{config},origin)=>{
     const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
-    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/volcengine`, {waitUntil:"networkidle"});
+    await page.goto(`${origin}/projects/demo/settings/volcengine`, {waitUntil:"networkidle"});
     await page.getByRole("button", {name:"编辑 alternate",exact:true}).waitFor();
     await action(page, config);
     assert.deepEqual(errors, []);
-  } finally {
+  });
+}
+
+// Node runs after hooks as soon as a test times out, before its async body settles.
+// Interrupt browser actions first, then drain the body and requests before removing their files.
+async function withTosSettingsPage<T extends { config: MemsphereConfig; dispose?: () => void }>(
+  t: TestContext, prefix: string, prepare: (dir: string) => Promise<T>,
+  action: (page: Page, fixture: T, origin: string) => Promise<void>,
+  options: Parameters<typeof createViewServer>[1] = {}
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  let fixture: T | undefined, server: ReturnType<typeof createViewServer> | undefined;
+  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
+  let listening: Promise<void> | undefined, openingPage: Promise<Page> | undefined, stopping: Promise<void> | undefined;
+  const requests = new Set<Promise<unknown>>();
+  const stop = () => stopping ??= (async () => {
+    await Promise.allSettled([listening, openingPage]);
     try { await browser?.close(); }
-    finally { server.closeAllConnections(); if (server.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
-  }
+    finally {
+      if (server) {
+        const closed = new Promise<void>(resolve => server!.close(() => resolve()));
+        server.closeAllConnections();
+        await closed;
+        await Promise.allSettled([...requests]);
+      }
+    }
+  })();
+  // The after hook awaits the same promise and reports any cleanup failure.
+  const cancel = () => { void stop().catch(() => {}); };
+  t.signal.addEventListener("abort", cancel, { once: true });
+  const work = (async () => {
+    t.signal.throwIfAborted();
+    fixture = await prepare(dir);
+    t.signal.throwIfAborted();
+    server = createViewServer(fixture.config, options);
+    // Track the real async handler, including writes that outlive a disconnected response.
+    const handler = server.listeners("request")[0]!;
+    server.removeListener("request", handler);
+    server.on("request", (request, response) => {
+      const pending = Promise.resolve(handler.call(server, request, response));
+      requests.add(pending);
+      void pending.then(() => requests.delete(pending), () => requests.delete(pending));
+    });
+    listening = new Promise<void>((resolve, reject) => {
+      server!.once("error", reject);
+      server!.listen(0, "127.0.0.1", resolve);
+    });
+    await listening;
+    t.signal.throwIfAborted();
+    browser = await browserScope();
+    t.signal.throwIfAborted();
+    openingPage = browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const page = await openingPage;
+    t.signal.throwIfAborted();
+    page.setDefaultTimeout(5000);
+    await action(page, fixture, `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  })();
+  t.after(async () => {
+    try {
+      await stop();
+    } finally {
+      // A cancelled setup may finish after stop() observed no resources.
+      await work.catch(() => {});
+      t.signal.removeEventListener("abort", cancel);
+      fixture?.dispose?.();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+  try { await work; }
+  finally { await stop(); }
 }
 
 async function selectTosSetting(page: Page, path: string, name: string): Promise<void> {
