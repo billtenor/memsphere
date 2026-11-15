@@ -78,14 +78,16 @@ test("same old revision competition is decided at server commit, without any pre
   const ready = new Promise<void>(r => { both = r; }), gate = new Promise<void>(r => { release = r; });
   client.beforeCommit = async () => { if (++arrived === 2) both(); await gate; };
   client.calls.length = 0;
-  const a = store.update({}, data("item", "A"), { expectedRevision: revision });
-  const b = store.update({}, data("item", "B"), { expectedRevision: revision });
-  try { await casPhase(ready, "both writers reach commit", 3000); release(); const result = await Promise.allSettled([a, b]);
+  const controller = new AbortController();
+  const a = store.update({ signal: controller.signal }, data("item", "A"), { expectedRevision: revision });
+  const b = store.update({ signal: controller.signal }, data("item", "B"), { expectedRevision: revision });
+  const settled = Promise.allSettled([a, b]); // Observe early rejections while waiting at the barrier.
+  try { await casPhase(ready, "both writers reach commit", 3000); release(); const result = await settled;
     assert.equal(result.filter(r => r.status === "fulfilled").length, 1);
     assert.equal((result.find(r => r.status === "rejected") as PromiseRejectedResult).reason.code, "REVISION_CONFLICT");
     assert.deepEqual(client.calls.map(c => c.method), ["PUT", "PUT"]);
     assert.ok(client.calls.every(c => c.ifMatch === decodeRevision(revision).etag));
-  } finally { release(); await Promise.allSettled([a, b]); }
+  } finally { controller.abort(); release(); await settled; }
 });
 
 test("lazy Payload read retains its ETag and rejects concurrent replacement", async () => {
