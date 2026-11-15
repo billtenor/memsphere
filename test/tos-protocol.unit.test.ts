@@ -83,3 +83,31 @@ test("TOS config validates native region endpoints, namespace and credential ref
   ];
   for (const patch of patches) assert.throws(() => parseTosConfig(new Config({...base,...patch} as never)), JSON.stringify(patch));
 });
+
+// The source reuses a fixed 4 MiB block: exercise the actual default 5 GiB
+// counter without allocating a 5 GiB buffer or sending anything to a network.
+const boundaryBlock = Buffer.alloc(4 * 1024 ** 2);
+for (const mode of ["raw", "revision"] as const) for (const excess of [-1, 0, 1]) {
+  test(`${mode} default 5 GiB physical limit ${excess > 0 ? "+1" : excess} retains counts beyond uint32`, async () => {
+    const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
+    const { MAX_OBJECT_BYTES, HEADER_SIZE } = await import("../src/data/extensions/tos-datastore/header.js");
+    const header = mode === "revision" ? encodeHeader(1, false) : undefined;
+    const payloadSize = MAX_OBJECT_BYTES - (mode === "revision" ? HEADER_SIZE : 0) + excess;
+    let remaining = payloadSize, produced = 0, observed = 0, chunks = 0;
+    const content = { stream: () => new ReadableStream<Uint8Array>({ pull(controller) {
+      if (!remaining) { controller.close(); return; }
+      const size = Math.min(remaining, boundaryBlock.byteLength);
+      controller.enqueue(boundaryBlock.subarray(0, size)); remaining -= size; produced += size;
+    } }) };
+    const body = createTosUploadBody({}, { id: "item", model: "file.json", payload: { contentType: "application/octet-stream", content } }, header);
+    const consume = async () => {
+      for await (const chunk of body) { observed += chunk.byteLength; chunks++; }
+    };
+    if (excess > 0) await assert.rejects(consume(), { code: "PAYLOAD_TOO_LARGE" });
+    else { await consume(); assert.equal(observed, MAX_OBJECT_BYTES + excess); }
+    assert.equal(produced, payloadSize);
+    assert.ok(produced > 2 ** 32, "The production counter actually crosses uint32");
+    assert.ok(observed <= MAX_OBJECT_BYTES, "The rejected extra bytes must not be delivered");
+    assert.ok(chunks > 1024, "The count is accumulated across repeated chunks");
+  });
+}
