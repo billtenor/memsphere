@@ -1,7 +1,7 @@
 import type { Config } from "./config.js";
 import type { Context } from "./context.js";
 import type { Data, DataId, ModelRef } from "./data.js";
-import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "./store.js";
+import type { DeleteOptions, ListOptions, ListResult, Revision, StoreId, UpdateOptions } from "./store.js";
 
 /**
  * 保存完整 Data，不解释模型或反序列化 Payload。
@@ -18,9 +18,11 @@ export interface DataStore {
   readonly id: StoreId;
   /** 此 Store 唯一绑定的模型。 */
   readonly model: ModelRef;
+  /** Optional write policy; absence preserves the implementation's existing behavior. */
+  readonly capabilities?: { readonly update?: boolean; readonly conditionalWrite?: { readonly required: boolean } };
 
   /** 按 ID 读取完整记录，不存在时返回 undefined。 */
-  get(context: Context, id: DataId): Promise<StoredData | undefined>;
+  get(context: Context, id: DataId): Promise<DataStoreReadResult | undefined>;
   /** 按 ID 检查记录是否存在，不能用作写入原子条件检查的替代。 */
   has(context: Context, id: DataId): Promise<boolean>;
   /** 创建记录，ID 已存在时报错，不覆盖已有记录。 */
@@ -58,10 +60,11 @@ export interface AppendableDataStore extends DataStore {
 
 /** 存储管理信息由 Store 提供，不支持或无法取得时可省略。 */
 export type StoredData = {
+  deleted?: false;
   /** 完整 Data，包含 id、model 和 payload。 */
   data: Data;
   /** 该存储记录的版本，用于并发更新检查，不是模型版本。 */
-  revision?: number;
+  revision?: Revision;
   /** 创建时间，Unix 时间戳，单位为毫秒；更新时保留。 */
   createdAt?: number;
   /** 可信创建主体 ID；未知时可省略或为 null，更新时保留。 */
@@ -85,3 +88,16 @@ export interface DataStoreFactory {
     config: Config
   ): Promise<DataStore>;
 }
+
+/** A logical deletion has an identity/version but no pretend empty Payload. */
+export type DeletedStoredData = {
+  id: DataId;
+  model: ModelRef;
+  deleted: true;
+  revision: Revision;
+  createdAt?: number;
+  createdBy?: string | null;
+  updatedAt?: number;
+  updatedBy?: string | null;
+};
+export type DataStoreReadResult = StoredData | DeletedStoredData;

@@ -4,7 +4,7 @@ import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models";
+type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models" | "stores" | "tos-credentials" | "volcengine";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -24,6 +24,9 @@ interface ScopeState {
 const tokenKey = "memsphere.settingsToken.v1";
 const detectionKey = "memsphere.settings.acp-provider-detection";
 const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
+  stores: { scope: "project", module: "stores" },
+  "tos-credentials": { scope: "global", module: "volcengine" },
+  volcengine: { scope: "global", module: "volcengine" },
   overview: { scope: "global", module: "general" },
   general: { scope: "global", module: "general" },
   view: { scope: "global", module: "view" },
@@ -110,6 +113,12 @@ class SettingsApplication {
   #expandedParticipants = new Set<string>();
   #viewPackages: JsonObject = { installed: [], instances: [], diagnostics: [] };
   #packagePathDraft = "";
+  #tosDraft: JsonObject = { id: "", model: "", region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "", prefix: "", mode: "revision", source: "settings", credentialId: "", accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET", stsTokenEnv: "" };
+  #showTosStoreForm = false;
+  #expandedStores = new Set<string>();
+  #tosCredentialEditing: string | null | undefined = undefined;
+  #tosCredentialSaving = false;
+  #tosCredential: JsonObject = { id: "", accessKeyId: "", accessKeySecret: "", stsToken: "" };
   readonly #scopes: Record<ScopeName, ScopeState>;
 
   constructor(root: HTMLElement, options: SettingsViewOptions, signal: AbortSignal, scopes: Record<ScopeName, ScopeState>, route: Readonly<RouteLocation>) {
@@ -250,11 +259,13 @@ class SettingsApplication {
         ["view", this.t("settings.viewService", "界面服务")],
         ["appearance", this.t("settings.appearance", "界面与主题")],
         ["runners", this.t("settings.runners", "Runner Agent")],
-        ["providers", this.t("settings.providers", "ACP 提供方")]
+        ["providers", this.t("settings.providers", "ACP 提供方")],
+        ["volcengine", this.t("settings.volcengine", "火山云配置")]
       ]],
       ["project", `${this.t("navigation.project", "项目")} · ${this.#currentProject}`, [
         ["project", this.t("settings.overview", "概览")],
         ["models", this.t("settings.models", "模型存储")],
+        ["stores", this.t("settings.businessStores", "业务 Store")],
         ["participants", this.t("settings.participants", "参与者配置")]
       ]]
     ];
@@ -278,6 +289,8 @@ class SettingsApplication {
       runners: this.t("settings.runners", "Runner Agent"),
       providers: this.t("settings.providers", "模型提供商"),
       project: this.t("navigation.project", "当前项目"),
+      stores: this.t("settings.businessStores", "业务 Store"),
+      volcengine: this.t("settings.volcengine", "火山云配置"),
       models: this.t("settings.models", "模型存储"),
       participants: this.t("settings.participants", "参与者")
     };
@@ -308,18 +321,118 @@ class SettingsApplication {
       : this.t("settings.notLoaded", "配置尚未加载。"));
     if (this.#module === "appearance") return this.appearanceHtml();
     if (scope.confirmation) return this.confirmationHtml(scope);
-    const status = this.statusHtml(scope);
+    const status = this.#module === "volcengine" ? "" : this.statusHtml(scope);
     const notice = scope.notice ? `<div class="settings-notice" role="status">${escapeHtml(scope.notice)}</div>` : "";
     const panel = this.#module === "general" ? this.generalHtml(scope)
       : this.#module === "view" ? this.viewHtml(scope)
       : this.#module === "runners" ? this.runnersHtml(scope)
       : this.#module === "providers" ? this.providersHtml(scope)
       : this.#module === "participants" ? this.participantsHtml(scope)
+      : this.#module === "stores" ? this.storesHtml(scope)
+      : this.#module === "volcengine" ? this.tosCredentialsHtml(scope)
       : this.#module === "models" ? this.modelsHtml(scope)
       : this.overviewHtml(scope);
-    const actions = ["general", "view", "runners", "providers", "participants", "models"].includes(this.#module)
+    const actions = ["general", "view", "runners", "providers", "participants", "models", "stores"].includes(this.#module)
       ? `<div class="settings-actions"><button class="btn" data-action="reload">${escapeHtml(this.t("settings.reload", "重新读取"))}</button>${this.#module === "models" ? `<button class="btn" data-action="discard-project">${escapeHtml(this.t("settings.discard", "放弃修改"))}</button>` : ""}<button class="btn primary" data-action="validate">${escapeHtml(this.t("common.save", "保存"))}</button></div>` : "";
     return `<div class="settings-layout">${status}${notice}${panel}${actions}</div>`;
+  }
+
+  private tosCredentialIds(): string[] {
+    return [...(this.#scopes.global.data?.tosCredentialIds ?? [])].sort();
+  }
+
+  tosReferenceHtml(path: string, ref: JsonObject): string {
+    const source = selectField(`${path}.source`, this.t("settings.tosCredentialSource", "凭据来源"), ref.source, [["settings", this.t("settings.tosSavedCredential", "已保存凭据")], ["env", this.t("settings.tosEnvironment", "环境变量")]]);
+    if (ref.source !== "settings") return source + ["accessKeyIdEnv", "accessKeySecretEnv", "stsTokenEnv"].map(key => inputField(`${path}.${key}`, key, ref[key] ?? "")).join("");
+    const ids = this.tosCredentialIds(), selected = ref.id ?? "";
+    const missing = selected && !ids.includes(selected);
+    const options: Array<[string, string]> = [["", this.t("settings.chooseCredential", "请选择凭据")], ...ids.map(id => [id, id] as [string, string])];
+    if (missing) options.push([selected, `${selected} (${this.t("settings.credentialUnavailable", "已不可用")})`]);
+    return source + selectField(`${path}.id`, this.t("settings.tosCredentialId", "凭据名称"), selected, options) +
+      (!ids.length ? `<p class="settings-help">${escapeHtml(this.t("settings.addCredentialFirst", "请先在火山云配置中新增 TOS 凭据。"))}</p><button class="btn" data-section="volcengine">${escapeHtml(this.t("settings.openVolcengine", "前往火山云配置"))}</button>` : "") +
+      (missing ? `<p class="settings-error" role="alert">${escapeHtml(this.t("settings.chooseAvailableCredential", "所选凭据已不可用，请重新选择。"))}</p>` : "");
+  }
+
+  private storeFacts(entries: Array<[string, string]>): string {
+    return `<dl class="settings-store-facts">${entries.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
+  }
+
+  storesHtml(scope: ScopeState): string {
+    const entries = Object.entries(scope.draft!.dataStores ?? {}).filter(([id]) => !/^context_control\/(runs|steps|artifacts|externals|reviews)$/.test(id)) as Array<[string, JsonObject]>;
+    const existing = entries.map(([id, binding]) => {
+      const tos = binding.factory === "memsphere/tos", config = binding.config;
+      const mode = config.mode === "revision" ? this.t("settings.tosRevision", "带 revision") : this.t("settings.tosRaw", "不带 revision");
+      return `<article class="settings-section settings-store-card"><div class="settings-store-header"><div class="settings-store-heading"><strong>${escapeHtml(id)}</strong><p class="settings-help">${escapeHtml(this.t("settings.tos.model", "模型 ID"))}：${escapeHtml(binding.model)}</p></div><div class="settings-row-actions"><button type="button" class="btn" data-toggle-store aria-expanded="${this.#expandedStores.has(id)}">${escapeHtml(this.#expandedStores.has(id) ? this.t("settings.collapseStore", "收起") : this.t("settings.configureStore", "配置"))}</button><button class="btn" data-remove-store="${escapeAttr(id)}" aria-label="${escapeAttr(this.t("settings.deleteNamedStore", "删除 Store {id}", {id}))}" title="${escapeAttr(this.t("settings.unbindStore", "解除绑定（保留数据）"))}">${escapeHtml(this.t("common.delete", "删除"))}</button></div></div><details data-business-store="${escapeAttr(id)}"${this.#expandedStores.has(id) ? " open" : ""}><summary class="settings-store-disclosure" hidden>${escapeHtml(this.t("settings.configureStore", "配置"))}</summary><div class="settings-store-detail"><span class="settings-store-type">${escapeHtml(tos ? `TOS · ${mode}` : this.t("settings.localFilesystem", "本地文件系统"))}</span>
+        ${this.storeFacts([[this.t("settings.tos.model", "模型 ID"), binding.model], ...(tos ? [[this.t("settings.tos.bucket", "存储桶"), config.bucket], [this.t("settings.tos.prefix", "对象前缀"), config.prefix], [this.t("settings.tos.region", "地域"), config.region], [this.t("settings.tos.endpoint", "访问端点"), config.endpoint]] as Array<[string,string]> : [[this.t("settings.storeDirectory", "存储目录"), config.directory]] as Array<[string,string]> )])}
+        ${tos ? `<div class="settings-store-credentials"><h4>${escapeHtml(this.t("settings.storeCredentials", "访问凭据"))}</h4><div class="settings-grid">${this.tosReferenceHtml(`tosRef.${encodeURIComponent(id).replaceAll(".", "%2E")}`, config.credentials)}</div></div>` : ""}
+        <div class="settings-store-footer"><span class="settings-help">${escapeHtml(this.t("settings.storeBindingHelp", "位置、模型和模式创建后固定；解除绑定不会删除数据。"))}</span></div></div></details></article>`;
+    }).join("");
+    const draft = this.#tosDraft;
+    const field = (key: string) => inputField(`tosDraft.${key}`, this.t(`settings.tos.${key}`, key), draft[key]);
+    const group = (title: string, content: string, help = "") => `<fieldset class="settings-store-group"><legend>${escapeHtml(title)}</legend>${help ? `<p class="settings-help">${escapeHtml(help)}</p>` : ""}<div class="settings-grid">${content}</div></fieldset>`;
+    const form = !this.#showTosStoreForm ? "" : `<section class="settings-section settings-store-form"><h3>${escapeHtml(this.t("settings.addTosStore", "新增 TOS Store"))}</h3>
+      ${group(this.t("settings.storeIdentity", "基本信息"), field("id") + field("model"), this.t("settings.storeIdentityHelp", "Store ID 用来区分存储；模型 ID 需已在本项目登记。"))}
+      ${group(this.t("settings.storeLocation", "云端位置"), field("bucket") + field("prefix") + field("region") + field("endpoint"), this.t("settings.storeLocationHelp", "使用已有存储桶；对象前缀以 / 结尾，不同 Store 使用独立前缀。"))}
+      ${group(this.t("settings.storeWritePolicy", "写入与删除"), selectField("tosDraft.mode", this.t("settings.tos.mode", "模式"), draft.mode, [["revision", this.t("settings.tosRevision", "带 revision")], ["raw", this.t("settings.tosRaw", "不带 revision")]]))}
+      <p class="settings-store-policy">${escapeHtml(draft.mode === "revision" ? this.t("settings.revisionModeHelp", "允许更新；更新和删除都需要匹配的 revision。删除后保留删除标记，可再次写入，不保留旧正文。") : this.t("settings.rawModeHelp", "只允许新增，不能覆盖更新；删除会物理移除对象。正文保留原始格式。"))}</p>
+      <p class="settings-help">${escapeHtml(this.t("settings.storeLimitsHelp", "模式创建后不能修改。单个对象最多 5 GiB；带 revision 时正文上限少 10 字节。"))}</p>
+      ${group(this.t("settings.storeCredentials", "访问凭据"), this.tosReferenceHtml("tosDraft.credentials", this.tosDraftReference()))}
+      <div class="settings-actions"><button class="btn" data-action="cancel-tos-store">${escapeHtml(this.t("common.cancel", "取消"))}</button><button class="btn primary" data-action="add-tos-store">${escapeHtml(this.t("settings.addStore", "添加存储"))}</button></div>
+      <p class="settings-help">${escapeHtml(this.t("settings.storeDraftHelp", "添加到列表后，点击页面底部“保存”以生效。"))}</p></section>`;
+    return `<div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.savedStores", "已有 Store"))}</h3><p class="settings-help">${escapeHtml(this.t("settings.businessStoresHelp", "管理本项目的数据存储。每个 Store 绑定一个模型，数据保存在所选位置。"))}</p></div><button class="btn primary" data-action="new-tos-store">${escapeHtml(this.t("settings.addTosStore", "新增 TOS Store"))}</button></div>${existing || `<div class="empty">${escapeHtml(this.t("settings.noBusinessStores", "还没有业务 Store。"))}</div>`}${form}${this.errorsHtml(scope)}`;
+  }
+
+  tosDraftReference(): JsonObject {
+    const draft = this.#tosDraft;
+    return draft.source === "settings" ? { source: "settings", id: draft.credentialId } : { source: "env", accessKeyIdEnv: draft.accessKeyIdEnv, accessKeySecretEnv: draft.accessKeySecretEnv, ...(draft.stsTokenEnv ? { stsTokenEnv: draft.stsTokenEnv } : {}) };
+  }
+
+  tosCredentialsHtml(scope: ScopeState): string {
+    const ids = this.tosCredentialIds(), editing = this.#tosCredentialEditing;
+    const form = editing === undefined ? "" : `<section class="settings-credential-editor"><h3>${escapeHtml(editing === null ? this.t("settings.newTosCredential", "新增 TOS 凭据") : this.t("settings.editTosCredential", "编辑 TOS 凭据"))}</h3>
+      <div class="settings-grid">${["id", "accessKeyId", "accessKeySecret", "stsToken"].map(key => inputField(`tosCredential.${key}`, this.t(`settings.tosCredential.${key}`, key), this.#tosCredential[key], { type: key === "id" ? "text" : "password", disabled: this.#tosCredentialSaving || key === "id" && editing !== null })).join("")}</div>
+      <p class="settings-help">${escapeHtml(editing === null ? this.t("settings.newCredentialHelp", "使用不同名称保存多组凭据。AK/SK 必填，临时凭据另填 STS Token。") : this.t("settings.editCredentialHelp", "凭据名称不变；密钥留空保留原值，填写新值则替换。已保存的密钥不会回显。"))}</p>
+      <p class="settings-help">${escapeHtml(this.t("settings.credentialStorageHelp", "凭据在本机加密保存，可供不同项目引用。加密密钥也在本机设置中。"))}</p>
+      <div class="settings-actions"><button class="btn" data-action="cancel-tos-credential"${this.#tosCredentialSaving ? " disabled" : ""}>${escapeHtml(this.t("common.cancel", "取消"))}</button><button class="btn primary" data-action="save-tos-credential"${this.#tosCredentialSaving ? " disabled" : ""}>${escapeHtml(this.t("settings.saveTosCredential", "保存凭据"))}</button></div></section>`;
+    const list = ids.length ? `<div class="settings-credential-list">${ids.map(id => `<div class="settings-credential-item" data-credential="${escapeAttr(id)}"><div class="settings-credential-row"><div class="settings-credential-heading"><strong>${escapeHtml(id)}</strong><span class="settings-help">${escapeHtml(this.t("settings.credentialStored", "已保存，可供 Store 引用"))}</span></div><div class="settings-row-actions"><button class="btn" data-edit-tos-credential="${escapeAttr(id)}"${this.#tosCredentialSaving ? " disabled" : ""} aria-label="${escapeAttr(this.t("settings.editNamedCredential", "编辑 {id}", {id}))}">${escapeHtml(this.t("common.edit", "编辑"))}</button><button class="btn" data-action="delete-tos-credential:${escapeAttr(encodeURIComponent(id))}"${this.#tosCredentialSaving ? " disabled" : ""} aria-label="${escapeAttr(this.t("settings.deleteNamedCredential", "删除凭据 {id}", {id}))}">${escapeHtml(this.t("common.delete", "删除"))}</button></div></div>${editing === id ? form : ""}</div>`).join("")}</div>` : `<div class="empty">${escapeHtml(this.t("settings.tosNoCredentials", "尚未保存凭据"))}</div>`;
+    return `<section class="settings-section"><div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.tosCredentials", "TOS 凭据"))}</h3><p class="settings-help">${escapeHtml(this.t("settings.credentialListHelp", "按名称管理多组凭据，Store 通过名称选择使用。"))}</p></div><button class="btn primary" data-action="new-tos-credential"${this.#tosCredentialSaving ? " disabled" : ""}>${escapeHtml(this.t("settings.newCredential", "新增凭据"))}</button></div>${editing === null ? form : ""}${list}${this.errorsHtml(scope)}</section>`;
+  }
+
+  private editTosCredential(id: string | null): void {
+    this.#tosCredentialEditing = id;
+    this.#tosCredential = { id: id ?? "", accessKeyId: "", accessKeySecret: "", stsToken: "" };
+    this.#scopes.global.errors = []; this.#scopes.global.notice = ""; this.render();
+    this.detailRoot().querySelector<HTMLInputElement>(`[data-field="tosCredential.${id === null ? "id" : "accessKeyId"}"]`)?.focus();
+  }
+
+  async saveTosCredential(): Promise<void> {
+    if (this.#tosCredentialSaving || this.#tosCredentialEditing === undefined) return;
+    const scope = this.#scopes.global;
+    if (JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config)) throw new Error(this.t("settings.saveBeforeCredential", "请先保存或取消 Home 配置修改，再保存凭据。"));
+    const { accessKeyId, accessKeySecret, stsToken } = this.#tosCredential;
+    const id = this.#tosCredentialEditing ?? this.#tosCredential.id;
+    if (this.#tosCredentialEditing === null && this.tosCredentialIds().includes(id)) throw new Error(this.t("settings.credentialNameExists", "凭据名称已存在，请使用列表中的编辑操作。"));
+    this.#tosCredentialSaving = true; this.render();
+    try {
+      const response = await this.settingsFetch("/api/settings/global/tos-credentials", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, expectedRevision: scope.data!.diskRevision, credentials: { accessKeyId, accessKeySecret, ...(stsToken ? { stsToken } : {}) } }) });
+      if (!response.ok) { const payload = await response.json() as JsonObject; throw new Error(payload.error ?? this.t("settings.saveFailed", "保存失败")); }
+      this.#tosCredential = { id: "", accessKeyId: "", accessKeySecret: "", stsToken: "" }; this.#tosCredentialEditing = undefined;
+      await this.load("global"); scope.notice = this.t("settings.tosCredentialSaved", "凭据已保存。");
+    } finally { this.#tosCredentialSaving = false; this.render(); if (this.#tosCredentialEditing === undefined) this.detailRoot().querySelector<HTMLElement>('[data-action="new-tos-credential"]')?.focus(); }
+  }
+
+  async deleteTosCredential(id: string): Promise<void> {
+    if (this.#tosCredentialSaving) return;
+    const scope = this.#scopes.global;
+    if (JSON.stringify(scope.draft) !== JSON.stringify(scope.data?.config)) throw new Error(this.t("settings.saveBeforeCredential", "请先保存或取消 Home 配置修改，再保存凭据。"));
+    if (!window.confirm(this.t("settings.deleteCredentialConfirm", "删除凭据“{id}”？引用它的 Store 需更换凭据才能继续访问 TOS。此操作不会删除 Store 或云端数据。", {id}))) return;
+    this.#tosCredentialSaving = true; this.render();
+    try {
+      const response = await this.settingsFetch("/api/settings/global/tos-credentials", {method:"DELETE", headers:{"content-type":"application/json"}, body:JSON.stringify({id,expectedRevision:scope.data!.diskRevision})});
+      const result = await response.json(); if (!response.ok) throw new Error(result.error ?? response.statusText);
+      if (this.#tosCredentialEditing === id) { this.#tosCredentialEditing = undefined; this.#tosCredential = {id:"",accessKeyId:"",accessKeySecret:"",stsToken:""}; }
+      await this.load("global"); scope.notice = this.t("settings.tosCredentialDeleted", "凭据已删除。");
+    } finally { this.#tosCredentialSaving = false; this.render(); }
   }
 
   tokenHtml(): string {
@@ -557,6 +670,15 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   private bindRoot(root: HTMLElement): void {
+    root.querySelectorAll<HTMLDetailsElement>("details[data-business-store]").forEach(item => {
+      const button = item.closest(".settings-store-card")!.querySelector<HTMLButtonElement>("[data-toggle-store]")!;
+      button.addEventListener("click", event => { event.preventDefault(); event.stopPropagation(); item.open = !item.open; }, { signal: this.#signal });
+      item.addEventListener("toggle", () => {
+        toggleSet(this.#expandedStores, item.dataset.businessStore!, item.open);
+        button.textContent = item.open ? this.t("settings.collapseStore", "收起") : this.t("settings.configureStore", "配置");
+        button.setAttribute("aria-expanded", String(item.open));
+      }, { signal: this.#signal });
+    });
     root.querySelectorAll<HTMLDetailsElement>("details[data-provider-id]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedProviders, item.dataset.providerId!, item.open), { signal: this.#signal }));
     root.querySelectorAll<HTMLDetailsElement>("details[data-participant]").forEach(item => item.addEventListener("toggle", () => toggleSet(this.#expandedParticipants, item.dataset.participant!, item.open), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-section]").forEach(button => button.addEventListener("click", () => void this.activate(button.dataset.section as SectionName), { signal: this.#signal }));
@@ -618,7 +740,13 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
       root.querySelector("#settings-operator-token-error")?.remove();
     }, { signal: this.#signal });
     root.querySelectorAll<HTMLInputElement>("[data-permission]").forEach(input => input.addEventListener("change", () => this.updatePermission(input), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-edit-tos-credential]").forEach(button => button.addEventListener("click", () => this.editTosCredential(button.dataset.editTosCredential!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-action]").forEach(button => button.addEventListener("click", () => void this.action(button.dataset.action!), { signal: this.#signal }));
+    root.querySelectorAll<HTMLButtonElement>("[data-remove-store]").forEach(button => button.addEventListener("click", () => {
+      const id = button.dataset.removeStore!;
+      if (!window.confirm(this.t("settings.deleteStoreConfirm", "删除 Store“{id}”的绑定？数据将保留，点击页面保存后生效。", {id}))) return;
+      delete this.state.draft!.dataStores[id]; this.state.confirmation = null; this.render();
+    }, { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-remove-participant]").forEach(button => button.addEventListener("click", () => this.removeParticipant(button.dataset.removeParticipant!), { signal: this.#signal }));
     root.querySelectorAll<HTMLButtonElement>("[data-reset-provider]").forEach(button => button.addEventListener("click", () => this.resetProvider(button.dataset.resetProvider!), { signal: this.#signal }));
     root.querySelector<HTMLInputElement>("#settings-package-path")?.addEventListener("input", event => { this.#packagePathDraft = (event.currentTarget as HTMLInputElement).value; }, { signal: this.#signal });
@@ -659,6 +787,19 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
         }
       }
       else if (name === "reload-appearance") { await this.load("global"); await this.load("project"); }
+      else if (name === "new-tos-credential") this.editTosCredential(null);
+      else if (name === "cancel-tos-credential") { this.#tosCredentialEditing = undefined; this.#tosCredential = { id: "", accessKeyId: "", accessKeySecret: "", stsToken: "" }; this.state.errors = []; this.state.notice = ""; this.render(); this.detailRoot().querySelector<HTMLElement>('[data-action="new-tos-credential"]')?.focus(); }
+      else if (name === "new-tos-store") { this.#showTosStoreForm = true; this.render(); this.detailRoot().querySelector<HTMLInputElement>('[data-field="tosDraft.id"]')?.focus(); }
+      else if (name === "cancel-tos-store") { this.#showTosStoreForm = false; this.state.errors = []; this.state.notice = ""; this.render(); this.detailRoot().querySelector<HTMLElement>('[data-action="new-tos-store"]')?.focus(); }
+      else if (name === "save-tos-credential") await this.saveTosCredential();
+      else if (name.startsWith("delete-tos-credential:")) await this.deleteTosCredential(decodeURIComponent(name.slice("delete-tos-credential:".length)));
+      else if (name === "add-tos-store") {
+        const form = this.#tosDraft, stores = this.state.draft!.dataStores ??= {};
+        if (!form.id.trim() || form.id === "__proto__" || Object.hasOwn(stores, form.id)) throw new Error(this.t("settings.tosInvalidStoreId", "请输入尚未使用的 Store ID。"));
+        if (form.source === "settings" && !this.tosCredentialIds().includes(form.credentialId)) throw new Error(this.t("settings.chooseAvailableCredential", "请选择已保存的凭据。"));
+        stores[form.id] = { kind: "data", factory: "memsphere/tos", model: form.model, config: { region: form.region, endpoint: form.endpoint, bucket: form.bucket, prefix: form.prefix, mode: form.mode, credentials: this.tosDraftReference() } };
+        this.#expandedStores.add(form.id); form.id = ""; this.#showTosStoreForm = false; this.state.confirmation = null; this.render();
+      }
       else if (name === "validate") await this.validate();
       else if (name === "validate-global") await this.validateScope("global");
       else if (name === "validate-project") await this.validateScope("project");
@@ -699,6 +840,11 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     this.updateNamedField(field.dataset.field!, field.value, field instanceof HTMLSelectElement || field.dataset.commit === "true", field, scopeName);
   }
 
+  private renderTosSelection(path: string): void {
+    this.render();
+    this.detailRoot().querySelector<HTMLElement>(`[data-select-field="${CSS.escape(path)}"]`)?.focus();
+  }
+
   updateNamedField(
     path: string,
     value: string,
@@ -708,6 +854,20 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   ): void {
     const scope = this.#scopes[scopeName];
     const draft = scope.draft!;
+    if (path.startsWith("tosCredential.")) { this.#tosCredential[path.slice(14)] = value; return; }
+    if (path.startsWith("tosDraft.")) {
+      const key = path.slice(9);
+      this.#tosDraft[key === "credentials.id" ? "credentialId" : key.replace("credentials.", "")] = value;
+      if (structural) this.renderTosSelection(path); return;
+    }
+    if (path.startsWith("tosRef.")) {
+      const [, encodedId, key] = path.split(".");
+      const config = draft.dataStores[decodeURIComponent(encodedId)].config;
+      if (key === "source") config.credentials = value === "settings" ? { source: value, id: "" } : { source: value, accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET" };
+      else if (key === "stsTokenEnv" && !value) delete config.credentials[key];
+      else config.credentials[key] = value;
+      scope.confirmation = null; if (structural) this.renderTosSelection(path); else this.refreshStatus(scopeName); return;
+    }
     if (path.startsWith("runner.")) {
       const [, agent, key] = path.split(".");
       const options = (draft.runner_agents ??= {})[agent] ??= { identity_enabled: false, async_enabled: false };
@@ -838,6 +998,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   removeParticipant(id: string): void {
+    if (!window.confirm(this.t("settings.deleteParticipantConfirm", "删除参与者“{id}”？点击页面保存后生效。", {id}))) return;
     delete this.state.draft!.control_plane.actors[id];
     this.#expandedParticipants.delete(id);
     this.render();
@@ -866,6 +1027,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   removeViewPackage(index: number): void {
+    if (!window.confirm(this.t("settings.removeViewPackageConfirm", "卸载此界面包配置？本地文件将保留，点击页面保存后生效。"))) return;
     (this.#scopes.global.draft?.view_packages?.installed ?? []).splice(index, 1);
     this.render();
   }
@@ -1274,6 +1436,9 @@ const styles = `
   .memsphere-settings .settings-model-info { display:grid; gap:var(--mem-view-space-2); margin:var(--mem-view-space-4) 0 0; min-width:0; }
   .memsphere-settings .settings-model-info dt { margin:0; color:var(--mem-view-color-text-muted); font-size:var(--mem-view-font-size-sm); font-weight:600; }
   .memsphere-settings .settings-model-info dd { margin:0 0 var(--mem-view-space-3); min-width:0; overflow-wrap:anywhere; }
+  .settings-store-header,.settings-credential-row{display:flex;justify-content:space-between;align-items:center;gap:20px}.settings-store-heading,.settings-credential-heading{min-width:0;flex:1;overflow-wrap:anywhere}.settings-store-heading strong{font-size:16px}.settings-store-heading p{margin:8px 0 0}.settings-row-actions{display:flex;align-items:center;gap:12px;flex:none}.settings-row-actions .btn{flex:none}.settings-store-disclosure{display:none}.settings-store-detail>.settings-store-type{display:inline-block;margin-top:12px}.settings-store-detail{border-top:1px solid var(--line);margin-top:16px;padding-top:4px}
+  .settings-store-facts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px 24px;margin:16px 0}.settings-store-facts dt{font-size:12px;color:var(--muted);margin-bottom:4px}.settings-store-facts dd{margin:0;overflow-wrap:anywhere}.settings-store-type{font-size:12px;border-radius:16px;background:var(--soft);padding:5px 10px;white-space:nowrap}.settings-store-credentials{border-top:1px solid var(--line);padding-top:16px}.settings-store-credentials h4{margin:0 0 12px}.settings-store-footer{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-top:12px}.settings-store-group{border:0;border-top:1px solid var(--line);margin:20px 0 0;padding:16px 0 0;min-width:0}.settings-store-group legend{font-weight:600;padding-right:12px}.settings-store-policy{background:var(--soft);border-radius:6px;padding:12px;line-height:1.6}.settings-credential-item{border-top:1px solid var(--line)}.settings-credential-row{padding:14px 0}.settings-credential-heading{display:grid;gap:5px}.settings-credential-editor{width:100%;border-top:1px solid var(--line);padding:16px 0;margin-bottom:4px}.settings-credential-editor .settings-grid{gap:14px 20px}.settings-store-form .settings-grid{gap:12px 20px}
+  @media(max-width:760px){.settings-store-header,.settings-credential-row{gap:12px}.settings-row-actions{gap:8px}.settings-store-facts{grid-template-columns:minmax(0,1fr)}.settings-store-footer{align-items:flex-start;flex-direction:column}}
   @media(max-width:760px){.memsphere-settings{grid-template-columns:1fr}.settings-sidebar{border-right:0;border-bottom:1px solid var(--line)}.settings-content{padding:18px 16px 36px}.settings-grid,.settings-compact-grid,.settings-participant-basic,.settings-permissions{grid-template-columns:minmax(0,1fr)}.settings-section{padding:14px}.settings-section-head{align-items:flex-start}.settings-token-editor,.settings-token-buttons{align-items:stretch;flex-direction:column}.settings-token-buttons .btn{width:100%}}
   [data-view-theme-mode="dark"] .memsphere-settings .btn.primary { background:color-mix(in srgb,var(--mem-view-color-accent) 45%,var(--mem-view-color-canvas)); color:var(--mem-view-color-text); }
   [data-view-theme-mode="dark"] .memsphere-settings .btn.primary:hover:not(:disabled) { background:color-mix(in srgb,var(--mem-view-color-accent) 55%,var(--mem-view-color-canvas)); color:var(--mem-view-color-text); }

@@ -23,7 +23,7 @@ export class MemoryValueStore implements ValueStore {
   }
   private checkRevision(id: string, options?: UpdateOptions) {
     const expected = options?.expectedRevision;
-    if (expected !== undefined && (!Number.isSafeInteger(expected) || expected < 1)) throw new RangeError("expectedRevision must be a positive integer");
+    if (expected !== undefined && (typeof expected !== "string" || !/^[1-9][0-9]*$/.test(expected) || !Number.isSafeInteger(Number(expected)))) throw new RangeError("expectedRevision must be a revision string");
     if (expected !== undefined && this.state.rows.get(id)?.revision !== expected) throw failure("REVISION_CONFLICT", id);
   }
   private save(context: Context, id: string, value: unknown) {
@@ -32,7 +32,7 @@ export class MemoryValueStore implements ValueStore {
     const revision = (this.state.revisions.get(id) ?? 0) + 1;
     if (!Number.isSafeInteger(revision)) throw new RangeError("revision overflow");
     const now = this.now();
-    const row = { id, value: snapshot, revision, createdAt: previous?.createdAt ?? now, updatedAt: now };
+    const row = { id, value: snapshot, revision: String(revision), createdAt: previous?.createdAt ?? now, updatedAt: now };
     this.state.rows.set(id, row); this.state.revisions.set(id, revision);
     return structuredClone(row);
   }

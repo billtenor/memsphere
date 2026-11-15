@@ -100,3 +100,5 @@ tuple、Record、Set 不另设类型。动态对象字段仍由 `ObjectDescripto
 - 路径访问由 CLI `data read --path <path>` 提供，目前实现 RFC 9535 JSONPath，输出匹配值数组；没有改变公共 Store 查询接口或新增扩展注册字段。
 - Project 模型目录通过 `src/project/models.ts` 装配。模型定义 Store 绑定 Draft-07，ModelId 是包含 `.json` 的相对文件路径。相对 `modelsDirectory` 以 Registry 的 Project 根目录为基准，不依赖 Git、Memory 或 cwd。刷新创建新的宿主，不承诺跨请求的文件快照。
 - Manager 的 dependencies 接口保留，但 Project 和内置 JSON Schema Runtime 全部拒绝跨模型引用，只允许本模型内部复用，不下载远端定义或建立 `$id` 别名。所有模型与元模型 ID 统一带 `.json`；未支持的 Runtime 规则明确报错，不改写定义约束。
+
+- TOS DataStore：`memsphere/tos`，通过官方 SDK 使用已有 bucket/prefix；raw 模式不加头且拒绝覆盖，revision 模式用十字节头和 ETag 条件 PUT 支持更新、逻辑删除和普通 update 重新写入。详见 [TOS 扩展](extensions/tos-datastore/README.md)。所有 Store 的公开 revision/expectedRevision 均为字符串，调用方原样回传。

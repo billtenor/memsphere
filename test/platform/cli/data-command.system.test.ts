@@ -85,10 +85,10 @@ async function ipcCli(t: TestContext, fixture: Fixture, args: string[], pauseRea
 test("data CLI creates from stdin, reads/updates/edits complete values and returns explicit identities", { timeout: 30_000 }, async (t) => {
   const fixture = await businessFixture(t); await fixture.createStore();
   const created = success(await cli(t, fixture, ["data", "create", "item", "--store", "records", "--value-file", "-", "--output", "json"], '{"name":"first","count":1}'));
-  assert.equal(created.project, "test-project"); assert.equal(created.storeId, "records"); assert.equal(created.modelRef, "record.json"); assert.equal(created.id, "item"); assert.equal(created.revision, 1);
+  assert.equal(created.project, "test-project"); assert.equal(created.storeId, "records"); assert.equal(created.modelRef, "record.json"); assert.equal(created.id, "item"); assert.equal(created.revision, "1");
   success(await cli(t, fixture, ["data", "update", "item", "--store", "records", "--value", '{"name":"replaced","count":2}', "--expected-revision", "1", "--output", "json"]));
   const edited = success(await cli(t, fixture, ["data", "edit", "item", "--store", "records", "--patch", '[{"op":"replace","path":"/count","value":3}]', "--output", "json"]));
-  assert.equal(edited.revision, 3);
+  assert.equal(edited.revision, "3");
   const read = success(await cli(t, fixture, ["data", "read", "item", "--store", "records", "--output", "json"]));
   assert.deepEqual(read.value, { name: "replaced", count: 3 });
   const query = success(await cli(t, fixture, ["data", "read", "item", "--store", "records", "--path", "$.count", "--output", "json"]));
@@ -175,7 +175,7 @@ test("CLI opaque Payload export writes exact bytes and keeps raw stdout free of 
 test("CLI and direct Factory conditional writes use the same cross-process record lock", { timeout: 30_000 }, async (t) => {
   const fixture = await businessFixture(t); await fixture.createStore();
   await writeData({}, fixture.root, "records", "item", "create", { kind: "value", value: { name: "initial", count: 0 } });
-  const factory = await filesystemWorker(t, join(fixture.root, "data/records"), { operation: "update", expectedRevision: 1, pause: "after-lock", value: { name: "factory", count: 1 } });
+  const factory = await filesystemWorker(t, join(fixture.root, "data/records"), { operation: "update", expectedRevision: "1", pause: "after-lock", value: { name: "factory", count: 1 } });
   const command = await ipcCli(t, fixture, ["data", "update", "item", "--store", "records", "--value", '{"name":"CLI","count":2}', "--expected-revision", "1", "--output", "json"]);
   factory.send("start"); await factory.next("paused");
   command.send("start"); await command.next("waiting");
@@ -191,10 +191,10 @@ test("two CLI edits that capture the same revision commit exactly one complete p
   const second = await ipcCli(t, fixture, ["data", "edit", "item", "--store", "records", "--patch", '[{"op":"replace","path":"/count","value":2}]', "--output", "json"], true);
   first.send("start"); second.send("start");
   await Promise.all([first.next("captured"), second.next("captured")]);
-  first.send("continue"); assert.equal(success(await first.result).revision, 2);
+  first.send("continue"); assert.equal(success(await first.result).revision, "2");
   second.send("continue"); failure(await second.result, "REVISION_CONFLICT");
   const final = await readData({}, fixture.root, "records", "item");
-  assert.equal(final.revision, 2); assert.deepEqual(final.value, { name: "first", count: 0 });
+  assert.equal(final.revision, "2"); assert.deepEqual(final.value, { name: "first", count: 0 });
 });
 
 test("Store read reports raw Runtime Payload capability without claiming JSON value decoding", { timeout: 15_000 }, async (t) => {
@@ -250,12 +250,12 @@ test("Factory delete followed by CLI recreation cannot reuse a stale client revi
   const fixture = await businessFixture(t); await fixture.createStore();
   await writeData({}, fixture.root, "records", "item", "create", { kind: "value", value: { name: "initial", count: 0 } });
   const directory = join(fixture.root, "data/records");
-  const deleted = await filesystemWorker(t, directory, { operation: "delete", expectedRevision: 1 });
+  const deleted = await filesystemWorker(t, directory, { operation: "delete", expectedRevision: "1" });
   deleted.send("start"); assert.equal((await deleted.next("result")).value, true);
   const recreated = success(await cli(t, fixture, ["data", "create", "item", "--store", "records", "--value", '{"name":"recreated","count":1}', "--output", "json"]));
-  assert.equal(recreated.revision, 2);
+  assert.equal(recreated.revision, "2");
   for (const operation of ["update", "delete"]) {
-    const stale = await filesystemWorker(t, directory, { operation, expectedRevision: 1, value: { name: "stale", count: 2 } });
+    const stale = await filesystemWorker(t, directory, { operation, expectedRevision: "1", value: { name: "stale", count: 2 } });
     stale.send("start"); assert.equal((await stale.next("result")).code, "REVISION_CONFLICT");
   }
   assert.deepEqual((await readData({}, fixture.root, "records", "item")).value, { name: "recreated", count: 1 });
@@ -264,11 +264,11 @@ test("Factory delete followed by CLI recreation cannot reuse a stale client revi
 test("data upsert CLI creates then replaces a whole value and dry-run leaves data unchanged", async (t) => {
   const fixture = await businessFixture(t); await fixture.createStore();
   const args = ["data", "upsert", "item", "--store", "records", "--output", "json"];
-  assert.equal(success(await cli(t, fixture, [...args, "--value-file", "-"], '{"name":"first","count":1,"items":[2]}')).revision, 1);
-  assert.equal(success(await cli(t, fixture, [...args, "--value", '{"name":"second","count":2}'])).revision, 2);
+  assert.equal(success(await cli(t, fixture, [...args, "--value-file", "-"], '{"name":"first","count":1,"items":[2]}')).revision, "1");
+  assert.equal(success(await cli(t, fixture, [...args, "--value", '{"name":"second","count":2}'])).revision, "2");
   assert.deepEqual((await readData({}, fixture.root, "records", "item")).value, { name: "second", count: 2 });
   success(await cli(t, fixture, [...args, "--value", '{"name":"dry","count":3}', "--dry-run"]));
-  assert.equal((await readData({}, fixture.root, "records", "item")).revision, 2);
+  assert.equal((await readData({}, fixture.root, "records", "item")).revision, "2");
   await fixture.createStore("files", "record.json", "data");
   failure(await cli(t, fixture, ["data", "upsert", "item.json", "--store", "files", "--value", '{"name":"x","count":0}', "--output", "json"]), "UNSUPPORTED_CAPABILITY");
 });
@@ -296,3 +296,13 @@ for (const mode of ["abort", "fixture-cleanup"] as const) {
     }
   });
 }
+
+test("TOS update policy errors are reported before consuming stdin or resolving cloud credentials", { timeout: 15_000 }, async t => {
+  const fixture = await businessFixture(t);
+  const path = join(fixture.root, "config.json"), project = JSON.parse(await fs.readFile(path, "utf8"));
+  project.dataStores = Object.fromEntries(["raw", "revision"].map(mode => [mode, { kind: "data", factory: "memsphere/tos", model: "record.json", config: { mode, region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: `${mode}/`, credentials: { source: "env", accessKeyIdEnv: "MEMSPHERE_MISSING_PROBE_AK", accessKeySecretEnv: "MEMSPHERE_MISSING_PROBE_SK" } } }]));
+  await fs.writeFile(path, JSON.stringify(project));
+  failure(await cli(t, fixture, ["data", "update", "item", "--store", "revision", "--value-file", "-", "--output", "json"], undefined, true), "INVALID_ARGUMENT");
+  failure(await cli(t, fixture, ["data", "update", "item", "--store", "revision", "--expected-revision", "bad", "--value-file", "-", "--output", "json"], undefined, true), "INVALID_ARGUMENT");
+  failure(await cli(t, fixture, ["data", "update", "item", "--store", "raw", "--value-file", "-", "--output", "json"], undefined, true), "UNSUPPORTED_CAPABILITY");
+});

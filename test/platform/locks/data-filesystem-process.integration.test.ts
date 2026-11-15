@@ -28,7 +28,7 @@ test("independent creators commit exactly one complete record", { timeout: 15_00
   assert.equal((await first.next("result")).ok, true);
   assert.equal((await second.next("result")).code, "ALREADY_EXISTS");
   assert.deepEqual((await store.get({}, "item"))?.value, { winner: 1 });
-  assert.equal((await store.get({}, "item"))?.revision, 1);
+  assert.equal((await store.get({}, "item"))?.revision, "1");
 });
 
 for (const initial of [false, true]) for (const firstOperation of ["create", "delete"] as const) {
@@ -53,8 +53,8 @@ for (const initial of [false, true]) for (const firstOperation of ["create", "de
     } else {
       assert.equal(a.ok, true);
       assert.equal(a.value, initial);
-      assert.equal(b.value.revision, initial ? 2 : 1);
-      assert.equal((await store.get({}, "item"))?.revision, initial ? 2 : 1);
+      assert.equal(b.value.revision, initial ? "2" : "1");
+      assert.equal((await store.get({}, "item"))?.revision, initial ? "2" : "1");
     }
   });
 }
@@ -63,8 +63,8 @@ for (const [firstOperation, secondOperation] of [["update", "update"], ["update"
   test(`independent conditional ${firstOperation}/${secondOperation} commits at most once for one revision`, { timeout: 15_000 }, async (t) => {
     const { directory, store } = await fixture(t);
     await store.create({}, "item", { initial: true });
-    const first = await filesystemWorker(t, directory, { operation: firstOperation, expectedRevision: 1, pause: "after-lock" });
-    const second = await filesystemWorker(t, directory, { operation: secondOperation, expectedRevision: 1 });
+    const first = await filesystemWorker(t, directory, { operation: firstOperation, expectedRevision: "1", pause: "after-lock" });
+    const second = await filesystemWorker(t, directory, { operation: secondOperation, expectedRevision: "1" });
     first.send("start");
     await first.next("paused");
     second.send("start");
@@ -72,7 +72,7 @@ for (const [firstOperation, secondOperation] of [["update", "update"], ["update"
     first.send("continue");
     assert.equal((await first.next("result")).ok, true);
     assert.equal((await second.next("result")).code, "REVISION_CONFLICT");
-    assert.equal((await store.get({}, "item"))?.revision, firstOperation === "delete" ? undefined : 2);
+    assert.equal((await store.get({}, "item"))?.revision, firstOperation === "delete" ? undefined : "2");
   });
 }
 
@@ -84,57 +84,57 @@ test("independent unconditional writers serialize without claiming old-client re
   first.send("start"); await first.next("paused");
   second.send("start"); await second.next("waiting");
   first.send("continue");
-  assert.equal((await first.next("result")).value.revision, 2);
-  assert.equal((await second.next("result")).value.revision, 3);
-  assert.equal((await store.get({}, "item"))?.revision, 3);
+  assert.equal((await first.next("result")).value.revision, "2");
+  assert.equal((await second.next("result")).value.revision, "3");
+  assert.equal((await store.get({}, "item"))?.revision, "3");
 });
 
 test("delete/recreate across processes retains revision and rejects stale update and delete", { timeout: 15_000 }, async (t) => {
   const { directory, store } = await fixture(t);
   await store.create({}, "item", { initial: true });
-  const deleted = await filesystemWorker(t, directory, { operation: "delete", expectedRevision: 1 });
+  const deleted = await filesystemWorker(t, directory, { operation: "delete", expectedRevision: "1" });
   deleted.send("start"); assert.equal((await deleted.next("result")).value, true);
   const recreated = await filesystemWorker(t, directory, { operation: "create" });
-  recreated.send("start"); assert.equal((await recreated.next("result")).value.revision, 2);
+  recreated.send("start"); assert.equal((await recreated.next("result")).value.revision, "2");
   for (const operation of ["update", "delete"]) {
-    const stale = await filesystemWorker(t, directory, { operation, expectedRevision: 1 });
+    const stale = await filesystemWorker(t, directory, { operation, expectedRevision: "1" });
     stale.send("start"); assert.equal((await stale.next("result")).code, "REVISION_CONFLICT");
   }
-  assert.equal((await store.get({}, "item"))?.revision, 2);
+  assert.equal((await store.get({}, "item"))?.revision, "2");
   assert.deepEqual(await store.list({}), { items: [{ id: "item" }] });
 });
 
 test("SIGKILL after retaining deletion history leaves the visible record unchanged and can be retried", { timeout: 15_000 }, async (t) => {
   const { directory, store } = await fixture(t);
   await store.create({}, "item", { initial: true });
-  const dying = await filesystemWorker(t, directory, { operation: "delete", expectedRevision: 1, pause: "after-history" });
+  const dying = await filesystemWorker(t, directory, { operation: "delete", expectedRevision: "1", pause: "after-history" });
   dying.send("start"); await dying.next("paused");
   assert.ok((await fs.readdir(join(directory, FILESYSTEM_JSON_METADATA_DIRECTORY))).some((name) => name.endsWith(".revision.json")));
   dying.child.kill("SIGKILL"); await dying.exit;
-  assert.equal((await store.get({}, "item"))?.revision, 1);
-  assert.equal(await store.delete({}, "item", { expectedRevision: 1 }), true);
-  assert.equal((await store.create({}, "item", { recreated: true })).revision, 2);
+  assert.equal((await store.get({}, "item"))?.revision, "1");
+  assert.equal(await store.delete({}, "item", { expectedRevision: "1" }), true);
+  assert.equal((await store.create({}, "item", { recreated: true })).revision, "2");
 });
 
 test("SIGKILL before record publication leaves complete original JSON and releases its lock", { timeout: 15_000 }, async (t) => {
   const { directory, store } = await fixture(t);
   const original = await store.create({}, "item", { initial: true });
-  const dying = await filesystemWorker(t, directory, { operation: "update", expectedRevision: 1, pause: "before-publish" });
+  const dying = await filesystemWorker(t, directory, { operation: "update", expectedRevision: "1", pause: "before-publish" });
   dying.send("start"); await dying.next("paused");
   assert.deepEqual(await store.get({}, "item"), original);
   dying.child.kill("SIGKILL"); await dying.exit;
   assert.deepEqual(await store.get({}, "item"), original);
-  assert.equal((await store.update({}, "item", { retried: true }, { expectedRevision: 1 })).revision, 2);
+  assert.equal((await store.update({}, "item", { retried: true }, { expectedRevision: "1" })).revision, "2");
 });
 
 test("a committed update remains readable when SIGKILL loses its success receipt", { timeout: 15_000 }, async (t) => {
   const { directory, store } = await fixture(t);
   await store.create({}, "item", { initial: true });
-  const dying = await filesystemWorker(t, directory, { operation: "update", expectedRevision: 1, pause: "after-publish", value: { committed: true } });
+  const dying = await filesystemWorker(t, directory, { operation: "update", expectedRevision: "1", pause: "after-publish", value: { committed: true } });
   dying.send("start"); await dying.next("paused");
   dying.child.kill("SIGKILL"); await dying.exit;
   const committed = await store.get({}, "item");
-  assert.equal(committed?.revision, 2); assert.deepEqual(committed?.value, { committed: true });
-  await assert.rejects(store.update({}, "item", { retry: true }, { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
-  assert.equal((await store.update({}, "item", { next: true }, { expectedRevision: 2 })).revision, 3);
+  assert.equal(committed?.revision, "2"); assert.deepEqual(committed?.value, { committed: true });
+  await assert.rejects(store.update({}, "item", { retry: true }, { expectedRevision: "1" }), { code: "REVISION_CONFLICT" });
+  assert.equal((await store.update({}, "item", { next: true }, { expectedRevision: "2" })).revision, "3");
 });
