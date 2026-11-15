@@ -1,10 +1,11 @@
+import { AppSettingsPrototype } from "./apps-prototype.js";
 import { modelRegistrationSetupEnabled } from "../../../shared/model-browser-features.js";
 import type { RouteLocation, RouteTarget, RouteToken, ViewMount } from "@memsphere/view-sdk";
 import type { SettingsViewConfig } from "./index.js";
 
 type JsonObject = Record<string, any>;
 type ScopeName = "global" | "project";
-type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models";
+type SectionName = "overview" | "general" | "view" | "appearance" | "packages" | "composition" | "providers" | "runners" | "project" | "participants" | "models" | "apps";
 
 interface SettingsViewOptions {
   readonly config: SettingsViewConfig;
@@ -34,6 +35,7 @@ const sections: Record<SectionName, { scope: ScopeName; module: string }> = {
   providers: { scope: "global", module: "providers" },
   project: { scope: "project", module: "overview" },
   models: { scope: "project", module: "models" },
+  apps: { scope: "project", module: "apps" },
   participants: { scope: "project", module: "participants" }
 };
 
@@ -82,7 +84,7 @@ export function createSettingsViews(options: SettingsViewOptions): Readonly<{ li
   return {
     list: surface("list"),
     detail: surface("detail"),
-    dispose() { controller.abort(); app = undefined; }
+    dispose() { controller.abort(); app?.dispose(); app = undefined; }
   };
 }
 
@@ -99,6 +101,7 @@ class SettingsApplication {
   #projects: JsonObject[] = [];
   #currentProject = "";
   #loading = true;
+  #appPrototype?: AppSettingsPrototype;
   #token = sessionStorage.getItem(tokenKey) ?? "";
   #tokenError = "";
   #operatorTokenDraft = "";
@@ -150,6 +153,15 @@ class SettingsApplication {
     this.#loading = true;
     this.render();
     try {
+      if (this.#module === "apps") {
+        // Prototype uses demo data only; do not request protected settings.
+        const response = await fetch("/api/projects", {signal:this.#signal});
+        if (!response.ok) throw new Error(await response.text());
+        const projects = await response.json() as JsonObject;
+        this.#currentProject = projects.current ?? "";
+        this.#projects = projects.projects ?? [];
+        return;
+      }
       const [metaResponse, projectResponse, packageResponse] = await Promise.all([
         fetch("/api/settings/meta", { signal: this.#signal }),
         fetch("/api/projects", { signal: this.#signal }),
@@ -211,6 +223,8 @@ class SettingsApplication {
     }
   }
 
+  dispose(): void { this.#appPrototype?.dispose(); }
+
   render(): void {
     if (this.#signal.aborted) return;
     const scope = this.state;
@@ -230,12 +244,14 @@ class SettingsApplication {
       if (this.#listRoot) this.#listRoot.innerHTML = `<div class="memsphere-settings settings-list-surface"><style>${styles}</style><aside class="settings-sidebar">${this.listHtml()}</aside></div>`;
       if (this.#detailRoot) this.#detailRoot.innerHTML = `<div class="memsphere-settings settings-detail-surface"><style>${styles}</style>${detail}</div>`;
       this.bind();
+      this.mountAppPrototype();
       return;
     }
     this.#root.innerHTML = `<div class="memsphere-settings"><style>${styles}</style>
       <aside class="settings-sidebar">${this.navHtml()}</aside>
       ${detail}</div>`;
     this.bind();
+    this.mountAppPrototype();
   }
 
   get state(): ScopeState {
@@ -302,6 +318,8 @@ class SettingsApplication {
   }
 
   contentHtml(scope: ScopeState): string {
+    // This preview only uses labeled browser-local demo data, not protected settings.
+    if (this.#module === "apps") return `<div data-app-settings-prototype></div>`;
     if (this.#meta?.requiresToken && !this.#scopes.global.data) return this.tokenHtml();
     if (!scope.data || !scope.draft) return empty(this.#scope === "project"
       ? this.t("settings.projectUnavailable", "当前没有可管理的项目，但仍可管理 Memsphere 全局设置。")
@@ -632,6 +650,14 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
       details.open = false;
       details.querySelector<HTMLElement>("summary")?.focus();
     }, { signal: this.#signal }));
+  }
+
+  private mountAppPrototype(): void {
+    if (this.#module !== "apps") { this.#appPrototype?.dispose(); this.#appPrototype = undefined; return; }
+    const root = this.detailRoot().querySelector<HTMLElement>("[data-app-settings-prototype]");
+    if (!root) return;
+    this.#appPrototype ??= new AppSettingsPrototype(this.#currentProject);
+    this.#appPrototype.mount(root);
   }
 
   private surfaceRoots(): readonly HTMLElement[] { return [this.#listRoot, this.#detailRoot].filter((root): root is HTMLElement => Boolean(root)).concat(this.#listRoot || this.#detailRoot ? [] : [this.#root]); }

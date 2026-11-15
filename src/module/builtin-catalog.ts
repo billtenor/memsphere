@@ -95,7 +95,7 @@ export const builtinModuleCatalog: readonly BuiltinModuleCatalogEntry[] = deepFr
     icon: "gear",
     homeRouteId: "section",
     routes: [
-      { id: "section", path: "/settings/:module" }
+      { id: "section", path: "/settings/:module", query: ["app"] }
     ]
   }
 ]);
