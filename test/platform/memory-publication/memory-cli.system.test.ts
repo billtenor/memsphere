@@ -1,6 +1,6 @@
 import { invokeCliModule } from "../../helpers/cli-module.js";
 import assert from "node:assert/strict";
-import { access, mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,13 +24,16 @@ test("validate ambiguity text and JSON expose candidate status and legacy source
   const legacy = JSON.parse(original); legacy.id = "change-legacy-ambiguous"; delete legacy.bindings;
   const legacyRoot = join(f.changes, legacy.id); await mkdir(legacyRoot); const legacyPath = join(legacyRoot, "change.json");
   const legacyBytes = JSON.stringify(legacy); await writeFile(legacyPath, legacyBytes);
+  // Workspace roots are canonical paths; text diagnostics embed them as JSON
+  // (including escaped Windows separators).
+  const expectedRoot = await realpath(f.linked);
   const text = await runNativeCli(f.linked, ["memory", "change", "validate"], f.home);
   assert.equal(text.code, 1); assert.match(text.stderr, /Ambiguous/); assert.match(text.stderr, /change-legacy-ambiguous\tactive\t/);
-  assert(text.stderr.includes(f.linked)); assert.match(text.stderr, /concepts\/example/);
+  assert(text.stderr.includes(JSON.stringify(expectedRoot))); assert.match(text.stderr, /concepts\/example/);
   const json = await runNativeCli(f.linked, ["memory", "change", "validate", "--format", "json"], f.home);
   assert.equal(json.code, 1); assert.equal(json.stderr, "");
   const candidate = JSON.parse(json.stdout).error.candidates.find((c: { id: string }) => c.id === legacy.id);
-  assert.equal(candidate.status, "active"); assert.equal(candidate.source_worktree.root, f.linked);
+  assert.equal(candidate.status, "active"); assert.equal(candidate.source_worktree.root, expectedRoot);
   assert.deepEqual(candidate.references, ["concepts/example"]);
   assert.equal(await readFile(originalPath, "utf8"), original); assert.equal(await readFile(legacyPath, "utf8"), legacyBytes);
 }));
