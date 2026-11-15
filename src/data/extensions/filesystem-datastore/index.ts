@@ -7,7 +7,7 @@ import type { DataExtension } from "../../api/extension.js";
 import type { DeleteOptions, ListOptions, ListResult, StoreId, UpdateOptions } from "../../api/store.js";
 import {
   appendFileContent, atomicPublish, cleanupCreatedDirectories, deleteFile, findFile, listRelativeFilenames, openExistingDirectory, paginate, prepareDirectory,
-  readFileSnapshot, requirePositiveInteger, requireString, resolveFileParent,
+  readFileSnapshot, requireString, resolveFileParent,
   validateFilename, validateRelativeFilePath
 } from "../shared/filesystem.js";
 import { bytesContent, throwIfAborted } from "../shared/payload.js";
@@ -173,7 +173,9 @@ class FilesystemDataStore implements AppendableDataStore {
 
 function rejectRevision(expectedRevision: string | undefined): void {
   if (expectedRevision === undefined) return;
-  requirePositiveInteger(expectedRevision, "expectedRevision");
+  if (typeof expectedRevision !== "string" || expectedRevision.length === 0) {
+    throw Object.assign(new TypeError("expectedRevision must be a non-empty revision string"), { code: "INVALID_ARGUMENT" });
+  }
   throw Object.assign(new Error("Filesystem DataStore does not support expectedRevision"), { code: "UNSUPPORTED_CAPABILITY" });
 }
 

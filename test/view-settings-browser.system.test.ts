@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { type Page } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
@@ -616,6 +616,7 @@ test("Runner settings require installation detection and preserve identity/async
 
 test("TOS settings save credentials and a Store binding through real settings APIs", { timeout: 30_000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-settings-browser-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   const config = await settingsConfigFixture(dir, "127.0.0.1");
   const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
   await initializeProjectModelRegistrations({}, { root: config.scopeRoot });
@@ -681,46 +682,6 @@ test("TOS settings save credentials and a Store binding through real settings AP
     await page.reload();await openTosStore(page,"assets");await page.locator('[data-select-field="tosRef.assets.id"]').waitFor();
     assert.equal((await page.locator('[data-select-field="tosRef.assets.id"]').innerText()).replace("⌄", "").trim(),"alternate");
     assert.equal(JSON.parse(await readFile(config.configPath,"utf8")).dataStores.assets.config.credentials.id,"alternate");
-    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button",{name:"火山云配置",exact:true}).click();
-    assert.equal(await page.getByRole("button",{name:"TOS 凭据",exact:true}).count(),0,"Credentials are not a top-level section");
-    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
-    assert.equal(await page.locator('[data-field="tosCredential.id"]').isDisabled(),true);
-    assert.equal(await page.locator('[data-field="tosCredential.accessKeyId"]').inputValue(),"");
-    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
-    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("replacement-secret");
-    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
-    await page.getByText("凭据已保存。",{exact:true}).waitFor();
-    const {decryptTosCredential}=await import("../src/tos-credential-codec.js");
-    const homeFile=join(config.homeRoot!,"config.json");
-    const home=JSON.parse(await readFile(homeFile,"utf8"));
-    assert.deepEqual(Object.keys(home.tosCredentials.entries).sort(),["alternate","test"]);
-    assert.deepEqual(decryptTosCredential("alternate",home.tosCredentials),{accessKeyId:"fixture-other-ak",accessKeySecret:"replacement-secret"});
-    assert.equal(decryptTosCredential("test",home.tosCredentials).accessKeySecret,"fixture-secret");
-    const beforeDuplicate=await readFile(homeFile,"utf8");
-    await page.getByRole("button",{name:"新增凭据",exact:true}).click();
-    await page.locator('[data-field="tosCredential.id"]').fill("test");
-    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("unused-ak");
-    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unused-secret");
-    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
-    await page.getByText("凭据名称已存在，请使用列表中的编辑操作。",{exact:false}).waitFor();
-    assert.equal(await readFile(homeFile,"utf8"),beforeDuplicate);
-    await page.getByRole("button",{name:"取消",exact:true}).click();
-    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(),0);
-    await page.reload();
-    await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
-    await page.getByRole("button",{name:"编辑 alternate",exact:true}).waitFor();
-    assert.ok(!(await page.locator("body").innerText()).includes("replacement-secret"));
-    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
-    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("not-committed-secret");
-    const externalHome=(await readFile(homeFile,"utf8"))+"\n";
-    await writeFile(homeFile,externalHome);
-    const conflictingSave=page.waitForResponse(response=>response.url().endsWith("/tos-credentials")&&response.request().method()==="PUT");
-    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
-    assert.equal((await conflictingSave).status(),409);
-    await page.getByText("Settings changed; reload before saving credentials",{exact:true}).waitFor();
-    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"not-committed-secret");
-    assert.equal(await readFile(homeFile,"utf8"),externalHome);
-    await page.getByRole("button",{name:"取消",exact:true}).click();
     await page.setViewportSize({ width: 390, height: 844 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     assert.deepEqual(errors, []);
@@ -729,6 +690,7 @@ test("TOS settings save credentials and a Store binding through real settings AP
 
 test("TOS raw/env settings survive reload and preserve an unsaved reference after a real CAS conflict",{timeout:30_000},async t=>{
   const dir=await mkdtemp(join(tmpdir(),"memsphere-tos-raw-browser-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   const config=await settingsConfigFixture(dir,"127.0.0.1");
   const { initializeProjectModelRegistrations }=await import("../src/project/model-registration.js");
   await initializeProjectModelRegistrations({}, {root:config.scopeRoot});
@@ -776,8 +738,9 @@ test("TOS raw/env settings survive reload and preserve an unsaved reference afte
   }
 });
 
-test("TOS credential settings reject unauthenticated writes and recover through the operation-token UI",{timeout:30_000},async()=>{
+test("TOS credential settings reject unauthenticated writes and recover through the operation-token UI",{timeout:30_000},async t=>{
   const dir=await mkdtemp(join(tmpdir(),"memsphere-tos-auth-browser-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
   const config=await settingsConfigFixture(dir,"0.0.0.0"),homeFile=join(config.homeRoot!,"config.json");
   const before=await readFile(homeFile,"utf8");
   const server=createViewServer(config,{settingsToken:"fixture-operation-token"});
@@ -800,6 +763,95 @@ test("TOS credential settings reject unauthenticated writes and recover through 
   }finally{await browser.close();server.closeAllConnections();await new Promise<void>(resolve=>server.close(()=>resolve()));await rm(dir,{recursive:true,force:true});}
 });
 
+
+
+test("TOS credential editing retains omitted fields and isolates other credentials", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page, config) => {
+    assert.equal(await page.getByRole("button",{name:"TOS 凭据",exact:true}).count(),0,"Credentials are not a top-level section");
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    assert.equal(await page.locator('[data-field="tosCredential.id"]').isDisabled(),true);
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeyId"]').inputValue(),"");
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("replacement-secret");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    await page.getByText("凭据已保存。",{exact:true}).waitFor();
+    const {decryptTosCredential}=await import("../src/tos-credential-codec.js");
+    const homeFile=join(config.homeRoot!,"config.json");
+    const home=JSON.parse(await readFile(homeFile,"utf8"));
+    assert.deepEqual(Object.keys(home.tosCredentials.entries).sort(),["alternate","test"]);
+    assert.deepEqual(decryptTosCredential("alternate",home.tosCredentials),{accessKeyId:"fixture-other-ak",accessKeySecret:"replacement-secret"});
+    assert.equal(decryptTosCredential("test",home.tosCredentials).accessKeySecret,"fixture-secret");
+    await page.reload();
+    await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).waitFor();
+    assert.ok(!(await page.locator("body").innerText()).includes("replacement-secret"));
+  });
+});
+
+test("TOS credential creation rejects duplicate names without replacing saved credentials", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page, config) => {
+    const homeFile=join(config.homeRoot!,"config.json");
+    const beforeDuplicate=await readFile(homeFile,"utf8");
+    await page.getByRole("button",{name:"新增凭据",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').fill("test");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("unused-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unused-secret");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    await page.getByText("凭据名称已存在，请使用列表中的编辑操作。",{exact:false}).waitFor();
+    assert.equal(await readFile(homeFile,"utf8"),beforeDuplicate);
+    await page.getByRole("button",{name:"取消",exact:true}).click();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(),0);
+    await page.reload();
+    await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).waitFor();
+    assert.ok(!(await page.locator("body").innerText()).includes("unused-secret"));
+  });
+});
+
+test("TOS credential editing preserves the draft and external Home on CAS conflict", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page, config) => {
+    const homeFile=join(config.homeRoot!,"config.json");
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("not-committed-secret");
+    const externalHome=(await readFile(homeFile,"utf8"))+"\n";
+    await writeFile(homeFile,externalHome);
+    const conflictingSave=page.waitForResponse(response=>response.url().endsWith("/tos-credentials")&&response.request().method()==="PUT");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    assert.equal((await conflictingSave).status(),409);
+    await page.getByText("Settings changed; reload before saving credentials",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"not-committed-secret");
+    assert.equal(await readFile(homeFile,"utf8"),externalHome);
+    await page.getByRole("button",{name:"取消",exact:true}).click();
+  });
+});
+
+async function withTosCredentialPage(t: TestContext, action: (page: Page, config: MemsphereConfig) => Promise<void>): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-credential-browser-"));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const config = await settingsConfigFixture(dir, "127.0.0.1");
+  const { listTosCredentials, saveTosCredential } = await import("../src/tos-credentials.js");
+  const homeFile = join(config.homeRoot!, "config.json");
+  for (const [id, accessKeyId, accessKeySecret] of [["test", "fixture-ak", "fixture-secret"], ["alternate", "fixture-other-ak", "fixture-other-secret"]]) {
+    const { revision } = await listTosCredentials(homeFile);
+    await saveTosCredential(homeFile, id!, { accessKeyId: accessKeyId!, accessKeySecret: accessKeySecret! }, revision);
+  }
+  const server = createViewServer(config);
+  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+    browser = await browserScope();
+    const page = await browser.newPage({ viewport: {width:1280,height:900} });
+    page.setDefaultTimeout(5000);
+    const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${(server.address() as AddressInfo).port}/projects/demo/settings/volcengine`, {waitUntil:"networkidle"});
+    await page.getByRole("button", {name:"编辑 alternate",exact:true}).waitFor();
+    await action(page, config);
+    assert.deepEqual(errors, []);
+  } finally {
+    try { await browser?.close(); }
+    finally { server.closeAllConnections(); if (server.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
+  }
+}
 
 async function selectTosSetting(page: Page, path: string, name: string): Promise<void> {
   await page.locator(`[data-select-field="${path}"]`).press("ArrowDown");
