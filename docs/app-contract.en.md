@@ -80,7 +80,7 @@ Remote distribution, upgrades, uninstall, adoption of existing Memory, execution
 
 ## App configuration and View extensions
 
-Open **Settings → App configuration** and select an installed App in the current Project. Disabled Apps remain configurable. The page and `app configure` share the installation configuration; browser storage is not authoritative. Without a settings contribution, the host renders a common Schema form with JSON fields for complex values and preserves untouched properties.
+Open **Settings → App configuration** and select an installed App in the current Project. Disabled Apps remain configurable. The page and `app configure` share the installation configuration; browser storage is not authoritative. `app show <id> --output json` returns saved `config` and its `revision`; the existing `configuration` field remains the Schema path. Without a settings contribution, the host renders a common Schema form with JSON fields for complex values and preserves untouched properties.
 
 Declare a standard View Package in `assets.viewPackages`, for example `{"key":"settings","path":"settings"}`, and reference it with `entrypoints.settings: {"packageKey":"settings"}`. Its standard `module.json` declares `view.entry: "./index.js"`, `view.sdk: "^1.1.0"`, and exactly one contribution such as `{"id":"configuration","cell":"org.memsphere.settings.app.configuration@1:app","priority":100}`. Settings packages declare no extra capabilities, styles, themes, or dependencies. They use the existing loader, SDK and lifecycle.
 

@@ -5,7 +5,7 @@ import { resolveProjectContext } from "../project/resolver.js";
 import { AppError } from "../app/contracts.js";
 import { readJson } from "../app/files.js";
 import { checkApp, configureApp, installApp, setAppEnabled } from "../app/install.js";
-import { readAppState, requireApp } from "../app/state.js";
+import { appConfigurationRevision, readAppState, requireApp } from "../app/state.js";
 import { AppMemoryProvider } from "../app/memory-provider.js";
 import { DefaultMemoryCatalog } from "../memory/catalog.js";
 import { bindCli, checkCli, listClis, registerCli, showCli } from "../tools/registry.js";
@@ -47,6 +47,7 @@ export function registerAppCommands(program: Command): void {
         current.startsWith("procedures/") ? "start" : "read", current, ...(current.startsWith("procedures/") ? ["--name", "<run-name>"] : [])] };
     });
     return { id, name: app.manifest.name, version: app.manifest.version, enabled: app.enabled,
+      config: app.config, revision: appConfigurationRevision(app),
       description: app.manifest.description, assets: app.manifest.assets, memories,
       configuration: app.manifest.configuration, entrypoints: app.manifest.entrypoints,
       projectStores: app.manifest.projectStores.map(store => ({ key: store.key, model: store.model, kind: store.kind, storeId: app.config[store.configKey] ?? null })),

@@ -97,7 +97,7 @@ enable/configure/disable 改变持久配置；View 使用固定启动组合，�
 
 ## App 配置页与 View 扩展
 
-打开 **设置 → App 配置**，选择当前 Project 已安装的 App。停用的 App 仍可配置。配置写入原安装状态，与 `app configure` 使用同一份配置，不保存在浏览器。没有设置扩展时，宿主根据配置 Schema 呈现统一表单；复杂对象/数组使用 JSON 字段，未编辑字段保留。没有配置项时显示明确空态。
+打开 **设置 → App 配置**，选择当前 Project 已安装的 App。停用的 App 仍可配置。配置写入原安装状态，与 `app configure` 使用同一份配置，不保存在浏览器。`app show <id> --output json` 的 `config` 与 `revision` 返回当前保存值和配置版本；`configuration` 仍表示 Schema 路径。没有设置扩展时，宿主根据配置 Schema 呈现统一表单；复杂对象/数组使用 JSON 字段，未编辑字段保留。没有配置项时显示明确空态。
 
 需要组织自己的字段时，复用标准 View Package：
 
