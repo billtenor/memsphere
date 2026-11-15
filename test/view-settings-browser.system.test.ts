@@ -825,6 +825,69 @@ test("TOS credential editing preserves the draft and external Home on CAS confli
   });
 });
 
+test("TOS credential deletion requires confirmation and removes only the selected credential", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page,config) => {
+    const homeFile=join(config.homeRoot!,"config.json"),before=await readFile(homeFile,"utf8"),projectBefore=await readFile(config.configPath,"utf8");
+    page.once("dialog",dialog=>dialog.dismiss());
+    await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).click();
+    assert.equal(await readFile(homeFile,"utf8"),before);
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unsaved-secret");
+    page.once("dialog",async dialog=>{assert.match(dialog.message(),/不会删除 Store 或云端数据/);await dialog.accept();});
+    await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).click();
+    await page.getByText("凭据已删除。",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(),0);
+    const after=JSON.parse(await readFile(homeFile,"utf8"));
+    assert.equal(after.tosCredentials.entries.alternate,undefined);
+    assert.deepEqual(after.tosCredentials.entries.test,JSON.parse(before).tosCredentials.entries.test);
+    assert.equal(await readFile(config.configPath,"utf8"),projectBefore);
+    await page.reload();await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
+    assert.equal(await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).count(),0);
+    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  });
+});
+
+test("TOS credential deletion rejects a stale Home revision and keeps the edit draft", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t,async(page,config)=>{
+    const homeFile=join(config.homeRoot!,"config.json");
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unsaved-secret");
+    const external=(await readFile(homeFile,"utf8"))+"\n";await writeFile(homeFile,external);
+    page.once("dialog",dialog=>dialog.accept());
+    const response=page.waitForResponse(r=>r.url().endsWith("/tos-credentials")&&r.request().method()==="DELETE");
+    await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).click();assert.equal((await response).status(),409);
+    await page.getByText("Settings changed; reload before saving credentials",{exact:true}).waitFor();
+    assert.equal(await readFile(homeFile,"utf8"),external);
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"unsaved-secret");
+    assert.equal(await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).isEnabled(),true);
+  });
+});
+
+test("Store deletion is available while collapsed and only unbinds after confirmed save", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t,async(page,config)=>{
+    const {initializeProjectModelRegistrations}=await import("../src/project/model-registration.js");
+    await initializeProjectModelRegistrations({}, {root:config.scopeRoot});
+    const raw=JSON.parse(await readFile(config.configPath,"utf8"));
+    raw.dataStores={assets:{kind:"data",model:"memsphere/run/artifact.json",factory:"memsphere/tos",config:{bucket:"test-bucket",prefix:"assets/",region:"cn-beijing",endpoint:"tos-cn-beijing.volces.com",mode:"revision",credentials:{source:"settings",id:"test"}}}};
+    await writeFile(config.configPath,JSON.stringify(raw)+"\n");
+    const before=await readFile(config.configPath,"utf8"), homeBefore=await readFile(join(config.homeRoot!,"config.json"),"utf8");
+    const origin=new URL(page.url()).origin;
+    await page.goto(`${origin}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
+    const row=page.locator('details[data-business-store="assets"]');await row.waitFor();assert.equal(await row.getAttribute("open"),null);
+    const remove=()=>page.getByRole("button",{name:"删除 Store assets",exact:true});
+    assert.equal(await remove().isVisible(),true);assert.equal(await remove().evaluate(el=>el.closest("details")),null);
+    await page.setViewportSize({width:390,height:844});assert.equal(await remove().isVisible(),true);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    await remove().click();assert.equal(await row.count(),0);assert.equal(await readFile(config.configPath,"utf8"),before);
+    await page.getByRole("button",{name:"重新读取",exact:true}).click();await remove().waitFor();
+    await remove().click();await page.getByRole("button",{name:"保存",exact:true}).click();
+    await page.getByRole("button",{name:"确认保存",exact:true}).click();await page.getByRole("button",{name:"保存",exact:true}).waitFor();
+    assert.equal(JSON.parse(await readFile(config.configPath,"utf8")).dataStores?.assets,undefined);
+    assert.equal(await readFile(join(config.homeRoot!,"config.json"),"utf8"),homeBefore);
+    await page.reload();await page.getByRole("button",{name:"新增 TOS Store",exact:true}).waitFor();assert.equal(await row.count(),0);
+  });
+});
+
 async function withTosCredentialPage(t: TestContext, action: (page: Page, config: MemsphereConfig) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-credential-browser-"));
   t.after(() => rm(dir, { recursive: true, force: true }));

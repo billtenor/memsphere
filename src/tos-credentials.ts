@@ -33,3 +33,18 @@ export async function saveTosCredential(configPath: string, id: string, credenti
   });
   return listTosCredentials(configPath);
 }
+
+/** Remove only the saved credential; Store references and remote objects remain unchanged. */
+export async function deleteTosCredential(configPath: string, id: string, expectedRevision: string) {
+  if (!id || id.trim() !== id || id.length > 128 || id === "__proto__" || /[\x00-\x1f]/.test(id)) throw new TypeError("Invalid TOS credential id");
+  await withConfigFileLock(configPath, async () => {
+    const document = await readGlobalConfigDocument(configPath);
+    if (document.revision !== expectedRevision) throw new ConfigRevisionConflictError(expectedRevision, document.revision);
+    const vault = document.raw.tosCredentials;
+    if (!vault?.entries || !Object.hasOwn(vault.entries, id)) return;
+    const entries = { ...vault.entries };
+    delete entries[id];
+    await atomicWriteJson(configPath, { ...document.raw, tosCredentials: { ...vault, entries } });
+  });
+  return listTosCredentials(configPath);
+}

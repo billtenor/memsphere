@@ -542,7 +542,6 @@ async function handleRequest(
     sendJson(response, 200, {
       requiresToken: !isLoopbackHost(config.view.host),
       operatorTokenConfigured: Boolean(document.raw.view?.operator_token),
-    tosCredentialIds: Object.keys(document.raw.tosCredentials?.entries ?? {}).sort(),
       host: config.view.host,
       port: config.view.port
     });
@@ -797,19 +796,23 @@ async function handleRequest(
     return;
   }
 
-  if (url.pathname === "/api/settings/global/tos-credentials" && ["GET", "PUT"].includes(request.method ?? "")) {
-    if (!authorizeSettingsRequest(request, response, config, options, request.method === "PUT")) return;
-    const { listTosCredentials, saveTosCredential } = await import("../tos-credentials.js");
+  if (url.pathname === "/api/settings/global/tos-credentials" && ["GET", "PUT", "DELETE"].includes(request.method ?? "")) {
+    if (!authorizeSettingsRequest(request, response, config, options, request.method !== "GET")) return;
+    const { listTosCredentials, saveTosCredential, deleteTosCredential } = await import("../tos-credentials.js");
     const document = await readGlobalSettingsDocument(config);
     if (request.method === "GET") { sendJson(response, 200, await listTosCredentials(document.configPath)); return; }
     let body: { id?: unknown; expectedRevision?: unknown; credentials?: unknown };
     try { body = await readJsonBody(request, 32 * 1024); }
     catch { sendJson(response, 400, { code: "invalid_request", error: "Invalid TOS credential request" }); return; }
-    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.id !== "string" || typeof body.expectedRevision !== "string" || !body.credentials || typeof body.credentials !== "object" || Array.isArray(body.credentials)) {
-      sendJson(response, 400, { code: "invalid_request", error: "id, expectedRevision and credentials are required" }); return;
+    if (!body || typeof body !== "object" || Array.isArray(body) || typeof body.id !== "string" || typeof body.expectedRevision !== "string" || request.method === "PUT" && (!body.credentials || typeof body.credentials !== "object" || Array.isArray(body.credentials))) {
+      sendJson(response, 400, { code: "invalid_request", error: "id, expectedRevision and (for PUT) credentials are required" }); return;
     }
     try {
-      const keys = Object.keys(body.credentials);
+      if (request.method === "DELETE") {
+        const deleted = await deleteTosCredential(document.configPath, body.id, body.expectedRevision);
+        sendJson(response, 200, { ...deleted, deleted: true }); return;
+      }
+      const keys = Object.keys(body.credentials as object);
       if (keys.some(key => !["accessKeyId", "accessKeySecret", "stsToken"].includes(key))) throw new TypeError("Invalid TOS credential fields");
       const saved = await saveTosCredential(document.configPath, body.id, body.credentials as import("../data/extensions/tos-datastore/config.js").TosCredentials, body.expectedRevision);
       sendJson(response, 200, { ...saved, saved: true });
