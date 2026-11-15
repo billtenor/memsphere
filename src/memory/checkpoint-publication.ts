@@ -37,6 +37,10 @@ export async function publishCheckpoint<T>(input: {
   verify(directory: string): Promise<T>;
   commit(description: T): Promise<void>;
   afterCommit?(): Promise<void>;
+  retainHistory?: boolean;
+  commitSameDigest?: boolean;
+  confirmCommit?(): Promise<boolean>;
+  withAdmission?(commit: () => Promise<{ description: T; reused: boolean }>): Promise<{ description: T; reused: boolean }>;
 }): Promise<{ description: T; reused: boolean }> {
   if (!/^[a-f0-9]{64}$/.test(input.digest)) throw new Error("Invalid checkpoint digest");
   // Staging sits outside the directory traversed by version cleanup.
@@ -45,10 +49,10 @@ export async function publishCheckpoint<T>(input: {
   try {
     await cp(input.candidateRoot, join(staged, "memory"), { recursive: true });
     await atomicWriteJson(join(staged, "checkpoint.json"), input.description);
-    return await withCheckpointRecordLock(input.runtimeRoot, input.changeId, async () => {
+    const commitPrepared = () => withCheckpointRecordLock(input.runtimeRoot, input.changeId, async () => {
       const current = await input.readCurrent();
       const directory = join(input.checkpointsRoot, input.digest);
-      if (current.digest === input.digest) {
+      if (current.digest === input.digest && !input.commitSameDigest) {
         return { description: await input.verify(directory), reused: true };
       }
       if (current.token !== input.expectedToken) {
@@ -68,18 +72,19 @@ export async function publishCheckpoint<T>(input: {
         await input.commit(description);
       } catch (error) {
         // A write may have committed before its acknowledgement failed.
-        if ((await input.readCurrent()).digest !== input.digest) throw error;
+        if ((await input.readCurrent()).digest !== input.digest || input.confirmCommit && !await input.confirmCommit()) throw error;
         await input.verify(directory);
       }
       await input.afterCommit?.();
       const latest = await input.readCurrent();
-      if (latest.digest !== input.digest) throw new Error("Checkpoint commit did not publish the prepared version");
-      for (const entry of await readdir(input.checkpointsRoot, { withFileTypes: true })) {
+      if (latest.digest !== input.digest || input.confirmCommit && !await input.confirmCommit()) throw new Error("Checkpoint commit did not publish the prepared version and metadata");
+      for (const entry of input.retainHistory ? [] : await readdir(input.checkpointsRoot, { withFileTypes: true })) {
         if (entry.isDirectory() && /^[a-f0-9]{64}$/.test(entry.name) && entry.name !== latest.digest) {
           await rm(join(input.checkpointsRoot, entry.name), { recursive: true, force: true });
         }
       }
-      return { description, reused: false };
+      return { description, reused: current.digest === input.digest };
     });
+    return await (input.withAdmission ? input.withAdmission(commitPrepared) : commitPrepared());
   } finally { await rm(staged, { recursive: true, force: true }); }
 }

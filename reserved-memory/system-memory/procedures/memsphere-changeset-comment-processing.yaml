@@ -10,7 +10,7 @@ asserts:
   - 必须由 human 在 Agent 对话中明确提供 ChangeSet id；提交 Comment 本身不自动创建 Task 或启动 Agent。
   - 处理前必须执行 memsphere memory change claim <change-id>；已有处理者时不得绕过，只有 human 明确要求接手时才使用 --force。
   - 每条 processing Comment 都必须综合判断；合理则修改候选内容，不合理则保持内容不变。处理说明只在 Agent 对话中向 human 说明，不另建实体。
-  - 以 fixed 完成处理批次前必须运行 memsphere memory change validate <change-id> 且校验通过；rejected 不得伪造修改或校验结果。
+  - 以 fixed 完成处理批次前必须运行 memsphere memory change validate --change <id> 且校验通过；rejected 不得伪造修改或校验结果。
   - 不得修改 Comment 原文、提交者、定位快照、状态以外的审计字段，也不得修改与 Comment 无关的 Memory 内容。
   - 本流程结束时必须用 memsphere memory change finish 一次处理全部 processing Comment 并释放 claim；当前 CLI 为整个批次接受单一 fixed 或 rejected reason，不支持分批完成不同结论。若同一批次有不同处理结论，保留现场并请 human 决定，不伪造统一结论或修改状态。没有实际差异且全部 Comment 已完成时可以显式 complete。
 goals:
@@ -42,7 +42,7 @@ flow:
       format: markdown
   - !while
     condition: !action
-      action: 运行 memsphere memory change validate <change-id>；判断合理 Comment 的修改是否仍未通过校验，或是否仍有 Comment 需要 human 决定。
+      action: 运行 memsphere memory change validate --change <id>；判断合理 Comment 的修改是否仍未通过校验，或是否仍有 Comment 需要 human 决定。
       actor: agent
       artifact: !artifact
         name: 是否仍需修正

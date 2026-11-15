@@ -77,7 +77,7 @@ test("Reviewer ChangeSet read boundary", async t => {
   }
   for (const operation of ["validate", "claim", "resume", "complete", "finish"]) {
     await t.test(`Reviewer cannot mutate a ChangeSet using ${operation}`, () => {
-      const result = f.command(["memory", "change", operation, f.edit.change.id]);
+      const result = f.command(["memory", "change", operation, ...(operation === "validate" ? ["--change"] : []), f.edit.change.id]);
       assertChangeShowRejected(result, 1, /command is not allowed in this Agent Review Session/);
     });
   }

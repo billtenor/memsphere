@@ -127,18 +127,19 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       id: divergentId,
       checkpoint: { ...canonicalChange.checkpoint, digest: "f".repeat(64) }
     }, null, 2)}\n`);
+    process.chdir(linked);
     await assert.rejects(
       validateMemoryChange(),
-      new RegExp(`multiple divergent Embedded ChangeSets.*${first.changeId}.*${divergentId}|multiple divergent Embedded ChangeSets.*${divergentId}.*${first.changeId}`)
+      /Ambiguous Embedded ChangeSet bindings/
     );
     assert.equal(
       (JSON.parse(await readFile(join(project.root, "changes", divergentId, "change.json"), "utf8")) as { status: string }).status,
       "active"
     );
     await rm(join(project.root, "changes", divergentId), { recursive: true });
+    process.chdir(linkedTwin);
     const fromTwin = await validateMemoryChange();
-    assert.equal(fromTwin.changeId, first.changeId);
-    assert.equal(fromTwin.checkpointDigest, first.checkpointDigest);
+    assert.notEqual(fromTwin.changeId, first.changeId);
     process.chdir(linked);
     const checkpoint = join(project.root, "changes", first.changeId, "checkpoints", first.checkpointDigest, "memory");
     assert.deepEqual(await readdir(checkpoint), ["concepts"]);
@@ -348,7 +349,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     const repeated = await validateMemoryChange();
     assert.equal(repeated.changeId, first.changeId);
     assert.equal(repeated.checkpointDigest, first.checkpointDigest);
-    assert.deepEqual((await readdir(join(project.root, "changes"))).filter((name) => name.startsWith("change-")), [first.changeId]);
+    assert.deepEqual(new Set((await readdir(join(project.root, "changes"))).filter((name) => name.startsWith("change-"))), new Set([first.changeId, fromTwin.changeId]));
 
     await rm(join(linkedMemory, "concepts", "delete-me.yaml"));
     await rename(join(linkedMemory, "concepts", "rename-me.yaml"), join(linkedMemory, "concepts", "renamed.yaml"));
@@ -363,7 +364,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
       targets: Array<{ operation: string }>;
     };
     assert.deepEqual(new Set(expandedChange.targets.map((target) => target.operation)), new Set(["create", "delete", "rename", "update"]));
-    assert.deepEqual(await readdir(join(project.root, "changes", first.changeId, "checkpoints")), [expanded.checkpointDigest]);
+    assert.deepEqual(new Set(await readdir(join(project.root, "changes", first.changeId, "checkpoints"))), new Set([first.checkpointDigest, expanded.checkpointDigest]));
     await withMemoryChangeDetailSnapshot({
       home,
       project: "embedded",
@@ -542,7 +543,7 @@ test("Embedded validation checkpoints linked-worktree changes without changing t
     await writeFile(changePath, `${JSON.stringify({ ...reusable, origin: "view" }, null, 2)}\n`);
     const forwarded = await validateMemoryChange(first.changeId);
     assert.equal(forwarded.changeId, first.changeId);
-    assert.notEqual(forwarded.baseRevision, first.baseRevision);
+    assert.equal(forwarded.baseRevision, first.baseRevision);
     assert.notEqual(forwarded.checkpointDigest, first.checkpointDigest);
     const newerCandidate = await readMemoryChange({ home, project: "embedded", changeId: first.changeId });
     assert.equal(newerCandidate.status, "active");

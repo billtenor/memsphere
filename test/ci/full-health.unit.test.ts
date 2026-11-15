@@ -25,6 +25,11 @@ test("PR repair proof wins; pending and failed full never borrow an older green 
   }
   assert.equal(decideHealth(undefined, undefined, true).state, "pending");
   assert.equal(decideHealth(undefined, undefined, false).state, "failure");
+  for (const health of [proof("pending"), proof("failure"), undefined]) {
+    assert.match(decideHealth(health, undefined).description, /检查已合入代码，不作为当前分支验收依据/);
+  }
+  assert.match(decideHealth(undefined, undefined, false).description, /检查已合入代码，不作为当前分支验收依据/);
+  assert.equal(decideHealth(proof("pending"), proof("pending")).description, "PR full: pending");
 });
 
 

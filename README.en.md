@@ -225,7 +225,7 @@ When you edit Managed Memory, Memsphere creates a ChangeSet. Validate the comple
 
 ~~~bash
 memsphere memory edit concepts/example
-memsphere memory change validate <change-id>
+memsphere memory change validate --change <id>
 memsphere memory publish --change <change-id>
 ~~~
 
@@ -263,6 +263,8 @@ memsphere memory change validate
 git add .memsphere/memory
 git commit -m "Update Memory"
 ~~~
+
+The first ordinary Embedded validation creates a ChangeSet automatically. The same round continues across commits, amend and rebase, comparing the final working tree with the local `git merge-base master HEAD`. PR, branch and pre-branch worktree bindings identify active work; use `--change <id>` when the context is ambiguous. The old positional `validate <id>` form has been removed; see `memory change validate --help`.
 
 Embedded Memory does not use `memsphere memory publish`; Memsphere does not commit Git changes for you.
 
