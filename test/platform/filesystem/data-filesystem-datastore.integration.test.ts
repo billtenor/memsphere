@@ -223,14 +223,15 @@ test("relative reads, writes and enumeration never traverse symlink directories"
 test("filesystem DataStore rejects all version conditions instead of silently claiming CAS", async () => {
   await withStore(async (store, directory) => {
     await store.create({}, data("item.bin", "original"));
-    for (const expectedRevision of [1, 2, Number.MAX_SAFE_INTEGER]) {
-      await assert.rejects(store.update({}, data("item.bin", "replacement"), { expectedRevision }), /does not support expectedRevision/);
-      await assert.rejects(store.delete({}, "item.bin", { expectedRevision }), /does not support expectedRevision/);
-      await assert.rejects(store.delete({}, "missing.bin", { expectedRevision }), /does not support expectedRevision/);
+    for (const expectedRevision of ["1", "0", '00000001:"etag:part"']) {
+      await assert.rejects(store.update({}, data("item.bin", "replacement"), { expectedRevision }), { code: "UNSUPPORTED_CAPABILITY" });
+      await assert.rejects(store.delete({}, "item.bin", { expectedRevision }), { code: "UNSUPPORTED_CAPABILITY" });
+      await assert.rejects(store.delete({}, "missing.bin", { expectedRevision }), { code: "UNSUPPORTED_CAPABILITY" });
     }
-    for (const expectedRevision of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
-      await assert.rejects(store.update({}, data("item.bin"), { expectedRevision }), /positive safe integer/);
-      await assert.rejects(store.delete({}, "item.bin", { expectedRevision }), /positive safe integer/);
+    for (const invalid of ["", 1, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+      const expectedRevision = invalid as unknown as string;
+      await assert.rejects(store.update({}, data("item.bin"), { expectedRevision }), { code: "INVALID_ARGUMENT" });
+      await assert.rejects(store.delete({}, "item.bin", { expectedRevision }), { code: "INVALID_ARGUMENT" });
     }
     assert.equal(await readFile(join(directory, "item.bin"), "utf8"), "original");
     assert.deepEqual(await readdir(directory), ["item.bin"]);

@@ -73,9 +73,9 @@ test("schema reflection composes with readable raw files and independent JSON va
     const reopened = await new FilesystemJsonValueStoreFactory().createStore({}, "order-values", await orderRuntime(), valueConfig);
     const stored = await reopened.get({}, "order-001");
     assert.deepEqual(stored?.value, original);
-    assert.equal(stored?.revision, 1);
+    assert.equal(stored?.revision, "1");
     const recordText = await readFile(join(valueDirectory, "order-001.json"), "utf8");
-    assert.deepEqual(JSON.parse(recordText), created);
+    assert.deepEqual(JSON.parse(recordText), { ...created, revision: Number(created.revision) });
     assert.match(recordText, /\n  "id": "order-001"/);
     assert.ok(recordText.endsWith("\n"));
     const value = runtime.reflect(stored!.value);
@@ -89,7 +89,7 @@ test("schema reflection composes with readable raw files and independent JSON va
     assert.throws(() => quantity.set(0), /minimum|>= 1/);
     quantity.set(3);
     const updated = await reopened.update({}, stored!.id, value.value, { expectedRevision: stored!.revision });
-    assert.equal(updated.revision, 2);
+    assert.equal(updated.revision, "2");
     const expected = {
       orderNo: "O-001", lines: [{ quantity: 3 }]
     };

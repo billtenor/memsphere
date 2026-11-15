@@ -1,5 +1,6 @@
-import { readFile } from "node:fs/promises";
+import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
+import { readFile } from "node:fs/promises";
 import { readAll } from "../data/extensions/shared/payload.js";
 import { serviceError } from "../project/business-stores.js";
 import type { DataInput } from "../project/data-service.js";
@@ -28,12 +29,13 @@ export function assertInputOptions(options: ValueInputOptions, payloadAllowed = 
 }
 export async function readDataInput(options: ValueInputOptions, payloadAllowed = true): Promise<DataInput> {
   assertInputOptions(options, payloadAllowed);
-  if (options.payloadFile !== undefined) return { kind: "payload", bytes: await readInputBytes(options.payloadFile), contentType: options.contentType! };
+  if (options.payloadFile !== undefined) {
+    const path = options.payloadFile;
+    return { kind: "payload-stream", contentType: options.contentType!, content: { stream: () => Readable.toWeb(path === "-" ? process.stdin : createReadStream(path)) as ReadableStream<Uint8Array> } };
+  }
   return { kind: "value", value: parseJsonInput(options.value ?? await readInputText(options.valueFile!)) };
 }
-export function parseRevision(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined;
-  const revision = Number(value);
-  if (!/^\d+$/.test(value) || !Number.isSafeInteger(revision) || revision < 1) throw serviceError("INVALID_ARGUMENT", "expected-revision must be a positive safe integer");
-  return revision;
+export function parseRevision(value: string | undefined): string | undefined {
+  if (value !== undefined && (typeof value !== "string" || !value.length)) throw serviceError("INVALID_ARGUMENT", "expected-revision must be a non-empty revision string");
+  return value;
 }

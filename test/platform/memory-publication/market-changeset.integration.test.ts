@@ -58,7 +58,8 @@ async function withManagedMarket(run: (fixture: MarketFixture) => Promise<void>)
     process.env.MEMSPHERE_PROJECT = "managed";
     await runGit(["init", "-b", "master"], { cwd: workspace });
     process.chdir(workspace);
-    await managedProjectFixture("managed", { bind: true });
+    // Import plans provide the Memory under test; bundled installation is separate.
+    await managedProjectFixture("managed", { bind: true, systemMemory: false });
     const project = (await readProjectRegistry(home)).projects.managed;
     assert(project);
     await run({ home, project: "managed", workspace, memoryRoot: join(project.root, "memory") });

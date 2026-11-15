@@ -27,7 +27,10 @@ test("Managed ChangeSet publishes atomically and enforces target CAS", async () 
     process.env.MEMSPHERE_HOME = home;
     process.env.GIT_CONFIG_GLOBAL = gitConfig;
     process.chdir(workspace);
-    await managedProjectFixture("project", { bind: true });
+    // These publication/CAS cases create every referenced Memory themselves.
+    // Bundled System Memory installation has its own contract tests; loading it
+    // here makes every candidate validation rescan unrelated shipped documents.
+    await managedProjectFixture("project", { bind: true, systemMemory: false });
     const registry = await readProjectRegistry(home);
     const memoryRoot = join(registry.projects.project.root, "memory");
 

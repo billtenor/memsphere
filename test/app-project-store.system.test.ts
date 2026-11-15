@@ -412,6 +412,23 @@ test("removing and re-registering a Store preserves data but invalidates old tok
   assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"old",count:1});
 });
 
+test("Settings re-registration assigns a fresh identity and rejects an earlier App write",{timeout:30000},async t=>{
+  const f=await valueFixture(t);const first=(await f.read()).binding;
+  const {writeFile}=await import("node:fs/promises"),{join}=await import("node:path");
+  const {readProjectConfig}=await import("../src/config.js");
+  const {readProjectConfigDocument,editableProjectConfigDraft,writeProjectConfigDraft}=await import("../src/config-management.js");
+  const globalConfigPath=join(f.fixture.home,"config.json");await writeFile(globalConfigPath,"{}");
+  const resolved=await readProjectConfig("test-project",f.fixture.home);
+  const initial=await readProjectConfigDocument(resolved.configPath,resolved),binding=initial.raw.dataStores!.first;
+  const remove=editableProjectConfigDraft(initial);delete remove.dataStores!.first;
+  const removed=await writeProjectConfigDraft({document:initial,expectedRevision:initial.revision,draft:remove,globalConfigPath});
+  const recreate=editableProjectConfigDraft(removed);recreate.dataStores!.first=binding;
+  const restored=await writeProjectConfigDraft({document:removed,expectedRevision:removed.revision,draft:recreate,globalConfigPath});
+  assert.notEqual(restored.raw.dataStores!.first.registrationId,binding.registrationId);
+  await assert.rejects(f.invoke("write",{token:first.token,value:{name:"wrong",count:3}}),{code:"APP_STORE_BINDING_CHANGED"});
+  assert.deepEqual((await f.readData({},f.fixture.root,"first","one")).value,{name:"old",count:1});
+});
+
 test("a new host rejects an old token after same-ID re-registration without intervening App calls",{timeout:30000},async t=>{
   const f=await valueFixture(t);const token=(await f.read()).binding.token;
   await removeBusinessStore({},f.fixture.root,"first");await f.fixture.createStore("first");

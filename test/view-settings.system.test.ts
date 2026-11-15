@@ -591,3 +591,75 @@ test("Project Settings rejects Human prompt fields before saving and preserves d
     }
   });
 });
+
+test("TOS credentials settings save through authenticated CAS and never expose vault contents", async () => {
+  await withSettingsServer("0.0.0.0", async ({ origin, globalConfigPath, token }) => {
+    const endpoint = `${origin}/api/settings/global/tos-credentials`;
+    assert.equal((await fetch(endpoint)).status, 401);
+    const headers = { authorization: `Bearer ${token}`, "content-type": "application/json", origin, "sec-fetch-site": "same-origin" };
+    const before = await (await fetch(endpoint, { headers })).json();
+    const credentials = { accessKeyId: "fixture-ak", accessKeySecret: "fixture-secret", stsToken: "fixture-token" };
+    const saved = await fetch(endpoint, { method: "PUT", headers, body: JSON.stringify({ id: "test", credentials, expectedRevision: before.revision }) });
+    assert.equal(saved.status, 200);
+    const result = await saved.json();
+    assert.deepEqual(result.items, [{ id: "test" }]);
+    const stale = await fetch(endpoint, { method: "PUT", headers, body: JSON.stringify({ id: "test", credentials, expectedRevision: before.revision }) });
+    assert.equal(stale.status, 409);
+    const global = await (await fetch(`${origin}/api/settings/global`, { headers })).json();
+    assert.deepEqual(global.tosCredentialIds, ["test"]);
+    const exposed = JSON.stringify([result, global, await (await fetch(endpoint, { headers })).json()]);
+    const disk = JSON.parse(await readFile(globalConfigPath, "utf8"));
+    for (const secret of [...Object.values(credentials), disk.tosCredentials.key, disk.tosCredentials.entries.test.ciphertext]) assert.ok(!exposed.includes(secret));
+    assert.ok(!JSON.stringify(disk).includes(credentials.accessKeySecret));
+    const { decryptTosCredential } = await import("../src/tos-credential-codec.js");
+    assert.deepEqual(decryptTosCredential("test", disk.tosCredentials), credentials);
+  });
+});
+
+test("malformed TOS credential JSON never echoes request material", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin, globalConfigPath }) => {
+    const before = await readFile(globalConfigPath, "utf8");
+    const response = await fetch(`${origin}/api/settings/global/tos-credentials`, { method: "PUT", headers: { "content-type": "application/json", origin, "sec-fetch-site": "same-origin" }, body: "my-secret-material" });
+    assert.equal(response.status, 400);
+    assert.ok(!(await response.text()).includes("my-secret-material"));
+    assert.equal(await readFile(globalConfigPath, "utf8"), before);
+  });
+});
+
+test("TOS credential deletion preserves other credentials and Project bindings under authenticated CAS", async () => {
+  await withSettingsServer("0.0.0.0", async ({origin, globalConfigPath, configPath, token}) => {
+    const {listTosCredentials, saveTosCredential} = await import("../src/tos-credentials.js");
+    for (const id of ["remove", "keep"]) await saveTosCredential(globalConfigPath,id,{accessKeyId:`${id}-ak`,accessKeySecret:`${id}-secret`},(await listTosCredentials(globalConfigPath)).revision);
+    const endpoint=`${origin}/api/settings/global/tos-credentials`;
+    const headers={authorization:`Bearer ${token}`,"content-type":"application/json",origin,"sec-fetch-site":"same-origin"};
+    const previous=await listTosCredentials(globalConfigPath);
+    const homeBefore=JSON.parse(await readFile(globalConfigPath,"utf8")), projectBefore=await readFile(configPath,"utf8");
+    const response=await fetch(endpoint,{method:"DELETE",headers,body:JSON.stringify({id:"remove",expectedRevision:previous.revision})});
+    assert.equal(response.status,200);const body=await response.json();assert.deepEqual(body.items,[{id:"keep"}]);
+    const homeAfter=JSON.parse(await readFile(globalConfigPath,"utf8"));
+    assert.equal(homeAfter.tosCredentials.entries.remove,undefined);
+    assert.deepEqual(homeAfter.tosCredentials.entries.keep,homeBefore.tosCredentials.entries.keep);
+    assert.equal(homeAfter.tosCredentials.key,homeBefore.tosCredentials.key);
+    assert.equal(await readFile(configPath,"utf8"),projectBefore);
+    assert.ok(!JSON.stringify(body).includes("secret"));
+    const beforeConflict=await readFile(globalConfigPath,"utf8");
+    assert.equal((await fetch(endpoint,{method:"DELETE",headers,body:JSON.stringify({id:"keep",expectedRevision:previous.revision})})).status,409);
+    assert.equal(await readFile(globalConfigPath,"utf8"),beforeConflict);
+    const meta=await (await fetch(`${origin}/api/settings/meta`)).json();assert.equal(Object.hasOwn(meta,"tosCredentialIds"),false);
+  });
+});
+
+test("TOS credential deletion rejects unauthorized, cross-origin and malformed writes without side effects", async () => {
+  await withSettingsServer("0.0.0.0", async ({origin,globalConfigPath,token}) => {
+    const before=await readFile(globalConfigPath,"utf8"),endpoint=`${origin}/api/settings/global/tos-credentials`;
+    for(const [headers,body,status] of [
+      [{"content-type":"application/json",origin},JSON.stringify({id:"test",expectedRevision:"old"}),401],
+      [{authorization:`Bearer ${token}`,"content-type":"application/json",origin:"https://other.invalid"},JSON.stringify({id:"test",expectedRevision:"old"}),403],
+      [{authorization:`Bearer ${token}`,"content-type":"application/json",origin,"sec-fetch-site":"same-origin"},"secret-malformed",400],
+      [{authorization:`Bearer ${token}`,"content-type":"application/json",origin,"sec-fetch-site":"same-origin"},JSON.stringify({id:"test"}),400]
+    ] as const){
+      const response=await fetch(endpoint,{method:"DELETE",headers,body});assert.equal(response.status,status);
+      assert.ok(!(await response.text()).includes("secret-malformed"));assert.equal(await readFile(globalConfigPath,"utf8"),before);
+    }
+  });
+});
