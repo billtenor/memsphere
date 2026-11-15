@@ -769,6 +769,11 @@ test("TOS credential editing retains omitted fields and isolates other credentia
   await withTosCredentialPage(t, async (page, config) => {
     assert.equal(await page.getByRole("button",{name:"TOS 凭据",exact:true}).count(),0,"Credentials are not a top-level section");
     await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    const item=page.locator('[data-credential="alternate"]'),editor=item.locator(".settings-credential-editor");
+    assert.equal(await editor.count(),1,"Editor expands inside the selected credential item");
+    const rowBox=await item.locator(".settings-credential-row").boundingBox(),editorBox=await editor.boundingBox();
+    assert.ok(rowBox&&editorBox);assert.ok(Math.abs(rowBox.x-editorBox.x)<1&&Math.abs(rowBox.width-editorBox.width)<1,"Credential row and editor must have equal width and aligned edges");
+    await assertSettingActionsAligned(item.locator(".settings-row-actions"));
     assert.equal(await page.locator('[data-field="tosCredential.id"]').isDisabled(),true);
     assert.equal(await page.locator('[data-field="tosCredential.accessKeyId"]').inputValue(),"");
     assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
@@ -873,17 +878,19 @@ test("Store deletion is available while collapsed and only unbinds after confirm
     const before=await readFile(config.configPath,"utf8"), homeBefore=await readFile(join(config.homeRoot!,"config.json"),"utf8");
     const origin=new URL(page.url()).origin;
     await page.goto(`${origin}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
-    const row=page.locator('details[data-business-store="assets"]');await row.waitFor();assert.equal(await row.getAttribute("open"),null);
+    const row=page.locator('details[data-business-store="assets"]');await row.waitFor({state:"attached"});assert.equal(await row.getAttribute("open"),null);
     const remove=()=>page.getByRole("button",{name:"删除 Store assets",exact:true});
     assert.equal(await remove().isVisible(),true);assert.equal(await remove().evaluate(el=>el.closest("details")),null);
+    await assertSettingActionsAligned(row.locator("..").locator(".settings-row-actions"));
     await page.setViewportSize({width:390,height:844});assert.equal(await remove().isVisible(),true);
+    await assertSettingActionsAligned(row.locator("..").locator(".settings-row-actions"));
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
     assert.equal(await row.locator(".settings-store-type").isVisible(),false);
-    await row.getByRole("button",{name:"配置",exact:true}).click();
-    await row.getByRole("button",{name:"收起",exact:true}).waitFor();
+    await row.locator("..").getByRole("button",{name:"配置",exact:true}).click();
+    await row.locator("..").getByRole("button",{name:"收起",exact:true}).waitFor();
     assert.equal(await row.locator(".settings-store-type").isVisible(),true);
-    await row.getByRole("button",{name:"收起",exact:true}).click();
-    await row.getByRole("button",{name:"配置",exact:true}).waitFor();
+    await row.locator("..").getByRole("button",{name:"收起",exact:true}).click();
+    await row.locator("..").getByRole("button",{name:"配置",exact:true}).waitFor();
     assert.equal(await row.locator(".settings-store-type").isVisible(),false);
     page.once("dialog",dialog=>dialog.dismiss());await remove().click();assert.equal(await row.count(),1);
     assert.equal(await readFile(config.configPath,"utf8"),before);
@@ -926,6 +933,11 @@ test("View package removal requires confirmation and preserves its files",async 
   });
 });
 
+async function assertSettingActionsAligned(actions: import("playwright").Locator): Promise<void> {
+  const buttons=actions.getByRole("button"),first=await buttons.nth(0).boundingBox(),second=await buttons.nth(1).boundingBox();
+  assert.ok(first&&second);assert.ok(Math.abs(first.y-second.y)<1&&Math.abs(first.height-second.height)<1,"Row action buttons must share a baseline and height");
+}
+
 async function withTosCredentialPage(t: TestContext, action: (page: Page, config: MemsphereConfig) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "memsphere-tos-credential-browser-"));
   t.after(() => rm(dir, { recursive: true, force: true }));
@@ -963,6 +975,6 @@ async function selectTosSetting(page: Page, path: string, name: string): Promise
 
 async function openTosStore(page: Page, id: string): Promise<void> {
   const row=page.locator(`details[data-business-store="${id}"]`);
-  await row.waitFor();
-  if(await row.getAttribute("open")===null)await row.locator("summary").click();
+  await row.waitFor({state:"attached"});
+  if(await row.getAttribute("open")===null)await row.locator("..").getByRole("button",{name:"配置",exact:true}).click();
 }
