@@ -107,14 +107,34 @@ test("Real View API and independently launched CLI share records, revisions and 
   try {
   const html = await (await fetch(origin)).text();
   assert.match(html, /appApiBase/);
-  const record = await invoke("create", { description: "View expense", amount: 25 }) as { id: string; revision: number };
+  const record = await invoke("create", { description: "View expense", amount: 25 }) as { id: string; revision: string };
+  assert.equal(typeof record.revision, "string");
   const list = JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "list"], { encoding: "utf8" }));
   assert.equal(list.records[0].id, record.id);
-  execFileSync(process.execPath, [executable, "--ledger", ledger, "submit", "--id", record.id, "--revision", String(record.revision)], { encoding: "utf8" });
+  assert.equal(list.records[0].revision, record.revision);
+  const models = await createProjectModelHost({}, { root: context.primary.paths.root });
+  const store = await models.manager.getStore({}, "apps/org.memsphere.expense/ledger");
+  assert.equal(store.kind, "ValueStore");
+  if (store.kind !== "ValueStore") throw new Error("Expected expense ValueStore");
+  const updated = await store.update({}, record.id, { description: "Updated expense", amount: 30, status: "draft" }, { expectedRevision: record.revision });
+  assert.notEqual(updated.revision, record.revision);
+  await assert.rejects(invoke("submit", { id: record.id, revision: record.revision }), /revision conflict/);
+  assert.throws(() => execFileSync(process.execPath, [executable, "--ledger", ledger, "submit", "--id", record.id, "--revision", record.revision], { encoding: "utf8", stdio: "pipe" }), /revision conflict/);
+  await assert.rejects(invoke("submit", { id: record.id, revision: Number(updated.revision) }), /current revision/);
+  await assert.rejects(invoke("submit", { id: record.id, revision: "" }), /current revision/);
+  assert.deepEqual(await store.get({}, record.id), updated);
+  const submitted = JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "submit", "--id", record.id, "--revision", updated.revision], { encoding: "utf8" }));
+  assert.equal(typeof submitted.revision, "string");
+  assert.notEqual(submitted.revision, updated.revision);
   assert.equal((await invoke("list", {}) as any).records[0].value.status, "submitted");
+  const cliRecord = JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "create", "--description", "CLI expense", "--amount", "12"], { encoding: "utf8" }));
+  assert.equal(typeof cliRecord.revision, "string");
+  const viewSubmitted = await invoke("submit", { id: cliRecord.id, revision: cliRecord.revision });
+  const cliList = JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "list"], { encoding: "utf8" }));
+  assert.deepEqual(cliList.records.find((item: { id: string }) => item.id === cliRecord.id), viewSubmitted);
+  assert.equal(viewSubmitted.value.status, "submitted");
   await assert.rejects(invoke("create", { description: "Invalid", amount: -1 }), /positive/);
   assert.throws(() => execFileSync(process.execPath, [executable, "--ledger", ledger, "create", "--description", "Invalid", "--amount", "-1"], { encoding: "utf8", stdio: "pipe" }), /positive/);
-  const models = await createProjectModelHost({}, { root: context.primary.paths.root });
   assert.equal((await models.definition("example/expense.json")).origin, "app");
   for (const operation of ["update", "delete"] as const) {
     await assert.rejects(mutateModel({}, context.primary.paths.root, operation, "example/expense.json",
@@ -123,6 +143,6 @@ test("Real View API and independently launched CLI share records, revisions and 
   }
   await setAppEnabled(context, "org.memsphere.expense", false);
   await assert.rejects(invoke("list", {}), /disabled/);
-  assert.equal(JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "list"], { encoding: "utf8" })).records.length, 1);
+  assert.equal(JSON.parse(execFileSync(process.execPath, [executable, "--ledger", ledger, "list"], { encoding: "utf8" })).records.length, 2);
   } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 }));
