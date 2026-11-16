@@ -1,5 +1,5 @@
 import { appSettingsText } from "./app-settings-copy.js";
-import type { AppSettingsPresentationContext, AppSettingsSnapshot, SettingsConfig, SettingsPath } from "./app-settings-contracts.js";
+import type { AppSettingsStoreChoices, AppSettingsPresentationContext, AppSettingsSnapshot, SettingsConfig, SettingsPath } from "./app-settings-contracts.js";
 const clone = <T>(value: T): T => structuredClone(value);
 const canonical = (v: unknown): string => Array.isArray(v) ? `[${v.map(canonical)}]` : v && typeof v === "object" ? `{${Object.keys(v).sort().map(k => `${JSON.stringify(k)}:${canonical((v as SettingsConfig)[k])}`).join(",")}}` : JSON.stringify(v);
 function assertJson(value: unknown, seen = new Set<object>()): void {
@@ -55,11 +55,7 @@ export class AppSettingsController implements AppSettingsPresentationContext {
     }, readonly transport: (action: "validate" | "save", body: {
         config: SettingsConfig;
         expectedRevision: string;
-    }, signal: AbortSignal) => Promise<any>, readonly choices: (key: string, signal?: AbortSignal) => Promise<{
-        candidates: string[];
-        diagnostic?: string;
-        storeId?: unknown;
-    }>, readonly deadlines = { validate: 15000, save: 30000 }, readonly schema?: Readonly<Record<string, unknown>>, readonly locale = "zh-CN") {
+    }, signal: AbortSignal) => Promise<any>, readonly choices: (key: string, signal?: AbortSignal) => Promise<AppSettingsStoreChoices>, readonly deadlines = { validate: 15000, save: 30000 }, readonly schema?: Readonly<Record<string, unknown>>, readonly locale = "zh-CN") {
         this.#saved = clone(initial.config);
         this.#draft = clone(initial.config);
         this.#revision = initial.revision;

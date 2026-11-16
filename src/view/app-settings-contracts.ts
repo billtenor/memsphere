@@ -21,6 +21,15 @@ export interface AppSettingsSnapshot {
     }[];
     readonly notice: string;
 }
+export interface AppSettingsStoreChoices {
+    readonly key: string;
+    readonly configKey: string;
+    readonly model: string;
+    readonly kind: "ValueStore" | "DataStore";
+    readonly candidates: readonly string[];
+    readonly diagnostic?: string;
+    readonly storeId?: unknown;
+}
 export interface AppSettingsPresentationContext {
     readonly projectId: string;
     readonly app: Readonly<{
@@ -37,11 +46,7 @@ export interface AppSettingsPresentationContext {
     validate(): Promise<unknown>;
     save(): Promise<unknown>;
     reset(): void;
-    getStoreChoices(key: string): Promise<{
-        candidates: string[];
-        diagnostic?: string;
-        storeId?: unknown;
-    }>;
+    getStoreChoices(key: string): Promise<AppSettingsStoreChoices>;
 }
 export type SettingsOptions = readonly (Omit<SelectOptionDescriptor, "value"> & {
     readonly value: unknown;

@@ -3,7 +3,7 @@ import test from "node:test";
 import { AppSettingsController } from "../src/view/app-settings-controller.js";
 const deferred = () => { let resolve!: (v: any) => void; const promise = new Promise<any>(r => resolve = r); return { promise, resolve }; };
 function fixture(transport: any = async (_: unknown, body: any) => ({ ...body, revision: "new" }), deadlines = { validate: 15000, save: 30000 }) {
-    return new AppSettingsController("project", { id: "example.app", name: "Example" }, true, { config: { name: "A", prefs: { color: "blue" } }, revision: "old" }, transport, async () => ({ candidates: [] }), deadlines);
+    return new AppSettingsController("project", { id: "example.app", name: "Example" }, true, { config: { name: "A", prefs: { color: "blue" } }, revision: "old" }, transport, async () => ({ key:"records",configKey:"store",model:"record.json",kind:"ValueStore" as const,candidates: [] }), deadlines);
 }
 test("save captures one candidate and rejects editing, reset and duplicate requests until confirmed", async () => {
     const done = deferred();
@@ -77,11 +77,15 @@ test("timeout releases busy, retains unconfirmed draft and ignores late success"
     assert.equal(c.getState().revision, "old");
     c.dispose();
 });
-test("disposal invalidates pending and future callbacks; JSON APIs reject lossy values", async () => {
-    const done = deferred();
-    const c = fixture(() => done.promise);
+test("JSON APIs reject values that cannot be represented without loss", () => {
+    const c=fixture();
     for (const value of [NaN, Infinity, undefined, { bad: undefined }, new Date()])
         assert.throws(() => c.setValue(["name"], value));
+    c.dispose();
+});
+test("disposal invalidates pending and future callbacks", async () => {
+    const done = deferred();
+    const c = fixture(() => done.promise);
     const pending = c.validate();
     c.dispose();
     await assert.rejects(pending, { code: "APP_SETTINGS_CLOSED" });

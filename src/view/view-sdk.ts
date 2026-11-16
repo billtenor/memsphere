@@ -1,4 +1,4 @@
-export type { AppSettingsPresentationContext, AppSettingsSnapshot, SettingsFormDescriptor, SettingsFieldDescriptor } from "./app-settings-contracts.js";
+export type { AppSettingsStoreChoices, AppSettingsPresentationContext, AppSettingsSnapshot, SettingsFormDescriptor, SettingsFieldDescriptor } from "./app-settings-contracts.js";
 import type { AppSettingsPresentationContext, SettingsFormDescriptor } from "./app-settings-contracts.js";
 export const VIEW_SDK_VERSION = "1.1.0";
 export type MaybePromise<T> = T | Promise<T>;

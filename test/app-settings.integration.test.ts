@@ -53,14 +53,21 @@ test("two simultaneous App saves accept one revision exactly once", async (t) =>
     const rejected = results.find(r => r.status === "rejected") as PromiseRejectedResult;
     assert.equal(rejected.reason.code, "APP_CONFIG_CONFLICT");
 });
-test("disabled Apps share a settings package through distinct bound instances; ambiguous Home identity rejects every owner", async (t) => {
+async function twoSettingsApps(t: import("node:test").TestContext) {
     const { project, context, root, manifest } = await appSettingsFixture(t, true);
     await writeFile(join(root, "app.json"), JSON.stringify({ ...manifest, id: "second.app" }));
     await installApp(context, root, { name: "Second", store: "first" });
+    return {project,root};
+}
+test("disabled Apps sharing a settings package get distinct bound instances",async t=>{
+    const {project}=await twoSettingsApps(t);
     const resolved = await appSettingsCompositions(project, []);
     assert.equal(resolved.result.length, 2);
     assert.equal(resolved.diagnostics.length, 0);
     assert.notEqual(resolved.result[0].composition.instances[0].instanceId, resolved.result[1].composition.instances[0].instanceId);
+ });
+test("a different Home digest under the same package identity rejects all App owners",async t=>{
+    const {project,root}=await twoSettingsApps(t);
     const home = join(root, "home-settings");
     await mkdir(home);
     await writeFile(join(home, "module.json"), await readFile(join(root, "settings/module.json")));

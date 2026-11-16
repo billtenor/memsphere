@@ -1,10 +1,39 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import {removeBusinessStore} from "../src/project/business-stores.js";
 import assert from "node:assert/strict";
-import test from "node:test";
-import { browserScope } from "./helpers/browser.js";
+import nodeTest, {type TestContext, type TestOptions} from "node:test";
+import { browserScope as sharedBrowserScope } from "./helpers/browser.js";
 import { appSettingsServer } from "./helpers/app-settings.js";
 import { readAppSettings } from "../src/app/settings.js";
-import { configureApp } from "../src/app/install.js";
+import { configureApp, installApp } from "../src/app/install.js";
+type RunTest = (t: TestContext) => void | Promise<void>;
+function test(name:string,run:RunTest):Promise<void>;
+function test(name:string,options:TestOptions,run:RunTest):Promise<void>;
+function test(name:string,options:TestOptions|RunTest,run?:RunTest):Promise<void> {
+    return nodeTest(name,{timeout:90000,...(typeof options==="object"?options:{})},typeof options==="function"?options:run!);
+}
+async function browserScope() {
+    const browser=await sharedBrowserScope();
+    return {...browser,async newPage(options?:Parameters<typeof browser.newPage>[0]) {
+        const page=await browser.newPage(options);
+        page.setDefaultTimeout(10000);page.setDefaultNavigationTimeout(15000);
+        return page;
+    }};
+}
+function httpGate(t:TestContext) {
+    let arrived!:()=>void,reject!: (error:unknown)=>void,release!:()=>void;
+    const handshake=new Promise<void>((resolve,fail)=>{arrived=resolve;reject=fail;});
+    // Rejection may precede the UI click completing; it must still be delivered at await.
+    void handshake.catch(()=>{});
+    const gate=new Promise<void>(resolve=>release=resolve);
+    const timer=setTimeout(()=>fail(new Error("App HTTP handshake did not arrive within 15s")),15000);
+    const gateTimer=setTimeout(()=>release(),45000);
+    const cleanup=()=>{clearTimeout(timer);clearTimeout(gateTimer);release();};
+    const fail=(error:unknown)=>{reject(error);cleanup();};
+    t.after(cleanup);t.signal.addEventListener("abort",()=>fail(t.signal.reason),{once:true});
+    return {handshake,gate,arrived:()=>{clearTimeout(timer);arrived();},fail,release:cleanup};
+}
 async function customPage(t: import("node:test").TestContext) {
     const fixture = await appSettingsServer(t, "127.0.0.1", true);
     const browser = await browserScope(); t.after(() => browser.close());
@@ -121,14 +150,14 @@ test("a missing matching Store explains preparation without changing the saved t
 for (const action of ["validate", "save"] as const) test(`real HTTP ${action} locks public controls and SDK until the response is released`,async t=>{
     const {page,origin}=await customPage(t);
     await page.getByLabel("名称",{exact:true}).fill("Busy");
-    let release!:()=>void, arrived!:()=>void;
-    const gate=new Promise<void>(r=>release=r), handshake=new Promise<void>(r=>arrived=r);
+    const {gate,handshake,arrived,release,fail}=httpGate(t);
     const suffix=action==="validate"?"/validate":"";
     await page.route(`**/api/projects/test-project/settings/apps/example.app${suffix}`,async route=>{
         if(route.request().method()!==(action==="save"?"PUT":"POST")){await route.continue();return;}
-        const response=await route.fetch();arrived();await gate;await route.fulfill({response});
+        try { const response=await route.fetch({timeout:10000});arrived();await gate;await route.fulfill({response}); }
+        catch(error){fail(error);await route.abort().catch(()=>{});}
     });
-    t.after(release);
+    try {
     await page.getByRole("button",{name:action==="save"?"保存配置":"校验",exact:true}).click();
     await handshake;
     assert.equal(await page.getByLabel("名称",{exact:true}).isDisabled(),true);
@@ -142,6 +171,7 @@ for (const action of ["validate", "save"] as const) test(`real HTTP ${action} lo
     assert.deepEqual(codes,Array(6).fill("APP_SETTINGS_BUSY"));
     release();await page.waitForFunction(()=>!(globalThis as any).__appSettingsContext.getState().busy);
     assert.equal(await page.getByLabel("名称",{exact:true}).isDisabled(),false);
+    } finally {release();}
 });
 
 test("persisted save with a lost response stays unconfirmed without retry; reload recovers B and rejects the old revision",async t=>{
@@ -149,15 +179,17 @@ test("persisted save with a lost response stays unconfirmed without retry; reloa
     const a=await readAppSettings(project,"example.app");
     await page.getByLabel("名称",{exact:true}).fill("B");
     await page.getByLabel("记录 Store",{exact:true}).selectOption({label:"second"});
-    let arrived!:()=>void, release!:()=>void, requests=0;
-    const handshake=new Promise<void>(r=>arrived=r),gate=new Promise<void>(r=>release=r);
+    let requests=0;
+    const {gate,handshake,arrived,release,fail}=httpGate(t);
     await page.route("**/api/projects/test-project/settings/apps/example.app",async route=>{
         if(route.request().method()!=="PUT"){await route.continue();return;}
-        requests++;const response=await route.fetch();assert.equal(response.status(),200);arrived();await gate;
+        try {
+        requests++;const response=await route.fetch({timeout:10000});assert.equal(response.status(),200);arrived();await gate;
         // The server committed successfully, but its response is deliberately lost.
         await route.abort().catch(()=>{});
+        } catch(error){fail(error);await route.abort().catch(()=>{});}
     });
-    t.after(release);
+    try {
     await page.getByRole("button",{name:"保存配置",exact:true}).click();await handshake;
     const b=await readAppSettings(project,"example.app");assert.equal(b.config.name,"B");assert.equal(b.config.store,"second");assert.notEqual(b.revision,a.revision);
     await page.getByText("保存结果未确认，请重新读取后核实",{exact:true}).waitFor({timeout:35000});
@@ -171,6 +203,7 @@ test("persisted save with a lost response stays unconfirmed without retry; reloa
     const conflict=await fetch(`${origin}/api/projects/test-project/settings/apps/example.app`,{method:"PUT",headers:{origin,"content-type":"application/json"},body:JSON.stringify({config:a.config,expectedRevision:a.revision})});
     assert.equal(conflict.status,409);assert.equal((await conflict.json() as any).code,"APP_CONFIG_CONFLICT");
     const after=await readAppSettings(project,"example.app");assert.equal(after.revision,b.revision);assert.equal(after.config.store,"second");assert.equal(requests,1);
+    } finally {release();}
 });
 
 test("late options from a disposed presentation cannot overwrite the new form",async t=>{
@@ -222,4 +255,65 @@ test("validation preserves a confirmed pending restart until an actual View serv
     await page.goto(`${next}/projects/test-project/settings/apps?app=example.app`);await page.getByLabel("名称",{exact:true}).waitFor();
     assert.equal(await page.getByText(/当前 View 仍使用启动快照/).count(),0);
     const after=await (await fetch(`${next}/api/projects/test-project/settings/apps/example.app`)).json() as any;assert.equal(after.runtime.state,"unknown");
+});
+
+for (const custom of [false,true]) test(`${custom?"custom":"generic"} Store field applies Schema readOnly after configKey resolution`, {timeout:60000}, async t=>{
+    const {origin,project}=await appSettingsServer(t,"127.0.0.1",custom,"zh-CN",{readOnly:true});
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    const store=page.getByLabel(custom?"记录 Store":"records",{exact:true});
+    await store.locator("option",{hasText:"second"}).waitFor({state:"attached",timeout:10000});
+    assert.equal(await store.isDisabled(),true);
+    assert.equal(await store.inputValue(),"0");
+    await page.getByLabel(custom?"名称":"name",{exact:true}).fill("Other edit");
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor({timeout:10000});
+    assert.equal((await readAppSettings(project,"example.app")).config.store,"first");
+});
+for (const custom of [false,true]) test(`${custom?"custom":"generic"} Store field applies required and enum from its resolved configKey`, {timeout:60000}, async t=>{
+    const {origin}=await appSettingsServer(t,"127.0.0.1",custom,"zh-CN",{enum:["first"]});
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    const store=page.getByLabel(custom?"记录 Store":"records",{exact:true});
+    await page.getByText("records · record.json · ValueStore",{exact:true}).waitFor({timeout:10000});
+    assert.equal(await store.isDisabled(),false);
+    assert.equal(await store.getAttribute("required"),"");
+    assert.deepEqual(await store.locator("option").allTextContents(),["请选择","first"]);
+});
+
+test("custom and generic Apps keep independent configuration across save, switching and refresh",async t=>{
+    const {page,project,context,root,manifest}=await customPage(t);
+    await writeFile(join(root,"app.json"),JSON.stringify({...manifest,id:"generic.app",name:"Generic App",assets:{},entrypoints:{}}));
+    await installApp(context,root,{name:"Generic A",store:"second",untouched:{owner:"generic"}});
+    await page.getByLabel("名称",{exact:true}).fill("Custom B");
+    await page.getByLabel("记录 Store",{exact:true}).selectOption({label:"second"});
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    await page.getByRole("button",{name:"所有 App",exact:true}).click();
+    await page.locator('[data-app-id="generic.app"]').getByRole("button",{name:"配置",exact:true}).click();
+    assert.equal(await page.getByLabel("name",{exact:true}).inputValue(),"Generic A");
+    await page.getByLabel("name",{exact:true}).fill("Generic B");
+    await page.getByLabel("records",{exact:true}).selectOption({label:"first"});
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    await page.getByRole("button",{name:"所有 App",exact:true}).click();
+    await page.locator('[data-app-id="example.app"]').getByRole("button",{name:"配置",exact:true}).click();
+    assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Custom B");
+    await page.reload();await page.getByLabel("名称",{exact:true}).waitFor();
+    assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Custom B");
+    await page.getByRole("button",{name:"所有 App",exact:true}).click();
+    await page.locator('[data-app-id="generic.app"]').getByRole("button",{name:"配置",exact:true}).click();
+    await page.reload();await page.getByLabel("name",{exact:true}).waitFor();
+    assert.equal(await page.getByLabel("name",{exact:true}).inputValue(),"Generic B");
+    const custom=await readAppSettings(project,"example.app"),generic=await readAppSettings(project,"generic.app");
+    assert.equal(custom.config.store,"second");assert.equal(generic.config.store,"first");
+    assert.deepEqual(custom.config.untouched,{extra:true});assert.deepEqual(generic.config.untouched,{owner:"generic"});
+});
+test("App settings can be edited, reached by Tab and saved with Enter",async t=>{
+    const {page,project}=await customPage(t);
+    await page.getByLabel("记录 Store",{exact:true}).locator("option",{hasText:"second"}).waitFor({state:"attached"});
+    await page.getByLabel("名称",{exact:true}).focus();
+    await page.keyboard.press("ControlOrMeta+A");await page.keyboard.type("Keyboard saved");
+    const save=page.getByRole("button",{name:"保存配置",exact:true});
+    let focused=false;
+    for(let i=0;i<15;i++) {await page.keyboard.press("Tab");focused=await save.evaluate(el=>document.activeElement===el);if(focused)break;}
+    assert.equal(focused,true);await page.keyboard.press("Enter");await page.getByText(/配置已保存。/).waitFor();
+    assert.equal((await readAppSettings(project,"example.app")).config.name,"Keyboard saved");
 });

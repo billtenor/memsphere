@@ -70,13 +70,19 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                     context.setValue(path, value);
             });
             const schema = context.getState().schema;
-            let node: any = schema, parent: any;
-            for (const part of path) {
-                parent = node;
-                node = node?.properties?.[part];
-            }
-            const required = Boolean(field.required || parent?.required?.includes(path.at(-1)));
-            const schemaReadOnly = Boolean(schema?.readOnly || node?.readOnly);
+            let node: any, required = false, schemaReadOnly = false;
+            const resolveConstraints = () => {
+                node = schema;
+                let parent: any;
+                schemaReadOnly = Boolean(schema?.readOnly);
+                for (const part of path) {
+                    parent = node;
+                    node = node?.properties?.[part];
+                    schemaReadOnly ||= Boolean(node?.readOnly);
+                }
+                required = Boolean(field.required || parent?.required?.includes(path.at(-1)));
+            };
+            resolveConstraints();
             const permitted = (values: typeof choices) => Array.isArray(node?.enum) ? values.filter(c => node.enum.some((v: unknown) => JSON.stringify(v) === JSON.stringify(c.value))) : values;
             choices = permitted(choices);
             const base = { label: field.label, description: field.description, required, disabled: !context.canWrite };
@@ -125,7 +131,7 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                 const value = settingsValue(s.draft, path);
                 const buffer = s.textBuffers.find(b => JSON.stringify(b.path) === JSON.stringify(path));
                 const error = localError || buffer?.error || s.issues.find(i => JSON.stringify(i.path) === JSON.stringify(path))?.message;
-                const shared = { ...base, disabled, error: error ? { text: error } : undefined };
+                const shared = { ...base, required, disabled, error: error ? { text: error } : undefined };
                 if (field.kind === "boolean")
                     (control as ReturnType<ViewUi["checkboxField"]>).update({ ...shared, checked: value === true, onChange: change });
                 else if (field.kind === "select" || field.kind === "projectStore") {
@@ -151,10 +157,10 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                     if (!("configKey" in result) || typeof result.configKey !== "string")
                         throw Error("Undeclared Store requirement");
                     path = [result.configKey];
-                    choices = result.candidates.map(v => ({ value: v, label: { text: v } }));
+                    resolveConstraints();
+                    choices = permitted(result.candidates.map(v => ({ value: v, label: { text: v } })));
                     choiceReady = true;
-                    const metadata=result as typeof result & {key?:string;model?:string;kind?:string};
-                    storeMetadata.textContent=[metadata.key,metadata.model,metadata.kind].filter(Boolean).join(" · ");
+                    storeMetadata.textContent=[result.key,result.model,result.kind].filter(Boolean).join(" · ");
                     localError = [result.diagnostic, result.candidates.length?undefined:appSettingsText(locale,"noStores")].filter(Boolean).join("；");
                     update(context.getState());
                 }).catch(e => { if (!context.signal.aborted) {

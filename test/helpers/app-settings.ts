@@ -10,7 +10,7 @@ import { installApp, setAppEnabled, checkApp } from "../../src/app/install.js";
 import type { AppProject } from "../../src/app/state.js";
 import type { ProjectContext } from "../../src/project/resolver.js";
 export type SettingsFixtureKind = boolean | "hang-import" | "hang-apply" | "bad-root" | "incompatible" | "late-apply" | "late-options" | "business-view";
-export async function appSettingsFixture(t: import("node:test").TestContext, custom: SettingsFixtureKind = false) {
+export async function appSettingsFixture(t: import("node:test").TestContext, custom: SettingsFixtureKind = false, storeSchema: Record<string, unknown> = {}) {
     const f = await businessFixture(t);
     for (const kind of ["concepts", "statements", "procedures", "schemas"])
         await mkdir(join(f.root, "memory", kind));
@@ -21,7 +21,7 @@ export async function appSettingsFixture(t: import("node:test").TestContext, cus
     const root = join(f.directory, "app");
     await mkdir(root);
     const manifest: any = { schemaVersion: 1, id: "example.app", name: "Example", version: "1.0.0", description: "Example", configuration: "schema.json", projectStores: [{ key: "records", model: "record.json", kind: "ValueStore", configKey: "store" }] };
-    await writeFile(join(root, "schema.json"), JSON.stringify({ type: "object", properties: { name: { type: "string" }, store: { type: "string" }, count: { type: "integer", minimum: 1 }, choice: { enum: [false, true, 1, 2] }, prefs: { type: "object" } }, required: ["name", "store"] }));
+    await writeFile(join(root, "schema.json"), JSON.stringify({ type: "object", properties: { name: { type: "string" }, store: { type: "string", ...storeSchema }, count: { type: "integer", minimum: 1 }, choice: { enum: [false, true, 1, 2] }, prefs: { type: "object" } }, required: ["name", "store"] }));
     if (custom) {
         await mkdir(join(root, "settings"));
         manifest.assets = { viewPackages: [{ key: "settings", path: "settings" }] };
@@ -61,8 +61,8 @@ export async function appSettingsFixture(t: import("node:test").TestContext, cus
     }
     return { f, project, context, root, manifest };
 }
-export async function appSettingsServer(t: import("node:test").TestContext, host = "127.0.0.1", custom: SettingsFixtureKind = false,locale="zh-CN") {
-    const fixture = await appSettingsFixture(t, custom), { f, project } = fixture;
+export async function appSettingsServer(t: import("node:test").TestContext, host = "127.0.0.1", custom: SettingsFixtureKind = false,locale="zh-CN", storeSchema: Record<string, unknown> = {}) {
+    const fixture = await appSettingsFixture(t, custom, storeSchema), { f, project } = fixture;
     await writeFile(join(f.home, "config.json"), JSON.stringify({language:locale, view: { host, port: 30002 } }));
     const config = { configPath: project.paths.configPath, scopeRoot: f.root, homeRoot: f.home, language: locale, memoryRoot: project.memoryRoot, reviewsRoot: join(f.root, "reviews"), runsRoot: join(f.root, "runs"), archiveRoot: join(f.root, "archives"), debug: { agentReview: false, root: join(f.home, ".runtime/debug") }, view: { host, port: 30002 }, project: { name: project.name, revision: "fixture", store: project.config.store, mounted: [] } } as MemsphereConfig;
     const token = "settings-test-token-" + "a".repeat(43);

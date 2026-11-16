@@ -1,3 +1,4 @@
+import type { AppSettingsStoreChoices } from "../view/app-settings-contracts.js";
 import type { AppProject, AppInstallation } from "./state.js";
 import { appConfigurationRevision, readAppState, requireApp } from "./state.js";
 import { readAppPackage, validateAppConfig } from "./package.js";
@@ -9,7 +10,7 @@ import { withSharedStoreLock } from "../project/shared-store-lock.js";
 export async function listAppSettings(project: AppProject) {
     return Object.values((await readAppState(project)).installations).map(app => ({ id: app.manifest.id, name: app.manifest.name, version: app.manifest.version, description: app.manifest.description, enabled: app.enabled, configurable: Boolean(app.manifest.configuration || app.manifest.entrypoints.settings || app.manifest.projectStores.length || Object.keys(app.config).length) }));
 }
-export async function appStoreChoices(project: AppProject, app: AppInstallation) {
+export async function appStoreChoices(project: AppProject, app: AppInstallation): Promise<AppSettingsStoreChoices[]> {
     const config = await readBusinessProject(project.paths.root);
     return Promise.all(app.manifest.projectStores.map(async (requirement) => {
         const candidates: string[] = [];

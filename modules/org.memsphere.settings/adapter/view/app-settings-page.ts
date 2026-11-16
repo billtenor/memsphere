@@ -1,5 +1,5 @@
 import { appSettingsText } from "../../../../src/view/app-settings-copy.js";
-import { portableSlots, type ViewUi, type SlotRegistry, type SettingsFieldDescriptor, type AppSettingsPresentationContext } from "@memsphere/view-sdk";
+import { portableSlots, type ViewUi, type SlotRegistry, type SettingsFieldDescriptor, type AppSettingsPresentationContext, type AppSettingsStoreChoices } from "@memsphere/view-sdk";
 import { AppSettingsController } from "../../../../src/view/app-settings-controller.js";
 type RecordValue = Record<string, any>;
 export class AppSettingsPage {
@@ -51,8 +51,8 @@ export class AppSettingsPage {
             }
             const detail = result as RecordValue;
             const controller = this.#controller = new AppSettingsController(this.projectId, { id, name: detail.name }, detail.canWrite, { config: detail.config, revision: detail.revision }, (action, body, signal) => this.#json(`/api/settings/apps/${encodeURIComponent(id)}${action === "validate" ? "/validate" : ""}`, { method: action === "validate" ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal }), async (key,signal) => {
-                const latest = await this.#json(`/api/settings/apps/${encodeURIComponent(id)}`, { signal: signal??controller.signal });
-                const requirement = latest.projectStores.find((r: RecordValue) => r.key === key);
+                const latest = await this.#json(`/api/settings/apps/${encodeURIComponent(id)}`, { signal: signal??controller.signal }) as { projectStores: AppSettingsStoreChoices[] };
+                const requirement = latest.projectStores.find((r) => r.key === key);
                 if (!requirement)
                     throw Error("Undeclared Project Store key");
                 return requirement;
