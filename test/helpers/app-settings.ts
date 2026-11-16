@@ -9,7 +9,7 @@ import { readBusinessProject } from "../../src/project/business-stores.js";
 import { installApp, setAppEnabled, checkApp, configureApp } from "../../src/app/install.js";
 import type { AppProject } from "../../src/app/state.js";
 import type { ProjectContext } from "../../src/project/resolver.js";
-export type SettingsFixtureKind = boolean | "hang-import" | "hang-apply" | "bad-root" | "incompatible" | "late-apply" | "late-options" | "business-view" | "array-fields" | "tuple-fields" | "readonly-custom";
+export type SettingsFixtureKind = boolean | "hang-import" | "hang-apply" | "bad-root" | "incompatible" | "late-apply" | "late-options" | "business-view" | "array-fields" | "tuple-fields" | "readonly-custom" | "parameterized-text";
 export async function appSettingsFixture(t: import("node:test").TestContext, custom: SettingsFixtureKind = false, storeSchema: Record<string, unknown> = {}) {
     const f = await businessFixture(t);
     for (const kind of ["concepts", "statements", "procedures", "schemas"])
@@ -29,6 +29,10 @@ export async function appSettingsFixture(t: import("node:test").TestContext, cus
         await writeFile(join(root, "settings/module.json"), JSON.stringify({ schemaVersion: 1, id: "example.settings", version: "1.0.0", view: { entry: "./index.js", sdk: "^1.1.0", contributions: [{ id: "configuration", cell: "org.memsphere.settings.app.configuration@1:app", priority: 100 }] } }));
         await writeFile(join(root, "settings/index.js"), `import {defineViewPlugin,portableSlots} from '@memsphere/view-sdk';
  export default defineViewPlugin({apiVersion:1,inject:['slots','ui'],uiVersion:1,apply(ctx){ctx.slots.register(portableSlots.appSettingsConfiguration,{id:'configuration',key:ctx.module.appId,value:{render(context){globalThis.__appSettingsContext=context;return ctx.ui.settingsForm({context,sections:[{id:'main',title:{text:'App 自定义分组'},description:{text:'先填写常用偏好，再选择用于保存记录的数据 Store。'},fields:[{kind:'text',path:['name'],label:{text:'名称'}},{kind:'integer',path:['count'],label:{text:'数量'}},{kind:'select',path:['choice'],label:{text:'类型选项'},options:[{value:false,label:{text:'否'}},{value:true,label:{text:'是'}},{value:1,label:{text:'一'}},{value:2,label:{text:'二'}}]},{kind:'json',path:['prefs'],label:{text:'偏好 JSON'}},{kind:'projectStore',key:'records',label:{text:'记录 Store'}}]}]});}}});}});`);
+    }
+    if(custom === "parameterized-text") {
+        const entry=await readFile(join(root,"settings/index.js"),"utf8");
+        await writeFile(join(root,"settings/index.js"),entry.replace("title:{text:'App 自定义分组'}", "title:{key:'配置 {app}',params:{app:'费用'}}").replace("description:{text:'先填写常用偏好，再选择用于保存记录的数据 Store。'}", "description:{key:'为 {app} 设置 {count} 项偏好',params:{app:'费用',count:3}}").replace("label:{text:'名称'}", "label:{key:'{app} 名称',params:{app:'费用'}}"));
     }
     if(custom === "array-fields" || custom === "tuple-fields") {
         const schema=JSON.parse(await readFile(join(root,"schema.json"),"utf8"));

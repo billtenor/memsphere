@@ -591,3 +591,33 @@ test("custom readOnly settings retain their original disabled controls and omit 
     for(const label of ["保存配置","取消修改","校验"])assert.equal(await page.getByRole("button",{name:label,exact:true}).count(),0);
     assert.equal((await readAppSettings(project,"example.app")).config.name,"A");
 });
+
+test("App settings section titles and descriptions interpolate TextRef parameters like field labels", async t => {
+    const {origin} = await appSettingsServer(t,"127.0.0.1","parameterized-text");
+    const browser=await browserScope();t.after(()=>browser.close());
+    const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    await page.getByLabel("费用 名称",{exact:true}).waitFor();
+    assert.equal(await page.locator(".mem-settings-section-heading h3").textContent(),"配置 费用");
+    assert.equal(await page.locator(".mem-settings-description").textContent(),"为 费用 设置 3 项偏好");
+    assert.equal(await page.getByLabel("费用 名称",{exact:true}).inputValue(),"A");
+});
+
+test("appearance API and real settings page exclude the App-owned configuration Slot", async t => {
+    const {origin} = await appSettingsServer(t,"127.0.0.1",true);
+    const cell="org.memsphere.settings.app.configuration@1:app";
+    const response=await fetch(`${origin}/api/settings/view-packages`);
+    assert.equal(response.status,200);
+    const catalog=await response.json() as {configurableSlots:Array<{id:string}>};
+    assert.equal(catalog.configurableSlots.some(slot=>slot.id===cell),false);
+    assert.equal(catalog.configurableSlots.some(slot=>slot.id==="org.memsphere.models.page.presentation@1:page"),true);
+    const browser=await browserScope();t.after(()=>browser.close());
+    const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/appearance`);
+    await page.getByRole("heading",{name:"界面配置",exact:true}).waitFor();
+    assert.equal(await page.locator(".settings-config-table").getByText(cell,{exact:true}).count(),0);
+    assert.equal(await page.locator(`[data-field="view_composition.slot.${cell}"]`).count(),0);
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    await page.getByText("App 自定义分组",{exact:true}).waitFor();
+    assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"A");
+});

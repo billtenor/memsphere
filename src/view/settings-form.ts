@@ -3,9 +3,9 @@ import { appSettingsText } from "./app-settings-copy.js";
 import type { ViewUi, TextRef } from "./view-sdk.js";
 import type { AppSettingsPresentationContext, AppSettingsSnapshot, SettingsFieldDescriptor, SettingsFormDescriptor, SettingsPath } from "./app-settings-contracts.js";
 import { settingsValue } from "./app-settings-controller.js";
+import { textValue } from "./text-ref.js";
 const forms = new WeakMap<HTMLElement, AppSettingsPresentationContext>();
 export const isSettingsForm = (root: HTMLElement, context: AppSettingsPresentationContext) => forms.get(root) === context;
-const text = (value: TextRef | undefined) => !value ? "" : "text" in value ? value.text : value.key;
 const allowed = new Set(["kind", "path", "key", "label", "description", "required", "options", "visible", "disabled"]);
 export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescriptor, locale = "zh-CN"): HTMLElement {
     if (!descriptor || Object.keys(descriptor).some(k => !["context", "sections"].includes(k)) || !Array.isArray(descriptor.sections))
@@ -24,7 +24,7 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
         const panel = document.createElement("section");
         panel.className = "mem-settings-section";
         const title = document.createElement("h3");
-        title.textContent = text(section.title);
+        title.textContent = textValue(section.title);
         const heading = document.createElement("header");
         heading.className = "mem-settings-section-heading";
         heading.append(title);
@@ -32,7 +32,7 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
         if (section.description) {
             const p = document.createElement("p");
             p.className = "mem-settings-description";
-            p.textContent = text(section.description);
+            p.textContent = textValue(section.description);
             heading.append(p);
         }
         const grid = document.createElement("div");

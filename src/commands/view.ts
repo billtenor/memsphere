@@ -3262,6 +3262,7 @@ const viewRuntimeDependencies = new Map([
   ["/assets/app-settings-schema.js", {compiled:new URL("../view/app-settings-schema.js",import.meta.url),source:new URL("../view/app-settings-schema.ts",import.meta.url)}],
   ["/assets/app-settings-copy.js", {compiled:new URL("../view/app-settings-copy.js",import.meta.url),source:new URL("../view/app-settings-copy.ts",import.meta.url)}],
   ["/assets/settings-form.js", { compiled:new URL("../view/settings-form.js",import.meta.url), source:new URL("../view/settings-form.ts",import.meta.url) }],
+  ["/assets/text-ref.js", { compiled:new URL("../view/text-ref.js",import.meta.url), source:new URL("../view/text-ref.ts",import.meta.url) }],
   ["/assets/app-settings-controller.js", { compiled:new URL("../view/app-settings-controller.js",import.meta.url), source:new URL("../view/app-settings-controller.ts",import.meta.url) }],
   ["/assets/procedure-graph-layout.js", { compiled: new URL("../view/procedure-graph-layout.js", import.meta.url), source: new URL("../../modules/shared/view/graph-layout.ts", import.meta.url) }],
   ["/assets/model-definition.js", {

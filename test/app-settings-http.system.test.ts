@@ -57,3 +57,16 @@ for(const method of ["POST","PUT"]) test(`App settings ${method} rejects readOnl
     const allowed=await request({...a.config,name:"B"});assert.equal(allowed.status,200);
     const after=await readAppSettings(project,"example.app");assert.equal(after.config.store,"first");assert.equal(after.config.name,method==="POST"?"A":"B");
 });
+
+for(const method of ["POST","PUT"]) test(`appearance ${method} rejects the App-owned Slot without changing Home config`,async t=>{
+    const {origin,f}=await appSettingsServer(t);
+    const configPath=join(f.home,"config.json");
+    const {readFile}=await import("node:fs/promises");
+    const before=await readFile(configPath,"utf8");
+    const document=await (await fetch(`${origin}/api/settings/global`)).json() as any;
+    const candidate={...document.config,view_composition:{packages:[],slots:{"org.memsphere.settings.app.configuration@1:app":"example.settings:settings:configuration"}}};
+    const response=await fetch(`${origin}/api/settings/global${method==="POST"?"/validate":""}`,{method,headers:{origin,"content-type":"application/json"},body:JSON.stringify({config:candidate,expectedRevision:document.diskRevision})});
+    assert.equal(response.status,422);
+    assert.match(JSON.stringify(await response.json()),/unknown configurable View Slot/);
+    assert.equal(await readFile(configPath,"utf8"),before);
+});

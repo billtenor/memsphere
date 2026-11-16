@@ -1,4 +1,5 @@
 import { createSettingsForm } from "./settings-form.js";
+import { textValue } from "./text-ref.js";
 import {
   isActionDescriptor,
   isBadgeDescriptor,
@@ -1154,11 +1155,6 @@ function assertDescriptor<T>(value: unknown, validate: (candidate: unknown) => c
     const keys = value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).sort().join(",") : typeof value;
     throw new TypeError(`View UI ${name} is invalid (received: ${keys || "no fields"})`);
   }
-}
-
-function textValue(value: TextRef): string {
-  if ("text" in value) return value.text;
-  return value.key.replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(value.params?.[name] ?? `{${name}}`));
 }
 
 export const viewUiStyles = `
