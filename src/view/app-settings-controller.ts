@@ -117,7 +117,18 @@ export class AppSettingsController implements AppSettingsPresentationContext {
     #changed() { this.#issues = []; this.#notice = ""; this.#status = "editing"; this.#emit(); }
     setValue(path: SettingsPath, value: unknown) { this.#editable(); this.#conflict(path); if (value === undefined)
         throw error("APP_CONFIG_INVALID", "Use removeValue to remove a field"); assertJson(value); this.#write(path, value); this.#changed(); }
-    removeValue(path: SettingsPath) { this.#editable(); this.#conflict(path); this.#write(path, undefined, true); this.#changed(); }
+    removeValue(path: SettingsPath) {
+        this.#editable(); this.#conflict(path);
+        const parent = path.slice(0, -1);
+        if (Array.isArray(settingsValue(this.#draft, parent))) {
+            const index = Number(path.at(-1));
+            for (const buffer of this.#buffers.values()) {
+                if (prefix(parent, buffer.path) && Number(buffer.path[parent.length]) >= index)
+                    throw error("APP_SETTINGS_TEXT_CONFLICT", this.#t("textConflict"));
+            }
+        }
+        this.#write(path, undefined, true); this.#changed();
+    }
     setText(path: SettingsPath, text: string, kind: "json" | "number" | "integer" = "json") {
         this.#editable();
         this.#conflict(path, true);

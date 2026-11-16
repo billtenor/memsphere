@@ -1469,6 +1469,7 @@ class RuntimeSlotTransaction implements SlotRegistry {
   ): Disposer {
     if (this.#state !== "committed") throw new Error("Live Slot updates require a committed Plugin instance");
     if (this.#lifecycle.disposed) throw new Error("View Plugin instance is already disposed");
+    if (this.#module.settingsOnly) throw new Error("Settings Module may only register its App configuration Slot");
     if (token !== slots.navigationSecondary && token !== slots.headerTitle && token !== slots.headerActions && token !== slots.homeAttention && token !== slots.homeContinue) {
       throw new Error(`Slot ${slotIdentity(token)} does not allow live Module updates`);
     }

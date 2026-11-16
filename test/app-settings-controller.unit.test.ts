@@ -55,15 +55,12 @@ test("text path conflicts preserve every byte and issue, including valid ancesto
     assert.throws(() => c.setText(["prefs"], "{}"), { code: "APP_SETTINGS_TEXT_CONFLICT" });
     c.dispose();
 });
-test("conflicts and failed validation retain drafts; snapshots cannot mutate the authority", async () => {
+test("conflicts retain the edited draft", async () => {
     const c = fixture(async () => { throw Object.assign(Error("Changed elsewhere"), { code: "APP_CONFIG_CONFLICT" }); });
     c.setValue(["name"], "B");
     await assert.rejects(c.save(), { code: "APP_CONFIG_CONFLICT" });
     assert.equal(c.getState().status, "conflict");
     assert.equal(c.getState().dirty, true);
-    const snapshot = c.getState();
-    snapshot.draft.name = "bad";
-    assert.equal(c.getState().draft.name, "B");
     c.dispose();
 });
 test("timeout releases busy, retains unconfirmed draft and ignores late success", async () => {
@@ -99,6 +96,34 @@ test("numeric fields retain lossy, fractional and nonnumeric raw inputs without 
  assert.equal(requests,0);c.setText(["count"],"2","integer");assert.equal(c.getState().draft.count,2);c.dispose();
 });
 
-test("nested edits preserve array siblings and reject scalar traversal without partial changes",()=>{
- const c=fixture();c.setValue(["rows"],[{name:"first"},{name:"second"}]);c.setValue(["rows","0","name"],"changed");assert.deepEqual(c.getState().draft.rows,[{name:"changed"},{name:"second"}]);c.removeValue(["rows","0"]);assert.deepEqual(c.getState().draft.rows,[{name:"second"}]);const before=c.getState();assert.throws(()=>c.setValue(["name","child"],1),{code:"APP_SETTINGS_PATH"});assert.deepEqual(c.getState(),before);assert.throws(()=>c.setValue(["rows","extra"],1),{code:"APP_SETTINGS_PATH"});assert.deepEqual(c.getState(),before);c.dispose();
+test("nested edits and array removal preserve unaffected siblings",()=>{
+    const c=fixture();c.setValue(["rows"],[{name:"first"},{name:"second"}]);
+    c.setValue(["rows","0","name"],"changed");assert.deepEqual(c.getState().draft.rows,[{name:"changed"},{name:"second"}]);
+    c.removeValue(["rows","0"]);assert.deepEqual(c.getState().draft.rows,[{name:"second"}]);c.dispose();
+});
+test("invalid scalar traversal and array paths leave the whole draft unchanged",()=>{
+    const c=fixture();c.setValue(["rows"],[{name:"first"}]);const before=c.getState();
+    assert.throws(()=>c.setValue(["name","child"],1),{code:"APP_SETTINGS_PATH"});assert.deepEqual(c.getState(),before);
+    assert.throws(()=>c.setValue(["rows","extra"],1),{code:"APP_SETTINGS_PATH"});assert.deepEqual(c.getState(),before);c.dispose();
+});
+
+test("snapshots cannot mutate controller authority", () => {
+    const c = fixture();
+    const snapshot = c.getState();
+    snapshot.draft.name = "bad";
+    assert.equal(c.getState().draft.name, "A");
+    c.dispose();
+});
+for (const text of ['"B1"', '"unfinished']) test(`array deletion refuses to shift a ${text} text buffer`, async () => {
+    let submitted: any;
+    const c = fixture(async (_: unknown, body: any) => { submitted = body; return { config: body.config, revision: "next" }; });
+    c.setValue(["rows"], [{name:"A"}, {name:"B"}]);
+    c.setText(["rows","1","name"], text);
+    const before = c.getState();
+    assert.throws(() => c.removeValue(["rows","0"]), { code:"APP_SETTINGS_TEXT_CONFLICT" });
+    assert.deepEqual(c.getState(), before);
+    c.setText(["rows","1","name"], '"B2"');
+    await c.save();
+    assert.deepEqual(submitted.config.rows, [{name:"A"}, {name:"B2"}]);
+    c.dispose();
 });

@@ -7,34 +7,41 @@ import { createViewServer } from "../src/commands/view.js";
 import { readAppSettings } from "../src/app/settings.js";
 import { configureApp } from "../src/app/install.js";
 import type { MemsphereConfig } from "../src/config.js";
-for (const host of ["127.0.0.1", "0.0.0.0"])
-    test(`App settings HTTP ${host}: scoped auth, JSON origin, CAS and real CLI-compatible state`, async (t) => {
-        const { origin, token, project, context } = await appSettingsServer(t, host);
-        const base = `${origin}/api/projects/test-project/settings/apps`;
-        const headers = host === "127.0.0.1" ? {} : { authorization: `Bearer ${token}` };
-        const unauth = await fetch(base);
-        assert.equal(unauth.status, host === "127.0.0.1" ? 200 : 401);
-        const list = await fetch(base, { headers });
-        assert.equal(list.status, 200);
-        assert.deepEqual((await list.json() as any).apps.map((a: any) => a.id), ["example.app"]);
-        const detail = await fetch(`${base}/example.app`, { headers });
-        assert.equal(detail.headers.get("cache-control"), "no-store");
-        const a = await detail.json() as any;
-        const body = JSON.stringify({ config: { ...a.config, name: "B" }, expectedRevision: a.revision });
-        assert.equal((await fetch(`${base}/example.app`, { method: "PUT", headers: { ...headers, "content-type": "application/json", origin: "https://other.example" }, body })).status, 403);
-        assert.equal((await fetch(`${base}/example.app/validate`, { method: "POST", headers: { ...headers, origin, "content-type": "text/plain" }, body })).status, 403);
-        const valid = await fetch(`${base}/example.app/validate`, { method: "POST", headers: { ...headers, origin, "content-type": "application/json" }, body });
-        assert.equal(valid.status, 200);
-        assert.equal((await readAppSettings(project, a.id)).config.name, "A");
-        const saved = await fetch(`${base}/example.app`, { method: "PUT", headers: { ...headers, origin, "content-type": "application/json" }, body });
-        assert.equal(saved.status, 200);
-        const b = await saved.json() as any;
-        assert.notEqual(b.revision, a.revision);
-        assert.equal((await readAppSettings(project, a.id)).config.name, "B");
-        await configureApp(context, a.id, { ...a.config, name: "C" });
-        const conflict = await fetch(`${base}/example.app`, { method: "PUT", headers: { ...headers, origin, "content-type": "application/json" }, body: JSON.stringify({ config: b.config, expectedRevision: b.revision }) });
-        assert.equal(conflict.status, 409);
-        assert.equal((await conflict.json() as any).code, "APP_CONFIG_CONFLICT");
-        assert.equal((await fetch(`${base}/missing.app`, { headers })).status, 404);
-        assert.equal((await fetch(`${origin}/api/projects/missing/settings/apps`, { headers })).status, 404);
+
+for (const host of ["127.0.0.1", "0.0.0.0"]) {
+    async function fixture(t: import("node:test").TestContext) {
+        const f=await appSettingsServer(t,host);
+        const base=`${f.origin}/api/projects/test-project/settings/apps`;
+        const headers:Record<string,string>=host==="127.0.0.1"?{}:{authorization:`Bearer ${f.token}`};
+        const a=await (await fetch(`${base}/example.app`,{headers})).json() as any;
+        const send=(method:string,suffix:string,config=a.config,revision=a.revision)=>fetch(`${base}/example.app${suffix}`,{method,headers:{...headers,origin:f.origin,"content-type":"application/json"},body:JSON.stringify({config,expectedRevision:revision})});
+        return {...f,base,headers,a,send};
+    }
+    test(`App settings HTTP ${host} enforces listener authentication and mutation origin/JSON`,async t=>{
+        const {origin,base,headers,a}=await fixture(t);
+        assert.equal((await fetch(base)).status,host==="127.0.0.1"?200:401);
+        const body=JSON.stringify({config:a.config,expectedRevision:a.revision});
+        assert.equal((await fetch(`${base}/example.app`,{method:"PUT",headers:{...headers,"content-type":"application/json",origin:"https://other.example"},body})).status,403);
+        assert.equal((await fetch(`${base}/example.app/validate`,{method:"POST",headers:{...headers,origin,"content-type":"text/plain"},body})).status,403);
     });
+    test(`App settings HTTP ${host} scopes list and detail without caching`,async t=>{
+        const {origin,base,headers}=await fixture(t);
+        const list=await fetch(base,{headers});assert.equal(list.status,200);
+        assert.deepEqual((await list.json() as any).apps.map((a:any)=>a.id),["example.app"]);
+        assert.equal((await fetch(`${base}/example.app`,{headers})).headers.get("cache-control"),"no-store");
+        assert.equal((await fetch(`${base}/missing.app`,{headers})).status,404);
+        assert.equal((await fetch(`${origin}/api/projects/missing/settings/apps`,{headers})).status,404);
+    });
+    test(`App settings HTTP ${host} preview does not persist the candidate`,async t=>{
+        const {a,send,project}=await fixture(t);
+        assert.equal((await send("POST","/validate",{...a.config,name:"B"})).status,200);
+        const after=await readAppSettings(project,a.id);assert.equal(after.config.name,"A");assert.equal(after.revision,a.revision);
+    });
+    test(`App settings HTTP ${host} save advances revision and rejects a CLI-stale revision`,async t=>{
+        const {a,send,project,context}=await fixture(t);
+        const saved=await send("PUT","",{...a.config,name:"B"});assert.equal(saved.status,200);const b=await saved.json() as any;
+        assert.notEqual(b.revision,a.revision);assert.equal((await readAppSettings(project,a.id)).config.name,"B");
+        await configureApp(context,a.id,{...a.config,name:"C"});
+        const conflict=await send("PUT","",b.config,b.revision);assert.equal(conflict.status,409);assert.equal((await conflict.json() as any).code,"APP_CONFIG_CONFLICT");
+    });
+}

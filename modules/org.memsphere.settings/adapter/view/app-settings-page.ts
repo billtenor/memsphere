@@ -104,8 +104,13 @@ export class AppSettingsPage {
         identity.textContent = `${this.projectId} · ${detail.id} · v${detail.version} · ${detail.enabled ? this.#t("enabled") : this.#t("disabledHelp")}`;
         header.append(this.ui.button({ label: { text: this.#t("allApps") }, run: () => this.navigate() }), title, identity);
         const feedback = document.createElement("div"), body = document.createElement("div"), actions = document.createElement("div");
+        let pendingRestart = detail.runtime?.state === "pending-restart";
         actions.className = "app-settings-actions";
-        const save = this.ui.button({ label: { text: this.#t("save") }, run: () => this.#action(() => controller.save(), feedback) }, { tone: "primary" });
+        const save = this.ui.button({ label: { text: this.#t("save") }, run: () => this.#action(async () => {
+            const result = await controller.save() as { restartRequired?: boolean };
+            if (result.restartRequired) pendingRestart = true;
+            update();
+        }, feedback) }, { tone: "primary" });
         const validate = this.ui.button({ label: { text: this.#t("validate") }, run: () => this.#action(() => controller.validate(), feedback) });
         const cancel = this.ui.button({ label: { text: this.#t("reset") }, run: () => this.#action(() => controller.reset(), feedback) });
         const reload = this.ui.button({ label: { text: this.#t("reload") }, run: async () => { if (await this.beforeLeave())
@@ -159,7 +164,7 @@ export class AppSettingsPage {
             generic();
         const update = () => {
             const s = controller.getState();
-            state.textContent = `${s.dirty ? this.#t("dirty") : this.#t("clean")}${s.busy ? ` · ${this.#t("busy")}` : ""}${s.notice ? ` · ${s.notice}` : ""} · ${s.notice ? this.#t("unknown") : detail.runtime?.state === "pending-restart" ? this.#t("pendingRestart") : this.#t("unknown")}`;
+            state.textContent = `${s.dirty ? this.#t("dirty") : this.#t("clean")}${s.busy ? ` · ${this.#t("busy")}` : ""}${s.notice ? ` · ${s.notice}` : ""} · ${pendingRestart ? this.#t("pendingRestart") : this.#t("unknown")}`;
             save.disabled = s.busy || !s.dirty || s.textBuffers.some(b => b.error) || !controller.canWrite;
             cancel.disabled = s.busy || !s.dirty;
             validate.disabled = s.busy || s.textBuffers.some(b => b.error) || !controller.canWrite;
@@ -181,6 +186,13 @@ export class AppSettingsPage {
         await action();
     }
     catch (e) {
-        feedback.append(this.ui.feedback({ state: "error", title: { text: e instanceof Error ? e.message : String(e) } }));
+        // Request failures already belong to the controller's current issues.
+        // Only synchronous precondition errors need a transient host message.
+        if (!feedback.querySelector("[data-request-errors]")) {
+            const area = document.createElement("div");
+            area.dataset.requestErrors = "true";
+            area.append(this.ui.feedback({ state: "error", title: { text: e instanceof Error ? e.message : String(e) } }));
+            feedback.append(area);
+        }
     } }
 }

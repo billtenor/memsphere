@@ -13,31 +13,37 @@ import { readAppSettings, previewAppSettings, listAppSettings } from "../src/app
 import { appSettingsCompositions } from "../src/app/settings-composition.js";
 import { appManifestSchema } from "../src/app/contracts.js";
 import type { ProjectContext } from "../src/project/resolver.js";
-test("configuration reads and previews never migrate legacy state; CAS/no-op/ABA protect edits", async (t) => {
-    const { project, context } = await appSettingsFixture(t);
-    const state = await readAppState(project);
-    delete state.installations["example.app"].configurationRevision;
-    await writeAppState(project, state);
-    const file = appStatePath(project), before = await readFile(file, "utf8");
-    const a = await readAppSettings(project, "example.app");
-    assert.equal(a.enabled, false);
-    await previewAppSettings(project, a.id, a.config, a.revision);
-    assert.equal(await readFile(file, "utf8"), before);
-    assert.equal((await listAppSettings(project))[0].id, a.id);
-    const noop = await configureApp(context, a.id, a.config, context.primary, { expectedRevision: a.revision });
-    assert.equal(noop.revision, a.revision);
-    assert.equal(await readFile(file, "utf8"), before);
-    const b = await configureApp(context, a.id, { ...a.config, name: "B" }, context.primary, { expectedRevision: a.revision });
-    assert.notEqual(b.revision, a.revision);
-    await assert.rejects(configureApp(context, a.id, b.config, context.primary, { expectedRevision: a.revision }), { code: "APP_CONFIG_CONFLICT" });
-    const again = await configureApp(context, a.id, a.config);
-    assert.notEqual(again.revision, a.revision);
-    assert.notEqual(again.revision, b.revision);
-    const committed = await readFile(file, "utf8");
-    await assert.rejects(previewAppSettings(project, a.id, { name: "A", store: "missing" }, again.revision));
-    await assert.rejects(configureApp(context, a.id, { name: 123, store: "first" }));
-    assert.equal(await readFile(file, "utf8"), committed);
-    assert.deepEqual((await readAppSettings(project, a.id)).config.untouched, { extra: true });
+
+async function legacy(t: import("node:test").TestContext) {
+    const f=await appSettingsFixture(t); const state=await readAppState(f.project);
+    delete state.installations["example.app"].configurationRevision;await writeAppState(f.project,state);
+    const file=appStatePath(f.project),before=await readFile(file,"utf8");
+    const a=await readAppSettings(f.project,"example.app");return {...f,file,before,a};
+}
+test("configuration reads and previews never migrate legacy installation state",async t=>{
+    const {project,file,before,a}=await legacy(t);assert.equal(a.enabled,false);
+    await previewAppSettings(project,a.id,a.config,a.revision);
+    assert.equal((await listAppSettings(project))[0].id,a.id);assert.equal(await readFile(file,"utf8"),before);
+});
+test("no-op configuration saves do not write legacy state or advance its revision",async t=>{
+    const {project,context,file,before,a}=await legacy(t);
+    const noop=await configureApp(context,a.id,a.config,project,{expectedRevision:a.revision});
+    assert.equal(noop.revision,a.revision);assert.equal(await readFile(file,"utf8"),before);
+});
+test("configuration CAS rejects stale revisions even after an ABA value restoration",async t=>{
+    const {project,context,a}=await legacy(t);
+    const b=await configureApp(context,a.id,{...a.config,name:"B"},project,{expectedRevision:a.revision});
+    assert.notEqual(b.revision,a.revision);
+    await assert.rejects(configureApp(context,a.id,b.config,project,{expectedRevision:a.revision}),{code:"APP_CONFIG_CONFLICT"});
+    const again=await configureApp(context,a.id,a.config);assert.notEqual(again.revision,a.revision);assert.notEqual(again.revision,b.revision);
+    await assert.rejects(configureApp(context,a.id,a.config,project,{expectedRevision:a.revision}),{code:"APP_CONFIG_CONFLICT"});
+});
+test("invalid preview and save leave all authoritative configuration bytes unchanged",async t=>{
+    const {project,context,file,before,a}=await legacy(t);
+    await assert.rejects(previewAppSettings(project,a.id,{name:"A",store:"missing"},a.revision));
+    await assert.rejects(configureApp(context,a.id,{name:123,store:"first"}));
+    assert.equal(await readFile(file,"utf8"),before);
+    assert.deepEqual((await readAppSettings(project,a.id)).config.untouched,{extra:true});
 });
 test("two simultaneous App saves accept one revision exactly once", async (t) => {
     const { project, context } = await appSettingsFixture(t);

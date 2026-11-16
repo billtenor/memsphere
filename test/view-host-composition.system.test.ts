@@ -1496,3 +1496,33 @@ async function listen(server: Server): Promise<string> {
 async function close(server: Server): Promise<void> {
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 }
+
+for (const attempt of ["foreign-key","other-slot","live-upsert","route"] as const) test(`settings instance rejects ${attempt} through the real loader`,async()=>{
+    const restricted={...bootInstance("example.settings","settings","/settings-boundary.js","/"),module:{projectId:"memsphere",moduleId:"example.settings",moduleVersion:"1.0.0",instanceId:"settings",appId:"example.app",settingsOnly:true},allowedServices:["slots","ui"]} as ViewHostBootInstance;
+    const code=`import {slots,portableSlots} from '@memsphere/view-sdk';export default {apiVersion:1,uiVersion:1,inject:${JSON.stringify(attempt==="route"?["router","ui"]:["slots","ui"])},apply(ctx){
+        ${attempt==="foreign-key"?"ctx.slots.register(portableSlots.appSettingsConfiguration,{id:'configuration',key:'other.app',value:{render(){}}});":attempt==="other-slot"?"ctx.slots.register(slots.headerActions,{id:'extra',value:{label:{text:'forbidden'},run(){}}});":attempt==="live-upsert"?"globalThis.__attemptLive=()=>ctx.slots.upsert(slots.headerActions,{id:'extra',value:{label:{text:'forbidden'},run(){}}});":"ctx.router.register({id:'bad',path:'/bad'});"}
+    }};`;
+    await withPage(renderViewHostHtml("en",[restricted]),new Map([["/settings-boundary.js",code]]),undefined,async page=>{
+        if(attempt==="live-upsert") {
+            await page.waitForFunction(()=>typeof (globalThis as any).__attemptLive==="function");
+            const message=await page.evaluate(()=>{try{(globalThis as any).__attemptLive();return "accepted";}catch(e){return (e as Error).message;}});
+            assert.match(message,/only register its App configuration Slot/);
+        } else {
+            await page.waitForFunction(()=>typeof (globalThis as any).__memsphereViewDiagnostics==="function");
+            const diagnostics=await page.evaluate(()=>(globalThis as any).__memsphereViewDiagnostics());
+            const failed=diagnostics.instances.find((item:any)=>item.module.instanceId==="settings");
+            assert.equal(failed.status,"failed");
+            assert.match(failed.message,attempt==="foreign-key"?/ownership mismatch/:attempt==="other-slot"?/only register its App configuration Slot/:/capability grant: router/i);
+        }
+        assert.equal(await page.getByRole("button",{name:"forbidden",exact:true}).count(),0);
+    });
+});
+
+test("ordinary Module can still upsert a live header action after commit",async()=>{
+    const instance=bootInstance("example.live","live","/live-upsert.js","/");
+    const code=`import {slots} from '@memsphere/view-sdk';export default {apiVersion:1,inject:['slots'],apply(ctx){globalThis.__ordinaryLive=()=>ctx.slots.upsert(slots.headerActions,{id:'extra',value:{label:{text:'live action'},run(){}}});}};`;
+    await withPage(renderViewHostHtml("en",[instance]),new Map([["/live-upsert.js",code]]),undefined,async page=>{
+        await page.waitForFunction(()=>typeof (globalThis as any).__ordinaryLive==="function");await page.evaluate(()=>(globalThis as any).__ordinaryLive());
+        await page.getByRole("button",{name:"live action",exact:true}).waitFor();
+    });
+});

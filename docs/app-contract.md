@@ -146,7 +146,7 @@ export default defineViewPlugin({
 
 `AppSettingsPresentationContext` 提供当前 `projectId/app/canWrite/signal`，`getState/subscribe`、`setValue/removeValue/setText`、`validate/save/reset` 和当前 App 声明用途的 `getStoreChoices(key)`。路径是属性段数组，空数组表示完整配置；完整配置必须是 JSON object。快照包含 saved、draft、revision、busy、dirty、issues、文本缓冲和 Schema。业务读快照或通过方法改草稿，不另存权威配置。
 
-`setText(path,text,kind?)` 的可选 kind 为 json（默认）、number 或 integer，公共控件按字段类型传入。JSON、数字和整数字段保留原始输入；无效文本也算未保存，阻止任何 validate/save 请求。活动文本路径不能互为祖先或后代；同路径只能继续 `setText`，不能同时以 `setValue/removeValue` 覆盖。保存或显式 reset 才清理缓冲。校验/保存期间，控制器拒绝编辑、reset 和重复请求并返回 `APP_SETTINGS_BUSY`。取消导航保留页面和草稿；确认离开才清理。刷新/关闭使用浏览器原生未保存提醒。
+`setText(path,text,kind?)` 的可选 kind 为 json（默认）、number 或 integer，公共控件按字段类型传入。JSON、数字和整数字段保留原始输入；无效文本也算未保存，阻止任何 validate/save 请求。活动文本路径不能互为祖先或后代；同路径只能继续 `setText`，不能同时以 `setValue/removeValue` 覆盖。保存或显式 reset 才清理缓冲。数组删除若会移动任一活动文本缓冲的索引，返回 `APP_SETTINGS_TEXT_CONFLICT`，操作前后草稿与缓冲保持一致；先保存或 reset 再删除。校验/保存期间，控制器拒绝编辑、reset 和重复请求并返回 `APP_SETTINGS_BUSY`。取消导航保留页面和草稿；确认离开才清理。刷新/关闭使用浏览器原生未保存提醒。
 
 HTTP 使用 `/api/projects/:project/settings/apps`：GET 列表，GET `/:appId` 详情，POST `/:appId/validate` 预览，PUT `/:appId` 保存。两个写请求均提交 `{config,expectedRevision}`。服务端锁内比较每 App 的配置版本；过期返回 409 `APP_CONFIG_CONFLICT`，即使候选等于当前配置也不忽略冲突。无变化保存不改文件或推进版本；旧 CLI 不传版本的完整替换继续可用，但实际变更会推进版本。
 
