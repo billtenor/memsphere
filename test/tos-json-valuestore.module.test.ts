@@ -105,3 +105,51 @@ test("parent cancellation closes a stalled value read without cancelling an inde
   await ready; const peer = store.get({}, 'fast'); controller.abort(); await rejected;
   assert.equal(stalled!.destroyed, true); assert.deepEqual((await peer)!.value, { name: 'fast' });
 });
+
+// Each gate is reached only after both production handles finish HEAD and
+// construct their original PUT conditions. The chosen commit order is explicit.
+for (const scenario of ['missing-create', 'deleted-create', 'update-delete'] as const) {
+  for (const first of [0, 1] as const) test(`${scenario}: writer ${first} commits once and the competing original condition fails`, async () => {
+    await valueRace(scenario, first);
+  });
+}
+test('ValueStore CAS oracle rejects a transport that removes conditional headers', async () => {
+  await assert.rejects(valueRace('missing-create', 0, true), /Exactly one conditional writer may commit/);
+});
+async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update-delete', first: 0 | 1, removeConditions = false) {
+  const { controlledPutPair } = await import('./support/tos-cas-barrier.js');
+  const { client, store } = fixture();
+  if (scenario !== 'missing-create') await store.create({}, 'race', { name: 'old' });
+  if (scenario === 'deleted-create') await store.delete({}, 'race');
+  const revision = client.objects.get('values/race.json')?.headers.etag;
+  const transport = {
+    head: client.head.bind(client), read: client.read.bind(client), list: client.list.bind(client),
+    delete: client.delete.bind(client), versioning: client.versioning.bind(client),
+    put: ((context, key, body, options) => client.put(context, key, body,
+      removeConditions ? { ...options, create: undefined, ifMatch: undefined } : options)) as typeof client.put
+  };
+  client.calls.length = 0;
+  let mutation = 10;
+  await controlledPutPair({ client: transport, key: 'values/race.json', first,
+    condition: revision ? { ifMatch: revision } : { create: true },
+    conflictCode: scenario === 'update-delete' ? 'REVISION_CONFLICT' : 'ALREADY_EXISTS',
+    write: async (gated, context, index) => {
+      const handle = new TosJsonValueStore('values', runtime, config, gated, () => 2000, () => (++mutation).toString(16).padStart(16, '0'));
+      if (scenario !== 'update-delete') await handle.create(context, 'race', { name: index === 0 ? 'A' : 'B' });
+      else if (index === 0) await handle.update(context, 'race', { name: 'updated' }, { expectedRevision: revision });
+      else await handle.delete(context, 'race', { expectedRevision: revision });
+    }
+  });
+  assert.equal(client.calls.filter(c => c.method === 'PUT').length, 2);
+  assert.equal(client.calls.filter(c => c.method === 'HEAD').length, 2);
+  assert.equal(client.calls.filter(c => c.method === 'GET').length, scenario === 'missing-create' ? 2 : 0);
+  const body = JSON.parse(client.objects.get('values/race.json')!.bytes.toString());
+  const deleted = scenario === 'update-delete' && first === 1;
+  assert.equal(body.is_delete, deleted);
+  if (deleted) {
+    assert.equal(Object.hasOwn(body, 'value'), false); assert.equal(await store.get({}, 'race'), undefined);
+  } else {
+    const expected = { name: scenario === 'update-delete' ? 'updated' : first === 0 ? 'A' : 'B' };
+    assert.deepEqual(body.value, expected); assert.deepEqual((await store.get({}, 'race'))!.value, expected);
+  }
+}

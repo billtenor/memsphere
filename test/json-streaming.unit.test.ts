@@ -34,3 +34,37 @@ test("cancellation at a chunk boundary stops both parser and encoder", async () 
   await output.next(); controller.abort(); await assert.rejects(output.next(), { name: "AbortError" });
   await assert.rejects(parseJsonChunks({ signal: controller.signal }, parts(Buffer.from('{}'))), { name: "AbortError" });
 });
+
+test("parser cancellation after the first fragment closes its iterator before further consumption", { timeout: 5000 }, async t => {
+  let entered!: () => void, release!: () => void, closed = false, consumed = 0;
+  const ready = new Promise<void>(resolve => entered = resolve), gate = new Promise<void>(resolve => release = resolve);
+  const controller = new AbortController();
+  t.after(() => { controller.abort(); release(); });
+  const source = (async function* () {
+    try {
+      consumed++; yield Buffer.from('{"name":');
+      entered(); await gate;
+      consumed++; yield Buffer.from('"small"}');
+      consumed++; yield Buffer.from(' ');
+    } finally { closed = true; }
+  })();
+  const parsing = parseJsonChunks({ signal: controller.signal }, source);
+  const rejected = assert.rejects(parsing, { name: "AbortError" });
+  try { await ready; controller.abort(); }
+  finally { release(); }
+  await rejected;
+  assert.equal(consumed, 2); assert.equal(closed, true);
+});
+
+test("parser checks cancellation after complete EOF and final synchronous validation", async () => {
+  const controller = new AbortController(); let eof = false, cancelled = false;
+  const source = (async function* () {
+    yield Buffer.from('{"name":"small"}');
+    eof = true;
+    // EOF resumes parsing in microtasks. This immediate runs before the final
+    // checkpoint's immediate, after the synchronous final decode/validation.
+    setImmediate(() => { cancelled = true; controller.abort(); });
+  })();
+  await assert.rejects(parseJsonChunks({ signal: controller.signal }, source), { name: "AbortError" });
+  assert.equal(eof, true); assert.equal(cancelled, true);
+});

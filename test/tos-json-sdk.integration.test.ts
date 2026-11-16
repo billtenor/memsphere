@@ -80,3 +80,29 @@ test('DataStore HEAD404 diagnostic GET starts its own data budget after a partia
   get!.writeHead(404, { 'content-type': 'application/json' }); get!.end('{"Code":"NoSuchKey"}');
   assert.equal(await result, false);
 });
+
+for (const kind of ['value', 'data'] as const) test(`${kind} Factory dataTimeoutMs keeps a pending PUT alive past120s and closes only its own request`, { timeout: 10000 }, async t => {
+  const started = gate(), closed = gate(); let pending: import('node:http').ServerResponse | undefined;
+  const f = await fixture(t, (request, response) => {
+    if (request.url!.includes('versioning')) { response.end('{}'); return; }
+    if (request.url!.includes('peer')) { response.writeHead(200, { etag: '"peer"', 'content-length': '0' }); response.end(); return; }
+    if (request.method === 'HEAD') { response.writeHead(404); response.end(); return; }
+    if (request.method === 'GET') { response.writeHead(404, { 'content-type': 'application/json' }); response.end('{"Code":"NoSuchKey"}'); return; }
+    pending = response; response.once('close', closed.resolve);
+    request.resume(); request.once('end', started.resolve);
+  });
+  const parsed = new Config({ ...config, dataTimeoutMs: 180000, controlTimeoutMs: 1000, ...(kind === 'data' ? { mode: 'raw' } : {}) });
+  const context = { signal: f.controller().signal };
+  const { bytesContent } = await import('../src/data/extensions/shared/payload.js');
+  const store = kind === 'value'
+    ? await new TosJsonValueStoreFactory(credentials, c => bindTosClient(f.sdk, c.bucket, c)).createStore(context, 'values', runtime, parsed)
+    : await new TosDataStoreFactory(credentials, c => bindTosClient(f.sdk, c.bucket, c)).createStore(context, 'values', 'value.json', parsed);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let settled = false;
+  const writing = store.kind === 'ValueStore' ? store.create(context, 'a', { name: 'small' })
+    : store.create(context, { id: 'a', model: 'value.json', payload: { contentType: 'text/plain', content: bytesContent(Buffer.from('small')) } });
+  const rejected = assert.rejects(writing, { code: 'TOS_DEADLINE' }).finally(() => settled = true);
+  await started.promise; t.mock.timers.tick(120001); await Promise.resolve(); assert.equal(settled, false);
+  await bindTosClient(f.sdk, config.bucket, { controlTimeoutMs: 1000 }).head({}, 'peer');
+  t.mock.timers.tick(60000); await rejected; await closed.promise; assert.equal(pending!.destroyed, true);
+});
