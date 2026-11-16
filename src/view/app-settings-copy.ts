@@ -111,6 +111,10 @@ const copy = {
         "zh-CN": "已保存配置（只读）",
         "en": "Saved configuration (read-only)"
     },
+    "readOnlyHelp": {
+        "zh-CN": "以下配置为只读，可以查看，不能修改。",
+        "en": "These settings are read-only. You can view them, but cannot make changes."
+    },
     "json": {
         "zh-CN": "完整配置（JSON）",
         "en": "Full configuration (JSON)"

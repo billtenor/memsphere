@@ -187,6 +187,7 @@ export const settingsFormStyles = `
 .mem-view-settings-form .mem-view-field>small{min-height:0;font-size:12px;font-weight:400;line-height:1.5;color:var(--mem-view-color-text-muted);overflow-wrap:anywhere}
 .mem-view-settings-form .mem-view-field>small:empty{display:none}
 .mem-view-settings-form .mem-view-field[data-invalid="true"]>small{color:var(--mem-view-color-danger)}
+.mem-view-settings-form .mem-view-field-control input:disabled,.mem-view-settings-form .mem-view-field-control select:disabled,.mem-view-settings-form .mem-view-field-control textarea:disabled{background:var(--mem-view-color-subtle);color:var(--mem-view-color-text-muted);border-color:var(--mem-view-color-border);cursor:not-allowed;opacity:1;-webkit-text-fill-color:var(--mem-view-color-text-muted)}
 .mem-view-settings-form .mem-view-field-checkbox{align-items:start}
 .mem-view-settings-form .mem-view-field-checkbox .mem-view-field-control{padding-top:2px}
 .mem-view-settings-form .mem-settings-store-meta{margin:8px 0 0;color:var(--mem-view-color-text-muted);font-size:12px;font-weight:400;line-height:1.5;overflow-wrap:anywhere}

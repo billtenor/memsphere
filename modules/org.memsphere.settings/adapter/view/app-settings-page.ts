@@ -146,6 +146,16 @@ export class AppSettingsPage {
         state.className = "app-settings-save-state";
         state.setAttribute("role", "status");
         this.#surface.replaceChildren(header, feedback, body, state, actions);
+        const properties = detail.schema?.properties ?? {};
+        const names = new Set([...Object.keys(properties), ...Object.keys(detail.config)]);
+        // Static, simple closed objects can have no editable fields even when
+        // only their property schemas (rather than the root) are readOnly.
+        const closedSchema = detail.schema?.type === "object" && detail.schema.additionalProperties === false
+            && !Object.keys(detail.schema.patternProperties ?? {}).length
+            && !["$ref", "allOf", "anyOf", "oneOf", "if"].some(key => key in detail.schema);
+        let readOnlyPresentation = detail.schema?.readOnly === true || (closedSchema
+            && [...names].every(name => properties[name]?.readOnly === true)
+            && detail.projectStores.every((r: RecordValue) => properties[r.configKey]?.readOnly === true));
         const switchMode=async (mode: "generic" | "json")=>{
             if(controller.getState().busy)return;
             if(await this.beforeLeave())await this.#load(detail.id,mode);
@@ -154,8 +164,6 @@ export class AppSettingsPage {
             body.replaceChildren();
             const fields: SettingsFieldDescriptor[] = [];
             const stores = new Set<string>(detail.projectStores.map((r: RecordValue) => r.configKey));
-            const properties = detail.schema?.properties ?? {};
-            const names = new Set([...Object.keys(properties), ...Object.keys(detail.config)]);
             for (const name of names) {
                 if (stores.has(name))
                     continue;
@@ -166,24 +174,15 @@ export class AppSettingsPage {
             }
             for (const r of detail.projectStores)
                 fields.push({ kind: "projectStore", key: r.key, label: { text: r.key }, required: true });
-            // In a simple closed object, every named property being readOnly
-            // leaves no editable configuration. Open/complex schemas keep JSON.
-            const closedSchema = detail.schema?.type === "object" && detail.schema.additionalProperties === false
-                && !Object.keys(detail.schema.patternProperties ?? {}).length
-                && !["$ref", "allOf", "anyOf", "oneOf", "if"].some(key => key in detail.schema);
-            const allFieldsReadOnly = closedSchema && [...names].every(name => properties[name]?.readOnly === true)
-                && detail.projectStores.every((r: RecordValue) => properties[r.configKey]?.readOnly === true);
-            if (detail.schema?.readOnly === true || allFieldsReadOnly || (!fields.length && !Object.keys(detail.config).length && !detail.schema)) {
+            if (readOnlyPresentation || (!fields.length && !Object.keys(detail.config).length && !detail.schema)) {
+                readOnlyPresentation = true;
                 const p = document.createElement("p");
-                p.textContent = this.#t("noFields");
+                p.textContent = this.#t(fields.length ? "readOnlyHelp" : "noFields");
                 body.append(p);
-                if (Object.keys(detail.config).length) {
-                    const heading = document.createElement("h3");
-                    heading.textContent = this.#t("readOnlyValues");
-                    const values = document.createElement("pre");
-                    values.className = "app-settings-readonly";
-                    values.textContent = JSON.stringify(detail.config, null, 2);
-                    body.append(heading, values);
+                if (fields.length) {
+                    body.append(this.ui.settingsForm({ context: controller, sections: [{
+                        id: "configuration", title: { text: this.#t("readOnlyValues") }, fields
+                    }] }));
                 }
                 return;
             }
@@ -204,6 +203,7 @@ export class AppSettingsPage {
         }
         else
             generic();
+        save.hidden = cancel.hidden = validate.hidden = readOnlyPresentation;
         const update = () => {
             const s = controller.getState();
             state.textContent = `${s.dirty ? this.#t("dirty") : this.#t("clean")}${s.busy ? ` · ${this.#t("busy")}` : ""}${s.notice ? ` · ${s.notice}` : ""} · ${pendingRestart ? this.#t("pendingRestart") : this.#t("unknown")}`;

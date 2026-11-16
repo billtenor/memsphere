@@ -457,14 +457,14 @@ for(const mode of ["invalid","format-only"] as const)test(`${mode} native close 
     assert.deepEqual((await readAppSettings(project,"example.app")).config.prefs,{color:"blue"});
 });
 
-for (const id of ["empty.no-schema", "empty.closed", "empty.readonly"]) test(`App settings with no editable configuration explains ${id} without an editor`,async t=>{
+for (const id of ["empty.no-schema", "empty.closed"]) test(`App settings with no editable configuration explains ${id} without an editor`,async t=>{
     const {origin,project}=await emptyAppSettingsServer(t);
     const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
     await page.goto(`${origin}/projects/test-project/settings/apps?app=${id}`);
     await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
     assert.equal(await page.locator(".mem-view-settings-form").count(),0);
     assert.equal(await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).count(),0);
-    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).isDisabled(),true);
+    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).count(),0);
     await page.reload();await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
     assert.deepEqual((await readAppSettings(project,id)).config,{});
 });
@@ -510,19 +510,21 @@ test("App search retains unmatched text and clears it without confusing an unins
     assert.equal(await page.getByText("没有匹配的 App。",{exact:true}).isVisible(),false);
 });
 
-test("a closed App with all named fields readOnly shows saved values without editing controls",async t=>{
+for (const id of ["empty.readonly","empty.fields-readonly"]) test(`readOnly settings use disabled normal fields for ${id}`,async t=>{
     const {origin,project}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
-    await page.goto(`${origin}/projects/test-project/settings/apps?app=empty.fields-readonly`);
-    await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=${id}`);
+    await page.getByText("以下配置为只读，可以查看，不能修改。",{exact:true}).waitFor();
     await page.getByRole("heading",{name:"已保存配置（只读）",exact:true}).waitFor();
-    assert.deepEqual(JSON.parse(await page.locator(".app-settings-readonly").innerText()),{name:"A"});
-    assert.equal(await page.locator(".app-settings-page .mem-view-settings-form,.app-settings-page input,.app-settings-page textarea,.app-settings-page select").count(),0);
+    const name=page.getByLabel("name",{exact:true});assert.equal(await name.isDisabled(),true);
+    assert.equal(await name.inputValue(),id==="empty.fields-readonly"?"A":"");
+    assert.equal(await page.locator(".app-settings-body pre").count(),0);
     assert.equal(await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).count(),0);
-    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).isDisabled(),true);
+    for(const label of ["保存配置","取消修改","校验"])assert.equal(await page.getByRole("button",{name:label,exact:true}).isVisible(),false);
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
-    await page.reload();await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
-    assert.deepEqual((await readAppSettings(project,"empty.fields-readonly")).config,{name:"A"});
+    await page.reload();await name.waitFor();
+    assert.equal(await name.isDisabled(),true);
+    assert.deepEqual((await readAppSettings(project,id)).config,id==="empty.fields-readonly"?{name:"A"}:{});
 });
 test("a closed App with one editable field still saves it and preserves its readOnly field",async t=>{
     const {origin,project}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
@@ -576,4 +578,16 @@ for (const colorScheme of ["light", "dark"] as const) test(`settings form groups
     assert.notEqual(await feedback.evaluate(e=>getComputedStyle(e).color),geometry.descriptionColor);
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+});
+
+test("custom readOnly settings retain their original disabled controls and omit edit actions",async t=>{
+    const {origin,project}=await appSettingsServer(t,"127.0.0.1","readonly-custom");
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    await page.getByText("App 自定义分组",{exact:true}).waitFor();
+    const name=page.getByLabel("名称",{exact:true});assert.equal(await name.isDisabled(),true);assert.equal(await name.inputValue(),"A");
+    await page.getByText("用途：records · 模型：record.json · 类型：ValueStore",{exact:true}).waitFor();
+    assert.equal(await page.getByLabel("记录 Store",{exact:true}).isDisabled(),true);
+    for(const label of ["保存配置","取消修改","校验"])assert.equal(await page.getByRole("button",{name:label,exact:true}).count(),0);
+    assert.equal((await readAppSettings(project,"example.app")).config.name,"A");
 });

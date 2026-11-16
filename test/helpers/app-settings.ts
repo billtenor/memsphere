@@ -9,7 +9,7 @@ import { readBusinessProject } from "../../src/project/business-stores.js";
 import { installApp, setAppEnabled, checkApp, configureApp } from "../../src/app/install.js";
 import type { AppProject } from "../../src/app/state.js";
 import type { ProjectContext } from "../../src/project/resolver.js";
-export type SettingsFixtureKind = boolean | "hang-import" | "hang-apply" | "bad-root" | "incompatible" | "late-apply" | "late-options" | "business-view" | "array-fields" | "tuple-fields";
+export type SettingsFixtureKind = boolean | "hang-import" | "hang-apply" | "bad-root" | "incompatible" | "late-apply" | "late-options" | "business-view" | "array-fields" | "tuple-fields" | "readonly-custom";
 export async function appSettingsFixture(t: import("node:test").TestContext, custom: SettingsFixtureKind = false, storeSchema: Record<string, unknown> = {}) {
     const f = await businessFixture(t);
     for (const kind of ["concepts", "statements", "procedures", "schemas"])
@@ -36,6 +36,12 @@ export async function appSettingsFixture(t: import("node:test").TestContext, cus
         schema.properties.rows={type:"array",items:custom==="tuple-fields"?[item]:item};
         await writeFile(join(root,"schema.json"),JSON.stringify(schema));
         await writeFile(join(root,"settings/index.js"),`import {portableSlots} from '@memsphere/view-sdk';export default {apiVersion:1,inject:['slots','ui'],uiVersion:1,apply(ctx){ctx.slots.register(portableSlots.appSettingsConfiguration,{id:'configuration',key:ctx.module.appId,value:{render(context){globalThis.__appSettingsContext=context;return ctx.ui.settingsForm({context,sections:[{id:'array',title:{text:'数组配置'},fields:[{kind:'text',path:['name'],label:{text:'名称'}},{kind:'text',path:['rows','0','name'],label:{text:'数组名称'}},{kind:'select',path:['rows','0','choice'],label:{text:'数组选项'},options:[{value:'A',label:{text:'A'}},{value:'B',label:{text:'B'}}]}]}]});}}});}};`);
+    }
+    if(custom === "readonly-custom") {
+        const schema=JSON.parse(await readFile(join(root,"schema.json"),"utf8"));
+        for(const property of Object.values(schema.properties) as Array<Record<string,unknown>>)property.readOnly=true;
+        schema.properties.untouched={type:"object",readOnly:true};schema.additionalProperties=false;
+        await writeFile(join(root,"schema.json"),JSON.stringify(schema));
     }
     if(custom === "late-options") {
         const entry=await readFile(join(root,"settings/index.js"),"utf8");

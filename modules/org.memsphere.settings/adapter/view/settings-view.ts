@@ -1467,7 +1467,6 @@ const styles = `
   .app-settings-page > .app-settings-save-state {color:var(--mem-view-color-text-muted);font-size:12px;line-height:1.6;}
   .app-settings-actions {display:flex;flex-wrap:wrap;gap:var(--mem-view-space-2);}
   .app-settings-page [hidden] {display:none;}
-  .app-settings-readonly {white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;color:var(--mem-view-color-text-muted);}
   .app-settings-item {padding:var(--mem-view-space-5);border:1px solid var(--mem-view-color-border);border-radius:var(--mem-view-radius-lg);background:var(--mem-view-color-surface);display:grid;gap:var(--mem-view-space-3);justify-items:start;}
 
   .memsphere-settings { --surface:var(--mem-view-color-surface);--line:var(--mem-view-color-border);--soft:var(--mem-view-color-subtle);--text:var(--mem-view-color-text);--muted:var(--mem-view-color-text-muted);--accent:var(--mem-view-color-accent);--accent-soft:var(--mem-view-color-accent-soft);--danger:var(--mem-view-color-danger);--shadow:var(--mem-view-shadow-card); display:grid;grid-template-columns:240px minmax(0,1fr);min-height:calc(100vh - 82px);background:var(--mem-view-color-canvas);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-sizing:border-box }
