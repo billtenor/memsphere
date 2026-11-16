@@ -7,7 +7,7 @@ import { expenses } from "../backend/business.mjs";
 async function main() {
   const args = process.argv.slice(2);
   if (args.includes("--version")) { console.log("0.1.0"); return; }
-  if (args.includes("--help")) { console.log("expense --ledger <absolute-directory> list [--cursor <cursor>]\nexpense --ledger <absolute-directory> create --description <text> --amount <number>\nexpense --ledger <absolute-directory> submit --id <id> --revision <integer>\nResults: JSON stdout. Errors: stderr and nonzero exit. No interactive prompts."); return; }
+  if (args.includes("--help")) { console.log("expense --ledger <absolute-directory> list [--cursor <cursor>]\nexpense --ledger <absolute-directory> create --description <text> --amount <number>\nexpense --ledger <absolute-directory> submit --id <id> --revision <store-issued-string>\nResults: JSON stdout. Errors: stderr and nonzero exit. No interactive prompts."); return; }
   const options = {}, positional = [];
   for (let i = 0; i < args.length; i++) {
     if (args[i].startsWith("--")) {
@@ -20,7 +20,7 @@ async function main() {
   const model = { data: { id: "example/expense.json", model: JSON_SCHEMA_DRAFT_07, payload: { contentType: "application/json", content: { stream: () => new ReadableStream({ start(c) { c.enqueue(Buffer.from(JSON.stringify(definition))); c.close(); } }) } } }, definition };
   const manager = new DefaultDataManager({ extensions: new DefaultDataExtensionRegistry([filesystemJsonValueStoreExtension, jsonSchemaExtension, jsonSchemaMetaModelExtension, jsonSerializerExtension]),
     models: [{ model }], stores: [{ id: "ledger", model: "example/expense.json", kind: "ValueStore", factory: "memsphere/filesystem-json", config: new Config({ directory: resolve(options.ledger) }) }] });
-  const input = { ...options, ...(options.amount !== undefined ? { amount: Number(options.amount) } : {}), ...(options.revision !== undefined ? { revision: Number(options.revision) } : {}) };
+  const input = { ...options, ...(options.amount !== undefined ? { amount: Number(options.amount) } : {}) };
   console.log(JSON.stringify(await expenses(await manager.getStore({}, "ledger"), positional[0], input)));
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

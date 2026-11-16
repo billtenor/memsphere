@@ -12,7 +12,7 @@ export async function expenses(store, operation, input = {}) {
     return store.create({}, randomUUID(), { description: input.description.trim(), amount: input.amount, status: "draft" });
   }
   if (operation === "submit") {
-    if (typeof input.id !== "string" || !Number.isSafeInteger(input.revision) || input.revision < 1) throw new Error("ID and current revision are required");
+    if (typeof input.id !== "string" || typeof input.revision !== "string" || !input.revision.length) throw new Error("ID and current revision are required");
     const record = await store.get({}, input.id);
     if (!record) throw new Error("Expense not found");
     if (record.value.status !== "draft") throw new Error("Only draft expenses can be submitted");
