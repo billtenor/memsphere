@@ -99,6 +99,10 @@ const copy = {
         "zh-CN": "这个 App 没有可配置项。",
         "en": "This App has no configurable settings."
     },
+    "readOnlyValues": {
+        "zh-CN": "已保存配置（只读）",
+        "en": "Saved configuration (read-only)"
+    },
     "json": {
         "zh-CN": "完整配置（JSON）",
         "en": "Full configuration (JSON)"

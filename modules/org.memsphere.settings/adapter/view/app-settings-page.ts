@@ -154,15 +154,25 @@ export class AppSettingsPage {
             }
             for (const r of detail.projectStores)
                 fields.push({ kind: "projectStore", key: r.key, label: { text: r.key }, required: true });
-            // A closed empty object permits no configuration changes. Keep the
-            // JSON escape hatch for open schemas and unrecognised constraints.
-            const closedEmptySchema = detail.schema?.additionalProperties === false
+            // In a simple closed object, every named property being readOnly
+            // leaves no editable configuration. Open/complex schemas keep JSON.
+            const closedSchema = detail.schema?.type === "object" && detail.schema.additionalProperties === false
                 && !Object.keys(detail.schema.patternProperties ?? {}).length
                 && !["$ref", "allOf", "anyOf", "oneOf", "if"].some(key => key in detail.schema);
-            if (detail.schema?.readOnly === true || (!fields.length && !Object.keys(detail.config).length && (!detail.schema || closedEmptySchema))) {
+            const allFieldsReadOnly = closedSchema && [...names].every(name => properties[name]?.readOnly === true)
+                && detail.projectStores.every((r: RecordValue) => properties[r.configKey]?.readOnly === true);
+            if (detail.schema?.readOnly === true || allFieldsReadOnly || (!fields.length && !Object.keys(detail.config).length && !detail.schema)) {
                 const p = document.createElement("p");
                 p.textContent = this.#t("noFields");
                 body.append(p);
+                if (Object.keys(detail.config).length) {
+                    const heading = document.createElement("h3");
+                    heading.textContent = this.#t("readOnlyValues");
+                    const values = document.createElement("pre");
+                    values.className = "app-settings-readonly";
+                    values.textContent = JSON.stringify(detail.config, null, 2);
+                    body.append(heading, values);
+                }
                 return;
             }
             if(this.#mode==="json")fields.length=0;

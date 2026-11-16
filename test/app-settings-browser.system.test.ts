@@ -506,6 +506,39 @@ test("App search retains unmatched text and clears it without confusing an unins
     assert.equal(await page.locator("[data-app-id]:visible").count(),0);
     assert.equal(await page.getByText(/当前项目尚未安装 App/).count(),0);
     await page.getByRole("button",{name:"清空搜索",exact:true}).click();assert.equal(await search.inputValue(),"");
-    assert.equal(await page.locator("[data-app-id]:visible").count(),4);
+    assert.equal(await page.locator("[data-app-id]:visible").count(),7);
     assert.equal(await page.getByText("没有匹配的 App。",{exact:true}).isVisible(),false);
+});
+
+test("a closed App with all named fields readOnly shows saved values without editing controls",async t=>{
+    const {origin,project}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=empty.fields-readonly`);
+    await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
+    await page.getByRole("heading",{name:"已保存配置（只读）",exact:true}).waitFor();
+    assert.deepEqual(JSON.parse(await page.locator(".app-settings-readonly").innerText()),{name:"A"});
+    assert.equal(await page.locator(".app-settings-page .mem-view-settings-form,.app-settings-page input,.app-settings-page textarea,.app-settings-page select").count(),0);
+    assert.equal(await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).count(),0);
+    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).isDisabled(),true);
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+    await page.reload();await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
+    assert.deepEqual((await readAppSettings(project,"empty.fields-readonly")).config,{name:"A"});
+});
+test("a closed App with one editable field still saves it and preserves its readOnly field",async t=>{
+    const {origin,project}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=empty.mixed`);
+    await page.getByLabel("count",{exact:true}).fill("2");
+    assert.equal(await page.getByLabel("name",{exact:true}).isDisabled(),true);
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    await page.reload();assert.equal(await page.getByLabel("count",{exact:true}).inputValue(),"2");
+    assert.deepEqual((await readAppSettings(project,"empty.mixed")).config,{name:"A",count:2});
+});
+test("an open App with readOnly named fields still permits new JSON properties",async t=>{
+    const {origin,project}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=empty.open-readonly`);
+    await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).click();
+    await page.getByLabel("完整配置（JSON）",{exact:true}).fill('{"name":"A","extra":"kept"}');
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    await page.reload();assert.equal(await page.getByLabel("extra",{exact:true}).inputValue(),"kept");
+    assert.deepEqual((await readAppSettings(project,"empty.open-readonly")).config,{name:"A",extra:"kept"});
 });

@@ -99,13 +99,16 @@ export async function emptyAppSettingsServer(t: import("node:test").TestContext,
         ["empty.no-schema", undefined],
         ["empty.closed", {type:"object",properties:{},additionalProperties:false}],
         ["empty.open", {type:"object",properties:{},additionalProperties:true}],
-        ["empty.readonly", {type:"object",readOnly:true,properties:{name:{type:"string"}}}]
+        ["empty.readonly", {type:"object",readOnly:true,properties:{name:{type:"string"}}}],
+        ["empty.fields-readonly", {type:"object",properties:{name:{type:"string",readOnly:true}},additionalProperties:false}],
+        ["empty.mixed", {type:"object",properties:{name:{type:"string",readOnly:true},count:{type:"integer"}},additionalProperties:false}],
+        ["empty.open-readonly", {type:"object",properties:{name:{type:"string",readOnly:true}},additionalProperties:true}]
     ] as const) {
         const root = join(f.directory, id);
         await mkdir(root);
         await writeFile(join(root,"app.json"),JSON.stringify({schemaVersion:1,id,name:id,version:"1.0.0",description:"Empty settings acceptance",...(schema?{configuration:"schema.json"}:{})}));
         if (schema) await writeFile(join(root,"schema.json"),JSON.stringify(schema));
-        await installApp(context,root,{});
+        await installApp(context,root,id === "empty.mixed" ? {name:"A",count:1} : ["empty.fields-readonly","empty.open-readonly"].includes(id) ? {name:"A"} : {});
     }
     await writeFile(join(f.home,"config.json"),JSON.stringify({language:"zh-CN"}));
     const root = mode === "no-project" ? f.home : f.root;
