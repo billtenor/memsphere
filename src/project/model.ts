@@ -43,11 +43,20 @@ export const modelRegistrationConfigSchema = z.object({
 });
 
 const businessDirectorySchema = modelStorePathSchema;
-export const businessStoreBindingSchema = z.discriminatedUnion("kind", [
+const tosCredentialsReferenceSchema = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("env"), accessKeyIdEnv: z.string().min(1), accessKeySecretEnv: z.string().min(1), stsTokenEnv: z.string().min(1).optional() }).strict(),
+  z.object({ source: z.literal("settings"), id: z.string().min(1) }).strict()
+]);
+const tosBindingConfigSchema = z.object({
+  region: z.string().min(1), endpoint: z.string().min(1), bucket: z.string().min(1), prefix: z.string().min(1),
+  mode: z.enum(["raw", "revision"]), credentials: tosCredentialsReferenceSchema
+}).strict();
+export const businessStoreBindingSchema = z.discriminatedUnion("factory", [
   z.object({ model: z.string().min(1), kind: z.literal("value"), factory: z.literal("memsphere/filesystem-json"),
     config: z.object({ directory: businessDirectorySchema }).strict() }).strict(),
   z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/filesystem"),
-    config: z.object({ directory: businessDirectorySchema, contentTypeExtensions: z.record(z.array(z.string())).optional() }).strict() }).strict()
+    config: z.object({ directory: businessDirectorySchema, contentTypeExtensions: z.record(z.array(z.string())).optional() }).strict() }).strict(),
+  z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/tos"), config: tosBindingConfigSchema }).strict()
 ]);
 export type BusinessStoreBinding = z.infer<typeof businessStoreBindingSchema>;
 export const projectConfigSchema = z.object({

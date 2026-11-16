@@ -18,15 +18,15 @@ test("hierarchical ValueStore IDs preserve full paths, CAS and deleted revisions
     await store.create({}, "run-a/artifact", value);
     await store.create({}, "run-b/artifact", value);
     assert.equal(JSON.parse(await readFile(join(directory, "run-a/artifact.json"), "utf8")).id, "run-a/artifact");
-    const changed = await store.update({}, "run-a/artifact", { name: "changed", count: 2 }, { expectedRevision: 1 });
-    assert.equal(changed.revision, 2);
-    await assert.rejects(store.update({}, "run-a/artifact", value, { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
-    await store.delete({}, "run-a/artifact", { expectedRevision: 2 });
-    assert.equal((await store.create({}, "run-a/artifact", value)).revision, 3);
-    await assert.rejects(store.delete({}, "run-a/artifact", { expectedRevision: 1 }), { code: "REVISION_CONFLICT" });
-    assert.equal((await store.get({}, "run-b/artifact"))!.revision, 1);
+    const changed = await store.update({}, "run-a/artifact", { name: "changed", count: 2 }, { expectedRevision: "1" });
+    assert.equal(changed.revision, "2");
+    await assert.rejects(store.update({}, "run-a/artifact", value, { expectedRevision: "1" }), { code: "REVISION_CONFLICT" });
+    await store.delete({}, "run-a/artifact", { expectedRevision: "2" });
+    assert.equal((await store.create({}, "run-a/artifact", value)).revision, "3");
+    await assert.rejects(store.delete({}, "run-a/artifact", { expectedRevision: "1" }), { code: "REVISION_CONFLICT" });
+    assert.equal((await store.get({}, "run-b/artifact"))!.revision, "1");
     const reopened = await new FilesystemJsonValueStoreFactory().openExisting({}, STORE_ID, runtime, new Config({ directory }));
-    assert.equal((await reopened.get({}, "run-a/artifact"))!.revision, 3);
+    assert.equal((await reopened.get({}, "run-a/artifact"))!.revision, "3");
   });
 });
 
@@ -96,35 +96,35 @@ test("filesystem JSON ValueStore persists raw values, metadata and exact JSON ac
     assert.equal(created.id, "item");
     assert.deepEqual(created.value, value);
     assert.notEqual(created.value, value);
-    assert.equal(created.revision, 1);
+    assert.equal(created.revision, "1");
     assert.equal(created.updatedAt, created.createdAt);
     assert.equal("createdBy" in created, false);
     assert.equal("updatedBy" in created, false);
     assert.equal("data" in created, false);
     runtime.reflect(created.value);
     const text = await readFile(join(directory, "item.json"), "utf8");
-    assert.equal(text, `${JSON.stringify(created, null, 2)}\n`);
-    assert.deepEqual(JSON.parse(text), created);
+    assert.equal(text, `${JSON.stringify({ ...created, revision: Number(created.revision) }, null, 2)}\n`);
+    assert.deepEqual(JSON.parse(text), { ...created, revision: Number(created.revision) });
     assert.equal("model" in JSON.parse(text), false);
     assert.deepEqual(await readdir(directory), [FILESYSTEM_JSON_METADATA_DIRECTORY, "item.json"]);
     assert.equal(await store.has({}, "item"), true);
     await assert.rejects(store.create({}, "item", value), /already exists/);
     await assert.rejects(store.update({}, "missing", value), /does not exist/);
     const replacement = { name: "second", count: 2 };
-    const updated = await store.update({}, "item", replacement, { expectedRevision: 1 });
+    const updated = await store.update({}, "item", replacement, { expectedRevision: "1" });
     assert.deepEqual(updated.value, replacement);
-    assert.equal(updated.revision, 2);
+    assert.equal(updated.revision, "2");
     assert.equal(updated.createdAt, created.createdAt);
     assert.equal("tags" in (updated.value as object), false);
     const reopened = await new FilesystemJsonValueStoreFactory().createStore({}, STORE_ID, runtime, new Config({ directory }));
     assert.deepEqual(await reopened.get({}, "item"), updated);
     assert.deepEqual(created.value, value);
-    await assert.rejects(reopened.delete({}, "item", { expectedRevision: 1 }), /revision conflict/);
-    assert.equal(await reopened.delete({}, "item", { expectedRevision: 2 }), true);
+    await assert.rejects(reopened.delete({}, "item", { expectedRevision: "1" }), /revision conflict/);
+    assert.equal(await reopened.delete({}, "item", { expectedRevision: "2" }), true);
     assert.equal(await store.get({}, "item"), undefined);
     assert.equal(await store.delete({}, "item"), false);
-    await assert.rejects(store.delete({}, "item", { expectedRevision: 2 }), /revision conflict/);
-    await assert.rejects(store.update({}, "item", value, { expectedRevision: 2 }), /revision conflict/);
+    await assert.rejects(store.delete({}, "item", { expectedRevision: "2" }), /revision conflict/);
+    await assert.rejects(store.update({}, "item", value, { expectedRevision: "2" }), /revision conflict/);
   });
 });
 
@@ -145,7 +145,7 @@ test("filesystem JSON ValueStore snapshots before awaiting and never stores call
     (read.value as typeof expected).details.active = false;
     assert.deepEqual((await store.get({}, "snapshot"))!.value, expected);
     const replacement = { name: "update", count: 3 };
-    const updating = store.update({}, "snapshot", replacement, { expectedRevision: 1 });
+    const updating = store.update({}, "snapshot", replacement, { expectedRevision: "1" });
     replacement.name = "changed after invocation";
     assert.deepEqual((await updating).value, { name: "update", count: 3 });
     assert.deepEqual((await store.get({}, "snapshot"))!.value, { name: "update", count: 3 });
@@ -162,11 +162,11 @@ test("filesystem JSON ValueStore enforces complete runtime validation before wri
       { name: "nested", count: 1, details: { active: "yes" } }, { name: "coercion", count: "2" }
     ];
     for (const candidate of invalid) {
-      await assert.rejects(store.update({}, "kept", candidate, { expectedRevision: 1 }));
+      await assert.rejects(store.update({}, "kept", candidate, { expectedRevision: "1" }));
       await assert.rejects(store.create({}, "rejected", candidate));
       assert.equal(await store.has({}, "rejected"), false);
       assert.deepEqual((await store.get({}, "kept"))!.value, value);
-      assert.equal((await store.get({}, "kept"))!.revision, 1);
+      assert.equal((await store.get({}, "kept"))!.revision, "1");
     }
     await writeFile(join(directory, "bad-runtime-value.json"), JSON.stringify({
       id: "bad-runtime-value", revision: 1, createdAt: 1, updatedAt: 1, value: { name: "bad", count: -1 }
@@ -188,7 +188,7 @@ test("filesystem JSON ValueStore rejects unsupported JSON values and descriptors
     const before = await readFile(join(directory, "kept.json"));
     await assert.rejects(store.update({}, "kept", { value: 1n }), /JSON/);
     assert.deepEqual((await store.get({}, "kept"))!.value, { valid: true });
-    assert.equal((await store.get({}, "kept"))!.revision, 1);
+    assert.equal((await store.get({}, "kept"))!.revision, "1");
     assert.deepEqual(await readFile(join(directory, "kept.json")), before);
     const unsupported = await new FilesystemJsonValueStoreFactory().createStore({}, "unsupported-store",
       createPlainRuntime({ id: "unsupported.json", root: { kind: "scalar", scalar: "bigint" } }), new Config({ directory }));
@@ -243,12 +243,12 @@ test("filesystem JSON ValueStore shares per-record atomic CAS and pagination acr
     assert.equal(creates.filter(({ status }) => status === "fulfilled").length, 1);
     assert.equal(creates.filter(({ status }) => status === "rejected").length, 1);
     const updates = await Promise.allSettled([
-      first.update({}, "a", { name: "first update", count: 3 }, { expectedRevision: 1 }),
-      second.update({}, "a", { name: "second update", count: 4 }, { expectedRevision: 1 })
+      first.update({}, "a", { name: "first update", count: 3 }, { expectedRevision: "1" }),
+      second.update({}, "a", { name: "second update", count: 4 }, { expectedRevision: "1" })
     ]);
     assert.equal(updates.filter(({ status }) => status === "fulfilled").length, 1);
     assert.equal(updates.filter(({ status }) => status === "rejected").length, 1);
-    assert.equal((await first.get({}, "a"))!.revision, 2);
+    assert.equal((await first.get({}, "a"))!.revision, "2");
     for (const id of ["b", "c"]) await first.create({}, id, { name: id, count: 0 });
     const page = await first.list({}, { limit: 2 });
     assert.deepEqual(page.items, [{ id: "a" }, { id: "b" }]);
@@ -257,8 +257,8 @@ test("filesystem JSON ValueStore shares per-record atomic CAS and pagination acr
     assert.deepEqual((await readdir(directory)).sort(), [FILESYSTEM_JSON_METADATA_DIRECTORY, "a.json", "b.json", "c.json"]);
     await assert.rejects(first.list({}, { cursor: "bad cursor" }), /Invalid.*list cursor/);
     await assert.rejects(first.list({}, { limit: 0 }), /limit/);
-    await assert.rejects(first.update({}, "a", { name: "x", count: 0 }, { expectedRevision: 0 }), /expectedRevision/);
-    await assert.rejects(first.delete({}, "a", { expectedRevision: 0 }), /expectedRevision/);
+    await assert.rejects(first.update({}, "a", { name: "x", count: 0 }, { expectedRevision: "0" }), /expectedRevision/);
+    await assert.rejects(first.delete({}, "a", { expectedRevision: "0" }), /expectedRevision/);
   });
 });
 
@@ -267,11 +267,11 @@ test("filesystem JSON ValueStore respects cancellation and portable configuratio
     const value = { name: "valid", count: 1 };
     await store.create({}, "kept", value);
     const controller = new AbortController();
-    const updating = store.update({ signal: controller.signal }, "kept", { name: "new", count: 2 }, { expectedRevision: 1 });
+    const updating = store.update({ signal: controller.signal }, "kept", { name: "new", count: 2 }, { expectedRevision: "1" });
     controller.abort();
     await assert.rejects(updating, { name: "AbortError" });
     assert.deepEqual((await store.get({}, "kept"))!.value, value);
-    assert.equal((await store.get({}, "kept"))!.revision, 1);
+    assert.equal((await store.get({}, "kept"))!.revision, "1");
     const aborted = { signal: controller.signal };
     await assert.rejects(store.get(aborted, "kept"), { name: "AbortError" });
     await assert.rejects(store.has(aborted, "kept"), { name: "AbortError" });
@@ -325,21 +325,21 @@ test("filesystem JSON ValueStore snapshots mutable update and delete revision op
   await withStore(async (store) => {
     const original = { name: "original", count: 1 };
     await store.create({}, "kept", original);
-    await store.update({}, "kept", original, { expectedRevision: 1 });
-    const updateOptions: { expectedRevision?: number } = { expectedRevision: 1 };
+    await store.update({}, "kept", original, { expectedRevision: "1" });
+    const updateOptions: { expectedRevision?: number } = { expectedRevision: "1" };
     const pendingUpdate = store.update({}, "kept", { name: "must not persist", count: 2 }, updateOptions);
     updateOptions.expectedRevision = 2;
     await assert.rejects(pendingUpdate, /revision conflict: expected 1, found 2/);
     for (const changedRevision of [undefined, 2]) {
-      const deleteOptions: { expectedRevision?: number } = { expectedRevision: 1 };
+      const deleteOptions: { expectedRevision?: number } = { expectedRevision: "1" };
       const pendingDelete = store.delete({}, "kept", deleteOptions);
       deleteOptions.expectedRevision = changedRevision;
       await assert.rejects(pendingDelete, /revision conflict: expected 1, found 2/);
     }
     const kept = (await store.get({}, "kept"))!;
-    assert.equal(kept.revision, 2);
+    assert.equal(kept.revision, "2");
     assert.deepEqual(kept.value, original);
-    const matchingOptions = { expectedRevision: 2 };
+    const matchingOptions = { expectedRevision: "2" };
     const matchingDelete = store.delete({}, "kept", matchingOptions);
     matchingOptions.expectedRevision = 0;
     assert.equal(await matchingDelete, true);
@@ -383,13 +383,13 @@ test("filesystem JSON ValueStore preserves creator but does not attribute an upd
         createdBy: creator, updatedBy: "previous-user", value: { name: "old", count: 1 }
       };
       await writeFile(join(directory, `${id}.json`), JSON.stringify(record));
-      assert.deepEqual(await store.get({}, id), record);
-      const updated = await store.update({}, id, { name: "new", count: 2 }, { expectedRevision: 5 });
-      assert.equal(updated.revision, 6);
+      assert.deepEqual(await store.get({}, id), { ...record, revision: String(record.revision) });
+      const updated = await store.update({}, id, { name: "new", count: 2 }, { expectedRevision: "5" });
+      assert.equal(updated.revision, "6");
       assert.equal(updated.createdAt, 10);
       assert.equal(updated.createdBy, creator);
       assert.equal("updatedBy" in updated, false);
-      assert.deepEqual(JSON.parse(await readFile(join(directory, `${id}.json`), "utf8")), updated);
+      assert.deepEqual(JSON.parse(await readFile(join(directory, `${id}.json`), "utf8")), { ...updated, revision: Number(updated.revision) });
     }
   });
 });
@@ -440,11 +440,11 @@ test("filesystem JSON ValueStore lock is only per record and a canceled waiter n
     });
     await enteredPromise;
     const controller = new AbortController();
-    const waiting = store.update({ signal: controller.signal }, "busy", { name: "canceled", count: 2 }, { expectedRevision: 1 });
+    const waiting = store.update({ signal: controller.signal }, "busy", { name: "canceled", count: 2 }, { expectedRevision: "1" });
     const rejected = assert.rejects(waiting, { name: "AbortError" });
     try {
       const independent = await store.create({}, "independent", value);
-      assert.equal(independent.revision, 1);
+      assert.equal(independent.revision, "1");
       controller.abort();
       await rejected;
       assert.deepEqual((await readdir(directory)).sort(), [FILESYSTEM_JSON_METADATA_DIRECTORY, "busy.json", "independent.json"]);
@@ -455,7 +455,7 @@ test("filesystem JSON ValueStore lock is only per record and a canceled waiter n
       await held;
       await rejected;
     }
-    assert.equal((await store.update({}, "busy", { name: "next", count: 3 }, { expectedRevision: 1 })).revision, 2);
+    assert.equal((await store.update({}, "busy", { name: "next", count: 3 }, { expectedRevision: "1" })).revision, "2");
   });
 });
 
@@ -465,20 +465,46 @@ test("atomic upsert replaces complete records and preserves deletion revision hi
     const first = await store.upsert({}, "upsert", { name: "first", count: 1, tags: ["old"] });
     const second = await store.upsert({}, "upsert", { name: "second", count: 2 });
     assert.equal(second.createdAt, first.createdAt);
-    assert.equal(second.revision, 2);
+    assert.equal(second.revision, "2");
     assert.deepEqual((await store.get({}, "upsert"))?.value, { name: "second", count: 2 });
     await store.delete({}, "upsert");
-    assert.equal((await store.upsert({}, "upsert", { name: "reborn", count: 0 })).revision, 3);
+    assert.equal((await store.upsert({}, "upsert", { name: "reborn", count: 0 })).revision, "3");
     await assert.rejects(store.upsert({}, "upsert", { name: "invalid", count: -1 }));
-    assert.equal((await store.get({}, "upsert"))?.revision, 3);
+    assert.equal((await store.get({}, "upsert"))?.revision, "3");
   });
 });
 
 test("concurrent upserts of a missing ID create one record with every revision retained", async () => {
   await withStore(async (store) => {
     const results = await Promise.all(Array.from({ length: 8 }, (_, count) => store.upsert!({}, "shared", { name: "concurrent", count })));
-    assert.deepEqual(results.map(result => result.revision).sort((a, b) => a! - b!), [1, 2, 3, 4, 5, 6, 7, 8]);
-    assert.equal((await store.get({}, "shared"))?.revision, 8);
+    assert.deepEqual(results.map(result => result.revision).sort(), ["1", "2", "3", "4", "5", "6", "7", "8"]);
+    assert.equal((await store.get({}, "shared"))?.revision, "8");
     assert.deepEqual(await store.list({}), { items: [{ id: "shared" }] });
+  });
+});
+
+
+test("public revisions are strings while legacy disk counters stay numeric", async () => {
+  await withStore(async (store, directory, runtime) => {
+    const path = join(directory, "legacy.json");
+    await writeFile(path, JSON.stringify({ id: "legacy", revision: 41, createdAt: 1, updatedAt: 1, value: { name: "old", count: 0 } }));
+    const read = await store.get({}, "legacy");
+    assert.equal(read!.revision, "41");
+    const before = await readFile(path);
+    for (const revision of [41, 0, "", "041", " 41", "41 ", "4.1e1", "41.0", "9007199254740992"]) {
+      await assert.rejects(store.update({}, "legacy", { name: "rejected", count: 1 }, { expectedRevision: revision as string }), { code: "INVALID_ARGUMENT" });
+      assert.deepEqual(await readFile(path), before);
+    }
+    await assert.rejects(store.delete({}, "legacy", { expectedRevision: "40" }), error => {
+      const details = (error as { details: { expectedRevision: unknown; actualRevision: unknown } }).details;
+      assert.deepEqual(details, { id: "legacy", expectedRevision: "40", actualRevision: "41" }); return true;
+    });
+    const saved = await store.update({}, "legacy", { name: "new", count: 1 }, { expectedRevision: read!.revision });
+    assert.equal(saved.revision, "42");
+    assert.equal(JSON.parse(await readFile(path, "utf8")).revision, 42);
+    const reopened = await new FilesystemJsonValueStoreFactory().openExisting({}, STORE_ID, runtime, new Config({ directory }));
+    assert.equal((await reopened.get({}, "legacy"))!.revision, "42");
+    await reopened.delete({}, "legacy", { expectedRevision: "42" });
+    assert.equal((await store.create({}, "legacy", { name: "recreated", count: 0 })).revision, "43");
   });
 });

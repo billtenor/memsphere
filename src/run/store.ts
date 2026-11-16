@@ -1285,7 +1285,21 @@ function assertRunRunning(run: RunState): void {
 
 export async function readRun(runsRoot: string, id: string): Promise<RunState> {
   const raw = await retryRunFileAccess(async () => readFile(await existingRunPath(runsRoot, id), "utf8"));
-  return parseRunState(JSON.parse(raw));
+  return parsePersistedRunState(JSON.parse(raw));
+}
+
+/** Normalize only the legacy disk receipt field; public Store tokens remain strings. */
+function parsePersistedRunState(parsed: unknown): RunState {
+  if (parsed && typeof parsed === "object" && "events" in parsed && Array.isArray(parsed.events)) {
+    for (const event of parsed.events) {
+      const receipt = event?.artifact?.modelData;
+      if (receipt && typeof receipt.revision === "number") {
+        if (!Number.isSafeInteger(receipt.revision) || receipt.revision < 1) throw new TypeError("Invalid persisted Store revision");
+        receipt.revision = String(receipt.revision);
+      }
+    }
+  }
+  return parseRunState(parsed);
 }
 
 export function parseRunState(parsed: unknown): RunState {
@@ -1395,7 +1409,7 @@ async function readRunSummary(runsRoot: string, id: string): Promise<RunListSumm
   if (!raw || typeof raw !== "object") throw new Error(`invalid Run summary: ${id}`);
   const source = raw as Record<string, unknown>;
   if (source.contractVersion !== 2 && source.contractVersion !== 3) {
-    const summary = summarizeRun(parseRunState(raw));
+    const summary = summarizeRun(parsePersistedRunState(raw));
     cacheRunSummary(path, file, summary);
     return summary;
   }

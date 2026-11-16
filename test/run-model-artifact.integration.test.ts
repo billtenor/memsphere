@@ -50,7 +50,7 @@ test("model Artifact retains immutable full snapshot independently of business u
   const f = await fixture(t); const run = await f.start(); const done = await f.report(run.id);
   assert.equal(done.status, "done");
   const artifact = done.events[0].artifact; const receipt = artifact.modelData!;
-  assert(receipt.dataId.startsWith(`${run.id}--`)); assert.equal(receipt.revision, 1);
+  assert(receipt.dataId.startsWith(`${run.id}--`)); assert.equal(receipt.revision, "1");
   const snapshot = await fs.readFile(join(f.runsRoot, artifact.path!), "utf8");
   assert.deepEqual(JSON.parse(snapshot), (await readData({}, f.root, "records", receipt.dataId)).value);
   await upsertData({}, f.root, "records", receipt.dataId, { kind: "value", value: { name: "later", count: 2 } });
@@ -66,7 +66,7 @@ test("model Artifact target freezing and publication complete while the old Proj
     const done = await f.report(run.id);
     assert.equal(done.status, "done");
     const receipt = done.events[0].artifact.modelData!;
-    assert.equal(receipt.revision, 1);
+    assert.equal(receipt.revision, "1");
     assert.deepEqual((await readData({}, f.root, "records", receipt.dataId)).value, { name: "original", count: 1 });
   });
 });
@@ -167,7 +167,7 @@ test("business write followed by Run-save failure is safely redone at the same d
   const done = await f.report(run.id); assert.equal(done.status, "done");
   assert.equal(done.events[0].artifact.modelData!.dataId, before.items[0].id);
   assert.equal(before.items[0].id, "redo-target");
-  assert.equal(done.events[0].artifact.modelData!.revision, 2);
+  assert.equal(done.events[0].artifact.modelData!.revision, "2");
 });
 
 
@@ -243,7 +243,7 @@ test("explicit business ID replaces one complete record across steps and Runs wh
   assert.deepEqual(run.events.map(e => e.artifact.modelData!.dataId), ["task-1", "task-1"]);
   assert.notEqual(first.modelData!.stepExecutionId, run.events[1].artifact.modelData!.stepExecutionId);
   const next = await f.start(); await f.report(next.id, '{"name":"next-run","count":3}', undefined, "task-1");
-  assert.equal((await readData({}, f.root, "records", "task-1")).revision, 3);
+  assert.equal((await readData({}, f.root, "records", "task-1")).revision, "3");
   assert.equal(await fs.readFile(join(f.runsRoot, first.path!), "utf8"), snapshot);
 });
 
@@ -395,4 +395,14 @@ test("empty write options are rejected on non-model Artifacts", async t => {
   const f = await fixture(t, action().replace('      store: records\n', '')); const run = await f.start();
   await assert.rejects(reportRun({ runsRoot: f.runsRoot, runId: run.id, artifact: { kind: "inline", value: "unused" }, writeOptions: {} }), /only supported for model Artifacts/);
   assert.equal((await readRun(f.runsRoot, run.id)).events.length, 0);
+});
+test("legacy persisted numeric business receipt reads as a string without rewriting history", async t => {
+  const f = await fixture(t), run = await f.start(), completed = await f.report(run.id);
+  const path = join(f.runsRoot, run.id, `${run.id}.json`);
+  const persisted = JSON.parse(await fs.readFile(path, "utf8"));
+  persisted.events[0].artifact.modelData.revision = 1;
+  await fs.writeFile(path, JSON.stringify(persisted));
+  const before = await fs.readFile(path, "utf8");
+  assert.equal((await readRun(f.runsRoot, completed.id)).events[0].artifact.modelData?.revision, "1");
+  assert.equal(await fs.readFile(path, "utf8"), before);
 });

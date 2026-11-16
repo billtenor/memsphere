@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { type Page } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
@@ -613,3 +613,414 @@ test("Runner settings require installation detection and preserve identity/async
     assert.deepEqual(saved.acp_providers, { codex: { idle_timeout_ms: 90000 } });
   } finally { await browser.close(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(dir, { recursive: true, force: true }); }
 });
+
+test("TOS settings save credentials and a Store binding through real settings APIs", { timeout: 30_000 }, async t => {
+  await withTosSettingsPage(t, "memsphere-tos-settings-browser-", async dir => {
+    const config = await settingsConfigFixture(dir, "127.0.0.1");
+    const { initializeProjectModelRegistrations } = await import("../src/project/model-registration.js");
+    await initializeProjectModelRegistrations({ signal: t.signal }, { root: config.scopeRoot });
+    const { useTosService } = await import("./support/tos-sdk-service.js");
+    return { config, service: useTosService(t) };
+  }, async (page, { config, service }, origin) => {
+    const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`${origin}/projects/demo/settings/tos-credentials`, { waitUntil: "networkidle" });
+    await page.getByRole("button", {name:"新增凭据",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').fill("test");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("fixture-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("fixture-secret");
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').getAttribute("type"), "password");
+    await page.getByRole("button", { name: "保存凭据", exact: true }).click();
+    await page.getByText("凭据已保存。", { exact: true }).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(), 0);
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button", { name: "业务 Store", exact: true }).click();
+    await page.getByRole("button",{name:"新增 TOS Store",exact:true}).click();
+    const values = { id: "assets", model: "memsphere/run/artifact.json", bucket: "test-bucket", prefix: "assets/" };
+    for (const [key, value] of Object.entries(values)) await page.locator(`[data-field="tosDraft.${key}"]`).fill(value);
+    await selectTosSetting(page,"tosDraft.credentials.id","test");
+    await page.getByRole("button", { name: "添加存储", exact: true }).click();
+    await page.getByRole("button", { name: "保存", exact: true }).click();
+    await page.getByRole("button", { name: "确认保存", exact: true }).waitFor();
+    assert.equal(service.calls.length, 0, "Pure validation must not contact or scan TOS");
+    const saving = page.waitForResponse(response => response.url().endsWith("/settings/project") && response.request().method() === "PUT");
+    await page.getByRole("button", { name: "确认保存", exact: true }).click();
+    const savedResponse = await saving;
+    assert.equal(savedResponse.status(), 200, await savedResponse.text());
+    await openTosStore(page,"assets");
+    await page.locator('[data-select-field="tosRef.assets.id"]').waitFor();
+    assert.equal(service.calls.filter(call => call.method === "VERSIONING").length, 1); assert.equal(service.calls.filter(call => call.method === "LIST").length, 1);
+    const saved = JSON.parse(await readFile(config.configPath, "utf8"));
+    assert.equal(saved.dataStores.assets.config.credentials.id, "test");
+    assert.equal(saved.dataStores.assets.config.mode, "revision");
+    assert.equal((await page.locator('[data-select-field="tosRef.assets.id"]').innerText()).replace("⌄", "").trim(), "test");
+    assert.equal(await page.locator('[data-field="tosRef.assets.mode"]').count(), 0);
+    await page.reload();
+    await openTosStore(page,"assets");
+    await page.locator('[data-select-field="tosRef.assets.id"]').waitFor();
+    assert.equal((await page.locator('[data-select-field="tosRef.assets.id"]').innerText()).replace("⌄", "").trim(), "test");
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button", {name:"火山云配置",exact:true}).click();
+    await page.getByRole("button",{name:"新增凭据",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').fill("alternate");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("fixture-other-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("fixture-other-secret");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    await page.getByText("凭据已保存。",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(),0);
+    await page.locator('[data-view-slot="navigation.secondary"]').getByRole("button",{name:"业务 Store",exact:true}).click();
+    await openTosStore(page,"assets");
+    await selectTosSetting(page,"tosRef.assets.id","alternate");
+    await page.getByRole("button",{name:"保存",exact:true}).click();
+    await page.getByRole("button",{name:"确认保存",exact:true}).click();
+    await openTosStore(page,"assets");
+    await page.locator('[data-select-field="tosRef.assets.id"]').waitFor();
+    await page.reload();await openTosStore(page,"assets");await page.locator('[data-select-field="tosRef.assets.id"]').waitFor();
+    assert.equal((await page.locator('[data-select-field="tosRef.assets.id"]').innerText()).replace("⌄", "").trim(),"alternate");
+    assert.equal(JSON.parse(await readFile(config.configPath,"utf8")).dataStores.assets.config.credentials.id,"alternate");
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    assert.deepEqual(errors, []);
+  });
+});
+
+test("TOS raw/env settings survive reload and preserve an unsaved reference after a real CAS conflict",{timeout:30_000},async t=>{
+  const names=["BROWSER_TOS_AK","BROWSER_TOS_SK","BROWSER_TOS_AK_UPDATED"];
+  await withTosSettingsPage(t, "memsphere-tos-raw-browser-", async dir => {
+    const config=await settingsConfigFixture(dir,"127.0.0.1");
+    const { initializeProjectModelRegistrations }=await import("../src/project/model-registration.js");
+    await initializeProjectModelRegistrations({signal:t.signal}, {root:config.scopeRoot});
+    const { useTosService }=await import("./support/tos-sdk-service.js");useTosService(t);
+    const previous=names.map(name=>process.env[name]);
+    names.forEach(name=>{process.env[name]="fixture-value";});
+    return { config, dispose:()=>names.forEach((name,i)=>{if(previous[i]===undefined)delete process.env[name];else process.env[name]=previous[i];}) };
+  }, async(page,{config},origin)=>{
+    await page.setViewportSize({width:390,height:844});
+    await page.goto(`${origin}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
+    await page.getByRole("button",{name:"新增 TOS Store",exact:true}).click();
+    await page.getByText("请先在火山云配置中新增 TOS 凭据。",{exact:true}).waitFor();
+    for(const [key,value] of Object.entries({id:"raw-assets",model:"memsphere/run/artifact.json",bucket:"test-bucket",prefix:"raw-assets/"})) await page.locator(`[data-field="tosDraft.${key}"]`).fill(value);
+    const beforeEmptySelection=await readFile(config.configPath,"utf8");
+    await page.getByRole("button",{name:"添加存储",exact:true}).click();
+    await page.getByText("请选择已保存且可用的凭据。",{exact:true}).waitFor();
+    assert.equal(await readFile(config.configPath,"utf8"),beforeEmptySelection);
+    assert.equal(await page.locator('[data-field="tosDraft.id"]').inputValue(),"raw-assets");
+    await page.locator('[data-select-field="tosDraft.mode"]').click();await page.getByRole("option",{name:"不带 revision",exact:true}).click();
+    await page.locator('[data-select-field="tosDraft.credentials.source"]').click();await page.getByRole("option",{name:"环境变量",exact:true}).click();
+    await page.locator('[data-field="tosDraft.credentials.accessKeyIdEnv"]').fill(names[0]);
+    await page.locator('[data-field="tosDraft.credentials.accessKeySecretEnv"]').fill(names[1]);
+    await page.getByRole("button",{name:"添加存储",exact:true}).click();
+    await page.getByRole("button",{name:"保存",exact:true}).click();await page.getByRole("button",{name:"确认保存",exact:true}).click();
+    await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').waitFor();
+    await page.reload();await openTosStore(page,"raw-assets");await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').waitFor();
+    const saved=JSON.parse(await readFile(config.configPath,"utf8"));assert.equal(saved.dataStores["raw-assets"].config.mode,"raw");
+    assert.deepEqual(saved.dataStores["raw-assets"].config.credentials,{source:"env",accessKeyIdEnv:names[0],accessKeySecretEnv:names[1]});
+    await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').fill(names[2]);
+    await page.getByRole("button",{name:"保存",exact:true}).click();await page.getByRole("button",{name:"确认保存",exact:true}).waitFor();
+    const external=saved;await writeFile(config.configPath,JSON.stringify(external)+"\n\n");
+    const response=page.waitForResponse(r=>r.url().endsWith("/settings/project") && r.request().method()==="PUT");
+    await page.getByRole("button",{name:"确认保存",exact:true}).click();assert.equal((await response).status(),409);
+    assert.deepEqual(JSON.parse(await readFile(config.configPath,"utf8")),external);
+    await page.getByText("保存失败：配置文件已被其他进程修改，请重新读取。",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosRef.raw-assets.accessKeyIdEnv"]').inputValue(),names[2]);
+    await page.getByRole("button",{name:"重新读取",exact:true}).click();
+    await page.waitForFunction(name=>(document.querySelector('[data-field="tosRef.raw-assets.accessKeyIdEnv"]') as HTMLInputElement)?.value === name,names[0]);
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
+  });
+});
+
+test("TOS credential settings reject unauthenticated writes and recover through the operation-token UI",{timeout:30_000},async t=>{
+  await withTosSettingsPage(t, "memsphere-tos-auth-browser-", async dir => {
+    const config=await settingsConfigFixture(dir,"0.0.0.0"),homeFile=join(config.homeRoot!,"config.json");
+    return {config,homeFile,before:await readFile(homeFile,"utf8")};
+  }, async(page,{homeFile,before},origin)=>{
+    await page.goto(`${origin}/projects/demo/settings/tos-credentials`,{waitUntil:"domcontentloaded",timeout:15000});
+    const unauthorized=await page.evaluate(async()=>{
+      const response=await fetch("/api/settings/global/tos-credentials",{method:"PUT",headers:{"content-type":"application/json"},body:JSON.stringify({id:"forbidden",expectedRevision:"bad",credentials:{accessKeyId:"fixture-ak",accessKeySecret:"fixture-secret"}})});
+      return {status:response.status,text:await response.text()};
+    });
+    assert.equal(unauthorized.status,401);assert.ok(!unauthorized.text.includes("fixture-secret"));assert.equal(await readFile(homeFile,"utf8"),before);
+    await page.getByLabel("操作令牌",{exact:true}).fill("wrong-token");await page.getByRole("button",{name:"进入配置中心",exact:true}).click();
+    await page.getByText("操作令牌不正确，请检查后重试。",{exact:true}).waitFor();
+    assert.equal(await readFile(homeFile,"utf8"),before);
+    await page.getByLabel("操作令牌",{exact:true}).fill("fixture-operation-token");await page.getByRole("button",{name:"进入配置中心",exact:true}).click();
+    await page.getByRole("button",{name:"新增凭据",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
+  }, {settingsToken:"fixture-operation-token"});
+});
+
+
+
+test("TOS credential editing retains omitted fields and isolates other credentials", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page, config) => {
+    assert.equal(await page.getByRole("button",{name:"TOS 凭据",exact:true}).count(),0,"Credentials are not a top-level section");
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    const item=page.locator('[data-credential="alternate"]'),editor=item.locator(".settings-credential-editor");
+    assert.equal(await editor.count(),1,"Editor expands inside the selected credential item");
+    const rowBox=await item.locator(".settings-credential-row").boundingBox(),editorBox=await editor.boundingBox();
+    assert.ok(rowBox&&editorBox);assert.ok(Math.abs(rowBox.x-editorBox.x)<1&&Math.abs(rowBox.width-editorBox.width)<1,"Credential row and editor must have equal width and aligned edges");
+    await assertSettingActionsAligned(item.locator(".settings-row-actions"));
+    assert.equal(await page.locator('[data-field="tosCredential.id"]').isDisabled(),true);
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeyId"]').inputValue(),"");
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("replacement-secret");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    await page.getByText("凭据已保存。",{exact:true}).waitFor();
+    const {decryptTosCredential}=await import("../src/tos-credential-codec.js");
+    const homeFile=join(config.homeRoot!,"config.json");
+    const home=JSON.parse(await readFile(homeFile,"utf8"));
+    assert.deepEqual(Object.keys(home.tosCredentials.entries).sort(),["alternate","test"]);
+    assert.deepEqual(decryptTosCredential("alternate",home.tosCredentials),{accessKeyId:"fixture-other-ak",accessKeySecret:"replacement-secret"});
+    assert.equal(decryptTosCredential("test",home.tosCredentials).accessKeySecret,"fixture-secret");
+    await page.reload();
+    await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).waitFor();
+    assert.ok(!(await page.locator("body").innerText()).includes("replacement-secret"));
+  });
+});
+
+test("TOS credential creation rejects duplicate names without replacing saved credentials", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page, config) => {
+    const homeFile=join(config.homeRoot!,"config.json");
+    const beforeDuplicate=await readFile(homeFile,"utf8");
+    await page.getByRole("button",{name:"新增凭据",exact:true}).click();
+    await page.locator('[data-field="tosCredential.id"]').fill("test");
+    await page.locator('[data-field="tosCredential.accessKeyId"]').fill("unused-ak");
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unused-secret");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    await page.getByText("凭据名称已存在，请使用列表中的编辑操作。",{exact:false}).waitFor();
+    assert.equal(await readFile(homeFile,"utf8"),beforeDuplicate);
+    await page.getByRole("button",{name:"取消",exact:true}).click();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(),0);
+    await page.reload();
+    await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).waitFor();
+    assert.ok(!(await page.locator("body").innerText()).includes("unused-secret"));
+  });
+});
+
+test("TOS credential editing preserves the draft and external Home on CAS conflict", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page, config) => {
+    const homeFile=join(config.homeRoot!,"config.json");
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("not-committed-secret");
+    const externalHome=(await readFile(homeFile,"utf8"))+"\n";
+    await writeFile(homeFile,externalHome);
+    const conflictingSave=page.waitForResponse(response=>response.url().endsWith("/tos-credentials")&&response.request().method()==="PUT");
+    await page.getByRole("button",{name:"保存凭据",exact:true}).click();
+    assert.equal((await conflictingSave).status(),409);
+    await page.getByText("Settings changed; reload before saving credentials",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"not-committed-secret");
+    assert.equal(await readFile(homeFile,"utf8"),externalHome);
+    await page.getByRole("button",{name:"取消",exact:true}).click();
+  });
+});
+
+test("TOS credential deletion requires confirmation and removes only the selected credential", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t, async (page,config) => {
+    const homeFile=join(config.homeRoot!,"config.json"),before=await readFile(homeFile,"utf8"),projectBefore=await readFile(config.configPath,"utf8");
+    page.once("dialog",dialog=>dialog.dismiss());
+    await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).click();
+    assert.equal(await readFile(homeFile,"utf8"),before);
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unsaved-secret");
+    page.once("dialog",async dialog=>{assert.match(dialog.message(),/不会删除 Store 或云端数据/);await dialog.accept();});
+    await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).click();
+    await page.getByText("凭据已删除。",{exact:true}).waitFor();
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').count(),0);
+    const after=JSON.parse(await readFile(homeFile,"utf8"));
+    assert.equal(after.tosCredentials.entries.alternate,undefined);
+    assert.deepEqual(after.tosCredentials.entries.test,JSON.parse(before).tosCredentials.entries.test);
+    assert.equal(await readFile(config.configPath,"utf8"),projectBefore);
+    await page.reload();await page.getByRole("button",{name:"编辑 test",exact:true}).waitFor();
+    assert.equal(await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).count(),0);
+    await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+  });
+});
+
+test("TOS credential deletion rejects a stale Home revision and keeps the edit draft", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t,async(page,config)=>{
+    const homeFile=join(config.homeRoot!,"config.json");
+    await page.getByRole("button",{name:"编辑 alternate",exact:true}).click();
+    await page.locator('[data-field="tosCredential.accessKeySecret"]').fill("unsaved-secret");
+    const external=(await readFile(homeFile,"utf8"))+"\n";await writeFile(homeFile,external);
+    page.once("dialog",dialog=>dialog.accept());
+    const response=page.waitForResponse(r=>r.url().endsWith("/tos-credentials")&&r.request().method()==="DELETE");
+    await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).click();assert.equal((await response).status(),409);
+    await page.getByText("Settings changed; reload before saving credentials",{exact:true}).waitFor();
+    assert.equal(await readFile(homeFile,"utf8"),external);
+    assert.equal(await page.locator('[data-field="tosCredential.accessKeySecret"]').inputValue(),"unsaved-secret");
+    assert.equal(await page.getByRole("button",{name:"删除凭据 alternate",exact:true}).isEnabled(),true);
+  });
+});
+
+test("Store deletion is available while collapsed and only unbinds after confirmed save", {timeout:30_000}, async t => {
+  await withTosCredentialPage(t,async(page,config)=>{
+    const {initializeProjectModelRegistrations}=await import("../src/project/model-registration.js");
+    await initializeProjectModelRegistrations({}, {root:config.scopeRoot});
+    const raw=JSON.parse(await readFile(config.configPath,"utf8"));
+    raw.dataStores={assets:{kind:"data",model:"memsphere/run/artifact.json",factory:"memsphere/tos",config:{bucket:"test-bucket",prefix:"assets/",region:"cn-beijing",endpoint:"tos-cn-beijing.volces.com",mode:"revision",credentials:{source:"settings",id:"test"}}}};
+    await writeFile(config.configPath,JSON.stringify(raw)+"\n");
+    const before=await readFile(config.configPath,"utf8"), homeBefore=await readFile(join(config.homeRoot!,"config.json"),"utf8");
+    const origin=new URL(page.url()).origin;
+    await page.goto(`${origin}/projects/demo/settings/stores`,{waitUntil:"networkidle"});
+    const row=page.locator('details[data-business-store="assets"]');await row.waitFor({state:"attached"});assert.equal(await row.getAttribute("open"),null);
+    const remove=()=>page.getByRole("button",{name:"删除 Store assets",exact:true});
+    assert.equal(await remove().isVisible(),true);assert.equal(await remove().evaluate(el=>el.closest("details")),null);
+    await assertSettingActionsAligned(row.locator("..").locator(".settings-row-actions"));
+    await page.setViewportSize({width:390,height:844});assert.equal(await remove().isVisible(),true);
+    await assertSettingActionsAligned(row.locator("..").locator(".settings-row-actions"));
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
+    assert.equal(await row.locator(".settings-store-type").isVisible(),false);
+    await row.locator("..").getByRole("button",{name:"配置",exact:true}).click();
+    await row.locator("..").getByRole("button",{name:"收起",exact:true}).waitFor();
+    assert.equal(await row.locator(".settings-store-type").isVisible(),true);
+    await row.locator("..").getByRole("button",{name:"收起",exact:true}).click();
+    await row.locator("..").getByRole("button",{name:"配置",exact:true}).waitFor();
+    assert.equal(await row.locator(".settings-store-type").isVisible(),false);
+    page.once("dialog",dialog=>dialog.dismiss());await remove().click();assert.equal(await row.count(),1);
+    assert.equal(await readFile(config.configPath,"utf8"),before);
+    page.once("dialog",dialog=>dialog.accept());
+    await remove().click();assert.equal(await row.count(),0);assert.equal(await readFile(config.configPath,"utf8"),before);
+    await page.getByRole("button",{name:"重新读取",exact:true}).click();await remove().waitFor();
+    page.once("dialog",dialog=>dialog.accept());
+    await remove().click();await page.getByRole("button",{name:"保存",exact:true}).click();
+    await page.getByRole("button",{name:"确认保存",exact:true}).click();await page.getByRole("button",{name:"保存",exact:true}).waitFor();
+    assert.equal(JSON.parse(await readFile(config.configPath,"utf8")).dataStores?.assets,undefined);
+    assert.equal(await readFile(join(config.homeRoot!,"config.json"),"utf8"),homeBefore);
+    await page.reload();await page.getByRole("button",{name:"新增 TOS Store",exact:true}).waitFor();assert.equal(await row.count(),0);
+  });
+});
+
+test("Participant deletion requires confirmation before changing the draft", async () => {
+  await withActorSettingsBrowser(async(page,config)=>{
+    const before=await readFile(config.configPath,"utf8"),person=page.locator('[data-participant="person"]');
+    await person.locator("summary").click();
+    page.once("dialog",dialog=>dialog.dismiss());await person.getByRole("button",{name:"删除",exact:true}).click();
+    assert.equal(await person.count(),1);assert.equal(await readFile(config.configPath,"utf8"),before);
+    page.once("dialog",dialog=>dialog.accept());await person.getByRole("button",{name:"删除",exact:true}).click();
+    assert.equal(await person.count(),0);assert.equal(await readFile(config.configPath,"utf8"),before);
+    await page.getByRole("button",{name:"重新读取",exact:true}).click();await person.waitFor();
+  });
+});
+
+test("View package removal requires confirmation and preserves its files",async t=>{
+  await withTosCredentialPage(t,async(page,config)=>{
+    const homeFile=join(config.homeRoot!,"config.json"),packagePath=join(config.homeRoot!,"fixture-package");
+    await mkdir(packagePath);await writeFile(join(packagePath,"keep.txt"),"keep");
+    const raw=JSON.parse(await readFile(homeFile,"utf8"));raw.view_packages={installed:[{path:packagePath}]};await writeFile(homeFile,JSON.stringify(raw));
+    const before=await readFile(homeFile,"utf8");
+    await page.goto(`${new URL(page.url()).origin}/projects/demo/settings/appearance`,{waitUntil:"networkidle"});
+    const remove=page.getByRole("button",{name:"卸载",exact:true});await remove.waitFor();
+    page.once("dialog",dialog=>dialog.dismiss());await remove.click();assert.equal(await remove.count(),1);
+    assert.equal(await readFile(homeFile,"utf8"),before);
+    page.once("dialog",dialog=>dialog.accept());await remove.click();assert.equal(await remove.count(),0);
+    assert.equal(await readFile(homeFile,"utf8"),before);assert.equal(await readFile(join(packagePath,"keep.txt"),"utf8"),"keep");
+  });
+});
+
+async function assertSettingActionsAligned(actions: import("playwright").Locator): Promise<void> {
+  const buttons=actions.getByRole("button"),first=await buttons.nth(0).boundingBox(),second=await buttons.nth(1).boundingBox();
+  assert.ok(first&&second);assert.ok(Math.abs(first.y-second.y)<1&&Math.abs(first.height-second.height)<1,"Row action buttons must share a baseline and height");
+}
+
+async function withTosCredentialPage(t: TestContext, action: (page: Page, config: MemsphereConfig) => Promise<void>): Promise<void> {
+  await withTosSettingsPage(t, "memsphere-tos-credential-browser-", async dir => {
+    const config = await settingsConfigFixture(dir, "127.0.0.1");
+    const { listTosCredentials, saveTosCredential } = await import("../src/tos-credentials.js");
+    const homeFile = join(config.homeRoot!, "config.json");
+    for (const [id, accessKeyId, accessKeySecret] of [["test", "fixture-ak", "fixture-secret"], ["alternate", "fixture-other-ak", "fixture-other-secret"]]) {
+      t.signal.throwIfAborted();
+      const { revision } = await listTosCredentials(homeFile);
+      t.signal.throwIfAborted();
+      await saveTosCredential(homeFile, id!, { accessKeyId: accessKeyId!, accessKeySecret: accessKeySecret! }, revision);
+    }
+    return {config};
+  }, async(page,{config},origin)=>{
+    const errors: string[] = []; page.on("pageerror", error => errors.push(error.message));
+    await page.goto(`${origin}/projects/demo/settings/volcengine`, {waitUntil:"networkidle"});
+    await page.getByRole("button", {name:"编辑 alternate",exact:true}).waitFor();
+    await action(page, config);
+    assert.deepEqual(errors, []);
+  });
+}
+
+// Node runs after hooks as soon as a test times out, before its async body settles.
+// Interrupt browser actions first, then drain the body and requests before removing their files.
+async function withTosSettingsPage<T extends { config: MemsphereConfig; dispose?: () => void }>(
+  t: TestContext, prefix: string, prepare: (dir: string) => Promise<T>,
+  action: (page: Page, fixture: T, origin: string) => Promise<void>,
+  options: Parameters<typeof createViewServer>[1] = {}
+): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  let fixture: T | undefined, server: ReturnType<typeof createViewServer> | undefined;
+  let browser: Awaited<ReturnType<typeof browserScope>> | undefined;
+  let listening: Promise<void> | undefined, openingPage: Promise<Page> | undefined, stopping: Promise<void> | undefined;
+  const requests = new Set<Promise<unknown>>();
+  const stop = () => stopping ??= (async () => {
+    await Promise.allSettled([listening, openingPage]);
+    try { await browser?.close(); }
+    finally {
+      if (server) {
+        const closed = new Promise<void>(resolve => server!.close(() => resolve()));
+        server.closeAllConnections();
+        await closed;
+        await Promise.allSettled([...requests]);
+      }
+    }
+  })();
+  // The after hook awaits the same promise and reports any cleanup failure.
+  const cancel = () => { void stop().catch(() => {}); };
+  t.signal.addEventListener("abort", cancel, { once: true });
+  const work = (async () => {
+    t.signal.throwIfAborted();
+    fixture = await prepare(dir);
+    t.signal.throwIfAborted();
+    server = createViewServer(fixture.config, options);
+    // Track the real async handler, including writes that outlive a disconnected response.
+    const handler = server.listeners("request")[0]!;
+    server.removeListener("request", handler);
+    server.on("request", (request, response) => {
+      const pending = Promise.resolve(handler.call(server, request, response));
+      requests.add(pending);
+      void pending.then(() => requests.delete(pending), () => requests.delete(pending));
+    });
+    listening = new Promise<void>((resolve, reject) => {
+      server!.once("error", reject);
+      server!.listen(0, "127.0.0.1", resolve);
+    });
+    await listening;
+    t.signal.throwIfAborted();
+    browser = await browserScope();
+    t.signal.throwIfAborted();
+    openingPage = browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const page = await openingPage;
+    t.signal.throwIfAborted();
+    page.setDefaultTimeout(5000);
+    await action(page, fixture, `http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+  })();
+  t.after(async () => {
+    try {
+      await stop();
+    } finally {
+      // A cancelled setup may finish after stop() observed no resources.
+      await work.catch(() => {});
+      t.signal.removeEventListener("abort", cancel);
+      fixture?.dispose?.();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+  try { await work; }
+  finally { await stop(); }
+}
+
+async function selectTosSetting(page: Page, path: string, name: string): Promise<void> {
+  await page.locator(`[data-select-field="${path}"]`).press("ArrowDown");
+  await page.getByRole("option",{name,exact:true}).focus();
+  await page.keyboard.press("Enter");
+  assert.equal(await page.evaluate(() => (document.activeElement as HTMLElement)?.dataset.selectField),path,"Selection must return keyboard focus to its dropdown");
+}
+
+async function openTosStore(page: Page, id: string): Promise<void> {
+  const row=page.locator(`details[data-business-store="${id}"]`);
+  await row.waitFor({state:"attached"});
+  if(await row.getAttribute("open")===null)await row.locator("..").getByRole("button",{name:"配置",exact:true}).click();
+}

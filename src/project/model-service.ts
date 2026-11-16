@@ -191,6 +191,17 @@ async function validateModelOnce(context: Context, root: string, ref: string, op
       if (project.dataStores?.[storeId]?.model !== ref) throw serviceError("STORE_MODEL_MISMATCH", `Store ${storeId} does not use ${ref}`);
       const { store } = await openBusinessStore(context, root, storeId, { runtime: checked.runtime! });
       const result = { storeId, checked: 0, failures: [] as Array<{ id: string; message: string }> };
+      if (project.dataStores?.[storeId]?.factory === "memsphere/tos") {
+        const { inspectPhysicalRecords } = await import("../data/extensions/tos-datastore/index.js");
+        const { validateTosRecord } = await import("./tos-record-validation.js");
+        if (store.kind !== "DataStore") throw serviceError("STORE_INCOMPATIBLE", "TOS requires a DataStore");
+        for await (const record of inspectPhysicalRecords(context, store)) {
+          result.checked++;
+          try { await validateTosRecord(context, record, checked.runtime!); }
+          catch (error) { context.signal?.throwIfAborted(); result.failures.push({ id: record.deleted ? record.id : record.data.id, message: error instanceof Error ? error.message : "TOS validation failed" }); }
+        }
+        data.push(result); continue;
+      }
       let cursor: string | undefined;
       do {
         const page = await store.list(context, { limit: 1000, cursor });
@@ -198,7 +209,7 @@ async function validateModelOnce(context: Context, root: string, ref: string, op
           result.checked++;
           try {
             const record = await store.get(context, item.id);
-            if (!record) throw new Error("Record disappeared while checking data");
+            if (!record || ("deleted" in record && record.deleted)) throw new Error("Record disappeared while checking data");
             if ("data" in record && record.data.payload.contentType !== "application/json") throw new TypeError("Structured data checks require application/json Payloads");
             const value = "data" in record ? await new JsonPayloadSerializer().deserialize(context, checked.runtime!.descriptor, record.data.payload.content) : record.value;
             checked.runtime!.reflect(value);

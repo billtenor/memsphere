@@ -1,6 +1,7 @@
 import { Command, Option } from "commander";
 import { readConfig } from "../config.js";
-import { openBusinessStore, serviceError } from "../project/business-stores.js";
+import { validateTosWriteOptions } from "../data/extensions/tos-datastore/write-policy.js";
+import { getBusinessBinding, openBusinessStore, serviceError } from "../project/business-stores.js";
 import { listData, readData, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
 import { emitCommandResult } from "./cli-errors.js";
 import { assertInputOptions, readDataInput, readInputText, parseJsonInput, parseRevision } from "./input.js";
@@ -21,12 +22,14 @@ export function registerDataCommands(program: Command) {
   for (const operation of ["create", "update"] as const) {
     const command = stored(valueInput(data.command(`${operation} <id>`)).option("--payload-file <path|->", "Raw bytes; DataStore only")
       .option("--content-type <mime>", "MIME for raw Payload input").option("--dry-run"));
-    if (operation === "update") command.option("--expected-revision <n>", "Require the current record revision");
+    if (operation === "update") command.option("--expected-revision <revision>", "Require the current record revision");
     command.action(async (id, options) => {
       assertInputOptions(options); const expectedRevision = parseRevision(options.expectedRevision);
-      const config = await readConfig(); const opened = await openBusinessStore({}, config.scopeRoot, options.store);
-      if (expectedRevision !== undefined && opened.store.kind !== "ValueStore") throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no conditional-write capability");
-      const input = await readDataInput(options, opened.store.kind === "DataStore");
+      const config = await readConfig();
+      const { binding } = await getBusinessBinding(config.scopeRoot, options.store);
+      if (binding.factory === "memsphere/tos") validateTosWriteOptions(binding.config.mode, operation, expectedRevision);
+      else if (expectedRevision !== undefined && binding.kind === "data") throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no conditional-write capability");
+      const input = await readDataInput(options, binding.kind === "data");
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await writeData({}, config.scopeRoot, options.store, id, operation, input, { expectedRevision, dryRun: options.dryRun }) }, options.output);
     });
   }
@@ -36,12 +39,12 @@ export function registerDataCommands(program: Command) {
       const input = await readDataInput(options, false); const config = await readConfig();
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await upsertData({}, config.scopeRoot, options.store, id, input, { dryRun: options.dryRun }) }, options.output);
     });
-  stored(data.command("delete <id>").option("--expected-revision <n>").option("--dry-run"))
+  stored(data.command("delete <id>").option("--expected-revision <revision>").option("--dry-run"))
     .action(async (id, options) => { const expectedRevision = parseRevision(options.expectedRevision); const config = await readConfig();
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await deleteData({}, config.scopeRoot, options.store, id, { expectedRevision, dryRun: options.dryRun }) }, options.output);
     });
   stored(data.command("edit <id>").option("--patch <json>", "RFC 6902 operations with JSON Pointer path/from")
-    .option("--patch-file <path|->", "JSON Patch file; - reads stdin").option("--expected-revision <n>").option("--dry-run"))
+    .option("--patch-file <path|->", "JSON Patch file; - reads stdin").option("--expected-revision <revision>").option("--dry-run"))
     .action(async (id, options) => {
       if ((options.patch === undefined) === (options.patchFile === undefined)) throw serviceError("INVALID_ARGUMENT", "Provide exactly one patch or patch-file");
       const expectedRevision = parseRevision(options.expectedRevision); const config = await readConfig();

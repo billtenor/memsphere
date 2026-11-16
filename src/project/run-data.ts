@@ -153,7 +153,7 @@ export async function runDataStore(root: string, kind: RunDataKind): Promise<Dat
 
 export async function readRunContent(root: string, kind: RunDataKind, id: string): Promise<Buffer | undefined> {
   const stored = await (await runDataStore(root, kind)).get({}, id);
-  return stored && Buffer.from(await readAll({}, stored.data.payload.content));
+  return stored && !stored.deleted ? Buffer.from(await readAll({}, stored.data.payload.content)) : undefined;
 }
 
 export async function requireRunContent(root: string, kind: RunDataKind, id: string): Promise<Buffer> {

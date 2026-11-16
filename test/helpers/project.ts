@@ -31,6 +31,9 @@ export async function managedProjectFixture(name: string, options: { bind?: bool
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, file.bytes);
     }));
+  } else {
+    // Preserve the four empty kind directories across real Git rollback/clean.
+    await Promise.all(memoryKinds.map(kind => writeFile(join(paths.memoryRoot, kind, ".gitkeep"), "")));
   }
   await runGit(["init", "-b", "master"], { cwd: paths.memoryRoot });
   await runGit(["add", "."], { cwd: paths.memoryRoot });

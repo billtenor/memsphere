@@ -24,10 +24,10 @@ export function startSchemaWriting(definition: string, contentType: string, name
   collectWritingContracts({ ...runtime.schema.node, format: contract.format }, name, contract.format, contracts);
   return { items: clean(items), contracts: clean(contracts), index: 0, values: {}, skipped: [] };
 }
-export function writingPosition(draft: Artifact, revision: number): string {
+export function writingPosition(draft: Artifact, revision: string): string {
   return createHash("sha256").update(JSON.stringify([draft.stepId, draft.id, revision, draft.writing?.items[draft.writing.index]?.id])).digest("hex");
 }
-export function checkWritingPosition(draft: Artifact, revision: number, position?: string) {
+export function checkWritingPosition(draft: Artifact, revision: string, position?: string) {
   if (!position || position !== writingPosition(draft, revision)) throw failure("SCHEMA_POSITION_CHANGED", "Writing position changed; read schema show and use its position token");
   if (!draft.writing || draft.writing.submission || draft.status !== "draft") throw failure("RECOVERY_REQUIRED", "Draft is no longer editable");
   if (draft.writing.index >= draft.writing.items.length) throw failure("INVALID_ARGUMENT", "All fields are complete; inspect and submit the full Artifact");

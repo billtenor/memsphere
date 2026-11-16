@@ -94,8 +94,8 @@ test("DataManager integrates JSON Schema and filesystem JSON value stores with p
     assert.deepEqual((await firstStore.get({}, "item"))?.value, { title: "first project" });
     assert.deepEqual((await secondStore.get({}, "item"))?.value, { title: "second project" });
     const text = await readFile(join(firstDirectory, "item.json"), "utf8");
-    assert.equal(text, `${JSON.stringify(created, null, 2)}\n`);
-    assert.deepEqual(JSON.parse(text), created);
+    assert.equal(text, `${JSON.stringify({ ...created, revision: Number(created.revision) }, null, 2)}\n`);
+    assert.deepEqual(JSON.parse(text), { ...created, revision: Number(created.revision) });
     assert.equal(Object.hasOwn(JSON.parse(text), "model"), false);
     await assert.rejects(firstStore.create({}, "invalid", { title: "" }), /minLength|fewer than 1/);
     assert.equal(await firstStore.has({}, "invalid"), false);

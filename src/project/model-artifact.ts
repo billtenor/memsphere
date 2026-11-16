@@ -34,7 +34,7 @@ export function validateModelArtifactDataId(id: string): void {
 
 export const modelArtifactReceiptSchema = modelArtifactTargetSchema.extend({
   stepExecutionId: z.string().uuid(), dataId: z.string(), digest: z.string(),
-  committedAt: z.string(), revision: z.number().int().positive().optional()
+  committedAt: z.string(), revision: z.string().min(1).optional()
 }).strict();
 export type ModelArtifactReceipt = z.infer<typeof modelArtifactReceiptSchema>;
 

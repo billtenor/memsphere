@@ -62,7 +62,7 @@ async function openContextControlSnapshot(root: string, legacyUpgrade: boolean):
   const contentReader: ContentReader = async (ref, context) => {
     const opened = await openBusinessStore(context, root, ref.storeId);
     const row = await opened.store.get(context, ref.dataId);
-    if (!row) throw failure("NOT_FOUND", `Referenced content not found: ${ref.storeId}/${ref.dataId}`);
+    if (!row || ("deleted" in row && row.deleted)) throw failure("NOT_FOUND", `Referenced content not found: ${ref.storeId}/${ref.dataId}`);
     if ("data" in row) return { bytes: await readAll(context, row.data.payload.content), contentType: row.data.payload.contentType };
     const content = await new JsonPayloadSerializer().serialize(context, opened.runtime.descriptor, row.value);
     return { bytes: await readAll(context, content), contentType: "application/json" };
