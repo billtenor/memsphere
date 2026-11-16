@@ -29,24 +29,32 @@ export async function controlledPutPair(input: {
 }): Promise<void> {
   const ready = gate(), permits = [gate(), gate()];
   const controllers = [new AbortController(), new AbortController()];
-  let prepared = 0;
+  let prepared = 0, conditionsReady = false;
+  let rejectPreparation!: (error: unknown) => void;
+  const premature = new Promise<never>((_, reject) => { rejectPreparation = reject; });
   const client: TosObjectClient = { ...input.client, async put(context, key, body, options) {
     assert.equal(key, input.key);
     const index = prepared++;
     assert.ok(index < 2, "Conditional writers must not retry");
     assert.equal(options.create, input.condition.create);
     assert.equal(options.ifMatch, input.condition.ifMatch);
-    if (prepared === 2) ready.open();
+    if (prepared === 2) { conditionsReady = true; ready.open(); }
     await permits[index].promise;
     context.signal?.throwIfAborted();
     return input.client.put(context, key, body, options);
   } };
   const writes = ([0, 1] as const).map(index => {
     const signal = input.context?.signal ? AbortSignal.any([input.context.signal, controllers[index].signal]) : controllers[index].signal;
-    return input.write(client, { signal }, index).then(() => ({ success: true, code: "" }), error => ({ success: false, code: error.code as string }));
+    return Promise.resolve().then(() => input.write(client, { signal }, index)).then(() => {
+      if (!conditionsReady) rejectPreparation(Error("Writer completed before both original conditions were prepared"));
+      return { success: true, code: "" };
+    }, error => {
+      if (!conditionsReady) rejectPreparation(error);
+      return { success: false, code: error?.code as string };
+    });
   });
   try {
-    await casPhase(ready.promise, "both original conditions prepared", input.timeoutMs);
+    await casPhase(Promise.race([ready.promise, premature]), "both original conditions prepared", input.timeoutMs);
     permits[input.first].open();
     const first = await casPhase(writes[input.first], "chosen first server commit", input.timeoutMs);
     assert.equal(first.success, true, `First writer failed: ${first.code}`);

@@ -259,13 +259,13 @@ for (const scenario of ["same-payload", "update-delete", "delete-delete", "tombs
 }
 
 for(const defect of ["missing-writer","early-failure"] as const){
-  test(`CAS watchdog survives the mocked Store clock and cleans up ${defect}`, {timeout:5000},async()=>{
+  test(`CAS preparation detects ${defect} and cleans up with the mocked Store clock`, {timeout:5000},async()=>{
     const {client,store}=fixture();await store.create({},data("item"));const revision=(await live(store)).revision!;
     const bytes=Buffer.from(client.objects.get("records/item")!.bytes);client.calls.length=0;
     await assert.rejects(controlledPutPair({client,key:"records/item",first:0,condition:{ifMatch:revision},conflictCode:"REVISION_CONFLICT",timeoutMs:25,write:async(gated,context,index)=>{
       if(index===1){if(defect === "early-failure")throw Error("controlled failure before PUT");return;}
       await new TosDataStore("records","file.json",config("revision"),gated,mutation).update(context,data("item","new"),{expectedRevision:revision});
-    }}),/CAS barrier deadline: both original conditions prepared/);
+    }}),defect === "early-failure" ? /controlled failure before PUT/ : /Writer completed before both original conditions were prepared/);
     assert.deepEqual(client.objects.get("records/item")!.bytes,bytes);assert.deepEqual(client.calls,[]);
   });
 }

@@ -37,19 +37,6 @@ test("delete is hidden from standard reads, recreation rejects every pre-delete 
   const recreated = await store.create({}, "a", { name: "new" }); assert.notEqual(recreated.revision, first.revision);
   await assert.rejects(store.update({}, "a", { name: "bad" }, { expectedRevision: first.revision }), { code: "REVISION_CONFLICT" });
 });
-test("unconditional upsert races fail directly after consuming input, with no follow-up requests", async () => {
-  const { store, client } = fixture(); await store.create({}, "a", { name: "old" });
-  let ready!: () => void, release!: () => void, arrived = 0;
-  const both = new Promise<void>(r => ready = r), gate = new Promise<void>(r => release = r);
-  client.beforeCommit = async () => { if (++arrived === 2) ready(); await gate; };
-  client.calls.length = 0;
-  const result = Promise.allSettled([store.upsert({}, "a", { name: "A" }), store.upsert({}, "a", { name: "B" })]);
-  await both; release(); const settled = await result;
-  assert.equal(settled.filter(x => x.status === "fulfilled").length, 1);
-  assert.equal((settled.find(x => x.status === "rejected") as PromiseRejectedResult).reason.code, "REVISION_CONFLICT");
-  assert.equal(client.calls.filter(c => c.method === "PUT").length, 2);
-  assert.equal(client.calls.filter(c => c.method === "HEAD").length, 2); assert.equal(client.calls.filter(c => c.method === "GET").length, 0);
-});
 test("failed input, wildcard revision and metadata mismatch never alter the existing object", async () => {
   const { store, client } = fixture(); await store.create({}, "a", { name: "old" }); const original = Buffer.from(client.objects.get("values/a.json")!.bytes);
   client.calls.length = 0;
@@ -108,7 +95,7 @@ test("parent cancellation closes a stalled value read without cancelling an inde
 
 // Each gate is reached only after both production handles finish HEAD and
 // construct their original PUT conditions. The chosen commit order is explicit.
-for (const scenario of ['missing-create', 'deleted-create', 'update-delete'] as const) {
+for (const scenario of ['missing-create', 'deleted-create', 'update-delete', 'upsert-upsert'] as const) {
   for (const first of [0, 1] as const) test(`${scenario}: writer ${first} commits once and the competing original condition fails`, async () => {
     await valueRace(scenario, first);
   });
@@ -116,7 +103,7 @@ for (const scenario of ['missing-create', 'deleted-create', 'update-delete'] as 
 test('ValueStore CAS oracle rejects a transport that removes conditional headers', async () => {
   await assert.rejects(valueRace('missing-create', 0, true), /Exactly one conditional writer may commit/);
 });
-async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update-delete', first: 0 | 1, removeConditions = false) {
+async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update-delete' | 'upsert-upsert', first: 0 | 1, removeConditions = false) {
   const { controlledPutPair } = await import('./support/tos-cas-barrier.js');
   const { client, store } = fixture();
   if (scenario !== 'missing-create') await store.create({}, 'race', { name: 'old' });
@@ -132,10 +119,11 @@ async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update
   let mutation = 10;
   await controlledPutPair({ client: transport, key: 'values/race.json', first,
     condition: revision ? { ifMatch: revision } : { create: true },
-    conflictCode: scenario === 'update-delete' ? 'REVISION_CONFLICT' : 'ALREADY_EXISTS',
+    conflictCode: ['update-delete', 'upsert-upsert'].includes(scenario) ? 'REVISION_CONFLICT' : 'ALREADY_EXISTS',
     write: async (gated, context, index) => {
       const handle = new TosJsonValueStore('values', runtime, config, gated, () => 2000, () => (++mutation).toString(16).padStart(16, '0'));
-      if (scenario !== 'update-delete') await handle.create(context, 'race', { name: index === 0 ? 'A' : 'B' });
+      if (scenario === 'upsert-upsert') await handle.upsert(context, 'race', { name: index === 0 ? 'A' : 'B' });
+      else if (scenario !== 'update-delete') await handle.create(context, 'race', { name: index === 0 ? 'A' : 'B' });
       else if (index === 0) await handle.update(context, 'race', { name: 'updated' }, { expectedRevision: revision });
       else await handle.delete(context, 'race', { expectedRevision: revision });
     }
@@ -153,3 +141,23 @@ async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update
     assert.deepEqual(body.value, expected); assert.deepEqual((await store.get({}, 'race'))!.value, expected);
   }
 }
+
+test('CAS preparation failure preserves its cause and settles the writer held at the gate', async () => {
+  const { controlledPutPair } = await import('./support/tos-cas-barrier.js');
+  const { client, store } = fixture(); const original = await store.create({}, 'early', { name: 'old' });
+  const before = Buffer.from(client.objects.get('values/early.json')!.bytes);
+  const transport = { head: client.head.bind(client), read: client.read.bind(client), list: client.list.bind(client),
+    delete: client.delete.bind(client), versioning: client.versioning.bind(client), put: client.put.bind(client) };
+  let arrived!: () => void, finished = false;
+  const firstPrepared = new Promise<void>(resolve => arrived = resolve), failure = new Error('writer failed before its PUT');
+  await assert.rejects(controlledPutPair({ client: transport, key: 'values/early.json', first: 0,
+    condition: { ifMatch: original.revision }, conflictCode: 'REVISION_CONFLICT',
+    write: async (gated, context, index) => {
+      if (index === 1) { await firstPrepared; throw failure; }
+      const observed = { ...gated, put: ((...args) => { const result = gated.put(...args); arrived(); return result; }) as typeof gated.put };
+      try { await new TosJsonValueStore('values', runtime, config, observed).upsert(context, 'early', { name: 'never committed' }); }
+      finally { finished = true; }
+    }
+  }), error => error === failure);
+  assert.equal(finished, true); assert.deepEqual(client.objects.get('values/early.json')!.bytes, before);
+});
