@@ -10,11 +10,12 @@ export interface SettingsViewConfig {
 export default defineViewPlugin<SettingsViewConfig>({
   name: "memsphere-settings-view",
   apiVersion: 1,
-  inject: ["router", "slots"],
+  inject: ["router", "slots", "ui"],
+  uiVersion: 1,
   apply(ctx, config) {
     if (!ctx.router) throw new Error("Settings View requires the router service");
 
-    const section = ctx.router.register({ id: "section", path: "/settings/:module" });
+    const section = ctx.router.register({ id: "section", path: "/settings/:module", query: ["app"] });
     let secondaryLease: Disposer | undefined;
     let titleLease: Disposer | undefined;
     const publishSecondary = (location: RouteLocation) => {
@@ -38,7 +39,7 @@ export default defineViewPlugin<SettingsViewConfig>({
           title: { text: settingsSectionLabel(config, selected) },
           subtitle: { text: selected === "appearance"
             ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
-            : ["project", "participants", "models", "stores"].includes(selected)
+            : ["project", "participants", "models", "apps", "stores"].includes(selected)
             ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
             : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
         }
@@ -48,11 +49,13 @@ export default defineViewPlugin<SettingsViewConfig>({
     ctx.lifecycle.own(() => { void titleLease?.(); void secondaryLease?.(); });
     const views = createSettingsViews({
       config,
+      ui:ctx.ui!, slots:ctx.slots, projectId:ctx.module.projectId,
       route: section,
       navigate: target => ctx.router!.navigate(target),
       onRoute: publishSecondary
     });
     ctx.lifecycle.own(views.dispose);
+    ctx.router.beforeLeave?.(views.beforeLeave, views.hasChanges);
 
     const initialSection = normalizeSettingsSection(ctx.router.location.params.module);
     ctx.slots.register(slots.navigationSecondary, {
@@ -71,7 +74,7 @@ export default defineViewPlugin<SettingsViewConfig>({
         title: { text: settingsSectionLabel(config, initialSection) },
         subtitle: { text: initialSection === "appearance"
           ? text(config, "settings.appearanceHelp", "安装和管理界面扩展包，并配置主题、页面、组件和样式。")
-          : ["project", "participants", "models", "stores"].includes(initialSection)
+          : ["project", "participants", "models", "apps", "stores"].includes(initialSection)
           ? text(config, "navigation.projectSettingsSubtitle", "管理当前项目配置。")
           : text(config, "navigation.globalSettingsSubtitle", "管理 Memsphere 全局配置。") }
       }
@@ -115,6 +118,7 @@ function settingsSecondaryItems(config: SettingsViewConfig, section: RouteToken,
     ["stores", text(config, "settings.businessStores", "业务 Store"), "stack"],
     ["volcengine", text(config, "settings.volcengine", "火山云配置"), "gear-six"],
     ["models", text(config, "settings.models", "模型存储"), "stack"],
+    ["apps", text(config,"settings.apps","App 配置"), "cube"],
   ] as const;
   return entries.map(([id, label, icon]) => ({
     id,
@@ -134,6 +138,7 @@ function settingsSectionLabel(config: SettingsViewConfig, section: string): stri
     providers: text(config, "settings.providers", "模型提供商"),
     project: text(config, "navigation.project", "当前项目"),
     participants: text(config, "settings.participants", "参与者"),
+    apps: text(config,"settings.apps","App 配置"),
     stores: text(config, "settings.businessStores", "业务 Store"),
     volcengine: text(config, "settings.volcengine", "火山云配置"),
     models: text(config, "settings.models", "模型存储")

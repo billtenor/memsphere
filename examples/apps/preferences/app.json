@@ -1,0 +1,5 @@
+{
+  "schemaVersion":1,"id":"org.memsphere.preferences-example","name":"通用配置示例",
+  "version":"0.1.0","description":"仅声明 Schema，由宿主呈现统一表单。",
+  "configuration":"config.schema.json"
+}

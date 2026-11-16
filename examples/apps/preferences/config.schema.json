@@ -1,0 +1,9 @@
+{
+  "$schema":"http://json-schema.org/draft-07/schema#","type":"object",
+  "properties":{
+    "enabled":{"type":"boolean","title":"启用提醒"},
+    "pageSize":{"type":"integer","minimum":1,"maximum":100,"title":"每页数量"},
+    "density":{"type":"string","enum":["comfortable","compact"],"title":"信息密度"},
+    "advanced":{"type":"object","title":"高级配置（JSON）"}
+  },"additionalProperties":true
+}

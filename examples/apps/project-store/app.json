@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "id": "org.example.project-store",
+  "name": "Shared Project Store example",
+  "version": "1.0.0",
+  "description": "Access an existing Project ValueStore through an explicit binding.",
+  "configuration": "config.schema.json",
+  "projectStores": [
+    { "key": "expenses", "model": "example/expense.json", "kind": "ValueStore", "configKey": "expensesStore" }
+  ],
+  "backend": { "entry": "backend.mjs", "operations": { "read": "read", "save": "write", "remove": "write" } }
+}

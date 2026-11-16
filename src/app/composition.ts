@@ -9,7 +9,7 @@ import { projectPaths } from "../project/paths.js";
 import { AppError } from "./contracts.js";
 import { digest, isMissing, packagePath, readJson } from "./files.js";
 import { readAppPackage, resolveConfigValues } from "./package.js";
-import { readAppState, type AppProject } from "./state.js";
+import { canonicalAppConfig, readAppState, type AppProject } from "./state.js";
 import type { MemsphereConfig } from "../config.js";
 
 export async function appProjectFromRoot(root: string, memoryRoot?: string): Promise<AppProject | undefined> {
@@ -80,9 +80,10 @@ export async function appViewComposition(config: MemsphereConfig) {
   const global = structuredClone(config.viewPackages ?? { installed: [] });
   const composition = structuredClone(config.viewComposition ?? { packages: [] });
   const apps = new Map<string, string>();
+  const configurations = new Map<string,string>();
   const packages = new Map<string, string>();
   const diagnostics: Array<{ state: "invalid"; message: string }> = [];
-  if (!project) return { global, composition, apps, diagnostics };
+  if (!project) return { global, composition, apps, diagnostics, configurations };
   for (const app of Object.values((await readAppState(project)).installations)) {
     if (!app.enabled) continue;
     let pkg: Awaited<ReturnType<typeof readAppPackage>>;
@@ -99,6 +100,7 @@ export async function appViewComposition(config: MemsphereConfig) {
       }
     } catch (error) { diagnostics.push({ state: "invalid", message: `App ${app.manifest.id}: ${String(error)}` }); continue; }
     for (const entry of app.manifest.entrypoints.view) {
+      configurations.set(app.manifest.id, canonicalAppConfig(app.config));
       const view = pkg.views.find(view => view.key === entry.packageKey)!;
       const identity = `${view.definition.id}@${view.definition.version}`;
       if (packages.has(identity) && packages.get(identity) !== view.digest) throw new AppError("APP_PACKAGE_CONFLICT", `Different View content: ${identity}`);
@@ -111,5 +113,5 @@ export async function appViewComposition(config: MemsphereConfig) {
       apps.set(entry.instanceId, app.manifest.id);
     }
   }
-  return { global, composition, apps, diagnostics };
+  return { global, composition, apps, diagnostics, configurations };
 }

@@ -1,4 +1,5 @@
 export const zhCNViewMessages = {
+  "settings.apps": "App 配置",
   "settings.collapseStore": "收起",
   "settings.deleteStoreConfirm": "删除 Store“{id}”的绑定？数据将保留，点击页面保存后生效。",
   "settings.deleteParticipantConfirm": "删除参与者“{id}”？点击页面保存后生效。",

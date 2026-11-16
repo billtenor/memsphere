@@ -17,9 +17,11 @@
 | `assets.dataExtensions` | `{id,version,entry}[]`，可信 ESM 的 default export 使用既有 DataExtension 接口。 |
 | `dependencies` | `{kind,id,version?}[]`；kind 为 app、viewPackage、modelPackage、dataExtension、cli 或 memory。version 为 SemVer range；Memory 使用规范逻辑引用。缺项由 check/enable 报告，不联网下载。 |
 | `entrypoints.agent` | Memory 规范引用数组；Concept/Statement/Schema 用于阅读，Procedure 用于启动 Run。 |
+| `entrypoints.settings` | `{packageKey}`，标准 View Package 的 App 配置用途引用。 |
 | `entrypoints.view` | `{packageKey,instanceId,path?,config?}[]`；path 是以 `/` 开头的 Module 相对页面路径，用于 show 的使用入口。 |
 | `configuration` | 配置的 JSON Schema 文件路径，安装/configure 时校验。 |
 | `stores` | `{key,model,kind,factory,config}[]`，kind 为 DataStore 或 ValueStore；复用 DataManager StoreBinding。 |
+| `projectStores` | `{key,model,kind,configKey}[]`，声明需要从当前 Project 绑定的业务 Store；`configKey` 指向 App 配置中保存 Store ID 的顶层字段。 |
 | `cliBindings` | `{cli,args?,cwd?,env?}[]`，参数或环境值可以用单字段 `{configKey:"ledgerDirectory"}` 引用安装配置。 |
 | `backend` | `{entry,operations}`；entry 是可信 ESM，operations 把操作名映射为 read 或 write。 |
 
@@ -65,8 +67,89 @@ Model Package 的必填字段为 `schemaVersion:1`、`id`、`name`、`version` �
 
 View Plugin 注入 `api` 后使用 `ctx.api.invoke(operation,input)`；只有 App 绑定的实例能取得该服务。请求固定发往 `/api/projects/<project>/apps/<app>/operations/<operation>`，宿主按 Project 解析安装和 Store，不接受调用者覆盖 App/Project 上下文。入口复用 View 的 same-origin JSON 和远程 operator token 检查，只接受 Manifest 声明的操作。可信代码不是安全沙箱。
 
-backend default export 的 operations 各项为 `{kind,execute(ctx,input)}`，必须与 Manifest 完全匹配。ctx 提供 project、app、只读 config、signal 和 `getStore(key)`；只可通过该方法取得本 App 声明的 Store。类型由公开 `memsphere/app` 导出。独立 CLI 可直接使用公开 `memsphere/data` 与 `memsphere/data/extensions`，无需调用宿主 HTTP。
+backend default export 的 operations 各项为 `{kind,execute(ctx,input)}`，必须与 Manifest 完全匹配。ctx 提供 project、app、只读 config、signal 和 `getStore(key)`；只能取得 App 声明的自有 Store 或 Project Store。类型由公开 `memsphere/app` 导出。独立 CLI 可直接使用公开 `memsphere/data` 与 `memsphere/data/extensions`，无需调用宿主 HTTP。
+
+App 可在 `projectStores` 中声明 `{ "key": "expenses", "model": "example/expense.json", "kind": "ValueStore", "configKey": "expensesStore" }`，使用者在安装或完整替换配置时提供 `{"expensesStore":"business/expenses"}`。目标必须是当前 Project 登记的同模型、同类型业务 Store；`app show` 显示绑定，`app check` 和 enable 检查可用性。App 配置 Schema 允许缺省时，可以先以停用状态安装，启用前必须完成绑定。
+
+在一次 backend operation 中，先用 `ctx.getProjectStoreBinding("expenses")` 获得 `{storeId, token}`，再用 `ctx.getStore("expenses", {expectedBinding: token})` 读取；将读取结果与 token 一起返回页面。写入时由页面传回 token 并再次传给 `getStore`。改绑或移除后旧 token 不再有效，App 应提示用户刷新；返回的共享 Store 句柄只在当前 operation 内有效。共享 operation 按 Project 串行执行；后台代码和 I/O 应响应 `ctx.signal` 并等待结束。忽略取消且无法结束的可信代码可能阻塞其他共享操作，须停止宿主进程后检查并恢复。不要在 operation 内同步调用 Project Store 登记、App 配置或模型维护命令。直接修改 Project 配置文件不受此并发保护。
+
+HTTP 客户端断连后若操作取消或失败，View 在宿主日志中记录 Project、App、操作和错误类别，不记录请求内容、配置或 token。底层写入可能已经部分完成时，使用者应检查数据后再重试。
+
+例如以下操作假设声明的 `expenses` 是 ValueStore；页面必须保留读取响应的 token，并在保存时传回：
+
+```js
+export default { operations: {
+  read: { kind: "read", async execute(ctx, { id }) {
+    const binding = await ctx.getProjectStoreBinding("expenses");
+    const store = await ctx.getStore("expenses", { expectedBinding: binding.token });
+    return { record: await store.get(ctx, id), token: binding.token };
+  } },
+  save: { kind: "write", async execute(ctx, { id, value, token }) {
+    const store = await ctx.getStore("expenses", { expectedBinding: token });
+    return store.update(ctx, id, value);
+  } }
+} };
+```
 
 enable/configure/disable 改变持久配置；View 使用固定启动组合，需要重启应用界面变更。后端请求读取当前安装配置，停用立即拒绝新请求及新的 Procedure Run，已开始的业务调用不承诺自动回滚。Memory 仍可读，既有 Run 保留冻结内容，外部程序不受宿主启停控制。
 
 首版仅支持可信本地发行，不提供远端下载、升级、卸载、已有 Memory 认领、通用执行网关或热替换。
+
+## App 配置页与 View 扩展
+
+打开 **设置 → App 配置**，选择当前 Project 已安装的 App。停用的 App 仍可配置。配置写入原安装状态，与 `app configure` 使用同一份配置，不保存在浏览器。`app show <id> --output json` 的 `config` 与 `revision` 返回当前保存值和配置版本；`configuration` 仍表示 Schema 路径。没有设置扩展时，宿主根据配置 Schema 呈现统一表单；复杂对象/数组使用 JSON 字段，未编辑字段保留。没有配置项时显示明确空态。
+
+需要组织自己的字段时，复用标准 View Package：
+
+```json
+{
+  "assets": {"viewPackages": [{"key":"settings","path":"settings"}]},
+  "entrypoints": {"settings":{"packageKey":"settings"}}
+}
+```
+
+对应 `settings/module.json`：
+
+```json
+{
+  "schemaVersion":1,"id":"org.example.app-settings","version":"1.0.0",
+  "view": {
+    "entry":"./index.js","sdk":"^1.1.0",
+    "contributions":[{"id":"configuration","cell":"org.memsphere.settings.app.configuration@1:app","priority":100}]
+  }
+}
+```
+
+`entrypoints.settings.packageKey` 必须指向已声明的 View Package。每个设置包只声明一个本 App 配置贡献，不声明额外 capability、样式、主题或依赖。宿主绑定 `ctx.module.appId`，将便携 `:app` 单元映射到真实 App ID；同一包被两个 App 复用时会建立两个实例。相同包 ID/版本而内容不同会报冲突，包括与 Home 已安装包的冲突。
+
+```js
+import {defineViewPlugin, portableSlots} from '@memsphere/view-sdk';
+export default defineViewPlugin({
+  apiVersion:1, inject:['slots','ui'], uiVersion:1,
+  apply(ctx) {
+    ctx.slots.register(portableSlots.appSettingsConfiguration, {
+      id:'configuration', key:ctx.module.appId,
+      value:{render(context) {
+        return ctx.ui.settingsForm({context,sections:[{
+          id:'preferences',title:{text:'偏好'},fields:[
+            {kind:'text',path:['title'],label:{text:'标题'}},
+            {kind:'projectStore',key:'expenses',label:{text:'费用账本'}}
+          ]
+        }]});
+      }}
+    });
+  }
+});
+```
+
+`render` 同步返回本次 context 创建的公共 `ui.settingsForm` 根节点。宿主核验组件来源，不接受任意 DOM 或旧展示根。框架负责布局、主题、字段样式、错误和保存动作；业务提供分组、标签、字段路径和选项。字段种类为 `text/number/integer/boolean/select/json/projectStore`；不支持 HTML、CSS、className、style 或自定义字段 DOM。可用 `visible(state)`、`disabled(state)` 添加业务条件，不能放宽只读、busy、Schema 必填与枚举约束。`options` 可为类型化选项数组，或 `(state,{signal}) => options | Promise<options>`；依赖草稿变化会取消旧选项请求，15 秒超时，不自动改选当前配置。
+
+`AppSettingsPresentationContext` 提供当前 `projectId/app/canWrite/signal`，`getState/subscribe`、`setValue/removeValue/setText`、`validate/save/reset` 和当前 App 声明用途的 `getStoreChoices(key)`。其返回共享的 `AppSettingsStoreChoices`：必需的 `key/configKey/model/kind/candidates`，以及可选 `storeId/diagnostic`；`kind` 为 ValueStore 或 DataStore。公共 Store 控件解析 `configKey` 后应用真实字段的 Schema readOnly/required/enum，约束与候选就绪前禁用。路径是属性段数组，空数组表示完整配置；完整配置必须是 JSON object。快照包含 saved、draft、revision、busy、dirty、issues、文本缓冲和 Schema。业务读快照或通过方法改草稿，不另存权威配置。字段路径统一解析对象 `properties` 和数组 `items`（含 tuple）；Schema readOnly 同时约束表单、完整 JSON 和 context 的根/祖先替换。只读值须与已保存值一致，其他字段仍可编辑；违反时返回 `APP_SETTINGS_READ_ONLY`，原草稿不变，文本输入则保留错误原文并阻止保存。设置 API 也在写盘前比较只读值。
+
+`setText(path,text,kind?)` 的可选 kind 为 json（默认）、number 或 integer，公共控件按字段类型传入。JSON、数字和整数字段保留原始输入；无效文本也算未保存，阻止任何 validate/save 请求。活动文本路径不能互为祖先或后代；同路径只能继续 `setText`，不能同时以 `setValue/removeValue` 覆盖。保存或显式 reset 才清理缓冲。数组删除若会移动任一活动文本缓冲的索引，返回 `APP_SETTINGS_TEXT_CONFLICT`，操作前后草稿与缓冲保持一致；先保存或 reset 再删除。校验/保存期间，控制器拒绝编辑、reset 和重复请求并返回 `APP_SETTINGS_BUSY`。取消导航保留页面和草稿；确认离开才清理。刷新/关闭使用浏览器原生未保存提醒，取消保留无效或仅格式变化的原文与错误。跨 Project 确认放弃后，宿主先释放当前 View 的展示/监听再导航，避免再次触发原生询问；clean 页面或已释放展示不再提示。
+
+HTTP 使用 `/api/projects/:project/settings/apps`：GET 列表，GET `/:appId` 详情，POST `/:appId/validate` 预览，PUT `/:appId` 保存。两个写请求均提交 `{config,expectedRevision}`。服务端锁内比较每 App 的配置版本；过期返回 409 `APP_CONFIG_CONFLICT`，即使候选等于当前配置也不忽略冲突。无变化保存不改文件或推进版本；旧 CLI 不传版本的完整替换继续可用，但实际变更会推进版本。
+
+鉴权沿用现有 Settings 监听模式：loopback 读取免 token；非 loopback 所有操作需要 Bearer token。validate/PUT 在两种模式下均检查同源 JSON。失败保留草稿；保存 30 秒超时只表示结果未确认，应重新读取核实，不自动重试。已保存与运行中配置分开显示；View 保留启动快照，配置改变后可能需要 `view restart`，不能把写盘成功当扩展已应用。
+
+可运行示例见 `examples/apps/expense/settings`（标准配置 Slot）和 `examples/apps/preferences`（仅 Schema 的通用页）。设置用途的 SDK 为 1.1.0，Plugin/UI 版本仍为 1，兼容已有 ^1.0.0 View Package。

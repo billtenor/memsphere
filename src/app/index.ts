@@ -6,7 +6,8 @@ export interface AppOperationContext extends Context {
   readonly project: string;
   readonly app: string;
   readonly config: Readonly<Record<string, unknown>>;
-  getStore(key: string): Promise<DataStore | ValueStore>;
+  getStore(key: string, options?: { expectedBinding?: string }): Promise<DataStore | ValueStore>;
+  getProjectStoreBinding(key: string): Promise<{ storeId: string; token: string }>;
 }
 export interface AppBackend {
   readonly operations: Readonly<Record<string, {

@@ -215,6 +215,8 @@ View 的记忆市场提供精选 Memory 的显式导入；未导入内容不在 
 
 App 自带工具描述自动登记，独立工具用 `cli register <descriptor-file>`；程序按作者说明独立安装，再 `cli bind <id> --binding <file> [--app <id>]` 配置本机入口、固定参数和工作目录。用 `cli list/show` 读取结构化调用信息后直接执行工具；`cli check` 仅执行声明探测，不猜协议。envFrom 引用环境变量名，凭据不写清单。
 
+App 声明 projectStores 时，按作者提供的 configKey 在 App 配置中指定当前 Project 已登记业务 Store ID；app show 查看目标，app check 检查模型和类型，旧来源 token 失效时重新读取。
+
 App disable 保留 Memory 阅读、数据与历史，但拒绝新流程涉及停用 App。Managed 安装走 ChangeSet，Embedded 应用当前 worktree，不自动 Git 提交；未完成安装的 Memory 被隐藏，按原发行目录重试。Mounted 来源只读；当前没有 App 升级、卸载或已有 Memory 自动认领。
 
 ## 管理模型与业务数据
@@ -265,6 +267,10 @@ Home config.json 的 language 支持 zh-CN/en，缺省 zh-CN，同时影响 Agen
 配置中心分 Home 与当前 Project：Home 维护语言、View 服务、ACP Provider、主题/界面组合；Project 维护 Store、Control Plane、Runner 和 Human/Agent Actor。按 scope 审阅 diff 后保存；host/port 或界面组合变化需重启 View，语言保存后下一次加载生效。Actor 权限使用 Catalog，Memsphere Permission 不等于操作系统或网络授权。 设置页删除和卸载先弹出确认，取消不修改草稿。
 
 Agent Actor 指向 Home ACP Provider 实例和可选 model，Provider 当前支持 traex/qwen/kimi/codex；安装、认证和账户由 Provider 自己负责。Human Actor 不配置 system_prompt。Provider 的非托管参数、非敏感环境变量及 timeout 在 Home 配置，工作目录与托管安全参数由运行时管理。
+
+在“设置 → App 配置”中选择已安装的 App，可编辑其持久化配置，停用的 App 也可配置。View 与 `app configure` 共用安装状态，`app show` 返回当前配置和配置版本；版本冲突保留草稿，先重新读取核对，不自动覆盖。无效 JSON 会阻止校验/保存；保存超时仅表示结果未确认，重新读取核实。写盘成功与运行中 View 应用分开，按提示重启。
+
+开发 App 设置扩展时，复用标准 View Package 的 `entrypoints.settings` 引用和 `portableSlots.appSettingsConfiguration`，通过公共 `ui.settingsForm` 组织业务字段；框架负责设置样式和保存，不自建挂载协议、业务 DOM 或 CSS。细节见 App 契约与 View SDK，示例为费用 App 的 settings 包。
 
 ### 安装和开发界面扩展
 

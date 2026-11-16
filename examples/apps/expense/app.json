@@ -7,13 +7,14 @@
   "configuration": "config.schema.json",
   "assets": {
     "memories": [{ "key": "intro", "path": "memories/expense.yaml" }],
-    "viewPackages": [{ "key": "expense", "path": "view" }],
+    "viewPackages": [{ "key": "expense", "path": "view" }, { "key": "settings", "path": "settings" }],
     "modelPackages": [{ "key": "expense", "path": "models" }],
     "cliDescriptors": [{ "key": "expense", "path": "cli/descriptor.json" }]
   },
   "entrypoints": {
     "agent": ["concepts/expense-app"],
-    "view": [{ "packageKey": "expense", "instanceId": "expense", "path": "/expenses" }]
+    "view": [{ "packageKey": "expense", "instanceId": "expense", "path": "/expenses" }],
+    "settings": { "packageKey": "settings" }
   },
   "cliBindings": [{ "cli": "org.memsphere.expense-cli", "args": ["--ledger", { "configKey": "ledgerDirectory" }] }],
   "stores": [{ "key": "ledger", "model": "example/expense.json", "kind": "ValueStore", "factory": "memsphere/filesystem-json", "config": { "directory": { "configKey": "ledgerDirectory" } } }],

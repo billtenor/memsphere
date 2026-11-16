@@ -342,8 +342,8 @@ for(const {resistant,late,failOnce,orphan=false,launchGate=undefined,submitted=f
  verifiedCleanup=true;
  if(failOnce&&submitted&&!completed)await t.test('ACP teardown still cleans the second original execution after the first Job probe rejects',async()=>{
   // Exercise the actual registered ACP cleanup chain, not just the aggregator.
-  // The related execution is retired; its Job probe fails before cleanup of the
-  // still-live unrelated execution, whose original worker/provider/child must exit.
+  // Fail whichever Job probe runs first; the other cleanup must still be
+  // attempted and all original worker/provider/child processes must exit.
   const pids=[...new Set(processes.flatMap(p=>[p.workerPid,p.providerPid,p.childPid]).filter(Number.isInteger))];
   const verification=fixtureProcesses();
   verification.rememberSnapshot(...pids.map(pid=>observed.original(pid)!));

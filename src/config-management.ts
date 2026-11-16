@@ -1,8 +1,9 @@
 import { Config } from "./data/api/config.js";
 import { parseTosConfig } from "./data/extensions/tos-datastore/config.js";
 import { withConfigFileLock } from "./config-file-lock.js";
+import { withSharedStoreLock } from "./project/shared-store-lock.js";
 import { isDeepStrictEqual } from "node:util";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { ZodError, type z } from "zod";
@@ -344,7 +345,7 @@ export async function writeProjectConfigDraft(input: {
     }
   }
   // Network reads have finished. Hold only short local config CAS locks while publishing.
-  return withConfigFileLock(input.globalConfigPath, () => withConfigFileLock(input.document.configPath, async () => {
+  return withSharedStoreLock(input.document.scopeRoot, () => withConfigFileLock(input.globalConfigPath, () => withConfigFileLock(input.document.configPath, async () => {
     const [latest, global] = await Promise.all([
       readProjectConfigDocument(input.document.configPath, input.document.resolved),
       readGlobalConfigDocument(input.globalConfigPath)
@@ -352,6 +353,10 @@ export async function writeProjectConfigDraft(input: {
     assertExpectedRevision(baseline.revision, latest.revision);
     assertExpectedRevision(globalBaseline.revision, global.revision);
     await assertModelOperationStamp(baseline.scopeRoot, stamp);
+    // Every new registration receives a fresh identity, including TOS and Settings-created Stores.
+    for (const [id,binding] of Object.entries(candidate.dataStores ?? {})) {
+      if (!Object.hasOwn(latest.raw.dataStores ?? {},id)) binding.registrationId=randomUUID();
+    }
     const { validateModelStoragePaths } = await import("./project/model-storage-paths.js");
     await validateModelStoragePaths({ root: latest.scopeRoot, modelsDirectory: candidate.modelsDirectory, modelRegistration: candidate.modelRegistration });
     await validateBusinessBindings(latest.scopeRoot, candidate);
@@ -380,7 +385,7 @@ export async function writeProjectConfigDraft(input: {
       throw error;
     }
     return readProjectConfigDocument(latest.configPath, latest.resolved);
-  }));
+  })));
 }
 
 export function configRevision(source: string | Buffer): string {
