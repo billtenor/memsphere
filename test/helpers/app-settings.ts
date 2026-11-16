@@ -88,3 +88,30 @@ export async function appSettingsServer(t: import("node:test").TestContext, host
     t.after(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
     return { ...fixture, secondary, server, config, origin: `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`, token };
 }
+
+/** Real registered Projects and installed Apps for settings empty-state acceptance. */
+export async function emptyAppSettingsServer(t: import("node:test").TestContext, mode: "apps" | "empty" | "no-project" = "apps") {
+    const f = await businessFixture(t);
+    for (const kind of ["concepts", "statements", "procedures", "schemas"]) await mkdir(join(f.root, "memory", kind));
+    const project = { name: "test-project", paths: projectPaths(f.root), memoryRoot: join(f.root, "memory"), config: await readBusinessProject(f.root) } as AppProject;
+    const context = { primary: project, home: f.home } as ProjectContext;
+    if (mode === "apps") for (const [id, schema] of [
+        ["empty.no-schema", undefined],
+        ["empty.closed", {type:"object",properties:{},additionalProperties:false}],
+        ["empty.open", {type:"object",properties:{},additionalProperties:true}],
+        ["empty.readonly", {type:"object",readOnly:true,properties:{name:{type:"string"}}}]
+    ] as const) {
+        const root = join(f.directory, id);
+        await mkdir(root);
+        await writeFile(join(root,"app.json"),JSON.stringify({schemaVersion:1,id,name:id,version:"1.0.0",description:"Empty settings acceptance",...(schema?{configuration:"schema.json"}:{})}));
+        if (schema) await writeFile(join(root,"schema.json"),JSON.stringify(schema));
+        await installApp(context,root,{});
+    }
+    await writeFile(join(f.home,"config.json"),JSON.stringify({language:"zh-CN"}));
+    const root = mode === "no-project" ? f.home : f.root;
+    const config = { configPath: join(root,"config.json"), scopeRoot: root, homeRoot:f.home, language:"zh-CN", memoryRoot: mode === "no-project" ? join(f.home,"projects") : project.memoryRoot, reviewsRoot:join(root,"reviews"), runsRoot:join(root,"runs"), archiveRoot:join(root,"archives"),debug:{agentReview:false,root:join(f.home,".runtime/debug")},view:{host:"127.0.0.1",port:0},...(mode === "no-project" ? {} : {project:{name:project.name,revision:"fixture",store:project.config.store,mounted:[]}}) } as MemsphereConfig;
+    const server = createViewServer(config);
+    await new Promise<void>((resolve,reject)=>{server.once("error",reject);server.listen(0,"127.0.0.1",resolve);});
+    t.after(()=>new Promise<void>(resolve=>{server.closeAllConnections();server.close(()=>resolve());}));
+    return {f,project,context,config,origin:`http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`};
+}

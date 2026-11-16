@@ -47,6 +47,18 @@ const copy = {
         "zh-CN": "搜索 App",
         "en": "Search Apps"
     },
+    "noMatches": {
+        "zh-CN": "没有匹配的 App。",
+        "en": "No matching Apps."
+    },
+    "clearSearch": {
+        "zh-CN": "清空搜索",
+        "en": "Clear search"
+    },
+    "chooseProject": {
+        "zh-CN": "App 配置属于 Project。请先通过顶部项目选择器选择 Project，再配置其中已安装的 App。",
+        "en": "App configuration belongs to a Project. Select a Project using the top Project selector to configure its installed Apps."
+    },
     "enabled": {
         "zh-CN": "已启用",
         "en": "Enabled"

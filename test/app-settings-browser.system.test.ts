@@ -4,7 +4,7 @@ import {removeBusinessStore} from "../src/project/business-stores.js";
 import assert from "node:assert/strict";
 import nodeTest, {type TestContext, type TestOptions} from "node:test";
 import { browserScope as sharedBrowserScope } from "./helpers/browser.js";
-import { appSettingsServer } from "./helpers/app-settings.js";
+import { appSettingsServer, emptyAppSettingsServer } from "./helpers/app-settings.js";
 import { readAppSettings } from "../src/app/settings.js";
 import { configureApp, installApp } from "../src/app/install.js";
 type RunTest = (t: TestContext) => void | Promise<void>;
@@ -455,4 +455,52 @@ for(const mode of ["invalid","format-only"] as const)test(`${mode} native close 
     const second=page.waitForEvent("dialog",{timeout:10000}),closed=page.waitForEvent("close",{timeout:10000});
     const accepted=native.send("Page.close");const confirm=await second;assert.equal(confirm.type(),"beforeunload");await confirm.accept();await accepted;await closed;
     assert.deepEqual((await readAppSettings(project,"example.app")).config.prefs,{color:"blue"});
+});
+
+for (const id of ["empty.no-schema", "empty.closed", "empty.readonly"]) test(`App settings with no editable configuration explains ${id} without an editor`,async t=>{
+    const {origin,project}=await emptyAppSettingsServer(t);
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=${id}`);
+    await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
+    assert.equal(await page.locator(".mem-view-settings-form").count(),0);
+    assert.equal(await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).count(),0);
+    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).isDisabled(),true);
+    await page.reload();await page.getByText("这个 App 没有可配置项。",{exact:true}).waitFor();
+    assert.deepEqual((await readAppSettings(project,id)).config,{});
+});
+test("an open empty Schema remains editable and can persist new JSON properties",async t=>{
+    const {origin,project}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=empty.open`);
+    await page.getByLabel("完整配置（JSON）",{exact:true}).fill('{"newField":"kept"}');
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    await page.reload();await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).click();assert.deepEqual(JSON.parse(await page.getByLabel("完整配置（JSON）",{exact:true}).inputValue()),{newField:"kept"});
+    assert.deepEqual((await readAppSettings(project,"empty.open")).config,{newField:"kept"});
+});
+test("zero installed Apps shows installation guidance through the App settings menu",async t=>{
+    const {origin}=await emptyAppSettingsServer(t,"empty");const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/overview`);
+    await page.getByRole("button",{name:"App 配置",exact:true}).click();
+    await page.getByText(/当前项目尚未安装 App。使用 memsphere app install/).waitFor();
+    assert.equal(await page.locator("[data-app-id]").count(),0);
+    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).count(),0);
+});
+test("App settings without a selected Project explains selection and remains reachable",async t=>{
+    const {origin}=await emptyAppSettingsServer(t,"no-project");const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/settings/overview`);
+    await page.getByRole("button",{name:"App 配置",exact:true}).click();
+    await page.getByText(/App 配置属于 Project。请先通过顶部项目选择器选择 Project/).waitFor();
+    assert.equal(await page.locator("[data-app-id]").count(),0);
+    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).count(),0);
+});
+test("App search retains unmatched text and clears it without confusing an uninstalled Project",async t=>{
+    const {origin}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps`);
+    const search=page.getByLabel("搜索 App",{exact:true});await search.fill("unmatched-app");
+    await page.getByText("没有匹配的 App。",{exact:true}).waitFor();
+    assert.equal(await search.inputValue(),"unmatched-app");
+    assert.equal(await page.locator("[data-app-id]:visible").count(),0);
+    assert.equal(await page.getByText(/当前项目尚未安装 App/).count(),0);
+    await page.getByRole("button",{name:"清空搜索",exact:true}).click();assert.equal(await search.inputValue(),"");
+    assert.equal(await page.locator("[data-app-id]:visible").count(),4);
+    assert.equal(await page.getByText("没有匹配的 App。",{exact:true}).isVisible(),false);
 });

@@ -77,10 +77,24 @@ export class AppSettingsPage {
             this.#surface.append(p);
             return;
         }
-        const search = this.ui.searchField({ label: { text: this.#t("search") }, value: "", onInput: value => {
-                for (const row of Array.from(this.#surface.querySelectorAll<HTMLElement>("[data-app-id]")))
-                    row.hidden = !row.textContent?.toLowerCase().includes(value.toLowerCase());
-            } });
+        const noMatches = document.createElement("div");
+        noMatches.hidden = true;
+        noMatches.setAttribute("role", "status");
+        const message = document.createElement("p");
+        message.textContent = this.#t("noMatches");
+        const filter = (value: string) => {
+            let visible = 0;
+            for (const row of Array.from(this.#surface.querySelectorAll<HTMLElement>("[data-app-id]"))) {
+                row.hidden = !row.textContent?.toLowerCase().includes(value.toLowerCase());
+                if (!row.hidden) visible++;
+            }
+            noMatches.hidden = visible > 0;
+        };
+        const search = this.ui.searchField({ label: { text: this.#t("search") }, value: "", onInput: filter });
+        noMatches.append(message, this.ui.button({ label: { text: this.#t("clearSearch") }, run: () => {
+            search.control.value = "";
+            filter("");
+        } }));
         this.#surface.append(search.root);
         for (const app of apps) {
             const row = document.createElement("section");
@@ -95,6 +109,7 @@ export class AppSettingsPage {
             row.append(name, meta, description, this.ui.button({ label: { text: this.#t("configure") }, run: () => this.navigate(app.id) }));
             this.#surface.append(row);
         }
+        this.#surface.append(noMatches);
     }
     #detail(detail: RecordValue, controller: AppSettingsController) {
         const header = document.createElement("header");
@@ -139,7 +154,12 @@ export class AppSettingsPage {
             }
             for (const r of detail.projectStores)
                 fields.push({ kind: "projectStore", key: r.key, label: { text: r.key }, required: true });
-            if (!fields.length && !detail.schema && !Object.keys(detail.config).length) {
+            // A closed empty object permits no configuration changes. Keep the
+            // JSON escape hatch for open schemas and unrecognised constraints.
+            const closedEmptySchema = detail.schema?.additionalProperties === false
+                && !Object.keys(detail.schema.patternProperties ?? {}).length
+                && !["$ref", "allOf", "anyOf", "oneOf", "if"].some(key => key in detail.schema);
+            if (detail.schema?.readOnly === true || (!fields.length && !Object.keys(detail.config).length && (!detail.schema || closedEmptySchema))) {
                 const p = document.createElement("p");
                 p.textContent = this.#t("noFields");
                 body.append(p);

@@ -1,4 +1,5 @@
 import { AppSettingsPage } from "./app-settings-page.js";
+import { appSettingsText } from "../../../../src/view/app-settings-copy.js";
 import { modelRegistrationSetupEnabled } from "../../../shared/model-browser-features.js";
 import type { RouteLocation, RouteTarget, RouteToken, ViewMount, ViewUi, SlotRegistry } from "@memsphere/view-sdk";
 import type { SettingsViewConfig } from "./index.js";
@@ -331,6 +332,7 @@ class SettingsApplication {
 
   contentHtml(scope: ScopeState): string {
     if (this.#meta?.requiresToken && !this.#scopes.global.data) return this.tokenHtml();
+    if ((!scope.data || !scope.draft) && this.#module === "apps") return empty(appSettingsText(this.#config.locale ?? "zh-CN", "chooseProject"));
     if (!scope.data || !scope.draft) return empty(this.#scope === "project"
       ? this.t("settings.projectUnavailable", "当前没有可管理的项目，但仍可管理 Memsphere 全局设置。")
       : this.t("settings.notLoaded", "配置尚未加载。"));
@@ -1450,6 +1452,7 @@ const styles = `
   .app-settings-page header {display:grid;gap:var(--mem-view-space-3);justify-items:start;}
   .app-settings-page h2,.app-settings-page h3,.app-settings-page p {margin:0;overflow-wrap:anywhere;}
   .app-settings-actions {display:flex;flex-wrap:wrap;gap:var(--mem-view-space-2);}
+  .app-settings-page [hidden] {display:none;}
   .app-settings-item {padding:var(--mem-view-space-5);border:1px solid var(--mem-view-color-border);border-radius:var(--mem-view-radius-lg);background:var(--mem-view-color-surface);display:grid;gap:var(--mem-view-space-3);justify-items:start;}
 
   .memsphere-settings { --surface:var(--mem-view-color-surface);--line:var(--mem-view-color-border);--soft:var(--mem-view-color-subtle);--text:var(--mem-view-color-text);--muted:var(--mem-view-color-text-muted);--accent:var(--mem-view-color-accent);--accent-soft:var(--mem-view-color-accent-soft);--danger:var(--mem-view-color-danger);--shadow:var(--mem-view-shadow-card); display:grid;grid-template-columns:240px minmax(0,1fr);min-height:calc(100vh - 82px);background:var(--mem-view-color-canvas);color:var(--text);font:14px/1.45 ui-sans-serif,system-ui,sans-serif;box-sizing:border-box }
