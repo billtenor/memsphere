@@ -1,3 +1,4 @@
+import { assertSettingsReadOnly } from "./app-settings-schema.js";
 import { appSettingsText } from "./app-settings-copy.js";
 import type { AppSettingsStoreChoices, AppSettingsPresentationContext, AppSettingsSnapshot, SettingsConfig, SettingsPath } from "./app-settings-contracts.js";
 const clone = <T>(value: T): T => structuredClone(value);
@@ -90,6 +91,7 @@ export class AppSettingsController implements AppSettingsPresentationContext {
         if (!path.length) {
             if (remove || !value || typeof value !== "object" || Array.isArray(value))
                 throw error("APP_CONFIG_INVALID", this.#t("rootObject"));
+            assertSettingsReadOnly(this.schema, this.#saved, value, this.#t("readOnly"));
             this.#draft = clone(value as SettingsConfig);
             return;
         }
@@ -107,6 +109,7 @@ export class AppSettingsController implements AppSettingsPresentationContext {
         const last=path.at(-1)!;arrayIndex(target,last);
         if(remove){if(Array.isArray(target))target.splice(Number(last),1);else delete target[last];}
         else Object.defineProperty(target,last,{value:clone(value),writable:true,enumerable:true,configurable:true});
+        assertSettingsReadOnly(this.schema, this.#saved, candidate, this.#t("readOnly"));
         this.#draft=candidate;
     }
 

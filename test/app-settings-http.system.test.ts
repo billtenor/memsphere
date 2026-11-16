@@ -45,3 +45,15 @@ for (const host of ["127.0.0.1", "0.0.0.0"]) {
         const conflict=await send("PUT","",b.config,b.revision);assert.equal(conflict.status,409);assert.equal((await conflict.json() as any).code,"APP_CONFIG_CONFLICT");
     });
 }
+
+for(const method of ["POST","PUT"]) test(`App settings ${method} rejects readOnly changes independently of the editor`,{timeout:30000},async t=>{
+    const {origin,project}=await appSettingsServer(t,"127.0.0.1",false,"zh-CN",{readOnly:true});
+    const a=await readAppSettings(project,"example.app");
+    const endpoint=`${origin}/api/projects/test-project/settings/apps/example.app${method==="POST"?"/validate":""}`;
+    const request=(config:unknown)=>fetch(endpoint,{method,headers:{origin,"content-type":"application/json"},body:JSON.stringify({config,expectedRevision:a.revision}),signal:t.signal});
+    const rejected=await request({...a.config,store:"second",name:"B"});
+    assert.equal(rejected.status,400);assert.equal((await rejected.json() as any).code,"APP_SETTINGS_READ_ONLY");
+    const unchanged=await readAppSettings(project,"example.app");assert.equal(unchanged.config.store,"first");assert.equal(unchanged.revision,a.revision);
+    const allowed=await request({...a.config,name:"B"});assert.equal(allowed.status,200);
+    const after=await readAppSettings(project,"example.app");assert.equal(after.config.store,"first");assert.equal(after.config.name,method==="POST"?"A":"B");
+});

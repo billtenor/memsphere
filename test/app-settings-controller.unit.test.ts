@@ -131,3 +131,27 @@ for (const text of ['"B1"', '"unfinished']) test(`array deletion refuses to shif
     assert.deepEqual(submitted.config.rows, [{name:"A"}, {name:"B2"}]);
     c.dispose();
 });
+
+for (const method of ["setValue","removeValue","setText"] as const) for (const path of [["prefs","fixed"],["prefs"],[]]) test(`${method} protects readOnly descendants at ${JSON.stringify(path)}`,async()=>{
+    const initial={name:"A",prefs:{fixed:"locked",other:"old"}};
+    const c=new AppSettingsController("p",{id:"a",name:"A"},true,{config:initial,revision:"old"},async(_a,body)=>({config:body.config,revision:"next"}),async()=>({key:"r",configKey:"store",model:"r.json",kind:"ValueStore",candidates:[]}),undefined,{type:"object",properties:{prefs:{type:"object",properties:{fixed:{readOnly:true}}}}});
+    const before=c.getState();const value=path.length===0?{...initial,prefs:{fixed:"changed"}}:path.length===1?{fixed:"changed"}:"changed";
+    if(method==="setText") {c.setText(path,JSON.stringify(value));assert.deepEqual(c.getState().draft,before.draft);assert.match(c.getState().textBuffers[0].error!,/read.only|只读/i);await assert.rejects(c.save(),{code:"APP_SETTINGS_INVALID_TEXT"});}
+    else {assert.throws(()=>method==="setValue"?c.setValue(path,value):c.removeValue(path),{code:method==="removeValue"&&!path.length?"APP_CONFIG_INVALID":"APP_SETTINGS_READ_ONLY"});assert.deepEqual(c.getState(),before);}
+    c.dispose();
+});
+
+test("root and ancestor replacement can preserve readOnly values while editing siblings",async()=>{
+    const initial={name:"A",prefs:{fixed:"locked",other:"old"}};
+    const c=new AppSettingsController("p",{id:"a",name:"A"},true,{config:initial,revision:"old"},async(_a,body)=>({config:body.config,revision:"next"}),async()=>({key:"r",configKey:"store",model:"r.json",kind:"ValueStore",candidates:[]}),undefined,{properties:{prefs:{properties:{fixed:{readOnly:true}}}}});
+    c.setValue(["prefs"],{fixed:"locked",other:"new"});
+    c.setText([],JSON.stringify({...c.getState().draft,name:"B"}));await c.save();
+    assert.deepEqual(c.getState().saved,{name:"B",prefs:{fixed:"locked",other:"new"}});c.dispose();
+});
+for(const tuple of [false,true])test(`${tuple?"tuple":"homogeneous"} item readOnly survives whole-array replacement`,()=>{
+    const item={properties:{name:{readOnly:true}}};
+    const c=new AppSettingsController("p",{id:"a",name:"A"},true,{config:{rows:[{name:"A",note:"old"}]},revision:"old"},async()=>({}),async()=>({key:"r",configKey:"s",model:"r.json",kind:"ValueStore",candidates:[]}),undefined,{properties:{rows:{items:tuple?[item]:item}}});
+    const before=c.getState();assert.throws(()=>c.setValue(["rows"],[{name:"changed",note:"new"}]),{code:"APP_SETTINGS_READ_ONLY"});assert.deepEqual(c.getState(),before);
+    assert.throws(()=>c.removeValue(["rows","0"]),{code:"APP_SETTINGS_READ_ONLY"});assert.deepEqual(c.getState(),before);
+    c.setValue(["rows"],[{name:"A",note:"new"}]);assert.deepEqual(c.getState().draft.rows,[{name:"A",note:"new"}]);c.dispose();
+});

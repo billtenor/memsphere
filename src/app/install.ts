@@ -1,3 +1,4 @@
+import { assertSettingsReadOnly } from "../view/app-settings-schema.js";
 import { isViewSdkCompatible } from "../module/manifest.js";
 import { VIEW_SDK_VERSION } from "../view/view-sdk.js";
 import { listAppMemoryEntries } from "./ownership.js";
@@ -13,7 +14,7 @@ import { gitOutputRaw } from "../git.js";
 import { projectConfigSchema } from "../project/model.js";
 import type { ProjectContext, ResolvedProject } from "../project/resolver.js";
 import { AppError, cliBindingSchema } from "./contracts.js";
-import { digest, isMissing, packageDigest, readJson } from "./files.js";
+import { digest, isMissing, packageDigest, packagePath, readJson } from "./files.js";
 import { readAppPackage, resolveConfigValues, validateAppConfig } from "./package.js";
 import { appConfigurationRevision, canonicalAppConfig, assertWritableAppTarget, readAppState, requireApp, withAppLock, writeAppState, type AppInstallation, type AppProject } from "./state.js";
 import { checkCli, cliCatalog } from "../tools/registry.js";
@@ -247,7 +248,7 @@ export async function checkApp(project: AppProject, id: string) {
   }
   return { id, status: items.every(i => i.available) ? "available" : "unavailable", items };
 }
-export async function configureApp(context: ProjectContext, id: string, config: unknown, target = context.primary, options: { expectedRevision?: string } = {}) {
+export async function configureApp(context: ProjectContext, id: string, config: unknown, target = context.primary, options: { expectedRevision?: string; enforceReadOnly?: boolean } = {}) {
   assertWritableAppTarget(context, target);
   return withSharedStoreLock(target.paths.root, () => withAppLock(target, async () => {
     const state = await readAppState(target), app = requireApp(state, id);
@@ -257,6 +258,8 @@ export async function configureApp(context: ProjectContext, id: string, config: 
     if (await packageDigest(app.packageRoot) !== app.packageDigest) throw new AppError("APP_CACHE_INVALID", "Modified App package");
     const previous = app.config;
     app.config = await validateAppConfig(app.packageRoot, app.manifest, config);
+    if (options.enforceReadOnly && app.manifest.configuration)
+      assertSettingsReadOnly(await readJson(await packagePath(app.packageRoot,app.manifest.configuration)), previous, app.config);
     updateProjectStoreGenerations(app, previous);
     await validateProjectStores(target, app);
     if (canonicalAppConfig(previous) === canonicalAppConfig(app.config)) return { id, status: "configured", revision, restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length), config: app.config };

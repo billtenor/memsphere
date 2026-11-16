@@ -1,3 +1,4 @@
+import { settingsFieldSchema } from "./app-settings-schema.js";
 import { appSettingsText } from "./app-settings-copy.js";
 import type { ViewUi, TextRef } from "./view-sdk.js";
 import type { AppSettingsPresentationContext, AppSettingsSnapshot, SettingsFieldDescriptor, SettingsFormDescriptor, SettingsPath } from "./app-settings-contracts.js";
@@ -72,15 +73,10 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
             const schema = context.getState().schema;
             let node: any, required = false, schemaReadOnly = false;
             const resolveConstraints = () => {
-                node = schema;
-                let parent: any;
-                schemaReadOnly = Boolean(schema?.readOnly);
-                for (const part of path) {
-                    parent = node;
-                    node = node?.properties?.[part];
-                    schemaReadOnly ||= Boolean(node?.readOnly);
-                }
-                required = Boolean(field.required || parent?.required?.includes(path.at(-1)));
+                const constraints = settingsFieldSchema(schema, path);
+                node = constraints.node;
+                schemaReadOnly = constraints.readOnly;
+                required = Boolean(field.required || constraints.required);
             };
             resolveConstraints();
             const permitted = (values: typeof choices) => Array.isArray(node?.enum) ? values.filter(c => node.enum.some((v: unknown) => JSON.stringify(v) === JSON.stringify(c.value))) : values;

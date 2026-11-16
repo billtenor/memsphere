@@ -248,7 +248,10 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     await restore?.();
   };
 
-  let historyIndex = 0;
+  const storedHistoryIndex = globalThis.history?.state?.memsphereViewIndex;
+  let historyIndex = Number.isSafeInteger(storedHistoryIndex) ? storedHistoryIndex : 0;
+  let restoringHistory: ((event: PopStateEvent) => void) | undefined;
+  let rejectHistoryRestore: ((error: Error) => void) | undefined;
   let navigationEpoch = 0;
   globalThis.history?.replaceState({ ...globalThis.history.state, memsphereViewIndex: historyIndex }, "");
   routeRegistry.setNavigator(async (target, replace, preserveScroll) => {
@@ -755,6 +758,7 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     async dispose(): Promise<void> {
       if (disposed) return;
       disposed = true;
+      rejectHistoryRestore?.(new Error("ViewHost disposed during history navigation"));
       const errors: unknown[] = [];
       try {
         await disposeActiveMount(activeOverlayMount);
@@ -819,23 +823,38 @@ export async function startViewHost(options: StartViewHostOptions): Promise<Acti
     navigationQueue = operation.catch(() => undefined);
     return operation;
   };
-  let restoringHistory: (() => void) | undefined;
   let acceptedTraversal = false;
   const handlePopstate = (event: PopStateEvent) => {
-    if (restoringHistory) { const done = restoringHistory; restoringHistory = undefined; done(); return; }
+    if (restoringHistory) { restoringHistory(event); return; }
     if (acceptedTraversal) { acceptedTraversal = false; historyIndex = event.state?.memsphereViewIndex ?? historyIndex; void composeCurrentLocation().catch(error => renderShellNavigationError(options.root,error)); return; }
     const epoch=++navigationEpoch;
     const previous = routeRegistry.location;
     const destination = browserLocation();
     const nextIndex = event.state?.memsphereViewIndex;
     const delta = Number.isInteger(nextIndex) ? historyIndex-nextIndex : 0;
-    const restored = delta ? new Promise<void>(resolve => { restoringHistory=resolve;globalThis.history.go(delta); }) : Promise.resolve();
+    const restored = delta ? new Promise<void>((resolve, reject) => {
+      const previousPath = previous.pathname+previous.search+previous.hash;
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        restoringHistory = undefined;
+        rejectHistoryRestore = undefined;
+        if (error) {
+          if (!disposed) globalThis.history.replaceState({...globalThis.history.state,memsphereViewIndex:historyIndex}, "", previousPath);
+          reject(error);
+        } else resolve();
+      };
+      const timer = setTimeout(() => finish(new Error("History navigation could not be restored. Retry or reload this page.")), 5000);
+      rejectHistoryRestore = finish;
+      restoringHistory = event => finish(event.state?.memsphereViewIndex === historyIndex && browserLocation().pathname+browserLocation().search+browserLocation().hash === previousPath
+        ? undefined : new Error("History changed while restoring navigation. Retry or reload this page."));
+      globalThis.history.go(delta);
+    }) : Promise.resolve();
     if (!delta) globalThis.history?.replaceState({memsphereViewIndex:historyIndex}, "", previous.pathname+previous.search+previous.hash);
     void restored.then(()=>routeRegistry.requestLeave()).then(async allowed => {
       if (!allowed || epoch!==navigationEpoch) return;
       if (delta) { acceptedTraversal=true; globalThis.history.go(-delta); }
       else {globalThis.history?.replaceState({memsphereViewIndex:historyIndex}, "", destination.pathname+destination.search+destination.hash); await composeCurrentLocation();}
-    }).catch(error => renderShellNavigationError(options.root, error));
+    }).catch(error => { if (!disposed) renderShellNavigationError(options.root, error); });
   };
   const handleUnload = (event: BeforeUnloadEvent) => {
     if (routeRegistry.hasChanges()) { event.preventDefault(); event.returnValue = ""; }

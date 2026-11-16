@@ -437,7 +437,7 @@ async function handleRequest(
         const body = await readJsonBody<{config?:unknown; expectedRevision?:unknown}>(request,128 * 1024);
         if (typeof body.expectedRevision !== "string" || !body.expectedRevision) throw new AppError("APP_CONFIG_REVISION_REQUIRED", "expectedRevision is required");
         const result = request.method === "PUT"
-          ? await configureApp(context,id,body.config,context.primary,{expectedRevision:body.expectedRevision})
+          ? await configureApp(context,id,body.config,context.primary,{expectedRevision:body.expectedRevision,enforceReadOnly:true})
           : await previewAppSettings(context.primary,id,body.config,body.expectedRevision);
         sendJson(response,200,result); return;
       }
@@ -3259,6 +3259,7 @@ const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.ur
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 const viewRuntimeDependencies = new Map([
+  ["/assets/app-settings-schema.js", {compiled:new URL("../view/app-settings-schema.js",import.meta.url),source:new URL("../view/app-settings-schema.ts",import.meta.url)}],
   ["/assets/app-settings-copy.js", {compiled:new URL("../view/app-settings-copy.js",import.meta.url),source:new URL("../view/app-settings-copy.ts",import.meta.url)}],
   ["/assets/settings-form.js", { compiled:new URL("../view/settings-form.js",import.meta.url), source:new URL("../view/settings-form.ts",import.meta.url) }],
   ["/assets/app-settings-controller.js", { compiled:new URL("../view/app-settings-controller.js",import.meta.url), source:new URL("../view/app-settings-controller.ts",import.meta.url) }],

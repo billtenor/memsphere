@@ -1,3 +1,4 @@
+import { assertSettingsReadOnly } from "../view/app-settings-schema.js";
 import type { AppSettingsStoreChoices } from "../view/app-settings-contracts.js";
 import type { AppProject, AppInstallation } from "./state.js";
 import { appConfigurationRevision, readAppState, requireApp } from "./state.js";
@@ -56,6 +57,7 @@ export async function previewAppSettings(project: AppProject, id: string, input:
             throw new AppError("APP_CACHE_INVALID", "Modified App package");
         const candidate = structuredClone(app);
         candidate.config = await validateAppConfig(app.packageRoot, app.manifest, input);
+        if (app.manifest.configuration) assertSettingsReadOnly(await readJson(await packagePath(app.packageRoot,app.manifest.configuration)),app.config,candidate.config);
         await validateProjectStores(project, candidate);
         return { valid: true, config: candidate.config, revision: expectedRevision, restartRequired: Boolean(app.manifest.backend || app.manifest.entrypoints.view.length) };
     });

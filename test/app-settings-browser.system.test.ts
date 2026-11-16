@@ -317,3 +317,73 @@ test("App settings can be edited, reached by Tab and saved with Enter",async t=>
     assert.equal(focused,true);await page.keyboard.press("Enter");await page.getByText(/配置已保存。/).waitFor();
     assert.equal((await readAppSettings(project,"example.app")).config.name,"Keyboard saved");
 });
+
+test("full JSON cannot replace a readOnly descendant but can save other fields",async t=>{
+    const {origin,project}=await appSettingsServer(t,"127.0.0.1",false,"zh-CN",{readOnly:true});
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    await page.getByRole("button",{name:"编辑完整 JSON",exact:true}).click();
+    const editor=page.getByLabel("完整配置（JSON）",{exact:true});await editor.waitFor();
+    const initial=await readAppSettings(project,"example.app");
+    await editor.fill(JSON.stringify({...initial.config,store:"second",name:"B"}));
+    assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).isDisabled(),true);
+    assert.equal((await readAppSettings(project,"example.app")).config.store,"first");
+    await editor.fill(JSON.stringify({...initial.config,name:"B"}));
+    await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    const saved=await readAppSettings(project,"example.app");assert.equal(saved.config.store,"first");assert.equal(saved.config.name,"B");
+});
+for(const kind of ["array-fields","tuple-fields"] as const)test(`${kind} public controls preserve items readOnly, required and enum`,async t=>{
+    const {origin,project}=await appSettingsServer(t,"127.0.0.1",kind);
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
+    const name=page.getByLabel("数组名称",{exact:true});await name.waitFor();
+    assert.equal(await name.isDisabled(),true);assert.equal(await name.getAttribute("required"),"");
+    const choice=page.getByLabel("数组选项",{exact:true});assert.equal(await choice.getAttribute("required"),"");
+    assert.deepEqual(await choice.locator("option").allTextContents(),["请选择","A"]);
+    await page.getByLabel("名称",{exact:true}).fill("B");await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
+    assert.deepEqual((await readAppSettings(project,"example.app")).config.rows,[{name:"A",choice:"A",note:"keep"}]);
+});
+async function historyPage(t:TestContext) {
+    const fixture=await appSettingsServer(t,"127.0.0.1",true),{origin,context,root,manifest}=fixture;
+    await writeFile(join(root,"app.json"),JSON.stringify({...manifest,id:"other.app",name:"Other App",assets:{},entrypoints:{}}));
+    await installApp(context,root,{name:"Other",store:"second"});
+    const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage({viewport:{width:1440,height:1000}});
+    // Three real destinations A → B → C; no synthetic pushState or copied state.
+    const otherUrl=`${origin}/projects/test-project/settings/apps?app=other.app`;
+    await page.goto(otherUrl);await page.getByLabel("name",{exact:true}).waitFor();
+    await page.getByRole("button",{name:"所有 App",exact:true}).click();
+    const listUrl=page.url(),listIndex=await page.evaluate(()=>history.state.memsphereViewIndex);
+    await page.locator('[data-app-id="example.app"]').getByRole("button",{name:"配置",exact:true}).click();await page.getByLabel("名称",{exact:true}).waitFor();
+    const detailUrl=page.url(),index=await page.evaluate(()=>history.state.memsphereViewIndex);assert.equal(index,listIndex+1);
+    await page.reload();await page.getByLabel("名称",{exact:true}).waitFor();
+    return {...fixture,page,listUrl,listIndex,detailUrl,index,otherUrl};
+}
+test("reload preserves actual route history for dirty Back and Forward cancellation and confirmation",async t=>{
+    const {page,listUrl,listIndex,detailUrl,index,otherUrl}=await historyPage(t);
+    await page.getByLabel("名称",{exact:true}).fill("Unsaved after reload");
+    await page.goBack();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();
+    assert.equal(page.url(),detailUrl);assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),index);
+    assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Unsaved after reload");
+    await page.goBack();await page.getByRole("button",{name:"放弃并离开",exact:true}).last().click();
+    await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true}).waitFor();
+    assert.equal(await page.getByLabel("名称",{exact:true}).count(),0);assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),listIndex);
+    await page.goForward();await page.getByLabel("名称",{exact:true}).waitFor();assert.equal(page.url(),detailUrl);
+    assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"A");assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),index);
+    await page.goBack();await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true}).waitFor();
+    await page.goBack();await page.waitForURL(otherUrl);await page.getByLabel("name",{exact:true}).fill("Other dirty");
+    await page.goForward();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();
+    assert.equal(page.url(),otherUrl);assert.equal(await page.getByLabel("name",{exact:true}).inputValue(),"Other dirty");
+    assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),listIndex-1);
+    await page.goForward();await page.getByRole("button",{name:"放弃并离开",exact:true}).last().click();
+    await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true}).waitFor();
+    await page.goForward();await page.getByLabel("名称",{exact:true}).waitFor();assert.equal(page.url(),detailUrl);assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"A");
+});
+test("a missing history restoration event fails finitely and retains the current route and draft",async t=>{
+    const {page,detailUrl,index}=await historyPage(t);await page.getByLabel("名称",{exact:true}).fill("Keep draft");
+    await page.evaluate(()=>{const go=history.go.bind(history);(globalThis as any).__restoreNativeGo=go;history.go=(delta=0)=>{if(delta!==1)go(delta);};});
+    await page.goBack();await page.locator("[data-view-navigation-error]").getByText(/History navigation could not be restored/).waitFor({timeout:8000});
+    assert.equal(page.url(),detailUrl);assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),index);assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Keep draft");
+    await page.evaluate(()=>history.go=(globalThis as any).__restoreNativeGo);
+    await page.getByRole("button",{name:"所有 App",exact:true}).click();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();
+    assert.equal(page.url(),detailUrl);assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Keep draft");
+});
