@@ -491,6 +491,11 @@ test("App settings without a selected Project explains selection and remains rea
     await page.getByText(/App 配置属于 Project。请先通过顶部项目选择器选择 Project/).waitFor();
     assert.equal(await page.locator("[data-app-id]").count(),0);
     assert.equal(await page.getByRole("button",{name:"保存配置",exact:true}).count(),0);
+    await page.locator("#view-shell-project-trigger").click();
+    await page.getByRole("menuitem",{name:"test-project",exact:true}).click();
+    await page.waitForURL("**/projects/test-project/settings/apps");
+    await page.getByText(/当前项目尚未安装 App。使用 memsphere app install/).waitFor();
+    assert.equal(await page.getByText(/App 配置属于 Project。请先/).count(),0);
 });
 test("App search retains unmatched text and clears it without confusing an uninstalled Project",async t=>{
     const {origin}=await emptyAppSettingsServer(t);const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();

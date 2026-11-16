@@ -182,7 +182,11 @@ class SettingsApplication {
       if (projectResponse.ok) {
         const payload = await projectResponse.json() as JsonObject;
         this.#projects = payload.projects ?? [];
-        this.#currentProject = payload.current ?? "";
+        // The server's startup Project may differ from the Project in this
+        // page, including when View started without any Project selected.
+        this.#currentProject = this.#projects.some(project => project.name === this.#options.projectId && !project.missing)
+          ? this.#options.projectId
+          : payload.current ?? "";
       }
 
       const globalState = this.#scopes.global;
