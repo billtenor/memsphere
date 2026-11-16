@@ -95,6 +95,14 @@ const copy = {
         "zh-CN": "模型：{model}",
         "en": "Model: {model}"
     },
+    "storeMetadata": {
+        "zh-CN": "用途：{key} · 模型：{model} · 类型：{kind}",
+        "en": "Purpose: {key} · Model: {model} · Kind: {kind}"
+    },
+    "projectLabel": { "zh-CN": "项目", "en": "Project" },
+    "appIdLabel": { "zh-CN": "App ID", "en": "App ID" },
+    "versionLabel": { "zh-CN": "版本", "en": "Version" },
+    "statusLabel": { "zh-CN": "状态", "en": "Status" },
     "noFields": {
         "zh-CN": "这个 App 没有可配置项。",
         "en": "This App has no configurable settings."

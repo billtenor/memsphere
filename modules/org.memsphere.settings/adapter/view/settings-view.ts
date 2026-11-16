@@ -1453,8 +1453,18 @@ function escapeHtml(value: unknown): string { return String(value).replace(/&/g,
 
 const styles = `
   .app-settings-page {display:grid;gap:var(--mem-view-space-4);min-width:0;}
-  .app-settings-page header {display:grid;gap:var(--mem-view-space-3);justify-items:start;}
-  .app-settings-page h2,.app-settings-page h3,.app-settings-page p {margin:0;overflow-wrap:anywhere;}
+  .app-settings-page > header {display:grid;gap:12px;justify-items:start;}
+  .app-settings-page > h2,.app-settings-page > p,.app-settings-page > header > h2,.app-settings-item > h3,.app-settings-item > p {margin:0;overflow-wrap:anywhere;}
+  .app-settings-page > header > h2 {font-size:22px;font-weight:600;line-height:1.35;}
+  .app-settings-identity {display:flex;flex-wrap:wrap;gap:6px 20px;margin:0;font-size:12px;line-height:1.5;}
+  .app-settings-identity > div {display:flex;flex-wrap:wrap;gap:6px;min-width:0;}
+  .app-settings-identity dt {color:var(--mem-view-color-text-muted);}
+  .app-settings-identity dd {margin:0;overflow-wrap:anywhere;}
+  .app-settings-body {display:flex;flex-direction:column;align-items:flex-start;gap:16px;min-width:0;}
+  .app-settings-body > .mem-view-settings-form {width:100%;}
+  .app-settings-body > h3,.app-settings-body > p,.app-settings-body > pre {margin:0;}
+  .app-settings-body > h3 {font-size:14px;font-weight:600;}
+  .app-settings-page > .app-settings-save-state {color:var(--mem-view-color-text-muted);font-size:12px;line-height:1.6;}
   .app-settings-actions {display:flex;flex-wrap:wrap;gap:var(--mem-view-space-2);}
   .app-settings-page [hidden] {display:none;}
   .app-settings-readonly {white-space:pre-wrap;overflow-wrap:anywhere;max-width:100%;color:var(--mem-view-color-text-muted);}

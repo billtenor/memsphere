@@ -115,10 +115,21 @@ export class AppSettingsPage {
         const header = document.createElement("header");
         const title = document.createElement("h2");
         title.textContent = detail.name;
-        const identity = document.createElement("p");
-        identity.textContent = `${this.projectId} · ${detail.id} · v${detail.version} · ${detail.enabled ? this.#t("enabled") : this.#t("disabledHelp")}`;
+        const identity = document.createElement("dl");
+        identity.className = "app-settings-identity";
+        for (const [label, value] of [
+            [this.#t("projectLabel"), this.projectId], [this.#t("appIdLabel"), detail.id],
+            [this.#t("versionLabel"), detail.version], [this.#t("statusLabel"), detail.enabled ? this.#t("enabled") : this.#t("disabledHelp")]
+        ]) {
+            const item = document.createElement("div"), term = document.createElement("dt"), description = document.createElement("dd");
+            term.textContent = label;
+            description.textContent = value;
+            item.append(term, description);
+            identity.append(item);
+        }
         header.append(this.ui.button({ label: { text: this.#t("allApps") }, run: () => this.navigate() }), title, identity);
         const feedback = document.createElement("div"), body = document.createElement("div"), actions = document.createElement("div");
+        body.className = "app-settings-body";
         let pendingRestart = detail.runtime?.state === "pending-restart";
         actions.className = "app-settings-actions";
         const save = this.ui.button({ label: { text: this.#t("save") }, run: () => this.#action(async () => {
@@ -132,6 +143,7 @@ export class AppSettingsPage {
                 await this.#load(detail.id); } });
         actions.append(reload, cancel, validate, save);
         const state = document.createElement("p");
+        state.className = "app-settings-save-state";
         state.setAttribute("role", "status");
         this.#surface.replaceChildren(header, feedback, body, state, actions);
         const switchMode=async (mode: "generic" | "json")=>{

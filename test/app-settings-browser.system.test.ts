@@ -144,7 +144,7 @@ test("full JSON editing preserves unknown keys and requires confirmation before 
 });
 
 test("a missing matching Store explains preparation without changing the saved target",async t=>{
- const {origin,project,f}=await appSettingsServer(t,"127.0.0.1",true);await removeBusinessStore({},f.root,"first");await removeBusinessStore({},f.root,"second");const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);await page.getByText(/请先在当前 Project 登记符合所需模型和类型的 Store/).waitFor();assert.equal(await page.getByLabel("记录 Store",{exact:true}).isDisabled(),true);await page.getByText("records · record.json · ValueStore",{exact:true}).waitFor();assert.equal((await readAppSettings(project,"example.app")).config.store,"first");
+ const {origin,project,f}=await appSettingsServer(t,"127.0.0.1",true);await removeBusinessStore({},f.root,"first");await removeBusinessStore({},f.root,"second");const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);await page.getByText(/请先在当前 Project 登记符合所需模型和类型的 Store/).waitFor();assert.equal(await page.getByLabel("记录 Store",{exact:true}).isDisabled(),true);await page.getByText("用途：records · 模型：record.json · 类型：ValueStore",{exact:true}).waitFor();assert.equal((await readAppSettings(project,"example.app")).config.store,"first");
 });
 
 for (const action of ["validate", "save"] as const) test(`real HTTP ${action} locks public controls and SDK until the response is released`,async t=>{
@@ -274,7 +274,7 @@ for (const custom of [false,true]) test(`${custom?"custom":"generic"} Store fiel
     const browser=await browserScope();t.after(()=>browser.close());const page=await browser.newPage();
     await page.goto(`${origin}/projects/test-project/settings/apps?app=example.app`);
     const store=page.getByLabel(custom?"记录 Store":"records",{exact:true});
-    await page.getByText("records · record.json · ValueStore",{exact:true}).waitFor({timeout:10000});
+    await page.getByText("用途：records · 模型：record.json · 类型：ValueStore",{exact:true}).waitFor({timeout:10000});
     assert.equal(await store.isDisabled(),false);
     assert.equal(await store.getAttribute("required"),"");
     assert.deepEqual(await store.locator("option").allTextContents(),["请选择","first"]);
@@ -541,4 +541,39 @@ test("an open App with readOnly named fields still permits new JSON properties",
     await page.getByRole("button",{name:"保存配置",exact:true}).click();await page.getByText(/配置已保存。/).waitFor();
     await page.reload();assert.equal(await page.getByLabel("extra",{exact:true}).inputValue(),"kept");
     assert.deepEqual((await readAppSettings(project,"empty.open-readonly")).config,{name:"A",extra:"kept"});
+});
+
+for (const colorScheme of ["light", "dark"] as const) test(`settings form groups descriptions and controls with readable spacing in ${colorScheme} mode`,async t=>{
+    const {page}=await customPage(t);
+    await page.emulateMedia({colorScheme});
+    const section=page.locator(".mem-settings-section").first();
+    const geometry=await section.evaluate(root=>{
+        const description=root.querySelector<HTMLElement>(".mem-settings-description")!;
+        const fields=root.querySelector<HTMLElement>(".mem-settings-fields")!;
+        const rows=root.querySelectorAll<HTMLElement>(".mem-settings-field");
+        const input=rows[0]!.querySelector<HTMLInputElement>("input")!;
+        const label=rows[0]!.querySelector<HTMLElement>(".mem-view-field>span:first-child")!;
+        const emptyHelp=rows[0]!.querySelector<HTMLElement>("[data-field-description]")!;
+        const nextLabel=rows[1]!.querySelector<HTMLElement>(".mem-view-field>span:first-child")!;
+        const descriptionBox=description.getBoundingClientRect(), fieldsBox=fields.getBoundingClientRect();
+        const inputBox=input.getBoundingClientRect(),labelBox=label.getBoundingClientRect(),nextLabelBox=nextLabel.getBoundingClientRect();
+        return {descriptionGap:fieldsBox.top-descriptionBox.bottom,labelGap:inputBox.top-labelBox.bottom,
+            betweenFields:nextLabelBox.top-inputBox.bottom,emptyHelpHeight:emptyHelp.getBoundingClientRect().height,
+            labelSize:parseFloat(getComputedStyle(label).fontSize),helpSize:parseFloat(getComputedStyle(description).fontSize),
+            descriptionColor:getComputedStyle(description).color,labelColor:getComputedStyle(label).color};
+    });
+    assert.ok(geometry.descriptionGap>=16,"Section explanation must be separated from its first field");
+    assert.ok(geometry.labelGap>0&&geometry.labelGap<geometry.descriptionGap,"Label must belong visibly to its input");
+    assert.ok(geometry.betweenFields>=16&&geometry.betweenFields<=28,"Adjacent fields need consistent spacing without an empty help row");
+    assert.equal(geometry.emptyHelpHeight,0);
+    assert.ok(geometry.labelSize>=14&&geometry.helpSize>=12);
+    assert.notEqual(geometry.descriptionColor,geometry.labelColor);
+    await page.getByLabel("数量",{exact:true}).fill("0");await page.getByRole("button",{name:"保存配置",exact:true}).click();
+    await page.locator("[data-request-errors]").getByText(/must be >= 1/).waitFor();
+    const feedback=page.getByLabel("数量",{exact:true}).locator("..").locator("..").locator("[data-field-description]");
+    await feedback.getByText(/must be >= 1/).waitFor();
+    assert.equal(await feedback.getAttribute("role"),"alert");
+    assert.notEqual(await feedback.evaluate(e=>getComputedStyle(e).color),geometry.descriptionColor);
+    await page.setViewportSize({width:390,height:844});
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
 });

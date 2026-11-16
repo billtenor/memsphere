@@ -25,12 +25,15 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
         panel.className = "mem-settings-section";
         const title = document.createElement("h3");
         title.textContent = text(section.title);
-        panel.append(title);
+        const heading = document.createElement("header");
+        heading.className = "mem-settings-section-heading";
+        heading.append(title);
+        panel.append(heading);
         if (section.description) {
             const p = document.createElement("p");
             p.className = "mem-settings-description";
             p.textContent = text(section.description);
-            panel.append(p);
+            heading.append(p);
         }
         const grid = document.createElement("div");
         grid.className = "mem-settings-fields";
@@ -156,7 +159,7 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
                     resolveConstraints();
                     choices = permitted(result.candidates.map(v => ({ value: v, label: { text: v } })));
                     choiceReady = true;
-                    storeMetadata.textContent=[result.key,result.model,result.kind].filter(Boolean).join(" · ");
+                    storeMetadata.textContent = appSettingsText(locale, "storeMetadata", { key: result.key, model: result.model, kind: result.kind });
                     localError = [result.diagnostic, result.candidates.length?undefined:appSettingsText(locale,"noStores")].filter(Boolean).join("；");
                     update(context.getState());
                 }).catch(e => { if (!context.signal.aborted) {
@@ -172,5 +175,21 @@ export function createSettingsForm(ui: ViewUi, descriptor: SettingsFormDescripto
 }
 export const settingsFormStyles = `
 .mem-view-settings-form{display:grid;gap:20px;color:var(--mem-view-color-text);font:var(--mem-view-font-size-base,14px)/1.5 var(--mem-view-font-sans,system-ui)}
-.mem-view-settings-form *{box-sizing:border-box}.mem-settings-section{border:1px solid var(--mem-view-color-border);background:var(--mem-view-color-surface);border-radius:var(--mem-view-radius-lg,12px);padding:24px}.mem-settings-section h3{margin:0 0 8px;font-size:16px}.mem-settings-description{color:var(--mem-view-color-text-muted);font-size:12px;margin:0 0 20px}.mem-settings-fields{display:grid;gap:20px}.mem-settings-field{min-width:0}.mem-settings-field[hidden]{display:none}.mem-settings-error{font-size:12px;color:var(--mem-view-color-danger);margin:6px 0 0}.mem-settings-error[hidden]{display:none}.mem-settings-store-meta{font-size:12px;color:var(--mem-view-color-text-muted);margin:6px 0 0}.mem-settings-store-meta[hidden]{display:none}@media(max-width:640px){.mem-settings-section{padding:16px}}
+.mem-view-settings-form *{box-sizing:border-box}
+.mem-view-settings-form .mem-settings-section{display:grid;gap:24px;min-width:0;border:1px solid var(--mem-view-color-border);background:var(--mem-view-color-surface);border-radius:var(--mem-view-radius-lg,12px);padding:24px}
+.mem-view-settings-form .mem-settings-section-heading{display:grid;gap:6px;min-width:0}
+.mem-view-settings-form .mem-settings-section-heading h3{margin:0;font-size:16px;font-weight:600;line-height:1.5}
+.mem-view-settings-form .mem-settings-description{margin:0;color:var(--mem-view-color-text-muted);font-size:13px;font-weight:400;line-height:1.6}
+.mem-settings-fields{display:grid;gap:20px;min-width:0}
+.mem-settings-field{min-width:0}
+.mem-settings-field[hidden]{display:none}
+.mem-view-settings-form .mem-view-field{gap:8px;min-width:0;font-size:14px;font-weight:600;line-height:1.5}
+.mem-view-settings-form .mem-view-field>small{min-height:0;font-size:12px;font-weight:400;line-height:1.5;color:var(--mem-view-color-text-muted);overflow-wrap:anywhere}
+.mem-view-settings-form .mem-view-field>small:empty{display:none}
+.mem-view-settings-form .mem-view-field[data-invalid="true"]>small{color:var(--mem-view-color-danger)}
+.mem-view-settings-form .mem-view-field-checkbox{align-items:start}
+.mem-view-settings-form .mem-view-field-checkbox .mem-view-field-control{padding-top:2px}
+.mem-view-settings-form .mem-settings-store-meta{margin:8px 0 0;color:var(--mem-view-color-text-muted);font-size:12px;font-weight:400;line-height:1.5;overflow-wrap:anywhere}
+.mem-settings-store-meta[hidden]{display:none}
+@media(max-width:640px){.mem-view-settings-form .mem-settings-section{padding:16px;gap:20px}}
 `;
