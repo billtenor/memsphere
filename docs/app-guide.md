@@ -6,6 +6,16 @@
 
 作者交付一个包含 `app.json` 和自有资产的目录；使用者把这个目录安装到一个 Project，然后启用。安装器根据清单登记资产并建立归属，使用者不需要逐个安装其中的 Memory、登记 CLI 或添加 View Package。独立外部 CLI 的程序仍按其自身方式安装。
 
+## 将 App 连接到已有 Project Store
+
+如果 App 的 `app.json` 声明了 `projectStores`，先在当前 Project 登记符合声明模型和类型的业务 Store，然后按 App 的说明写配置文件。例如声明的 `configKey` 是 `expensesStore`，Project Store ID 是 `business/expenses`，则配置文件可以包含：
+
+```json
+{ "expensesStore": "business/expenses" }
+```
+
+在目标 Project 执行 `memsphere app install <app目录> --config <配置文件>`，再用 `memsphere app check <app-id>` 和 `memsphere app enable <app-id>`。安装后可用 `memsphere app configure <app-id> --config <配置文件>` 改绑；配置是完整替换，必须保留其他必需字段。`memsphere app show <app-id>` 显示当前目标。后端如何获取和传递防止旧页面误写的来源 token，见[实现契约](./app-contract.md)。
+
 ## 作者：创建一个最小 App
 
 先做一个“写作约定”App：让 Agent 在不同 Project 中读取相同的写作概念。它只需要两个文件，不需要 CLI、View 或 Model。

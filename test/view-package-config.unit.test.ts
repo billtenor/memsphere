@@ -5,9 +5,23 @@ import { globalConfigSchema } from "../src/config.js";
 import { projectConfigSchema } from "../src/project/model.js";
 import {
   normalizeInstalledViewPackagePaths,
+  configurableViewSlots,
+  configurableViewSlotIdForCell,
+  viewPackageContributionCellSchema,
   stableJson,
   viewCompositionDigest
 } from "../src/view/package-config.js";
+
+test("App configuration contributions are valid manifests but cannot be selected as global or Project appearance", () => {
+  const cell = "org.memsphere.settings.app.configuration@1:app";
+  assert.equal(viewPackageContributionCellSchema.safeParse(cell).success, true);
+  assert.equal(configurableViewSlotIdForCell(cell), undefined);
+  assert.equal(configurableViewSlots.some(slot => String(slot.id) === cell), false);
+  for (const selection of [null, "example.settings:settings:configuration"]) {
+    assert.equal(globalConfigSchema.safeParse({ view_composition: { slots: { [cell]: selection } } }).success, false);
+    assert.equal(projectConfigSchema.safeParse({ store: { type: "managed", published_revision: "abc" }, view: { slots: { [cell]: selection } } }).success, false);
+  }
+});
 
 test("View Package installation, theme, and composition are strict global configuration", () => {
   const packagePath = resolve("fixtures/custom-view-package");

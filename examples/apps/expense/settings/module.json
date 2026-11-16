@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "org.memsphere.expense-settings",
+  "version": "0.1.0",
+  "view": {
+    "entry": "./index.js",
+    "sdk": "^1.1.0",
+    "contributions": [{"id":"expense-settings","cell":"org.memsphere.settings.app.configuration@1:app","priority":100}]
+  }
+}

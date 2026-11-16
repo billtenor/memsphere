@@ -29,12 +29,14 @@ export const appManifestSchema = z.object({
   }).strict().default({}),
   dependencies: z.array(z.object({ kind: z.enum(["app", "viewPackage", "modelPackage", "dataExtension", "cli", "memory"]),
     id: text, version: text.refine(value => Boolean(semver.validRange(value))).optional() }).strict()).default([]),
-  entrypoints: z.object({ agent: z.array(text).default([]), view: z.array(z.object({
+  entrypoints: z.object({ settings: z.object({ packageKey: appId }).strict().optional(), agent: z.array(text).default([]), view: z.array(z.object({
     packageKey: appId, instanceId: appId, path: text.refine(value => value.startsWith("/") && !value.startsWith("//") && !/[?#]/.test(value), "expected a relative Module route beginning with /").optional(), config: z.record(z.unknown()).optional()
   }).strict()).default([]) }).strict().default({}),
   configuration: relativePath.optional(),
   stores: z.array(z.object({ key: appId, model: text, kind: z.enum(["DataStore", "ValueStore"]),
     factory: text, config: z.record(z.unknown()) }).strict()).default([]),
+  projectStores: z.array(z.object({ key: appId, model: text, kind: z.enum(["DataStore", "ValueStore"]),
+    configKey: text }).strict()).default([]),
   cliBindings: z.array(z.object({ cli: appId, args: z.array(configValue).optional(),
     cwd: configValue.optional(), env: z.record(configValue).optional() }).strict()).default([]),
   backend: z.object({ entry: relativePath, operations: z.record(appId, z.enum(["read", "write"])) }).strict().optional()
@@ -44,10 +46,11 @@ export const appManifestSchema = z.object({
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", path: ["assets", kind], message: "duplicate asset identity" });
   }
   const viewKeys = new Set(app.assets.viewPackages.map(a => a.key));
+  if (app.entrypoints.settings && !viewKeys.has(app.entrypoints.settings.packageKey)) context.addIssue({ code: "custom", path: ["entrypoints", "settings"], message: "unknown settings packageKey" });
   for (const entry of app.entrypoints.view) if (!viewKeys.has(entry.packageKey))
     context.addIssue({ code: "custom", path: ["entrypoints", "view"], message: `unknown packageKey: ${entry.packageKey}` });
   for (const [name, ids] of [["view instances", app.entrypoints.view.map(v => v.instanceId)],
-    ["stores", app.stores.map(s => s.key)], ["CLI bindings", app.cliBindings.map(b => b.cli)]] as const)
+    ["stores", [...app.stores, ...app.projectStores].map(s => s.key)], ["CLI bindings", app.cliBindings.map(b => b.cli)]] as const)
     if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: `duplicate ${name}` });
 });
 export const modelPackageSchema = z.object({

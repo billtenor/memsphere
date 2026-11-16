@@ -1,3 +1,9 @@
+import { canonicalAppConfig } from "../app/state.js";
+import { appSettingsCompositions } from "../app/settings-composition.js";
+import { VIEW_SDK_VERSION } from "../view/view-sdk.js";
+import { listAppSettings, readAppSettings, previewAppSettings } from "../app/settings.js";
+import { configureApp } from "../app/install.js";
+import { resolveProjectContext } from "../project/resolver.js";
 import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
 import { detectRunnerAgents } from "../runner/identity.js";
@@ -282,6 +288,7 @@ type ViewServerOptions = {
 type ViewCompositionBootEntry = Readonly<{
   projectId: string;
   globalRevision: string;
+  appConfigurations: ReadonlyMap<string,string>;
   viewPackages: MemsphereConfig["viewPackages"];
   viewTheme: MemsphereConfig["viewTheme"];
   viewComposition: MemsphereConfig["viewComposition"];
@@ -408,6 +415,41 @@ async function handleRequest(
   const { memoryRoot, runsRoot } = config;
   const archiveRoot = config.archiveRoot;
 
+  const appSettings = url.pathname.match(/^\/api\/settings\/apps(?:\/([^/]+)(?:\/(validate))?)?$/);
+  if (scopedApi && appSettings && ["GET", "POST", "PUT"].includes(request.method ?? "")) {
+    if (!authorizeSettingsRequest(request, response, config, options, request.method !== "GET")) return;
+    response.setHeader("Cache-Control", "no-store");
+    try {
+      const context = await resolveProjectContext({home:config.homeRoot, project:projectScope!.projectId, memoryScope:"canonical"});
+      if (resolve(context.primary.memoryRoot) !== resolve(config.memoryRoot)) throw new AppError("APP_READ_ONLY_SOURCE", "Project Memory scope differs from the View scope");
+      const id = appSettings[1] ? decodeURIComponent(appSettings[1]) : undefined;
+      if (!id && request.method === "GET") { sendJson(response,200,{apps:await listAppSettings(context.primary)}); return; }
+      if (!id) throw new AppError("APP_NOT_FOUND", "App ID is required");
+      if (request.method === "GET" && !appSettings[2]) {
+        const detail=await readAppSettings(context.primary,id);
+        const boot=compositionBootSnapshot.entries.get(projectScope!.projectId)?.appConfigurations.get(id);
+        detail.runtime=boot!==undefined&&boot!==canonicalAppConfig(detail.config)
+          ? {state:"pending-restart",message:"配置已保存；当前View启动快照仍使用旧配置，请重启View。"}
+          : {state:"unknown",message:boot!==undefined?"配置与View启动快照一致；实际扩展运行状态尚未确认。":"运行状态未确认。"};
+        sendJson(response,200,detail); return;
+      }
+      if (request.method === "PUT" && !appSettings[2] || request.method === "POST" && appSettings[2]) {
+        const body = await readJsonBody<{config?:unknown; expectedRevision?:unknown}>(request,128 * 1024);
+        if (typeof body.expectedRevision !== "string" || !body.expectedRevision) throw new AppError("APP_CONFIG_REVISION_REQUIRED", "expectedRevision is required");
+        const result = request.method === "PUT"
+          ? await configureApp(context,id,body.config,context.primary,{expectedRevision:body.expectedRevision,enforceReadOnly:true})
+          : await previewAppSettings(context.primary,id,body.config,body.expectedRevision);
+        sendJson(response,200,result); return;
+      }
+      sendJson(response,405,{code:"method_not_allowed",error:"Method not allowed"});
+    } catch(error) {
+      const code = (error as {code?:string}).code ?? "APP_SETTINGS_ERROR";
+      sendJson(response,code === "APP_CONFIG_CONFLICT" ? 409 : code === "APP_NOT_FOUND" ? 404 : code === "APP_READ_ONLY_SOURCE" ? 403 : 400,
+        {code,error:error instanceof Error ? error.message : String(error), ...((error as {details?:unknown}).details ? {details:(error as {details?:unknown}).details} : {})});
+    }
+    return;
+  }
+
   const appOperation = url.pathname.match(/^\/api\/apps\/([^/]+)\/operations\/([^/]+)$/);
   if (request.method === "POST" && scopedApi && appOperation) {
     if (!authorizeSettingsRequest(request, response, config, options, true)) return;
@@ -417,11 +459,27 @@ async function handleRequest(
       if (!project) throw new AppError("APP_PROJECT_NOT_FOUND", "Project is unavailable");
       project.name = projectScope!.projectId;
       const controller = new AbortController();
-      request.once("aborted", () => controller.abort());
-      const result = await invokeAppOperation(project, decodeURIComponent(appOperation[1]!), decodeURIComponent(appOperation[2]!), body.input, controller.signal);
-      sendJson(response, 200, { result });
+      const abort = () => { if (!response.writableFinished) controller.abort(); };
+      request.once("aborted", abort);
+      response.once("close", abort);
+      if (response.destroyed) controller.abort();
+      try {
+        const result = await invokeAppOperation(project, decodeURIComponent(appOperation[1]!), decodeURIComponent(appOperation[2]!), body.input, controller.signal);
+        if (!response.destroyed) sendJson(response, 200, { result });
+      } finally {
+        request.removeListener("aborted", abort);
+        response.removeListener("close", abort);
+      }
     } catch (error) {
-      sendJson(response, error instanceof AppError ? 409 : 400, { code: error instanceof AppError ? error.code : "APP_OPERATION_FAILED", error: error instanceof Error ? error.message : String(error) });
+      if (!response.destroyed) sendJson(response, error instanceof AppError ? 409 : 400, { code: error instanceof AppError ? error.code : "APP_OPERATION_FAILED", error: error instanceof Error ? error.message : String(error) });
+      else {
+        const systemCode = typeof error === "object" && error !== null && "code" in error ? error.code : undefined;
+        const code = error instanceof AppError && /^APP_[A-Z0-9_]{1,80}$/.test(error.code) ? error.code
+          : error instanceof Error && ["AbortError", "TimeoutError"].includes(error.name) ? error.name
+          : typeof systemCode === "string" && ["EACCES", "ENOSPC", "EIO", "EROFS", "EEXIST", "ENOENT"].includes(systemCode) ? systemCode : "APP_OPERATION_FAILED";
+        console.error(JSON.stringify({ event: "app_operation_disconnected", project: projectScope?.projectId,
+          app: appOperation[1], operation: appOperation[2], code }));
+      }
     }
     return;
   }
@@ -3201,6 +3259,11 @@ const compiledViewRuntimeUrl = new URL("../view/view-runtime.js", import.meta.ur
 const sourceViewSdkUrl = new URL("../view/view-sdk.ts", import.meta.url);
 const sourceViewRuntimeUrl = new URL("../view/view-runtime.ts", import.meta.url);
 const viewRuntimeDependencies = new Map([
+  ["/assets/app-settings-schema.js", {compiled:new URL("../view/app-settings-schema.js",import.meta.url),source:new URL("../view/app-settings-schema.ts",import.meta.url)}],
+  ["/assets/app-settings-copy.js", {compiled:new URL("../view/app-settings-copy.js",import.meta.url),source:new URL("../view/app-settings-copy.ts",import.meta.url)}],
+  ["/assets/settings-form.js", { compiled:new URL("../view/settings-form.js",import.meta.url), source:new URL("../view/settings-form.ts",import.meta.url) }],
+  ["/assets/text-ref.js", { compiled:new URL("../view/text-ref.js",import.meta.url), source:new URL("../view/text-ref.ts",import.meta.url) }],
+  ["/assets/app-settings-controller.js", { compiled:new URL("../view/app-settings-controller.js",import.meta.url), source:new URL("../view/app-settings-controller.ts",import.meta.url) }],
   ["/assets/procedure-graph-layout.js", { compiled: new URL("../view/procedure-graph-layout.js", import.meta.url), source: new URL("../../modules/shared/view/graph-layout.ts", import.meta.url) }],
   ["/assets/model-definition.js", {
     compiled: new URL("../view/model-definition.js", import.meta.url),
@@ -3236,7 +3299,7 @@ const viewRuntimeDependencies = new Map([
   }]
 ]);
 
-const viewSdkVersion = "1.0.0";
+const viewSdkVersion = VIEW_SDK_VERSION;
 
 function configuredThemeOverrides(config: MemsphereConfig): NonNullable<ViewHostBootInstance["themes"]> {
   const contributions: Array<NonNullable<ViewHostBootInstance["themes"]>[number]> = [];
@@ -3297,15 +3360,25 @@ async function captureViewCompositionBootSnapshot(
       composition: appView.composition,
       sdkVersion: viewSdkVersion
     }).then(value => ({ ...value, diagnostics: [...value.diagnostics, ...appView.diagnostics] }));
+    const settingPackages = await appSettingsCompositions(await appProjectFromRoot(dirname(resolved.configPath),resolved.memoryRoot), (appView.global?.installed ?? []).map(p=>p.path));
+    const settingsInstances = await Promise.all(settingPackages.result.map(async item => {
+      const ids = new Map(item.composition.instances.map(instance=>[instance.instanceId,item.appId]));
+      return externalViewInstances(presentationConfig,item.composition,assets,ids,true);
+    }));
+    const settingsFailures: ViewHostBootInstance[] = settingPackages.diagnostics.map(item=>({
+      pluginPath:"/invalid-app-settings",loadError:item.error,config:{},
+      module:{projectId,moduleId:`invalid.settings`,moduleVersion:"1.0.0",instanceId:`settings-error-${item.appId}`,appId:item.appId,settingsOnly:true}
+    }));
     entries.set(projectId, Object.freeze({
       projectId,
       globalRevision: globalDocument.revision,
+      appConfigurations: appView.configurations,
       viewPackages: appView.global,
       viewTheme,
       viewComposition: appView.composition,
       digest,
       composition,
-      externalInstances: composition.then(value => externalViewInstances(presentationConfig, value, assets, appView.apps))
+      externalInstances: composition.then(async value => [...await externalViewInstances(presentationConfig, value, assets, appView.apps), ...settingsInstances.flat(), ...settingsFailures])
     }));
   }));
   await Promise.all([...entries.values()].map(entry => entry.externalInstances));
@@ -3346,6 +3419,7 @@ async function externalViewInstances(
   composition: ResolvedViewPackageComposition,
   assets: ViewPackageAssetRegistry,
   apps: ReadonlyMap<string, string> = new Map(),
+  settingsOnly = false,
 ): Promise<readonly ViewHostBootInstance[]> {
   const projectId = config.project?.name ?? "memsphere";
   return Promise.all(composition.instances.map(async instance => {
@@ -3375,7 +3449,7 @@ async function externalViewInstances(
     }));
     return Object.freeze({
       pluginPath: `/assets/view-packages/${encodeURIComponent(projectId)}/${entry.key}`,
-      ...(apps.has(instance.instanceId) ? { appApiBase: `/api/projects/${encodeURIComponent(projectId)}/apps/${encodeURIComponent(apps.get(instance.instanceId)!)}/operations` } : {}),
+      ...(!settingsOnly && apps.has(instance.instanceId) ? { appApiBase: `/api/projects/${encodeURIComponent(projectId)}/apps/${encodeURIComponent(apps.get(instance.instanceId)!)}/operations` } : {}),
       config: instance.config,
       styles: Object.freeze(styles),
       themes: Object.freeze(themes),
@@ -3387,7 +3461,7 @@ async function externalViewInstances(
         ...(suppliesSelectedTheme && capabilities.has("theme.register") ? ["register" as const] : []),
         ...(suppliesSelectedTheme && capabilities.has("theme.override") ? ["override" as const] : [])
       ]),
-      allowedServices: Object.freeze([
+      allowedServices: settingsOnly ? Object.freeze(["slots" as const,"ui" as const]) : Object.freeze([
         ...(apps.has(instance.instanceId) ? ["api" as const] : []),
         ...(apps.has(instance.instanceId) || capabilities.has("router.register") ? ["router" as const] : []),
         "slots" as const,
@@ -3404,7 +3478,8 @@ async function externalViewInstances(
         projectId,
         moduleId: instance.package.manifest.id,
         moduleVersion: instance.package.manifest.version,
-        instanceId: instance.instanceId
+        instanceId: instance.instanceId,
+        ...(settingsOnly ? {appId:apps.get(instance.instanceId),settingsOnly:true} : {})
       })
     });
     } catch (error) {
@@ -3674,7 +3749,7 @@ function matchProjectScopedPath(pathname: string, prefix: string): { projectId: 
 function isProjectResourceApi(pathname: string): boolean {
   return [
     "/api/runs", "/api/artifact-reviews", "/api/memories", "/api/changes",
-    "/api/market", "/api/models", "/api/archive/runs", "/api/archive/changes", "/api/settings/project"
+    "/api/market", "/api/models", "/api/archive/runs", "/api/archive/changes", "/api/settings/project", "/api/settings/apps"
   ].some(prefix => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 

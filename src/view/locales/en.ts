@@ -20,6 +20,7 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.apps": "App configuration",
   "settings.collapseStore": "Collapse",
   "settings.deleteStoreConfirm": "Remove the binding for Store “{id}”? Data will be preserved. Save this page to apply.",
   "settings.deleteParticipantConfirm": "Delete participant “{id}”? Save this page to apply.",
