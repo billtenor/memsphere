@@ -9,7 +9,7 @@ import { fixture, gate, responseChunk } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
 const config = (mode: "raw" | "revision") => ({ mode, region:"cn-beijing",endpoint:"tos-cn-beijing.volces.com",bucket:"probe-bucket",prefix:"test/",credentials:{source:"settings" as const,id:"fixture"} });
-const identity = (mode: "raw" | "revision") => ({etag:'"snapshot"',"content-type":mode === "raw" ? "text/plain" : "application/octet-stream","x-tos-meta-memsphere-store-format":`${mode}-v1`,"x-tos-meta-memsphere-model":Buffer.from("file.json").toString("base64url"),"x-tos-meta-memsphere-content-type":"text/plain"});
+const identity = (mode: "raw" | "revision") => ({etag:'"snapshot"',"content-type":mode === "raw" ? "text/plain" : "application/octet-stream","x-tos-meta-memsphere-storage-version":`${mode}-v1`,"x-tos-meta-memsphere-model":Buffer.from("file.json").toString("base64url"),"x-tos-meta-memsphere-content-type":"text/plain"});
 const invoke = (store: TosDataStore, operation: "get" | "has" | "delete", context = {}) => store[operation](context,"item");
 
 for (const operation of ["get","has","delete"] as const) for (const failure of ["NoSuchKey","NoSuchBucket","AccessDenied","ServerError","malformed","oversized","head-denied"] as const) {
@@ -77,7 +77,7 @@ for(const defect of ["ignored-range","bad-range","missing-etag","missing-model",
         if(defect === "bad-range") headers["content-range"]="bytes 1-14/18";
         if(defect === "missing-etag") delete headers.etag;
         if(defect === "missing-model") delete headers["x-tos-meta-memsphere-model"];
-        if(defect === "bad-format") headers["x-tos-meta-memsphere-store-format"]="raw-v1";
+        if(defect === "bad-format") headers["x-tos-meta-memsphere-storage-version"]="raw-v1";
         if(defect === "bad-mime") headers["x-tos-meta-memsphere-content-type"]="invalid";
         response.writeHead(defect === "ignored-range" ? 200 : 206,headers);
         response.write(defect === "short-header" ? encodeHeader(Buffer.alloc(8, 1),false).slice(0,13) : defect === "long-header" ? Buffer.concat([encodeHeader(Buffer.alloc(8, 1),false),Buffer.of(1)]) : encodeHeader(Buffer.alloc(8, 1),defect === "deleted-payload"));response.end();return;

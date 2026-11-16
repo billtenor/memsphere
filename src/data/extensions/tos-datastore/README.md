@@ -34,3 +34,5 @@ Home settings encrypt saved credentials with AES-256-GCM. The key is stored in t
 Credential deletion requires confirmation and Home configuration CAS. It does not remove Store references or remote objects; affected Stores need another credential. Store deletion is available outside the collapsed configuration and only unbinds the Store after confirmed save.
 
 Optional `dataTimeoutMs` (GET/PUT) and `controlTimeoutMs` (HEAD/list/versioning/physical DELETE) are positive integer milliseconds, each defaulting to 120000 for both TOS Store kinds. They can be edited after creation in CLI config or View; omission restores defaults. Each budget covers one request and its body, and parent cancellation may stop it earlier. Conflicts and uncertain outcomes are not automatically retried.
+
+Object metadata uses `memsphere-storage-version` for the existing `raw-v1` / `revision-v1` storage identifiers. The former `memsphere-store-format` key remains readable for existing objects; conflicting old/new markers are rejected. New writes emit only `memsphere-storage-version`. This key rename does not change the Payload, binary header or public revision.

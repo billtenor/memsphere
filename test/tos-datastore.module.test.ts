@@ -193,7 +193,7 @@ for (const defect of ["status", "range", "length", "etag", "model", "format", "m
       if (defect === "length") out.headers["content-length"] = "9";
       if (defect === "etag") delete out.headers.etag;
       if (defect === "model") delete out.headers["x-tos-meta-memsphere-model"];
-      if (defect === "format") out.headers["x-tos-meta-memsphere-store-format"] = "raw-v1";
+      if (defect === "format") out.headers["x-tos-meta-memsphere-storage-version"] = "raw-v1";
       if (defect === "mime") out.headers["x-tos-meta-memsphere-content-type"] = "invalid";
       if (["short-header", "long-header", "deleted-payload"].includes(defect)) {
         out.stream.destroy();
@@ -292,4 +292,25 @@ test("list waits for its cancelled sibling to settle and preserves the original 
     assert.equal(settled,false,"List must wait for the cancelled read's asynchronous cleanup");
     released.resolve();await rejected;
   }finally{parent.abort();fail.resolve();released.resolve();await Promise.allSettled([list,observed,rejected]);}
+});
+
+for (const mode of ['raw', 'revision'] as const) test(`${mode} writes storage-version, reads the legacy key and rejects conflicting markers`, async () => {
+  const { store, client } = fixture(mode); await store.create({}, data('metadata'));
+  const headers = client.objects.get('records/metadata')!.headers;
+  assert.equal(headers['x-tos-meta-memsphere-storage-version'], `${mode}-v1`);
+  assert.equal(headers['x-tos-meta-memsphere-store-format'], undefined);
+  headers['x-tos-meta-memsphere-store-format'] = headers['x-tos-meta-memsphere-storage-version'];
+  delete headers['x-tos-meta-memsphere-storage-version'];
+  const previous = await live(store, 'metadata');
+  assert.equal(Buffer.from(await readAll({}, previous.data.payload.content)).toString(), 'payload');
+  headers['x-tos-meta-memsphere-storage-version'] = `${mode}-v1`;
+  headers['x-tos-meta-memsphere-store-format'] = 'conflicting';
+  await assert.rejects(store.has({}, 'metadata'), { code: 'STORE_INCOMPATIBLE' });
+  headers['x-tos-meta-memsphere-store-format'] = `${mode}-v1`;
+  if (mode === 'revision') {
+    await store.update({}, data('metadata', 'new'), { expectedRevision: previous.revision });
+    const updated = client.objects.get('records/metadata')!.headers;
+    assert.equal(updated['x-tos-meta-memsphere-storage-version'], 'revision-v1');
+    assert.equal(updated['x-tos-meta-memsphere-store-format'], undefined);
+  }
 });

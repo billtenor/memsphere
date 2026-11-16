@@ -50,11 +50,15 @@ export class TosDataStore implements DataStore {
   }
   private key(id: string) { return objectKey(this.config.prefix, id); }
   private metadata(contentType?: string): Record<string, string> {
-    return { "memsphere-store-format": `${this.config.mode}-v1`, "memsphere-model": this.encodedModel,
+    return { "memsphere-storage-version": `${this.config.mode}-v1`, "memsphere-model": this.encodedModel,
       ...(contentType ? { "memsphere-content-type": contentType } : {}) };
   }
   private identity(headers: ObjectHeaders, deleted: boolean): string | undefined {
-    if (headers["x-tos-meta-memsphere-store-format"] !== `${this.config.mode}-v1` || headers["x-tos-meta-memsphere-model"] !== this.encodedModel) {
+    const version = headers["x-tos-meta-memsphere-storage-version"];
+    const legacyVersion = headers["x-tos-meta-memsphere-store-format"];
+    if ((version ?? legacyVersion) !== `${this.config.mode}-v1` ||
+        (version !== undefined && legacyVersion !== undefined && version !== legacyVersion) ||
+        headers["x-tos-meta-memsphere-model"] !== this.encodedModel) {
       throw storeError("STORE_INCOMPATIBLE", "TOS object format/model does not match the Store");
     }
     if (this.config.mode === "revision" && headers["content-type"] !== "application/octet-stream") responseError();

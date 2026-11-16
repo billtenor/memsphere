@@ -247,6 +247,7 @@ memsphere data read order-001 --store orders --output json
 - TOS Store 先读 `memsphere-data-store`。使用已有 bucket、专用 prefix、region、endpoint 和固定 raw/revision 模式，凭据只引用 Home 保存的名称或 AK/SK/可选 STS Token 环境变量。View 的 Home“火山云配置”内以 TOS 凭据列表新增、编辑或删除命名身份，编辑密钥留空保留原值；删除凭据需确认，仅移除本机保存项，引用它的 Store 需更换凭据；Project 业务 Store 页分组创建绑定，从下拉框选择已保存凭据；已有 Store 可改凭据引用及 dataTimeoutMs/controlTimeoutMs，首版不切换或迁移。
 - TOS raw 模式保存原始 Payload，create 不覆盖，拒绝 update/expectedRevision，delete 物理删除。revision 模式必须在 update/delete 携带读取的 token，单次条件 PUT；删除态 read 返回 deleted 和 revision，普通 update 带该 token 及新 Payload 重新写入，没有 restore 命令。has 包含删除态，普通 list 隐藏；空 items 仍可能有 nextCursor。
 - TOS 使用官方 SDK，首版仅接入从未启用版本控制的桶，普通上传最多 5 GiB（带头 Payload 少十四字节），不支持分片。失败明确报错，无本地回退、自动重试或自动删除补偿；超时后先重读确认。只有 TOS Store 的数据在云端，不表示整个 Project 备份。
+- 两种 TOS Store 的对象元数据统一使用 `memsphere-storage-version`；DataStore 兼容读取旧 `memsphere-store-format`，新写入不再产生旧键。
 - TOS JSON ValueStore 使用 `--kind value --factory memsphere/tos-json`，配置无 mode；使用可读 JSON 外层记录与 metadata 镜像，支持全部标准值接口和原子 upsert。更新/删除可选 expectedRevision，冲突直接报错，无重试；删除后 get/has/list 按不存在处理，可重新 create。两种 TOS 的 revision 都是原始单对象 ETag，业务不用提供内部随机标识。dataTimeoutMs/controlTimeoutMs 为可选正整数毫秒、均默认 120000；可在 Store 配置与 View 创建/编辑，留空恢复默认。ValueStore 的 4 GiB 上限仅为防御，不进行容量上限、超限边界或大对象压力测试。
 
 
