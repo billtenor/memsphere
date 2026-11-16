@@ -365,17 +365,17 @@ test("reload preserves actual route history for dirty Back and Forward cancellat
     assert.equal(page.url(),detailUrl);assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),index);
     assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Unsaved after reload");
     await page.goBack();await page.getByRole("button",{name:"放弃并离开",exact:true}).last().click();
-    await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true}).waitFor();
+    await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true,level:2}).waitFor();
     assert.equal(await page.getByLabel("名称",{exact:true}).count(),0);assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),listIndex);
     await page.goForward();await page.getByLabel("名称",{exact:true}).waitFor();assert.equal(page.url(),detailUrl);
     assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"A");assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),index);
-    await page.goBack();await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true}).waitFor();
+    await page.goBack();await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true,level:2}).waitFor();
     await page.goBack();await page.waitForURL(otherUrl);await page.getByLabel("name",{exact:true}).fill("Other dirty");
     await page.goForward();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();
     assert.equal(page.url(),otherUrl);assert.equal(await page.getByLabel("name",{exact:true}).inputValue(),"Other dirty");
     assert.equal(await page.evaluate(()=>history.state.memsphereViewIndex),listIndex-1);
     await page.goForward();await page.getByRole("button",{name:"放弃并离开",exact:true}).last().click();
-    await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true}).waitFor();
+    await page.waitForURL(listUrl);await page.getByRole("heading",{name:"App 配置",exact:true,level:2}).waitFor();
     await page.goForward();await page.getByLabel("名称",{exact:true}).waitFor();assert.equal(page.url(),detailUrl);assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"A");
 });
 test("a missing history restoration event fails finitely and retains the current route and draft",async t=>{
@@ -386,4 +386,73 @@ test("a missing history restoration event fails finitely and retains the current
     await page.evaluate(()=>history.go=(globalThis as any).__restoreNativeGo);
     await page.getByRole("button",{name:"所有 App",exact:true}).click();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();
     assert.equal(page.url(),detailUrl);assert.equal(await page.getByLabel("名称",{exact:true}).inputValue(),"Keep draft");
+});
+
+async function leavingPage(t:TestContext) {
+    const fixture=await appSettingsServer(t,"127.0.0.1",true,"zh-CN",{},true);
+    const browser=await browserScope();t.after(()=>browser.close());const context=await browser.newContext({viewport:{width:1440,height:1000}});
+    context.setDefaultTimeout(10000);context.setDefaultNavigationTimeout(15000);
+    const page=await context.newPage();
+    await page.goto(`${fixture.origin}/projects/test-project/settings/apps?app=example.app`);
+    await page.getByLabel("偏好 JSON",{exact:true}).waitFor();
+    await page.getByLabel("偏好 JSON",{exact:true}).click();
+    return {...fixture,page};
+}
+for(const mode of ["invalid","format-only"] as const)test(`${mode} JSON Project switch cancels intact and discards once with cleanup`,async t=>{
+    const {page,project,secondary}=await leavingPage(t);
+    const editor=page.getByLabel("偏好 JSON",{exact:true}),original=await editor.inputValue();
+    const raw=mode==="invalid"?'{"color":':JSON.stringify(JSON.parse(original));assert.notEqual(raw,original);
+    await editor.fill(raw);const url=page.url();
+    assert.equal(await page.evaluate(()=>(globalThis as any).__appSettingsContext.getState().dirty),true);
+    if(mode==="invalid")await page.locator("[data-request-errors]").waitFor();
+    else assert.deepEqual(await page.evaluate(()=>(globalThis as any).__appSettingsContext.getState().draft.prefs),{color:"blue"});
+    const nativeDialogs:string[]=[];page.on("dialog",async dialog=>{nativeDialogs.push(dialog.type());await dialog.accept();});
+    await page.evaluate(()=>{localStorage.removeItem("settings-disposed");(globalThis as any).__appSettingsContext.signal.addEventListener("abort",()=>localStorage.setItem("settings-disposed","yes"),{once:true});});
+    const choose=async()=>{if(await page.locator("#view-shell-project-trigger").getAttribute("aria-expanded")!=="true")await page.locator("#view-shell-project-trigger").click();await page.getByRole("menuitem",{name:"second-project",exact:true}).click();};
+    await choose();await page.getByRole("button",{name:"继续编辑",exact:true}).last().click();
+    assert.equal(page.url(),url);assert.equal(await editor.inputValue(),raw);
+    assert.equal(await page.locator("[data-request-errors]").count(),mode==="invalid"?1:0);
+    assert.equal(await page.evaluate(()=>localStorage.getItem("settings-disposed")),null);
+    await choose();await page.getByRole("button",{name:"放弃并离开",exact:true}).last().click();
+    await page.waitForURL("**/projects/second-project/settings/apps");await page.getByRole("heading",{name:"App 配置",exact:true,level:2}).waitFor();
+    assert.deepEqual(nativeDialogs,[]);assert.equal(await page.evaluate(()=>localStorage.getItem("settings-disposed")),"yes");
+    await page.getByRole("button",{name:"配置",exact:true}).click();await page.getByLabel("name",{exact:true}).waitFor();
+    assert.equal(await page.getByLabel("name",{exact:true}).inputValue(),"Second");
+    assert.deepEqual((await readAppSettings(project,"example.app")).config.prefs,{color:"blue"});
+    assert.deepEqual((await readAppSettings(secondary!.project,"example.app")).config.prefs,{color:"green"});
+    await page.reload();await page.getByLabel("name",{exact:true}).waitFor();assert.deepEqual(nativeDialogs,[]);
+    await page.locator("#view-shell-project-trigger").click();await page.getByRole("menuitem",{name:"test-project",exact:true}).click();
+    await page.waitForURL("**/projects/test-project/settings/apps");await page.getByRole("heading",{name:"App 配置",exact:true,level:2}).waitFor();
+    assert.equal(await page.getByRole("dialog").count(),0);assert.deepEqual(nativeDialogs,[]);
+});
+
+for(const mode of ["invalid","format-only"] as const)test(`${mode} JSON native reload cancellation retains raw input and confirmation discards it`,async t=>{
+    const {page,project}=await leavingPage(t);const editor=page.getByLabel("偏好 JSON",{exact:true}),original=await editor.inputValue();
+    const raw=mode==="invalid"?'{"color":':JSON.stringify(JSON.parse(original));await editor.fill(raw);const url=page.url();
+    const first=page.waitForEvent("dialog",{timeout:10000});
+    const cancelled=page.reload().then(()=>null,error=>error);
+    const dialog=await first;assert.equal(dialog.type(),"beforeunload");await dialog.dismiss();await cancelled;
+    assert.equal(page.url(),url);assert.equal(await editor.inputValue(),raw);
+    assert.equal(await page.locator("[data-request-errors]").count(),mode==="invalid"?1:0);
+    const second=page.waitForEvent("dialog",{timeout:10000});const accepted=page.reload();
+    const confirm=await second;assert.equal(confirm.type(),"beforeunload");await confirm.accept();await accepted;
+    await page.getByLabel("偏好 JSON",{exact:true}).waitFor();assert.equal(await page.getByLabel("偏好 JSON",{exact:true}).inputValue(),original);
+    assert.equal(await page.locator("[data-request-errors]").count(),0);assert.deepEqual((await readAppSettings(project,"example.app")).config.prefs,{color:"blue"});
+    let cleanDialogs=0;page.on("dialog",async d=>{cleanDialogs++;await d.dismiss();});
+    await page.reload();await page.getByLabel("偏好 JSON",{exact:true}).waitFor();assert.equal(cleanDialogs,0);
+    const closed=page.waitForEvent("close",{timeout:10000});await page.close({runBeforeUnload:true});await closed;assert.equal(cleanDialogs,0);
+});
+
+for(const mode of ["invalid","format-only"] as const)test(`${mode} native close cancellation preserves raw JSON; accepting closes without saving`,async t=>{
+    const {page,project}=await leavingPage(t);const editor=page.getByLabel("偏好 JSON",{exact:true});
+    const raw=mode==="invalid"?'{"color":':JSON.stringify(JSON.parse(await editor.inputValue()));await editor.fill(raw);
+    // Use Chrome's native close command: Playwright Page.close keeps a closing
+    // state after a dismissed beforeunload and will not issue a second close.
+    const native=await page.context().newCDPSession(page);
+    const first=page.waitForEvent("dialog",{timeout:10000});const cancelled=native.send("Page.close");
+    const dialog=await first;assert.equal(dialog.type(),"beforeunload");await dialog.dismiss();await cancelled;
+    assert.equal(page.isClosed(),false);assert.equal(await page.getByLabel("偏好 JSON",{exact:true}).inputValue(),raw);assert.equal(await page.locator("[data-request-errors]").count(),mode==="invalid"?1:0);
+    const second=page.waitForEvent("dialog",{timeout:10000}),closed=page.waitForEvent("close",{timeout:10000});
+    const accepted=native.send("Page.close");const confirm=await second;assert.equal(confirm.type(),"beforeunload");await confirm.accept();await accepted;await closed;
+    assert.deepEqual((await readAppSettings(project,"example.app")).config.prefs,{color:"blue"});
 });

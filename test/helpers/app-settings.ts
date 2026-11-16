@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { businessFixture } from "./business-data.js";
 import { projectPaths } from "../../src/project/paths.js";
 import { readBusinessProject } from "../../src/project/business-stores.js";
-import { installApp, setAppEnabled, checkApp } from "../../src/app/install.js";
+import { installApp, setAppEnabled, checkApp, configureApp } from "../../src/app/install.js";
 import type { AppProject } from "../../src/app/state.js";
 import type { ProjectContext } from "../../src/project/resolver.js";
 export type SettingsFixtureKind = boolean | "hang-import" | "hang-apply" | "bad-root" | "incompatible" | "late-apply" | "late-options" | "business-view" | "array-fields" | "tuple-fields";
@@ -68,13 +68,23 @@ export async function appSettingsFixture(t: import("node:test").TestContext, cus
     }
     return { f, project, context, root, manifest };
 }
-export async function appSettingsServer(t: import("node:test").TestContext, host = "127.0.0.1", custom: SettingsFixtureKind = false,locale="zh-CN", storeSchema: Record<string, unknown> = {}) {
+export async function appSettingsServer(t: import("node:test").TestContext, host = "127.0.0.1", custom: SettingsFixtureKind = false,locale="zh-CN", storeSchema: Record<string, unknown> = {}, withSecondProject=false) {
     const fixture = await appSettingsFixture(t, custom, storeSchema), { f, project } = fixture;
     await writeFile(join(f.home, "config.json"), JSON.stringify({language:locale, view: { host, port: 30002 } }));
     const config = { configPath: project.paths.configPath, scopeRoot: f.root, homeRoot: f.home, language: locale, memoryRoot: project.memoryRoot, reviewsRoot: join(f.root, "reviews"), runsRoot: join(f.root, "runs"), archiveRoot: join(f.root, "archives"), debug: { agentReview: false, root: join(f.home, ".runtime/debug") }, view: { host, port: 30002 }, project: { name: project.name, revision: "fixture", store: project.config.store, mounted: [] } } as MemsphereConfig;
+    let secondary: Awaited<ReturnType<typeof appSettingsFixture>> | undefined;
+    if(withSecondProject) {
+        await configureApp(fixture.context,"example.app",{name:"A",store:"first",prefs:{color:"blue"}});
+        secondary=await appSettingsFixture(t,false);
+        await configureApp(secondary.context,"example.app",{name:"Second",store:"second",prefs:{color:"green"}});
+        const registry=JSON.parse(await readFile(join(f.home,"registry.json"),"utf8"));
+        registry.projects["second-project"]={root:secondary.f.root};
+        await writeFile(join(f.home,"registry.json"),JSON.stringify(registry));
+        await writeFile(join(secondary.f.root,"project.json"),JSON.stringify({format_version:1,name:"second-project",created_at:"2026-11-16T00:00:00.000Z"}));
+    }
     const token = "settings-test-token-" + "a".repeat(43);
     const server = createViewServer(config, { settingsToken: token });
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
     t.after(() => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()); }));
-    return { ...fixture, server, config, origin: `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`, token };
+    return { ...fixture, secondary, server, config, origin: `http://127.0.0.1:${(server.address() as import("node:net").AddressInfo).port}`, token };
 }

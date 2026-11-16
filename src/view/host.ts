@@ -339,6 +339,10 @@ export function renderViewHostHtml(
             : relativePath === "/market" || relativePath === "/memory-market" ? "/market"
             : relativePath === "/" ? ""
             : "/memories";
+          // The user has confirmed leaving. Release guards and App presentations
+          // before document navigation so beforeunload does not ask a second time.
+          try { await activeHost.dispose(); }
+          catch (error) { console.error("View cleanup failed before Project switch", error); }
           location.replace("/projects/" + encodeURIComponent(name) + landing);
         };
         projectTrigger.addEventListener("click", () => {

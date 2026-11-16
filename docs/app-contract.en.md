@@ -97,3 +97,5 @@ The Project API is `/api/projects/:project/settings/apps`: GET list, GET `/:appI
 Authorization follows existing Settings listener modes: loopback reads require no token; non-loopback requests require the existing Bearer token. Both modes enforce same-origin JSON for validate/PUT. Persisted and running configuration are reported separately: View uses a boot snapshot and may require `view restart`; successful persistence is not proof that an extension applied the configuration.
 
 See `examples/apps/expense/settings` for a standard Slot contribution and `examples/apps/preferences` for Schema-only configuration. Host SDK 1.1.0 preserves Plugin/UI version 1 and compatibility with existing ^1.0.0 packages.
+
+Native reload/close warns for invalid or formatting-only JSON and cancellation preserves raw text and errors. After an explicit discard when switching Projects, the Host disposes the current View and leave listeners before document navigation, avoiding a second native prompt. Clean and disposed presentations do not retain unsaved warnings.
