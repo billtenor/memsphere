@@ -43,7 +43,7 @@ test("Settings Builtin Module registers its durable Route and Slot contract", as
     }
   }, { locale: "zh-CN", messages: { "common.settings": "设置" } });
 
-  assert.deepEqual(routeDefinitions, [{ id: "section", path: "/settings/:module" }]);
+  assert.deepEqual(routeDefinitions, [{ id: "section", path: "/settings/:module", query: ["app"] }]);
   assert.deepEqual(registrations.map(entry => entry.slot), [
     slots.navigationSecondary.definition.name,
     slots.headerTitle.definition.name,

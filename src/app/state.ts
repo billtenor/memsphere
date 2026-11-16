@@ -11,7 +11,9 @@ export const installationSchema = z.object({
   installedAt: z.string(), enabled: z.boolean(), config: z.record(z.unknown()),
   memories: z.array(memoryAsset), descriptors: z.array(cliDescriptorSchema),
   bindings: z.record(cliBindingSchema), operationId: z.string(), memoryRevision: z.string().optional(), changeId: z.string().optional(),
-  bindingOverrides: z.record(cliBindingSchema).optional()
+  bindingOverrides: z.record(cliBindingSchema).optional(),
+  configurationRevision: z.string().uuid().optional(),
+  projectStoreGenerations: z.record(z.string().uuid()).optional()
 }).strict();
 export const appStateSchema = z.object({
   schemaVersion: z.literal(1), revision: z.number().int().nonnegative(), memoryRoot: z.string(),
@@ -50,4 +52,14 @@ export function assertWritableAppTarget(context: ProjectContext, project: Resolv
 export function requireApp(state: AppState, id: string): AppInstallation {
   if (!Object.hasOwn(state.installations, id)) throw new AppError("APP_NOT_FOUND", `App is not installed: ${id}`);
   return state.installations[id];
+}
+
+/** Stable for legacy installations; reads never migrate installation state. */
+export function canonicalAppConfig(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalAppConfig).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalAppConfig((value as Record<string,unknown>)[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+export function appConfigurationRevision(app: AppInstallation): string {
+  return app.configurationRevision ?? digest(canonicalAppConfig([app.operationId, app.packageDigest, app.config]));
 }

@@ -1,3 +1,5 @@
+import { createSettingsForm } from "./settings-form.js";
+import { textValue } from "./text-ref.js";
 import {
   isActionDescriptor,
   isBadgeDescriptor,
@@ -51,6 +53,7 @@ type UiNavigation = (target: RouteTarget) => Promise<void>;
 export function createViewUi(navigate: UiNavigation, locale: "zh-CN" | "en" = "zh-CN"): ViewUi {
   const ui: ViewUi = {
     version: 1 as const,
+    settingsForm: descriptor => createSettingsForm(ui,descriptor,locale),
     modelDefinition: descriptor => renderModelDefinition(ui, descriptor, locale),
     contentComponent: input => input.defaultRender(),
     contentList(source: ContentListDescriptor | ContentListProvider): ViewMount {
@@ -1152,11 +1155,6 @@ function assertDescriptor<T>(value: unknown, validate: (candidate: unknown) => c
     const keys = value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value).sort().join(",") : typeof value;
     throw new TypeError(`View UI ${name} is invalid (received: ${keys || "no fields"})`);
   }
-}
-
-function textValue(value: TextRef): string {
-  if ("text" in value) return value.text;
-  return value.key.replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(value.params?.[name] ?? `{${name}}`));
 }
 
 export const viewUiStyles = `

@@ -28,6 +28,7 @@ export const enViewMessages = {
   "settings.tosInvalidTimeout": "Timeout must be an integer from 1 to 2147483647 milliseconds.",
 
 
+  "settings.apps": "App configuration",
   "settings.collapseStore": "Collapse",
   "settings.deleteStoreConfirm": "Remove the binding for Store “{id}”? Data will be preserved. Save this page to apply.",
   "settings.deleteParticipantConfirm": "Delete participant “{id}”? Save this page to apply.",

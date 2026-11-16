@@ -24,6 +24,9 @@ export const portableViewContributionCells = [
   "org.memsphere.models.definition.renderer@1:definition"
 ] as const;
 
+// Valid in an App's settings manifest, never a Home/Project appearance preference.
+const appConfigurationContributionCell = "org.memsphere.settings.app.configuration@1:app";
+
 export const globalStylesViewSlot = "styles.global@1" as const;
 
 export const configurableViewSlots = [
@@ -51,8 +54,8 @@ export function configurableViewSlotIdForCell(cell: string): string | undefined 
 }
 
 export const viewPackageContributionCellSchema = z.string().min(1).refine(
-  value => Boolean(configurableViewSlotIdForCell(value)),
-  "View contribution must target a configurable Host Slot"
+  value => value === appConfigurationContributionCell || Boolean(configurableViewSlotIdForCell(value)),
+  "View contribution must target a configurable Host Slot or the App configuration Slot"
 );
 
 export const installedViewPackageSchema = z.object({

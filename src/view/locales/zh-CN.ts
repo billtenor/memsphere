@@ -7,6 +7,7 @@ export const zhCNViewMessages = {
   "settings.tos.controlTimeoutMs": "控制请求超时（毫秒）",
   "settings.tosInvalidTimeout": "超时必须为 1–2147483647 毫秒的整数。",
 
+  "settings.apps": "App 配置",
   "settings.collapseStore": "收起",
   "settings.deleteStoreConfirm": "删除 Store“{id}”的绑定？数据将保留，点击页面保存后生效。",
   "settings.deleteParticipantConfirm": "删除参与者“{id}”？点击页面保存后生效。",
