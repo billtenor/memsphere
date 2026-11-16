@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { validateTosWriteOptions } from "./write-policy.js";
 import { Readable } from "node:stream";
 import type { Context } from "../../api/context.js";
@@ -7,12 +8,12 @@ import type { DeleteOptions, ListOptions, ListResult, UpdateOptions } from "../.
 import { throwIfAborted } from "../shared/payload.js";
 import type { TosConfig } from "./config.js";
 import type { ObjectHeaders, TosObjectClient } from "./client.js";
-import { TosRequestError, readBounded } from "./response.js";
-import { HEADER_SIZE, MAX_OBJECT_BYTES, encodeHeader, decodeHeader } from "./header.js";
-import { assertEtag, decodeRevision, encodeRevision } from "./revision.js";
+import { TosRequestError, readBounded, writeOutcome } from "./response.js";
+import { HEADER_SIZE, MAX_OBJECT_BYTES, createHeader, decodeHeader } from "./header.js";
+import { assertEtag } from "./revision.js";
 import { objectKey, cursorScope, encodeCursor, decodeCursor } from "./keys.js";
 
-type Snapshot = { headers: ObjectHeaders; length: number; etag: string; counter?: number; deleted: boolean; contentType?: string };
+type Snapshot = { headers: ObjectHeaders; length: number; etag: string; deleted: boolean; contentType?: string };
 export function storeError(code: string, message: string): Error & { code: string } { return Object.assign(new Error(message), { code }); }
 function isMissingObject(error: unknown): boolean {
   return error instanceof TosRequestError && error.status === 404 && error.code === "NoSuchKey";
@@ -36,7 +37,7 @@ export class TosDataStore implements DataStore {
   readonly capabilities: NonNullable<DataStore["capabilities"]>;
   private readonly scope: string;
   private readonly encodedModel: string;
-  constructor(readonly id: string, readonly model: string, private readonly config: TosConfig, private readonly client: TosObjectClient) {
+  constructor(readonly id: string, readonly model: string, private readonly config: TosConfig, private readonly client: TosObjectClient, private readonly mutation: () => Uint8Array = () => randomBytes(8)) {
     this.capabilities = Object.freeze(config.mode === "raw" ? { update: false } : { update: true, conditionalWrite: Object.freeze({ required: true }) });
     this.scope = cursorScope([id, model, config.region, config.endpoint, config.bucket, config.prefix, config.mode]);
     this.encodedModel = Buffer.from(model).toString("base64url");
@@ -65,14 +66,10 @@ export class TosDataStore implements DataStore {
     return type;
   }
   private async head(context: Context, key: string): Promise<ObjectHeaders | undefined> {
-    const controller = new AbortController();
-    const relay = () => controller.abort(context.signal?.reason);
-    const timer = setTimeout(() => controller.abort(new TosRequestError("TOS_DEADLINE")), 120_000); timer.unref();
-    context.signal?.addEventListener("abort", relay, { once: true });
-    if (context.signal?.aborted) relay();
-    try { return await this.confirmHead({ signal: controller.signal }, key); }
-    finally { clearTimeout(timer); context.signal?.removeEventListener("abort", relay); }
+    throwIfAborted(context);
+    return this.confirmHead(context, key);
   }
+
   private async confirmHead(context: Context, key: string): Promise<ObjectHeaders | undefined> {
     try { return await this.client.head(context, key); }
     catch (error) {
@@ -101,24 +98,24 @@ export class TosDataStore implements DataStore {
       return { headers, etag, length: lengthOf(headers["content-length"]), deleted: false, contentType: this.identity(headers, false) };
     }
     let response;
-    try { response = await this.client.read(context, key, { range: "bytes=0-9" }); }
+    try { response = await this.client.read(context, key, { range: `bytes=0-${HEADER_SIZE - 1}` }); }
     catch (error) { if (isMissingObject(error)) return undefined; throw error; }
     try {
       const { headers } = response;
-      const match = /^bytes 0-9\/(\d+)$/.exec(headers["content-range"] ?? "");
-      if (response.status !== 206 || !match || (headers["content-length"] !== undefined && headers["content-length"] !== "10")) responseError();
+      const match = new RegExp(`^bytes 0-${HEADER_SIZE - 1}/(\\d+)$`).exec(headers["content-range"] ?? "");
+      if (response.status !== 206 || !match || (headers["content-length"] !== undefined && headers["content-length"] !== String(HEADER_SIZE))) responseError();
       const length = lengthOf(match[1]); if (length < HEADER_SIZE) responseError();
       const etag = headers.etag; assertEtag(etag);
-      const { counter, deleted } = decodeHeader(await readBounded(response.stream, HEADER_SIZE));
+      const { deleted } = decodeHeader(await readBounded(response.stream, HEADER_SIZE));
       if (deleted && length !== HEADER_SIZE) responseError();
-      return { headers, etag, counter, deleted, length, contentType: this.identity(headers, deleted) };
+      return { headers, etag, deleted, length, contentType: this.identity(headers, deleted) };
     } finally { response.stream.destroy(); }
   }
   async get(context: Context, id: string): Promise<DataStoreReadResult | undefined> {
     throwIfAborted(context);
     const snapshot = await this.snapshot(context, id);
     if (!snapshot) return undefined;
-    const revision = snapshot.counter === undefined ? undefined : encodeRevision(snapshot.counter, snapshot.etag);
+    const revision = this.config.mode === "raw" ? undefined : snapshot.etag;
     const stamp = Date.parse(snapshot.headers["last-modified"] ?? "");
     const updated = Number.isFinite(stamp) ? { updatedAt: stamp } : {};
     if (snapshot.deleted) return { id, model: this.model, deleted: true, revision: revision!, ...updated } satisfies DeletedStoredData;
@@ -145,11 +142,11 @@ export class TosDataStore implements DataStore {
             throwIfAborted({ signal });
             if (!expected) { output.close(); return; }
             if (!reader) {
-              const response = await this.client.read({ signal }, key, { ifMatch: snapshot.etag, ...(start ? { range: "bytes=10-" } : {}) });
+              const response = await this.client.read({ signal }, key, { ifMatch: snapshot.etag, ...(start ? { range: `bytes=${HEADER_SIZE}-` } : {}) });
               try {
                 if (response.status !== (start ? 206 : 200) || response.headers.etag !== snapshot.etag ||
                   (response.headers["content-length"] !== undefined && lengthOf(response.headers["content-length"]) !== expected) ||
-                  (start && response.headers["content-range"] !== `bytes 10-${snapshot.length - 1}/${snapshot.length}`)) responseError();
+                  (start && response.headers["content-range"] !== `bytes ${HEADER_SIZE}-${snapshot.length - 1}/${snapshot.length}`)) responseError();
                 reader = (Readable.toWeb(response.stream) as ReadableStream<Uint8Array>).getReader();
               } catch (error) { response.stream.destroy(); throw error; }
             }
@@ -183,19 +180,19 @@ export class TosDataStore implements DataStore {
     if (error instanceof TosRequestError && (error.status === 412 || (!create && isMissingObject(error)) || (create && error.status === 409))) {
       return storeError(create ? "ALREADY_EXISTS" : "REVISION_CONFLICT", "TOS record conflicts with the supplied condition");
     }
-    return error;
+    return writeOutcome(error);
   }
   async create(context: Context, data: Data): Promise<void> {
     throwIfAborted(context); const key = this.target(data);
-    const body = createTosUploadBody(context, data, this.config.mode === "revision" ? encodeHeader(1, false) : undefined);
+    const body = createTosUploadBody(context, data, this.config.mode === "revision" ? createHeader(false, this.mutation) : undefined);
     try { await this.client.put(context, key, body, { create: true, contentType: this.config.mode === "raw" ? data.payload.contentType : "application/octet-stream", meta: this.metadata(data.payload.contentType) }); }
     catch (error) { throw this.writeError(error, true); }
     finally { body.destroy(); }
   }
   async update(context: Context, data: Data, options?: UpdateOptions): Promise<void> {
     throwIfAborted(context); const key = this.target(data);
-    const { counter, etag } = validateTosWriteOptions(this.config.mode, "update", options?.expectedRevision)!;
-    const body = createTosUploadBody(context, data, encodeHeader((counter + 1) >>> 0, false));
+    const { etag } = validateTosWriteOptions(this.config.mode, "update", options?.expectedRevision)!;
+    const body = createTosUploadBody(context, data, createHeader(false, this.mutation));
     try { await this.client.put(context, key, body, { ifMatch: etag, contentType: "application/octet-stream", meta: this.metadata(data.payload.contentType) }); }
     catch (error) { throw this.writeError(error, false); }
     finally { body.destroy(); }
@@ -207,8 +204,8 @@ export class TosDataStore implements DataStore {
       if (!(await this.snapshot(context, id))) return false;
       await this.client.delete(context, key); return true;
     }
-    const { counter, etag } = condition!;
-    const body = Readable.from([encodeHeader((counter + 1) >>> 0, true)]);
+    const { etag } = condition!;
+    const body = Readable.from([createHeader(true, this.mutation)]);
     try { await this.client.put(context, key, body, { ifMatch: etag, contentType: "application/octet-stream", meta: this.metadata() }); return true; }
     catch (error) { throw this.writeError(error, false); }
     finally { body.destroy(); }
@@ -264,7 +261,7 @@ export class TosDataStore implements DataStore {
   }
 }
 
-export function createTosUploadBody(context: Context, data: Data, header?: Uint8Array, maximumBytes = MAX_OBJECT_BYTES): Readable {
+export function createTosUploadBody(context: Context, data: Data, header?: Uint8Array): Readable {
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let cancelled = false, sentHeader = false, bytes = header?.byteLength ?? 0;
     const cancel = () => {
@@ -288,7 +285,7 @@ export function createTosUploadBody(context: Context, data: Data, header?: Uint8
           } else {
             if (!(next.value instanceof Uint8Array)) throw storeError("INVALID_ARGUMENT", "Payload chunks must be Uint8Array");
             bytes += next.value.byteLength;
-            if (!Number.isSafeInteger(bytes) || bytes > maximumBytes) throw new TosRequestError("PAYLOAD_TOO_LARGE");
+            if (!Number.isSafeInteger(bytes) || bytes > MAX_OBJECT_BYTES) throw new TosRequestError("PAYLOAD_TOO_LARGE");
             output.enqueue(next.value);
           }
         } catch (error) { cancel(); output.error(error); }

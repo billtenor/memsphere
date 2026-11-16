@@ -198,7 +198,7 @@ export async function checkApp(project: AppProject, id: string) {
         : dependency.kind === "viewPackage" ? pkg.views.map(v => v.definition) : pkg.manifest.assets.dataExtensions);
       if (dependency.kind === "dataExtension") {
         const builtins = await import("../data/extensions/index.js");
-        candidates.push(builtins.filesystemDataStoreExtension, builtins.filesystemJsonValueStoreExtension,
+        candidates.push(builtins.filesystemDataStoreExtension, builtins.filesystemJsonValueStoreExtension, builtins.tosJsonValueStoreExtension,
           builtins.jsonSchemaExtension, builtins.jsonSchemaMetaModelExtension, builtins.jsonSerializerExtension, builtins.rawExtension);
       }
       const found = candidates.find(candidate => candidate.id === dependency.id && (!dependency.version || semver.satisfies(candidate.version, dependency.version)));

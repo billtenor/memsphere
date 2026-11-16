@@ -1,5 +1,4 @@
-import type {
- ZhCNViewMessageKey } from "./zh-CN.js";
+import type { ZhCNViewMessageKey } from "./zh-CN.js";
 
 export const enViewPluralMessages = {
   "memory.count": { one: "{count} memory", other: "{count} memories" },
@@ -20,6 +19,15 @@ export const enViewPluralMessages = {
 } satisfies Partial<Record<ZhCNViewMessageKey, { one: string; other: string }>>;
 
 export const enViewMessages = {
+  "settings.tosNeverVersioned": "Only buckets that have never enabled versioning are supported.",
+  "settings.tos.kind": "Store type",
+  "settings.tosValueHelp": "JSON values with atomic upsert. Revision checks are optional for update/delete; conflicts fail without retry. Deleted IDs can be created again.",
+  "settings.tosValueLimit": "Complete JSON objects: up to 4 GiB. Reading a complete value requires sufficient memory.",
+  "settings.tos.dataTimeoutMs": "Data request timeout (ms)",
+  "settings.tos.controlTimeoutMs": "Control request timeout (ms)",
+  "settings.tosInvalidTimeout": "Timeout must be an integer from 1 to 2147483647 milliseconds.",
+
+
   "settings.collapseStore": "Collapse",
   "settings.deleteStoreConfirm": "Remove the binding for Store “{id}”? Data will be preserved. Save this page to apply.",
   "settings.deleteParticipantConfirm": "Delete participant “{id}”? Save this page to apply.",
@@ -41,7 +49,7 @@ export const enViewMessages = {
   "settings.storeWritePolicy": "Writes and deletion",
   "settings.revisionModeHelp": "Updates and deletes require a matching revision. Deletion leaves a tombstone that can be written again; the old Payload is not retained.",
   "settings.rawModeHelp": "Create only, with no overwrite updates. Deletion physically removes the object. Payload bytes retain their original format.",
-  "settings.storeLimitsHelp": "Mode is fixed after creation. Objects are limited to 5 GiB; revision Payloads allow ten bytes less.",
+  "settings.storeLimitsHelp": "Mode is fixed after creation. Objects are limited to 5 GiB; revision Payloads allow fourteen bytes less.",
   "settings.storeDraftHelp": "After adding to the list, save at the bottom of the page to apply the configuration.",
   "settings.savedStores": "Configured Stores",
   "settings.businessStoresHelp": "Manage data storage for this project. Each Store binds one model and saves data at the configured location.",

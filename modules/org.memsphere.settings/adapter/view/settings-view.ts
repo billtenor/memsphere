@@ -113,7 +113,7 @@ class SettingsApplication {
   #expandedParticipants = new Set<string>();
   #viewPackages: JsonObject = { installed: [], instances: [], diagnostics: [] };
   #packagePathDraft = "";
-  #tosDraft: JsonObject = { id: "", model: "", region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "", prefix: "", mode: "revision", source: "settings", credentialId: "", accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET", stsTokenEnv: "" };
+  #tosDraft: JsonObject = { kind: "data", dataTimeoutMs: "", controlTimeoutMs: "", id: "", model: "", region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "", prefix: "", mode: "revision", source: "settings", credentialId: "", accessKeyIdEnv: "TOS_ACCESS_KEY_ID", accessKeySecretEnv: "TOS_ACCESS_KEY_SECRET", stsTokenEnv: "" };
   #showTosStoreForm = false;
   #expandedStores = new Set<string>();
   #tosCredentialEditing: string | null | undefined = undefined;
@@ -353,6 +353,21 @@ class SettingsApplication {
       (missing ? `<p class="settings-error" role="alert">${escapeHtml(this.t("settings.chooseAvailableCredential", "所选凭据已不可用，请重新选择。"))}</p>` : "");
   }
 
+  private tosTimeoutFields(path: string, config: JsonObject): string {
+    return (["dataTimeoutMs", "controlTimeoutMs"] as const).map(key => inputField(`${path}.${key}`,
+      this.t(`settings.tos.${key}`, key === "dataTimeoutMs" ? "数据请求超时（毫秒）" : "控制请求超时（毫秒）"),
+      config[key] === undefined ? "" : String(config[key]), { type: "number", min: "1", max: "2147483647", placeholder: "120000" })).join("");
+  }
+  private tosTimeoutValues(form: JsonObject): JsonObject {
+    const result: JsonObject = {};
+    for (const key of ["dataTimeoutMs", "controlTimeoutMs"]) if (form[key] !== "" && form[key] !== undefined) {
+      const value = Number(form[key]);
+      if (!Number.isInteger(value) || value < 1 || value > 2147483647) throw new Error(this.t("settings.tosInvalidTimeout", "超时必须为 1–2147483647 毫秒的整数。"));
+      result[key] = value;
+    }
+    return result;
+  }
+
   private storeFacts(entries: Array<[string, string]>): string {
     return `<dl class="settings-store-facts">${entries.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>`;
   }
@@ -360,23 +375,25 @@ class SettingsApplication {
   storesHtml(scope: ScopeState): string {
     const entries = Object.entries(scope.draft!.dataStores ?? {}).filter(([id]) => !/^context_control\/(runs|steps|artifacts|externals|reviews)$/.test(id)) as Array<[string, JsonObject]>;
     const existing = entries.map(([id, binding]) => {
-      const tos = binding.factory === "memsphere/tos", config = binding.config;
+      const tos = binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json", config = binding.config;
       const mode = config.mode === "revision" ? this.t("settings.tosRevision", "带 revision") : this.t("settings.tosRaw", "不带 revision");
-      return `<article class="settings-section settings-store-card"><div class="settings-store-header"><div class="settings-store-heading"><strong>${escapeHtml(id)}</strong><p class="settings-help">${escapeHtml(this.t("settings.tos.model", "模型 ID"))}：${escapeHtml(binding.model)}</p></div><div class="settings-row-actions"><button type="button" class="btn" data-toggle-store aria-expanded="${this.#expandedStores.has(id)}">${escapeHtml(this.#expandedStores.has(id) ? this.t("settings.collapseStore", "收起") : this.t("settings.configureStore", "配置"))}</button><button class="btn" data-remove-store="${escapeAttr(id)}" aria-label="${escapeAttr(this.t("settings.deleteNamedStore", "删除 Store {id}", {id}))}" title="${escapeAttr(this.t("settings.unbindStore", "解除绑定（保留数据）"))}">${escapeHtml(this.t("common.delete", "删除"))}</button></div></div><details data-business-store="${escapeAttr(id)}"${this.#expandedStores.has(id) ? " open" : ""}><summary class="settings-store-disclosure" hidden>${escapeHtml(this.t("settings.configureStore", "配置"))}</summary><div class="settings-store-detail"><span class="settings-store-type">${escapeHtml(tos ? `TOS · ${mode}` : this.t("settings.localFilesystem", "本地文件系统"))}</span>
+      return `<article class="settings-section settings-store-card"><div class="settings-store-header"><div class="settings-store-heading"><strong>${escapeHtml(id)}</strong><p class="settings-help">${escapeHtml(this.t("settings.tos.model", "模型 ID"))}：${escapeHtml(binding.model)}</p></div><div class="settings-row-actions"><button type="button" class="btn" data-toggle-store aria-expanded="${this.#expandedStores.has(id)}">${escapeHtml(this.#expandedStores.has(id) ? this.t("settings.collapseStore", "收起") : this.t("settings.configureStore", "配置"))}</button><button class="btn" data-remove-store="${escapeAttr(id)}" aria-label="${escapeAttr(this.t("settings.deleteNamedStore", "删除 Store {id}", {id}))}" title="${escapeAttr(this.t("settings.unbindStore", "解除绑定（保留数据）"))}">${escapeHtml(this.t("common.delete", "删除"))}</button></div></div><details data-business-store="${escapeAttr(id)}"${this.#expandedStores.has(id) ? " open" : ""}><summary class="settings-store-disclosure" hidden>${escapeHtml(this.t("settings.configureStore", "配置"))}</summary><div class="settings-store-detail"><span class="settings-store-type">${escapeHtml(tos ? `TOS · ${binding.kind === "value" ? "ValueStore" : mode}` : this.t("settings.localFilesystem", "本地文件系统"))}</span>
         ${this.storeFacts([[this.t("settings.tos.model", "模型 ID"), binding.model], ...(tos ? [[this.t("settings.tos.bucket", "存储桶"), config.bucket], [this.t("settings.tos.prefix", "对象前缀"), config.prefix], [this.t("settings.tos.region", "地域"), config.region], [this.t("settings.tos.endpoint", "访问端点"), config.endpoint]] as Array<[string,string]> : [[this.t("settings.storeDirectory", "存储目录"), config.directory]] as Array<[string,string]> )])}
-        ${tos ? `<div class="settings-store-credentials"><h4>${escapeHtml(this.t("settings.storeCredentials", "访问凭据"))}</h4><div class="settings-grid">${this.tosReferenceHtml(`tosRef.${encodeURIComponent(id).replaceAll(".", "%2E")}`, config.credentials)}</div></div>` : ""}
+        ${tos ? `<div class="settings-store-credentials"><h4>${escapeHtml(this.t("settings.storeCredentials", "访问凭据"))}</h4><div class="settings-grid">${this.tosReferenceHtml(`tosRef.${encodeURIComponent(id).replaceAll(".", "%2E")}`, config.credentials)}</div><div class="settings-grid">${this.tosTimeoutFields(`tosTimeout.${encodeURIComponent(id).replaceAll(".", "%2E")}`, config)}</div></div>` : ""}
         <div class="settings-store-footer"><span class="settings-help">${escapeHtml(this.t("settings.storeBindingHelp", "位置、模型和模式创建后固定；解除绑定不会删除数据。"))}</span></div></div></details></article>`;
     }).join("");
     const draft = this.#tosDraft;
     const field = (key: string) => inputField(`tosDraft.${key}`, this.t(`settings.tos.${key}`, key), draft[key]);
     const group = (title: string, content: string, help = "") => `<fieldset class="settings-store-group"><legend>${escapeHtml(title)}</legend>${help ? `<p class="settings-help">${escapeHtml(help)}</p>` : ""}<div class="settings-grid">${content}</div></fieldset>`;
     const form = !this.#showTosStoreForm ? "" : `<section class="settings-section settings-store-form"><h3>${escapeHtml(this.t("settings.addTosStore", "新增 TOS Store"))}</h3>
-      ${group(this.t("settings.storeIdentity", "基本信息"), field("id") + field("model"), this.t("settings.storeIdentityHelp", "Store ID 用来区分存储；模型 ID 需已在本项目登记。"))}
+      ${group(this.t("settings.storeIdentity", "基本信息"), selectField("tosDraft.kind", this.t("settings.tos.kind", "Store 类型"), draft.kind, [["data", "DataStore"], ["value", "ValueStore"]]) + field("id") + field("model"), this.t("settings.storeIdentityHelp", "Store ID 用来区分存储；模型 ID 需已在本项目登记。"))}
       ${group(this.t("settings.storeLocation", "云端位置"), field("bucket") + field("prefix") + field("region") + field("endpoint"), this.t("settings.storeLocationHelp", "使用已有存储桶；对象前缀以 / 结尾，不同 Store 使用独立前缀。"))}
-      ${group(this.t("settings.storeWritePolicy", "写入与删除"), selectField("tosDraft.mode", this.t("settings.tos.mode", "模式"), draft.mode, [["revision", this.t("settings.tosRevision", "带 revision")], ["raw", this.t("settings.tosRaw", "不带 revision")]]))}
-      <p class="settings-store-policy">${escapeHtml(draft.mode === "revision" ? this.t("settings.revisionModeHelp", "允许更新；更新和删除都需要匹配的 revision。删除后保留删除标记，可再次写入，不保留旧正文。") : this.t("settings.rawModeHelp", "只允许新增，不能覆盖更新；删除会物理移除对象。正文保留原始格式。"))}</p>
-      <p class="settings-help">${escapeHtml(this.t("settings.storeLimitsHelp", "模式创建后不能修改。单个对象最多 5 GiB；带 revision 时正文上限少 10 字节。"))}</p>
+      <p class="settings-help">${escapeHtml(this.t("settings.tosNeverVersioned", "仅支持从未启用过版本控制的桶。"))}</p>
+      ${draft.kind === "value" ? `<p class="settings-help">${escapeHtml(this.t("settings.tosValueHelp", "JSON 值；支持原子 upsert；更新和删除可选 revision，冲突直接报错；删除后可重新创建。"))}</p>` : group(this.t("settings.storeWritePolicy", "写入与删除"), selectField("tosDraft.mode", this.t("settings.tos.mode", "模式"), draft.mode, [["revision", this.t("settings.tosRevision", "带 revision")], ["raw", this.t("settings.tosRaw", "不带 revision")]]))}
+      <p class="settings-store-policy">${escapeHtml(draft.kind === "value" ? this.t("settings.tosValueLimit", "完整 JSON 对象最多 4 GiB，读取完整值需要足够内存。") : draft.mode === "revision" ? this.t("settings.revisionModeHelp", "允许更新；更新和删除都需要匹配的 revision。删除后保留删除标记，可再次写入，不保留旧正文。") : this.t("settings.rawModeHelp", "只允许新增，不能覆盖更新；删除会物理移除对象。正文保留原始格式。"))}</p>
+      ${draft.kind === "data" ? `<p class="settings-help">${escapeHtml(this.t("settings.storeLimitsHelp", "模式创建后不能修改。单个对象最多 5 GiB；带 revision 时正文上限少 14 字节。"))}</p>` : ""}
       ${group(this.t("settings.storeCredentials", "访问凭据"), this.tosReferenceHtml("tosDraft.credentials", this.tosDraftReference()))}
+      <div class="settings-grid">${this.tosTimeoutFields("tosDraft", draft)}</div>
       <div class="settings-actions"><button class="btn" data-action="cancel-tos-store">${escapeHtml(this.t("common.cancel", "取消"))}</button><button class="btn primary" data-action="add-tos-store">${escapeHtml(this.t("settings.addStore", "添加存储"))}</button></div>
       <p class="settings-help">${escapeHtml(this.t("settings.storeDraftHelp", "添加到列表后，点击页面底部“保存”以生效。"))}</p></section>`;
     return `<div class="settings-section-head"><div><h3>${escapeHtml(this.t("settings.savedStores", "已有 Store"))}</h3><p class="settings-help">${escapeHtml(this.t("settings.businessStoresHelp", "管理本项目的数据存储。每个 Store 绑定一个模型，数据保存在所选位置。"))}</p></div><button class="btn primary" data-action="new-tos-store">${escapeHtml(this.t("settings.addTosStore", "新增 TOS Store"))}</button></div>${existing || `<div class="empty">${escapeHtml(this.t("settings.noBusinessStores", "还没有业务 Store。"))}</div>`}${form}${this.errorsHtml(scope)}`;
@@ -797,7 +814,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
         const form = this.#tosDraft, stores = this.state.draft!.dataStores ??= {};
         if (!form.id.trim() || form.id === "__proto__" || Object.hasOwn(stores, form.id)) throw new Error(this.t("settings.tosInvalidStoreId", "请输入尚未使用的 Store ID。"));
         if (form.source === "settings" && !this.tosCredentialIds().includes(form.credentialId)) throw new Error(this.t("settings.chooseAvailableCredential", "请选择已保存的凭据。"));
-        stores[form.id] = { kind: "data", factory: "memsphere/tos", model: form.model, config: { region: form.region, endpoint: form.endpoint, bucket: form.bucket, prefix: form.prefix, mode: form.mode, credentials: this.tosDraftReference() } };
+        stores[form.id] = { kind: form.kind, factory: form.kind === "value" ? "memsphere/tos-json" : "memsphere/tos", model: form.model, config: { region: form.region, endpoint: form.endpoint, bucket: form.bucket, prefix: form.prefix, ...(form.kind === "data" ? { mode: form.mode } : {}), credentials: this.tosDraftReference(), ...this.tosTimeoutValues(form) } };
         this.#expandedStores.add(form.id); form.id = ""; this.#showTosStoreForm = false; this.state.confirmation = null; this.render();
       }
       else if (name === "validate") await this.validate();
@@ -858,7 +875,13 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     if (path.startsWith("tosDraft.")) {
       const key = path.slice(9);
       this.#tosDraft[key === "credentials.id" ? "credentialId" : key.replace("credentials.", "")] = value;
-      if (structural) this.renderTosSelection(path); return;
+      if (key === "kind") this.render(); else if (structural) this.renderTosSelection(path); return;
+    }
+    if (path.startsWith("tosTimeout.")) {
+      const [, encodedId, key] = path.split(".");
+      const config = draft.dataStores[decodeURIComponent(encodedId)].config;
+      if (!value) delete config[key]; else config[key] = Number(value);
+      scope.confirmation = null; this.refreshStatus(scopeName); return;
     }
     if (path.startsWith("tosRef.")) {
       const [, encodedId, key] = path.split(".");

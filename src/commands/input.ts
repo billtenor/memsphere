@@ -1,3 +1,4 @@
+import { parseJsonChunks } from "../data/extensions/json-serializer/streaming.js";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
 import { readFile } from "node:fs/promises";
@@ -27,15 +28,21 @@ export function assertInputOptions(options: ValueInputOptions, payloadAllowed = 
   if (options.payloadFile !== undefined && options.contentType === undefined || options.payloadFile === undefined && options.contentType !== undefined)
     throw serviceError("INVALID_ARGUMENT", "payload-file and content-type must be provided together");
 }
-export async function readDataInput(options: ValueInputOptions, payloadAllowed = true): Promise<DataInput> {
+export async function readDataInput(options: ValueInputOptions, payloadAllowed = true, streamingValue = false): Promise<DataInput> {
   assertInputOptions(options, payloadAllowed);
   if (options.payloadFile !== undefined) {
     const path = options.payloadFile;
     return { kind: "payload-stream", contentType: options.contentType!, content: { stream: () => Readable.toWeb(path === "-" ? process.stdin : createReadStream(path)) as ReadableStream<Uint8Array> } };
   }
-  return { kind: "value", value: parseJsonInput(options.value ?? await readInputText(options.valueFile!)) };
+  return { kind: "value", value: streamingValue && options.valueFile !== undefined ? await readJsonInput(options.valueFile) : parseJsonInput(options.value ?? await readInputText(options.valueFile!)) };
 }
 export function parseRevision(value: string | undefined): string | undefined {
   if (value !== undefined && (typeof value !== "string" || !value.length)) throw serviceError("INVALID_ARGUMENT", "expected-revision must be a non-empty revision string");
   return value;
+}
+
+/** File/stdin JSON without a whole-document text or Buffer. */
+export async function readJsonInput(path: string): Promise<unknown> {
+  const input = path === "-" ? process.stdin : createReadStream(path);
+  try { return await parseJsonChunks({}, input); } finally { if (path !== "-") input.destroy(); }
 }

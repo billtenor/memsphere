@@ -7,6 +7,7 @@ import type { AxiosResponse } from "axios";
 import type { TosResponse } from "@volcengine/tos-sdk/dist/methods/base.js";
 import type { Context } from "../../api/context.js";
 
+import { JsonStreamError } from "../json-serializer/streaming.js";
 import { TosRequestError, readBounded } from "./response.js";
 export { TosRequestError, readBounded } from "./response.js";
 
@@ -17,6 +18,7 @@ const sdkDebug = createRequire(import.meta.url)("debug") as { enabled(namespace:
 type Operation = {
   readonly cancelToken: ReturnType<typeof CancelToken.source>["token"];
   readonly success: readonly number[];
+  readonly deadlineAt: number;
   readonly streams: Set<Readable>;
   readonly signal: AbortSignal;
 };
@@ -54,9 +56,11 @@ export class ContextTosSdk extends TosClient {
       source.cancel("TOS operation closed");
       for (const stream of streams) stream.destroy();
     };
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    const deadlineAt = performance.now() + timeoutMs;
     let timedOut = false;
     let inputFailure: unknown;
-    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, options.timeoutMs ?? 120_000);
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
     timer.unref();
     context.signal?.addEventListener("abort", abortParent, { once: true });
     controller.signal.addEventListener("abort", abort, { once: true });
@@ -69,7 +73,7 @@ export class ContextTosSdk extends TosClient {
     let transferred = false;
     try {
       if (controller.signal.aborted) throw new TosRequestError("ABORTED");
-      const result = await this.operations.run({ cancelToken: source.token, streams, signal: controller.signal, success }, action);
+      const result = await this.operations.run({ cancelToken: source.token, streams, signal: controller.signal, success, deadlineAt }, action);
       if (bodyFinished) {
         const failure = await bodyFinished;
         if (failure !== undefined) throw failure;
@@ -86,7 +90,7 @@ export class ContextTosSdk extends TosClient {
     } catch (error) {
       if (context.signal?.aborted) throw context.signal.reason instanceof TosRequestError ? context.signal.reason : new TosRequestError("ABORTED");
       if (timedOut) throw new TosRequestError("TOS_DEADLINE");
-      if (inputFailure) throw inputFailure instanceof TosRequestError ? inputFailure : new TosRequestError("PAYLOAD_READ_ERROR");
+      if (inputFailure) throw inputFailure instanceof TosRequestError || inputFailure instanceof JsonStreamError ? inputFailure : new TosRequestError("PAYLOAD_READ_ERROR");
       if (error instanceof TosRequestError) throw error;
       throw new TosRequestError("TOS_TRANSPORT_ERROR");
     } finally {
@@ -102,6 +106,8 @@ export class ContextTosSdk extends TosClient {
   ): Promise<TosResponse<T>> {
     const operation = this.operations.getStore();
     if (!operation) throw new Error("TOS SDK operation context is required");
+    const remainingMs = Math.ceil(operation.deadlineAt - performance.now());
+    if (remainingMs <= 0) throw new TosRequestError("TOS_DEADLINE");
     const raw = await super.fetch<unknown>(method, path, query, headers, body, {
       ...options,
       handleResponse: response => response,
@@ -110,6 +116,7 @@ export class ContextTosSdk extends TosClient {
         // Native TOS endpoints use direct TLS. Axios 0.21's implicit HTTP
         // proxy selection otherwise pairs an HTTP request with the SDK TLS Agent.
         proxy: false,
+        timeout: remainingMs,
         cancelToken: operation.cancelToken,
         responseType: "stream",
         validateStatus: () => true,

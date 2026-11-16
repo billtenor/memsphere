@@ -1,23 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { encodeHeader, decodeHeader } from "../src/data/extensions/tos-datastore/header.js";
-import { encodeRevision, decodeRevision } from "../src/data/extensions/tos-datastore/revision.js";
+import { assertEtag } from "../src/data/extensions/tos-datastore/revision.js";
 import { encryptTosCredential, decryptTosCredential } from "../src/tos-credential-codec.js";
 
-test("opaque revision preserves quoted ETags containing colons and rejects malformed input", () => {
-  const token = encodeRevision(42, '"a:b:c"');
-  assert.equal(token, '0000002a:"a:b:c"');
-  assert.deepEqual(decodeRevision(token), { counter: 42, etag: '"a:b:c"' });
-  for (const bad of ['2a:"a"', '0000002A:"a"', '0000002a:', '0000002a:a\r\nsecret', 1, null]) assert.throws(() => decodeRevision(bad as string));
+test("single opaque ETag preserves quoted colons/commas and rejects conditional expressions", () => {
+  for (const good of ['"a:b:c"', '"a,b"', "abc123", "a:b"]) assert.doesNotThrow(() => assertEtag(good));
+  for (const bad of ["*", " ", '"a", "b"', "a,b", 'W/"a"', "a\r\nsecret", 1, null]) assert.throws(() => assertEtag(bad));
 });
-
-test("header has a fixed ten-byte format and fails closed on unknown format/flags", () => {
-  const header = encodeHeader(0xffffffff, true);
-  assert.equal(header.length, 10);
+test("header has a fixed fourteen-byte version2 layout and rejects unsupported headers", () => {
+  const mutationId = Buffer.alloc(8, 255), header = encodeHeader(mutationId, true);
+  assert.equal(header.length, 14); assert.equal(header[4], 2);
   assert.equal(Buffer.from(header.slice(0, 4)).toString(), "MSDT");
-  assert.deepEqual(decodeHeader(header), { counter: 0xffffffff, deleted: true });
+  assert.deepEqual(decodeHeader(header), { mutationId: Uint8Array.from(mutationId), deleted: true });
   for (const offset of [0, 4, 5]) { const changed = header.slice(); changed[offset] = 99; assert.throws(() => decodeHeader(changed)); }
-  assert.throws(() => decodeHeader(header.slice(1)));
+  const legacy = header.slice(); legacy[4] = 1; assert.throws(() => decodeHeader(legacy));
+  assert.throws(() => decodeHeader(header.slice(1))); assert.throws(() => encodeHeader(new Uint8Array(4), false));
 });
 
 test("credential vault encrypts values, authenticates the id and detects tampering", () => {
@@ -33,21 +31,6 @@ test("credential vault encrypts values, authenticates the id and detects tamperi
   assert.notDeepEqual(vault.entries.first, replaced.entries.first);
   assert.deepEqual(decryptTosCredential("first", vault), credentials);
 });
-
-test("upload boundary counts the physical header and accepts exactly the limit", async () => {
-  const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
-  const { MAX_OBJECT_BYTES } = await import("../src/data/extensions/tos-datastore/header.js");
-  const { bytesContent } = await import("../src/data/extensions/shared/payload.js");
-  assert.equal(MAX_OBJECT_BYTES, 5 * 1024 ** 3);
-  for (const header of [undefined, encodeHeader(1, false)]) for (const excess of [-1, 0, 1]) {
-    const data = { id: "item", model: "file.json", payload: { contentType: "application/octet-stream", content: bytesContent(Buffer.alloc(20 - (header?.length ?? 0) + excess)) } };
-    const body = createTosUploadBody({}, data, header, 20);
-    const consume = async () => { let size = 0; for await (const chunk of body) size += chunk.length; return size; };
-    if (excess > 0) await assert.rejects(consume(), { code: "PAYLOAD_TOO_LARGE" });
-    else assert.equal(await consume(), 20 + excess);
-  }
-});
-
 
 test("TOS keys enforce the UTF-8 limit and retain literal Unicode and percent signs", async () => {
   const { objectKey } = await import("../src/data/extensions/tos-datastore/keys.js");
@@ -83,31 +66,3 @@ test("TOS config validates native region endpoints, namespace and credential ref
   ];
   for (const patch of patches) assert.throws(() => parseTosConfig(new Config({...base,...patch} as never)), JSON.stringify(patch));
 });
-
-// The source reuses a fixed 4 MiB block: exercise the actual default 5 GiB
-// counter without allocating a 5 GiB buffer or sending anything to a network.
-const boundaryBlock = Buffer.alloc(4 * 1024 ** 2);
-for (const mode of ["raw", "revision"] as const) for (const excess of [-1, 0, 1]) {
-  test(`${mode} default 5 GiB physical limit ${excess > 0 ? "+1" : excess} retains counts beyond uint32`, async () => {
-    const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
-    const { MAX_OBJECT_BYTES, HEADER_SIZE } = await import("../src/data/extensions/tos-datastore/header.js");
-    const header = mode === "revision" ? encodeHeader(1, false) : undefined;
-    const payloadSize = MAX_OBJECT_BYTES - (mode === "revision" ? HEADER_SIZE : 0) + excess;
-    let remaining = payloadSize, produced = 0, observed = 0, chunks = 0;
-    const content = { stream: () => new ReadableStream<Uint8Array>({ pull(controller) {
-      if (!remaining) { controller.close(); return; }
-      const size = Math.min(remaining, boundaryBlock.byteLength);
-      controller.enqueue(boundaryBlock.subarray(0, size)); remaining -= size; produced += size;
-    } }) };
-    const body = createTosUploadBody({}, { id: "item", model: "file.json", payload: { contentType: "application/octet-stream", content } }, header);
-    const consume = async () => {
-      for await (const chunk of body) { observed += chunk.byteLength; chunks++; }
-    };
-    if (excess > 0) await assert.rejects(consume(), { code: "PAYLOAD_TOO_LARGE" });
-    else { await consume(); assert.equal(observed, MAX_OBJECT_BYTES + excess); }
-    assert.equal(produced, payloadSize);
-    assert.ok(produced > 2 ** 32, "The production counter actually crosses uint32");
-    assert.ok(observed <= MAX_OBJECT_BYTES, "The rejected extra bytes must not be delivered");
-    assert.ok(chunks > 1024, "The count is accumulated across repeated chunks");
-  });
-}

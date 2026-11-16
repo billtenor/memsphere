@@ -18,9 +18,9 @@ test("TOS CLI uses opaque zero/quoted-colon revisions through deletion, normal u
   await run(["store","create","assets","--model","record.json","--kind","data","--factory","memsphere/tos","--config-file",config]);
   await run(["create","item","--store","assets","--payload-file",input,"--content-type","application/octet-stream"]);
   const object=service.objects.get("cli/item")!;
-  object.bytes=Buffer.concat([encodeHeader(0,false),bytes]);object.headers.etag='"zero:opaque:etag"';
+  object.bytes=Buffer.concat([encodeHeader(Buffer.alloc(8, 0),false),bytes]);object.headers.etag='"zero:opaque:etag"';
   const first=await run(["read","item","--store","assets","--metadata-only"]);
-  assert.equal(first.revision,'00000000:"zero:opaque:etag"');
+  assert.equal(first.revision,'"zero:opaque:etag"');
   const snapshot=Buffer.from(object.bytes), before=service.calls.length;
   await run(["delete","item","--store","assets","--expected-revision",first.revision,"--dry-run"]);
   assert.deepEqual(service.objects.get("cli/item")!.bytes,snapshot);assert.ok(service.calls.slice(before).every(c=>!["PUT","DELETE"].includes(c.method)));
@@ -39,7 +39,7 @@ test("TOS CLI uses opaque zero/quoted-colon revisions through deletion, normal u
   await run(["update","item","--store","assets","--expected-revision",deleted.revision,"--payload-file",input,"--content-type","application/octet-stream"]);
   const current=await run(["read","item","--store","assets","--metadata-only"]);assert.notEqual(current.revision,deleted.revision);assert.equal(current.deleted,undefined);
   await run(["export","item","--store","assets","--as","payload","--out",out]);assert.deepEqual(await fs.readFile(out),bytes);
-  assert.deepEqual(service.objects.get("cli/item")!.bytes.subarray(10),bytes);
+  assert.deepEqual(service.objects.get("cli/item")!.bytes.subarray(14),bytes);
 });
 
 for(const operation of ["read","validate","export"] as const)for(const failure of ["conflict","permission"] as const){
@@ -57,7 +57,7 @@ for(const operation of ["read","validate","export"] as const)for(const failure o
       if(options?.ifMatch && !injected){
         injected=true;
         if(failure === "permission")throw new TosRequestError("AccessDenied",403);
-        const object=service.objects.get(key)!;object.bytes=Buffer.concat([encodeHeader(2,false),Buffer.from('{"name":"concurrent","count":1}')]);object.headers.etag='"concurrent:etag"';object.headers["content-length"]=String(object.bytes.length);
+        const object=service.objects.get(key)!;object.bytes=Buffer.concat([encodeHeader(Buffer.alloc(8, 2),false),Buffer.from('{"name":"concurrent","count":1}')]);object.headers.etag='"concurrent:etag"';object.headers["content-length"]=String(object.bytes.length);
       }
       return read(context,key,options);
     };
@@ -66,7 +66,7 @@ for(const operation of ["read","validate","export"] as const)for(const failure o
     await assert.rejects(command(args),error=>{assert.equal(JSON.parse((error as Error & {stderr:string}).stderr).error.code,failure === "conflict" ? "REVISION_CONFLICT" : "AccessDenied");return true;});
     assert.equal(injected,true);assert.ok(service.calls.every(call=>!["PUT","DELETE"].includes(call.method)));
     if(failure === "permission")assert.deepEqual(service.objects.get("cli-json/item")!.bytes,original);
-    else assert.equal(service.objects.get("cli-json/item")!.bytes.subarray(10).toString(),'{"name":"concurrent","count":1}');
+    else assert.equal(service.objects.get("cli-json/item")!.bytes.subarray(14).toString(),'{"name":"concurrent","count":1}');
     await assert.rejects(fs.stat(output),{code:"ENOENT"});
   });
 }

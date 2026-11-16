@@ -1,4 +1,5 @@
 import { TosDataStoreFactory, inspectPhysicalRecords, parseTosConfig } from "../data/extensions/tos-datastore/index.js";
+import { TosJsonValueStoreFactory, parseTosJsonConfig } from "../data/extensions/tos-json-valuestore/index.js";
 import { resolveTosCredentials } from "../tos-credentials.js";
 import { validateTosRecord } from "./tos-record-validation.js";
 import { ConfigRevisionConflictError, configRevision } from "../config-management.js";
@@ -52,8 +53,8 @@ export async function validateBusinessBindings(root: string, project: ProjectCon
     const binding = businessStoreBindingSchema.parse(input);
     assertModelRef(binding.model);
     const config = new Config(binding.config);
-    if (binding.factory === "memsphere/tos") {
-      const parsed = parseTosConfig(config);
+    if ((binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json")) {
+      const parsed = binding.factory === "memsphere/tos" ? parseTosConfig(config) : parseTosJsonConfig(config);
       if (remote.some(other => other.region === parsed.region && other.bucket === parsed.bucket &&
         (other.prefix.startsWith(parsed.prefix) || parsed.prefix.startsWith(other.prefix)))) throw serviceError("STORE_PATH_CONFLICT", `TOS Store ${id} overlaps another prefix`);
       remote.push({ id, ...parsed }); continue;
@@ -78,7 +79,7 @@ export async function getBusinessBinding(root: string, id: string) {
   if (!binding) throw serviceError("STORE_NOT_FOUND", `Business Store not found: ${id}`);
   await assertModelOperationStamp(root, stamp);
   const directory = directories.get(id);
-  const location = binding.factory === "memsphere/tos"
+  const location = (binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json")
     ? { kind: "tos" as const, bucket: binding.config.bucket, prefix: binding.config.prefix }
     : { kind: "filesystem" as const, directory: directory! };
   return { project, binding, directory, location, stamp };
@@ -93,8 +94,10 @@ async function openBusinessStoreOnce(context: Context, root: string, id: string,
     try { assertJsonDescriptor(runtime.descriptor.root); }
     catch (cause) { throw serviceError("STORE_INCOMPATIBLE", "filesystem JSON ValueStore requires a JSON-compatible model", { cause: String(cause) }); }
   }
-  if (state.binding.factory === "memsphere/tos") {
-    const store = await new TosDataStoreFactory(resolveTosCredentials).createStore(context, id, state.binding.model, new Config(state.binding.config));
+  if ((state.binding.factory === "memsphere/tos" || state.binding.factory === "memsphere/tos-json")) {
+    const store = state.binding.factory === "memsphere/tos-json"
+      ? await new TosJsonValueStoreFactory(resolveTosCredentials).createStore(context, id, runtime, new Config(state.binding.config))
+      : await new TosDataStoreFactory(resolveTosCredentials).createStore(context, id, state.binding.model, new Config(state.binding.config));
     await assertModelOperationStamp(root, state.stamp);
     return { ...state, store, runtime };
   }
@@ -108,7 +111,7 @@ async function openBusinessStoreOnce(context: Context, root: string, id: string,
   return { ...state, store, runtime };
 }
 async function assertDirectoryProtocol(context: Context, directory: string, binding: BusinessStoreBinding) {
-  if (binding.factory === "memsphere/tos") throw new TypeError("A remote Store has no local directory");
+  if ((binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json")) throw new TypeError("A remote Store has no local directory");
   const extensions = binding.kind === "data" ? parseFilesystemDataStoreConfig(new Config(binding.config)).extensions : undefined;
   const visit = async (folder: string, prefix = ""): Promise<void> => {
     for (const file of await readdir(folder, { withFileTypes: true })) {
@@ -136,7 +139,7 @@ async function assertDirectoryProtocol(context: Context, directory: string, bind
   await visit(directory);
 }
 async function validateExistingDirectory(context: Context, id: string, directory: string, binding: BusinessStoreBinding, runtime: ModelRuntime) {
-  if (binding.factory === "memsphere/tos") throw new TypeError("A remote Store has no local directory");
+  if ((binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json")) throw new TypeError("A remote Store has no local directory");
   try { if (!(await stat(directory)).isDirectory()) throw new TypeError(`Not a directory: ${directory}`); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return; throw error; }
   await assertDirectoryProtocol(context, directory, binding);
@@ -167,7 +170,10 @@ async function validateExistingDirectory(context: Context, id: string, directory
 }
 /** Explicit preflight only; ordinary settings validation must not scan cloud data. */
 export async function preflightBusinessBinding(context: Context, root: string, id: string, binding: BusinessStoreBinding, runtime: ModelRuntime, directory?: string, credentialsResolver = resolveTosCredentials): Promise<void> {
-  if (binding.factory === "memsphere/tos") {
+  if (binding.factory === "memsphere/tos-json") {
+    const store = await new TosJsonValueStoreFactory(credentialsResolver).createStore(context, id, runtime, new Config(binding.config));
+    for await (const _record of store.inspectPhysicalRecords(context)) { context.signal?.throwIfAborted(); }
+  } else if (binding.factory === "memsphere/tos") {
     const store = await new TosDataStoreFactory(credentialsResolver).createStore(context, id, binding.model, new Config(binding.config));
     for await (const record of inspectPhysicalRecords(context, store)) await validateTosRecord(context, record, runtime);
   } else {
@@ -191,7 +197,7 @@ export async function createBusinessStore(context: Context, root: string, id: st
   }
   // Cloud I/O and compatibility reads occur before the short config CAS lock.
   await preflightBusinessBinding(context, root, id, binding, runtime, directory);
-  const location = binding.factory === "memsphere/tos" ? { kind: "tos" as const, bucket: binding.config.bucket, prefix: binding.config.prefix }
+  const location = (binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json") ? { kind: "tos" as const, bucket: binding.config.bucket, prefix: binding.config.prefix }
     : { kind: "filesystem" as const, directory: directory! };
   if (dryRun) return { operation: "data.store.create", storeId: id, binding, location, ...(directory ? { directory } : {}), dryRun: true };
   return withConfigFileLock(path, async () => {

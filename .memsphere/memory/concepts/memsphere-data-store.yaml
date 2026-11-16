@@ -8,10 +8,16 @@ defines:
   - DataStore 保存带模型身份和 MIME 的 Payload 字节；ValueStore 保存由 Runtime 校验的值实例。模型 ID 不是 Store 的隐式选择条件，解除绑定保留数据。
   - revision 是 Store 发出的不透明非空字符串，调用方从读取结果取得并原样作为 expectedRevision 交回。它表示条件写入的前提，不提供历史内容恢复，也不是模型版本；不同 Store 的 token 不可比较大小或互换。
   - filesystem JSON ValueStore 的公开 revision 是十进制字符串；本地持久化计数仍为数字，删除后同 ID 重建延续计数。原始 filesystem DataStore 不维护 revision。
-  - TOS DataStore 使用官方火山云 SDK 访问已有桶及专用 prefix；位置、模型和 raw/revision 模式在创建时固定，凭据引用可更新。首版只接受从未启用版本控制的桶，使用普通上传，对象总大小最多 5 GiB，不支持分片、历史迁移和离线回退。
+  - TOS DataStore 使用官方火山云 SDK 访问已有桶及专用 prefix；位置、模型和 raw/revision 模式在创建时固定，凭据引用和请求超时可更新。首版只接受从未启用版本控制的桶，使用普通上传，对象总大小最多 5 GiB，不支持分片、历史迁移和离线回退。
   - TOS raw 模式直接保存原始 Payload，只允许不覆盖的创建和物理删除；拒绝更新和 expectedRevision。删除后可以重新创建同 ID。
-  - TOS revision 模式在 Payload 前保存十字节协议头，包含格式版本、删除标记和四字节计数器；公开 token 合并计数器与原始 ETag。更新和逻辑删除用 token 内的 ETag 作条件，递增计数后执行一次 PUT，不为写入预读对象；计数器允许回绕，因此有限计数不承诺永久消除 ABA。
-  - TOS revision 模式的删除态只保存协议头。读取返回已删除及当前 revision，不伪造 Payload；普通列表隐藏删除态，has 仍表示物理对象存在。重新写入使用普通 update，携带删除态 revision 和新 Payload；再次删除也递增计数。普通创建遇到删除态仍冲突，没有独立恢复操作。
+  - TOS revision 模式在 Payload 前保存十四字节协议头，包含存储版本、删除标记和八字节密码学随机标识；公开 revision 直接使用单对象原始 ETag。更新和逻辑删除用 expectedRevision 作条件执行一次 PUT，不为写入预读对象。随机标识由 Store 内部生成，降低相同内容重现导致的旧 ETag 复用风险，不表示版本排序或永久唯一。
+  - TOS revision 模式的删除态只保存协议头。读取返回已删除及当前 revision，不伪造 Payload；普通列表隐藏删除态，has 仍表示物理对象存在。重新写入使用普通 update，携带删除态 revision 和新 Payload；再次删除也生成新随机标识。普通创建遇到删除态仍冲突，没有独立恢复操作。
   - TOS Payload 通过可取消的流逐块传输；带协议头的对象由 Store 去除头后交付原始字节。请求超时或取消后可能已经提交，调用方重新读取判断，Store 不自动重试、覆盖或删除补偿。
   - View 设置的 Home“火山云配置”按名称列出多组 TOS 凭据，支持新增、编辑和删除；Store 配置通过下拉框引用已保存名称。编辑时不回填密钥，留空保留原值。凭据以加密内容持久化，密钥位于同一本地设置文件；这不保护被完整读取的设置文件。Project 只保存凭据名称或环境变量名称，界面不回填已存密钥。临时凭据也可通过环境变量引用。
   - TOS 凭据删除经确认后只移除 Home 中的命名凭据，使用配置 revision 检查，不删除 Store、桶或数据；引用该名称的 Store 需更换凭据才能继续访问。业务 Store 的删除按钮在折叠配置外可见，只解除绑定，仍经配置保存确认，不删除存储数据。
+
+  - TOS JSON ValueStore 使用 memsphere/tos-json Factory，保存可读 JSON 外层记录及业务 value，不提供 raw/revision 双模式或二进制 header。外层包含 storageVersion、模型身份、内部 mutationId 和 is_delete，metadata 保存对应镜像；同一次 PUT 原子更新两者，HEAD 用于不下载 value 的状态读取，GET 核对一致性。
+  - TOS ValueStore 对调用方保留标准值语义，支持 get、has、create、update、upsert、delete 和 list；更新和删除可选 expectedRevision。删除后按不存在处理，允许 create 同 ID；这与 DataStore 暴露删除态并由普通 update 写回的语义不同。
+  - 两种 TOS Store 的写调用最多执行一次条件 PUT，竞争直接报错，不自动读取新版本后重试。ValueStore 为区分存在、删除和创建元信息先读 HEAD；原子提交仍由服务端 ETag 条件保障，不使用本机锁冒充跨客户端 CAS。
+  - dataTimeoutMs 和 controlTimeoutMs 是每个 TOS Store 可编辑的请求超时配置，单位毫秒，均默认 120000。数据 GET/PUT 与控制 HEAD/list 等分别使用对应预算，响应正文归同一请求生命周期；修改超时不改变位置、模型或分页身份，也不影响已经运行的请求。
+  - ValueStore 的完整 JSON 大小限制仅用于极端输入防御，不代表在任意内存和网络下的容量承诺。分块编解码不拼整条文档字符串，返回完整 JavaScript 值仍需足够内存并受运行时表示限制。

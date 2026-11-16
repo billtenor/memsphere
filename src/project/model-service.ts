@@ -191,6 +191,12 @@ async function validateModelOnce(context: Context, root: string, ref: string, op
       if (project.dataStores?.[storeId]?.model !== ref) throw serviceError("STORE_MODEL_MISMATCH", `Store ${storeId} does not use ${ref}`);
       const { store } = await openBusinessStore(context, root, storeId, { runtime: checked.runtime! });
       const result = { storeId, checked: 0, failures: [] as Array<{ id: string; message: string }> };
+      if (project.dataStores?.[storeId]?.factory === "memsphere/tos-json") {
+        const { TosJsonValueStore } = await import("../data/extensions/tos-json-valuestore/index.js");
+        if (!(store instanceof TosJsonValueStore)) throw serviceError("STORE_INCOMPATIBLE", "Expected TOS ValueStore");
+        for await (const _record of store.inspectPhysicalRecords(context)) result.checked++;
+        data.push(result); continue;
+      }
       if (project.dataStores?.[storeId]?.factory === "memsphere/tos") {
         const { inspectPhysicalRecords } = await import("../data/extensions/tos-datastore/index.js");
         const { validateTosRecord } = await import("./tos-record-validation.js");
