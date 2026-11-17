@@ -10,7 +10,9 @@ import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
 test("TOS CLI uses opaque zero/quoted-colon revisions through deletion, normal update and byte export",{timeout:30_000},async t=>{
   const f=await businessFixture(t), service=useTosService(t);
   const env={...process.env,MEMSPHERE_HOME:f.home,CLI_TOS_AK:"fixture-ak",CLI_TOS_SK:"fixture-sk"};
-  const command=async(args:string[])=>invokeCliModule(["--project","test-project","data",...args,"--output","json"],f.cwd,env,"memsphere");
+  let pendingCli: ReturnType<typeof invokeCliModule> | undefined;
+  f.beforeCleanup(async () => { await Promise.allSettled([pendingCli]); });
+  const command=(args:string[])=>pendingCli=invokeCliModule(["--project","test-project","data",...args,"--output","json"],f.cwd,env,"memsphere",t.signal);
   const run=async(args:string[])=>JSON.parse((await command(args)).stdout);
   const config=join(f.directory,"tos.json"),input=join(f.directory,"payload.bin"),out=join(f.directory,"export.bin");
   const bytes=Buffer.from([0,255,17,13,10,88]);await fs.writeFile(input,bytes);
@@ -46,7 +48,9 @@ for(const operation of ["read","validate","export"] as const)for(const failure o
   test(`TOS CLI active JSON ${operation} exposes ${failure} without publishing or overwriting`,{timeout:30_000},async t=>{
     const f=await businessFixture(t),service=useTosService(t);
     const env={...process.env,MEMSPHERE_HOME:f.home,CLI_TOS_AK:"fixture-ak",CLI_TOS_SK:"fixture-sk"};
-    const command=(args:string[])=>invokeCliModule(["--project","test-project","data",...args,"--output","json"],f.cwd,env,"memsphere");
+    let pendingCli: ReturnType<typeof invokeCliModule> | undefined;
+    f.beforeCleanup(async () => { await Promise.allSettled([pendingCli]); });
+    const command=(args:string[])=>pendingCli=invokeCliModule(["--project","test-project","data",...args,"--output","json"],f.cwd,env,"memsphere",t.signal);
     const settings=join(f.directory,"tos.json"),output=join(f.directory,"not-published.json");
     await fs.writeFile(settings,JSON.stringify({mode:"revision",region:"cn-beijing",endpoint:"tos-cn-beijing.volces.com",bucket:"test-bucket",prefix:"cli-json/",credentials:{source:"env",accessKeyIdEnv:"CLI_TOS_AK",accessKeySecretEnv:"CLI_TOS_SK"}}));
     await command(["store","create","assets","--model","record.json","--kind","data","--factory","memsphere/tos","--config-file",settings]);

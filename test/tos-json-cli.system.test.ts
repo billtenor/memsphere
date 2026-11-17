@@ -11,7 +11,12 @@ import { readProjectConfigDocument, editableProjectConfigDraft, writeProjectConf
 test("TOS ValueStore CLI supports JSON operations, CAS, tombstone recreation and timeout changes between pages", { timeout: 30000 }, async t => {
   const f = await businessFixture(t), service = useTosService(t);
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CLI_TOS_AK: 'fake-ak', CLI_TOS_SK: 'fake-sk' };
-  const run = async (args: string[]) => JSON.parse((await invokeCliModule(['--project', 'test-project', 'data', ...args, '--output', 'json'], f.cwd, env, 'memsphere')).stdout);
+  let pendingCli: ReturnType<typeof invokeCliModule> | undefined;
+  f.beforeCleanup(async () => { await Promise.allSettled([pendingCli]); });
+  const run = async (args: string[]) => {
+    pendingCli = invokeCliModule(['--project', 'test-project', 'data', ...args, '--output', 'json'], f.cwd, env, 'memsphere', t.signal);
+    return JSON.parse((await pendingCli).stdout);
+  };
   const path = join(f.directory, 'tos.json'), valueFile = join(f.directory, 'value.json');
   await fs.writeFile(join(f.home, 'config.json'), '{}');
   await fs.writeFile(path, JSON.stringify({ region: 'cn-beijing', endpoint: 'tos-cn-beijing.volces.com', bucket: 'test-bucket', prefix: 'json/', credentials: { source: 'env', accessKeyIdEnv: 'CLI_TOS_AK', accessKeySecretEnv: 'CLI_TOS_SK' } }));

@@ -57,7 +57,7 @@ test('View binds ValueStore, independent CLI manages values, CAS conflict fails 
     const page = await setup.acquire(() => ownedBrowser.newPage({ viewport: { width: 1200, height: 900 } }));
     setup.check(); page.setDefaultTimeout(5000);
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
-    const run = async (args: string[]) => { setup.check(); const work = invokeCliModule(['--project', 'test-project', 'data', ...args, '--output', 'json'], f.cwd, env, 'memsphere'); pendingCli = work; const result = await work; setup.check(); return JSON.parse(result.stdout); };
+    const run = async (args: string[]) => { setup.check(); const work = invokeCliModule(['--project', 'test-project', 'data', ...args, '--output', 'json'], f.cwd, env, 'memsphere', t.signal); pendingCli = work; const result = await work; setup.check(); return JSON.parse(result.stdout); };
     const select = async (path: string, label: string) => { await page.locator(`[data-select-field="${path}"]`).click(); await page.getByRole('option', { name: label, exact: true }).click(); };
     const save = async () => { await page.getByRole('button', { name: '保存', exact: true }).click(); await page.getByRole('button', { name: '确认保存', exact: true }).click(); await page.getByText('配置已保存并生效。', { exact: true }).waitFor(); };
     pendingJourney = (async () => {
