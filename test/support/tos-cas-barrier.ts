@@ -30,22 +30,23 @@ export async function controlledPutPair(input: {
   const ready = gate(), permits = [gate(), gate()];
   const controllers = [new AbortController(), new AbortController()];
   let prepared = 0, conditionsReady = false;
+  const seen = new Set<number>();
   let rejectPreparation!: (error: unknown) => void;
   const premature = new Promise<never>((_, reject) => { rejectPreparation = reject; });
-  const client: TosObjectClient = { ...input.client, async put(context, key, body, options) {
+  const clientFor = (index: 0 | 1): TosObjectClient => ({ ...input.client, async put(context, key, body, options) {
     assert.equal(key, input.key);
-    const index = prepared++;
-    assert.ok(index < 2, "Conditional writers must not retry");
+    assert.ok(!seen.has(index), "Conditional writers must not retry");
     assert.equal(options.create, input.condition.create);
     assert.equal(options.ifMatch, input.condition.ifMatch);
+    seen.add(index); prepared++;
     if (prepared === 2) { conditionsReady = true; ready.open(); }
     await permits[index].promise;
     context.signal?.throwIfAborted();
     return input.client.put(context, key, body, options);
-  } };
+  } });
   const writes = ([0, 1] as const).map(index => {
     const signal = input.context?.signal ? AbortSignal.any([input.context.signal, controllers[index].signal]) : controllers[index].signal;
-    return Promise.resolve().then(() => input.write(client, { signal }, index)).then(() => {
+    return Promise.resolve().then(() => input.write(clientFor(index), { signal }, index)).then(() => {
       if (!conditionsReady) rejectPreparation(Error("Writer completed before both original conditions were prepared"));
       return { success: true, code: "" };
     }, error => {

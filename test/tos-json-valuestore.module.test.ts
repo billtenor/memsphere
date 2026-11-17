@@ -103,7 +103,10 @@ for (const scenario of ['missing-create', 'deleted-create', 'update-delete', 'up
 test('ValueStore CAS oracle rejects a transport that removes conditional headers', async () => {
   await assert.rejects(valueRace('missing-create', 0, true), /Exactly one conditional writer may commit/);
 });
-async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update-delete' | 'upsert-upsert', first: 0 | 1, removeConditions = false) {
+for (const first of [0, 1] as const) test(`upsert with reverse PUT arrival still commits chosen writer ${first}`, async () => {
+  await valueRace('upsert-upsert', first, false, true);
+});
+async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update-delete' | 'upsert-upsert', first: 0 | 1, removeConditions = false, reverseArrival = false) {
   const { controlledPutPair } = await import('./support/tos-cas-barrier.js');
   const { client, store } = fixture();
   if (scenario !== 'missing-create') await store.create({}, 'race', { name: 'old' });
@@ -117,17 +120,30 @@ async function valueRace(scenario: 'missing-create' | 'deleted-create' | 'update
   };
   client.calls.length = 0;
   let mutation = 10;
+  let releaseFirst!: () => void;
+  const writerOnePrepared = new Promise<void>(resolve => { releaseFirst = resolve; });
+  const arrivals: number[] = [], finished = [false, false];
   await controlledPutPair({ client: transport, key: 'values/race.json', first,
     condition: revision ? { ifMatch: revision } : { create: true },
     conflictCode: ['update-delete', 'upsert-upsert'].includes(scenario) ? 'REVISION_CONFLICT' : 'ALREADY_EXISTS',
     write: async (gated, context, index) => {
-      const handle = new TosJsonValueStore('values', runtime, config, gated, () => 2000, () => (++mutation).toString(16).padStart(16, '0'));
-      if (scenario === 'upsert-upsert') await handle.upsert(context, 'race', { name: index === 0 ? 'A' : 'B' });
-      else if (scenario !== 'update-delete') await handle.create(context, 'race', { name: index === 0 ? 'A' : 'B' });
-      else if (index === 0) await handle.update(context, 'race', { name: 'updated' }, { expectedRevision: revision });
-      else await handle.delete(context, 'race', { expectedRevision: revision });
+      try {
+        if (reverseArrival && index === 0) await writerOnePrepared;
+        const observed = { ...gated, put: ((...args) => {
+          arrivals.push(index); const result = gated.put(...args);
+          if (index === 1) releaseFirst();
+          return result;
+        }) as typeof gated.put };
+        const handle = new TosJsonValueStore('values', runtime, config, observed, () => 2000, () => (++mutation).toString(16).padStart(16, '0'));
+        if (scenario === 'upsert-upsert') await handle.upsert(context, 'race', { name: index === 0 ? 'A' : 'B' });
+        else if (scenario !== 'update-delete') await handle.create(context, 'race', { name: index === 0 ? 'A' : 'B' });
+        else if (index === 0) await handle.update(context, 'race', { name: 'updated' }, { expectedRevision: revision });
+        else await handle.delete(context, 'race', { expectedRevision: revision });
+      } finally { if (index === 1) releaseFirst(); finished[index] = true; }
     }
   });
+  assert.deepEqual(finished, [true, true]);
+  if (reverseArrival) assert.deepEqual(arrivals, [1, 0]);
   assert.equal(client.calls.filter(c => c.method === 'PUT').length, 2);
   assert.equal(client.calls.filter(c => c.method === 'HEAD').length, 2);
   assert.equal(client.calls.filter(c => c.method === 'GET').length, scenario === 'missing-create' ? 2 : 0);
@@ -155,7 +171,7 @@ test('CAS preparation failure preserves its cause and settles the writer held at
     write: async (gated, context, index) => {
       if (index === 1) { await firstPrepared; throw failure; }
       const observed = { ...gated, put: ((...args) => { const result = gated.put(...args); arrived(); return result; }) as typeof gated.put };
-      try { await new TosJsonValueStore('values', runtime, config, observed).upsert(context, 'early', { name: 'never committed' }); }
+      try { await new TosJsonValueStore('values', runtime, config, observed, () => 2000, () => '0000000000000002').upsert(context, 'early', { name: 'never committed' }); }
       finally { finished = true; }
     }
   }), error => error === failure);
