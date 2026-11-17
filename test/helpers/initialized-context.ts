@@ -5,11 +5,16 @@ import { openContextControl } from "../../src/project/context-control.js";
 import { businessFixture } from "./business-data.js";
 
 const cleanups: Array<() => unknown> = [];
-after(async () => { for (const cleanup of cleanups) await cleanup(); });
+const baselineController = new AbortController();
+after(async () => {
+  baselineController.abort();
+  await Promise.allSettled([baseline]);
+  for (const cleanup of cleanups) await cleanup();
+});
 let baseline: Promise<string> | undefined;
 function installedBaseline() {
   return baseline ??= (async () => {
-    const f = await businessFixture({ after: cleanup => { cleanups.push(cleanup); } } as TestContext, {});
+    const f = await businessFixture({ signal: baselineController.signal, after: cleanup => { cleanups.push(cleanup); } } as TestContext, {});
     await openContextControl(f.root, true);
     return f.root;
   })();
