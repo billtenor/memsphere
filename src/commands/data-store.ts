@@ -63,7 +63,7 @@ export function registerDataStoreCommands(data: Command) {
       await assertModelOperationStamp(config.scopeRoot, state.stamp);
       emitCommandResult({ project: config.project?.name, storeId: id, ...state.binding, directory: state.directory,
         ...status,
-        idRule: value ? "single portable record name; .json is a physical suffix" : state.binding.factory === "memsphere/tos" ? "portable relative path; no filename suffix required" : "portable relative path including a MIME-mapped suffix",
+        idRule: value ? state.binding.factory === "memsphere/tos-json" ? "portable relative path; .json is a physical suffix" : "single portable record name; .json is a physical suffix" : state.binding.factory === "memsphere/tos" ? "portable relative path; no filename suffix required" : "portable relative path including a MIME-mapped suffix",
         capabilities: { value: jsonValue, payload: !value && status.status === "available", conditionalWrite: value && jsonValue || status.status === "available" && state.binding.factory === "memsphere/tos" && state.binding.config.mode === "revision", update: status.status === "available" && (value ? jsonValue : state.binding.factory !== "memsphere/tos" || state.binding.config.mode === "revision"), upsert: value && jsonValue, edit: value && jsonValue }, ...(mapping ? { contentTypeExtensions: mapping } : {}) }, options.output);
     });
   output(store.command("create <store-id>").requiredOption("--model <ref>")

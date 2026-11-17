@@ -5,38 +5,54 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { createBusinessStore } from "../../src/project/business-stores.js";
+import { ownedSetup } from "../support/owned-setup.js";
 
 export const objectSchema = { type: "object", properties: { name: { type: "string" }, count: { type: "integer", minimum: 0 }, items: { type: "array", items: { type: "integer" } } }, required: ["name", "count"], additionalProperties: false };
-export async function businessFixture(t: TestContext, schemas: Record<string, unknown> = { "record.json": objectSchema }) {
-  const directory = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "memsphere-business-data-")));
+export function businessFixture(t: TestContext, schemas: Record<string, unknown> = { "record.json": objectSchema }) {
+  let directory: string | undefined, initializing: Promise<unknown> | undefined;
   const cleanups: Array<() => Promise<void>> = [];
-  const beforeCleanup = (cleanup: () => Promise<void>) => { cleanups.push(cleanup); };
+  const context = { signal: t.signal };
+  const owner = ownedSetup(t.signal, async () => { await Promise.allSettled([initializing]); });
+  // Register before mkdtemp, including ownership of a directory returned late.
   t.after(async () => {
-    for (const cleanup of cleanups) await cleanup();
-    await fs.rm(directory, { recursive: true, force: true });
+    const settled = owner.stop();
+    void settled.catch(() => undefined);
+    // Stop consumers first, so they can release resources needed by in-flight I/O.
+    try { for (const cleanup of cleanups) await cleanup(); }
+    finally { await settled; }
+    if (directory) await fs.rm(directory, { recursive: true, force: true });
   });
-  const root = join(directory, "project"); const home = join(directory, "home"); const cwd = join(directory, "workspace");
-  await fs.mkdir(join(root, "models", "json-schema", "draft-07"), { recursive: true });
-  await fs.mkdir(home); await fs.mkdir(cwd); await fs.mkdir(join(root, "memory"));
-  await fs.writeFile(join(root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" } }));
-  await fs.writeFile(join(root, "project.json"), JSON.stringify({ format_version: 1, name: "test-project", created_at: "2026-10-05T00:00:00.000Z" }));
-  await fs.writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: { "test-project": { root } }, workspaces: {} }));
-  for (const [name, schema] of Object.entries(schemas)) await fs.writeFile(join(root, "models", "json-schema", "draft-07", name), JSON.stringify(schema));
-  const registerModels = async (refs = Object.keys(schemas)) => {
-    for (const ref of refs) {
-      const directory = join(root, "models/registrations/project");
-      const registry = await createModelRegistrationStore({}, "fixture-registrations", directory);
-      const page = await registry.list({}, { limit: 1000 });
-      let exists = false;
-      for (const item of page.items) if (((await registry.get({}, item.id))?.value as { modelRef?: string } | undefined)?.modelRef === ref) exists = true;
-      if (!exists) await registry.create({}, randomUUID(), { modelRef: ref, storage: "store", store_id: "models/json-schema/draft-07", definition_sha256: modelDefinitionHash(await fs.readFile(join(root, "models/json-schema/draft-07", ref))) });
-    }
-  };
-  const createStore = async (id = "records", model = "record.json", kind: "value" | "data" = "value", config: Record<string, unknown> = { directory: `data/${id}` }, dryRun = false) => {
-    return createBusinessStore({}, root, id, { model, kind, factory: kind === "value" ? "memsphere/filesystem-json" : "memsphere/filesystem", config }, dryRun);
-  };
-  await registerModels();
-  return { directory, root, home, cwd, createStore, beforeCleanup, registerModels };
+  const beforeCleanup = (cleanup: () => Promise<void>) => { owner.check(); cleanups.push(cleanup); };
+  const ready = Promise.resolve().then(async () => {
+    const acquired = await owner.acquire(() => fs.mkdtemp(join(tmpdir(), "memsphere-business-data-")), value => { directory = value; });
+    const resolved = await owner.acquire(() => fs.realpath(acquired), value => { directory = value; });
+    const root = join(resolved, "project"), home = join(resolved, "home"), cwd = join(resolved, "workspace");
+    await owner.acquire(() => fs.mkdir(join(root, "models", "json-schema", "draft-07"), { recursive: true }));
+    await owner.acquire(() => fs.mkdir(home)); await owner.acquire(() => fs.mkdir(cwd)); await owner.acquire(() => fs.mkdir(join(root, "memory")));
+    await owner.acquire(() => fs.writeFile(join(root, "config.json"), JSON.stringify({ store: { type: "managed", branch: "master", published_revision: "fixture" } }), context));
+    await owner.acquire(() => fs.writeFile(join(root, "project.json"), JSON.stringify({ format_version: 1, name: "test-project", created_at: "2026-10-05T00:00:00.000Z" }), context));
+    await owner.acquire(() => fs.writeFile(join(home, "registry.json"), JSON.stringify({ format_version: 1, projects: { "test-project": { root } }, workspaces: {} }), context));
+    for (const [name, schema] of Object.entries(schemas)) await owner.acquire(() => fs.writeFile(join(root, "models", "json-schema", "draft-07", name), JSON.stringify(schema), context));
+    const registerModels = async (refs = Object.keys(schemas)) => {
+      for (const ref of refs) {
+        const registry = await owner.acquire(() => createModelRegistrationStore(context, "fixture-registrations", join(root, "models/registrations/project")));
+        const page = await owner.acquire(() => registry.list(context, { limit: 1000 }));
+        let exists = false;
+        for (const item of page.items) if (((await owner.acquire(() => registry.get(context, item.id)))?.value as { modelRef?: string } | undefined)?.modelRef === ref) exists = true;
+        if (!exists) {
+          const definition = await owner.acquire(() => fs.readFile(join(root, "models/json-schema/draft-07", ref), context));
+          await owner.acquire(() => registry.create(context, randomUUID(), { modelRef: ref, storage: "store", store_id: "models/json-schema/draft-07", definition_sha256: modelDefinitionHash(definition) }));
+        }
+      }
+    };
+    const createStore = async (id = "records", model = "record.json", kind: "value" | "data" = "value", config: Record<string, unknown> = { directory: `data/${id}` }, dryRun = false) => {
+      return owner.acquire(() => createBusinessStore(context, root, id, { model, kind, factory: kind === "value" ? "memsphere/filesystem-json" : "memsphere/filesystem", config }, dryRun));
+    };
+    await registerModels(); owner.check();
+    return { directory: resolved, root, home, cwd, createStore, beforeCleanup, registerModels };
+  });
+  initializing = ready;
+  return ready;
 }
 
 export async function snapshotTree(root: string, emptyLockedFiles: string[] = []): Promise<unknown[]> {

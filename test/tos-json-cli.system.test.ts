@@ -21,6 +21,7 @@ test("TOS ValueStore CLI supports JSON operations, CAS, tombstone recreation and
   await fs.writeFile(join(f.home, 'config.json'), '{}');
   await fs.writeFile(path, JSON.stringify({ region: 'cn-beijing', endpoint: 'tos-cn-beijing.volces.com', bucket: 'test-bucket', prefix: 'json/', credentials: { source: 'env', accessKeyIdEnv: 'CLI_TOS_AK', accessKeySecretEnv: 'CLI_TOS_SK' } }));
   await run(['store', 'create', 'values', '--kind', 'value', '--factory', 'memsphere/tos-json', '--model', 'record.json', '--config-file', path]);
+  assert.equal((await run(['store', 'read', 'values'])).idRule, 'portable relative path; .json is a physical suffix');
   await fs.writeFile(valueFile, JSON.stringify({ name: 'first', count: 1 }));
   const first = await run(['create', 'a', '--store', 'values', '--value-file', valueFile]); assert.equal(typeof first.revision, 'string');
   assert.deepEqual((await run(['read', 'a', '--store', 'values'])).value, { name: 'first', count: 1 });
