@@ -1,4 +1,4 @@
-import { cp } from "node:fs/promises";
+import fs from "node:fs/promises";
 import { join } from "node:path";
 import { after, type TestContext } from "node:test";
 import { openContextControl } from "../../src/project/context-control.js";
@@ -24,20 +24,20 @@ function installedBaseline() {
  * Copy the real installed definitions, registrations and empty filesystem Stores.
  * Each test still opens/validates its own bindings and persists its own records.
  */
-export async function initializedContextFixture(t: TestContext, schemas: Record<string, unknown> = {}) {
-  const f = await businessFixture(t, schemas);
-  const source = await installedBaseline();
-  for (const entry of ["config.json", "models", "data"]) {
-    await cp(join(source, entry), join(f.root, entry), { recursive: true });
-  }
-  return f;
+export function initializedContextFixture(t: TestContext, schemas: Record<string, unknown> = {}) {
+  return businessFixture(t, schemas, async (f, acquire) => {
+    const source = await acquire(installedBaseline);
+    for (const entry of ["config.json", "models", "data"]) {
+      await acquire(() => fs.cp(join(source, entry), join(f.root, entry), { recursive: true }));
+    }
+  });
 }
 
 /** Legacy model-backed Artifact tests need installed models, without bindings
  * to unrelated Context Control Stores that change Run source discovery. */
-export async function initializedModelFixture(t: TestContext, schemas: Record<string, unknown>) {
-  const f = await businessFixture(t, schemas);
-  const source = await installedBaseline();
-  await cp(join(source, "models"), join(f.root, "models"), { recursive: true });
-  return f;
+export function initializedModelFixture(t: TestContext, schemas: Record<string, unknown>) {
+  return businessFixture(t, schemas, async (f, acquire) => {
+    const source = await acquire(installedBaseline);
+    await acquire(() => fs.cp(join(source, "models"), join(f.root, "models"), { recursive: true }));
+  });
 }

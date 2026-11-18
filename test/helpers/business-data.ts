@@ -8,7 +8,8 @@ import { createBusinessStore } from "../../src/project/business-stores.js";
 import { ownedSetup } from "../support/owned-setup.js";
 
 export const objectSchema = { type: "object", properties: { name: { type: "string" }, count: { type: "integer", minimum: 0 }, items: { type: "array", items: { type: "integer" } } }, required: ["name", "count"], additionalProperties: false };
-export function businessFixture(t: TestContext, schemas: Record<string, unknown> = { "record.json": objectSchema }) {
+type FixturePreparation = (location: { directory: string; root: string; home: string; cwd: string }, acquire: <T>(operation: () => Promise<T>) => Promise<T>) => Promise<void>;
+export function businessFixture(t: TestContext, schemas: Record<string, unknown> = { "record.json": objectSchema }, prepare?: FixturePreparation) {
   let directory: string | undefined, initializing: Promise<unknown> | undefined;
   const cleanups: Array<() => Promise<void>> = [];
   const context = { signal: t.signal };
@@ -18,8 +19,14 @@ export function businessFixture(t: TestContext, schemas: Record<string, unknown>
     const settled = owner.stop();
     void settled.catch(() => undefined);
     // Stop consumers first, so they can release resources needed by in-flight I/O.
-    try { for (const cleanup of cleanups) await cleanup(); }
-    finally { await settled; }
+    const errors: unknown[] = [];
+    for (const cleanup of cleanups) {
+      try { await cleanup(); } catch (error) { errors.push(error); }
+    }
+    try { await settled; } catch (error) { errors.push(error); }
+    // A failed consumer close may still use the directory. Preserve it, while
+    // reporting every failure after attempting all independent consumers.
+    if (errors.length) throw new AggregateError(errors, `Fixture cleanup failed; directory retained: ${directory}`);
     if (directory) await fs.rm(directory, { recursive: true, force: true });
   });
   const beforeCleanup = (cleanup: () => Promise<void>) => { owner.check(); cleanups.push(cleanup); };
@@ -48,7 +55,9 @@ export function businessFixture(t: TestContext, schemas: Record<string, unknown>
     const createStore = async (id = "records", model = "record.json", kind: "value" | "data" = "value", config: Record<string, unknown> = { directory: `data/${id}` }, dryRun = false) => {
       return owner.acquire(() => createBusinessStore(context, root, id, { model, kind, factory: kind === "value" ? "memsphere/filesystem-json" : "memsphere/filesystem", config }, dryRun));
     };
-    await registerModels(); owner.check();
+    await registerModels();
+    if (prepare) await prepare({ directory: resolved, root, home, cwd }, owner.acquire);
+    owner.check();
     return { directory: resolved, root, home, cwd, createStore, beforeCleanup, registerModels };
   });
   initializing = ready;

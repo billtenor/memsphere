@@ -82,3 +82,16 @@ test('fixture cleans its acquired directory when canonicalization fails', async 
     await assert.rejects(fs.access(directory), { code: 'ENOENT' });
   } finally { if (directory) await fs.rm(directory, { recursive: true, force: true }); }
 });
+
+test('fixture attempts independent cleanups after a consumer close fails and retains its directory', async t => {
+  const hooks: Array<() => Promise<void>> = [], failure = new Error('consumer did not close');
+  const context = { signal: t.signal, after: (cleanup: () => Promise<void>) => { hooks.push(cleanup); } } as unknown as TestContext;
+  const f = await businessFixture(context, {}), closed: string[] = [];
+  f.beforeCleanup(async () => { closed.push('first'); throw failure; });
+  f.beforeCleanup(async () => { closed.push('second'); });
+  try {
+    await assert.rejects(hooks[0](), error => error instanceof AggregateError && error.errors[0] === failure);
+    assert.deepEqual(closed, ['first', 'second']);
+    await fs.access(f.directory);
+  } finally { await fs.rm(f.directory, { recursive: true, force: true }); }
+});
