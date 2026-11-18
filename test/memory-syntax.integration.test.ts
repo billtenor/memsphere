@@ -209,3 +209,37 @@ test("Migration source hashes detect edits made after preparation", async () => 
     await assert.rejects(assertMigrationSourcesUnchanged(checked.prepared), /Memory changed while migration/);
   });
 });
+
+test("default syntax migration preserves an explicit newer graph Store Procedure", async () => {
+  await withTempDir(async dir => {
+    const memoryRoot = join(dir, "memory");
+    for (const kind of memoryKinds) await mkdir(join(memoryRoot, kind), { recursive: true });
+    const path = join(memoryRoot, "procedures", "store-graph.yaml");
+    const source = `!procedure
+syntax: memsphere-20261118-stable
+mode: graph
+names: [store-graph]
+defines: [Write a value]
+actions:
+  - !action
+    id: write
+    description: Write
+    dependencies: [!dependency {from: START}]
+    artifact:
+      name: Result
+      model: {definedBy: raw.json, definition: '{}'}
+      payload: {contentType: application/json}
+      store: {store_id: records, operation: upsert}
+`;
+    await writeFile(path, source);
+    const config: MemsphereConfig = {
+      configPath: join(dir, "config.json"), scopeRoot: dir, memoryRoot, reviewsRoot: join(dir, "reviews"),
+      runsRoot: join(dir, "runs"), archiveRoot: join(dir, "archives"), view: { host: "127.0.0.1", port: 0 }
+    };
+    const result = await checkMemorySyntaxMigration(config);
+    assert.equal(result.manifest.status, "ready");
+    assert.equal(result.manifest.files[0].changed, false);
+    assert.equal(result.manifest.files[0].to, "memsphere-20261118-stable");
+    assert.equal(await readFile(path, "utf8"), source);
+  });
+});
