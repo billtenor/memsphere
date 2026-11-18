@@ -57,7 +57,11 @@ async function context(project: string, run: string, step: string) {
   return row?.value.status === "active" && row.value.parameters.project === project && row.value.groupId === run && row.value.parameters.step === step ? row.value : undefined;
 }
 async function closeStep(project: string, run: string, step: string) {
-  try { for (const row of [await currentCommandState()].filter((r): r is NonNullable<typeof r> => Boolean(r))) if (row.value.parameters.step === step && row.value.status === "active") await updateCommandState(row, { ...row.value, status: "closed" }); } catch { /* Auxiliary state cannot fail a completed Step. */ }
+  try {
+    const row = await currentCommandState();
+    if (row?.value.status === "active" && row.value.parameters.project === project && row.value.groupId === run && row.value.parameters.step === step)
+      await updateCommandState(row, { ...row.value, status: "closed" });
+  } catch { /* Auxiliary state cannot fail a completed Step. */ }
 }
 async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, project: string) {
   const run = snapshot.run, a = g.action(run, step), c = await context(project, run.id, step.id);
@@ -167,6 +171,7 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       await assertSessionTarget(project, run.id, stepId);
       await assertReportExecutionCapability();
       const snapshot = await g.retryBusinessStore(run.id, stepId);
+      await closeStep(project, run.id, stepId);
       emitCommandResult({ runId: run.id, stepId, step: snapshot.steps.find(step => step.id === stepId), prompt: await graphNext(g, snapshot, project) }, options.output ?? "text");
       return true;
     }

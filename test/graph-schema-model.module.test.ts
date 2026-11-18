@@ -730,7 +730,29 @@ fields:
         name: note
         optional: true
 `);
+  assert.deepEqual(await runtime.businessValue(Buffer.from("No values.\n"), "text/markdown"), { quantity: [], note: [] });
+  const single = "# Values\n\n## quantity 1\n1\n\n## note 1\nA\n";
+  assert.deepEqual(await runtime.businessValue(Buffer.from(single), "text/markdown"), { quantity: [1], note: ["A"] });
   const content = "# Values\n\n## quantity 1\n1\n\n## note 1\nA\n\n## quantity 2\n2\n\n## note 2\nB\n";
   assert.deepEqual(await runtime.businessValue(Buffer.from(content), "text/markdown"), { quantity: [1, 2], note: ["A", "B"] });
   await assert.rejects(runtime.businessValue(Buffer.from(content.replace("## note 2\nB\n", "")), "text/markdown"), /note\[2\]/);
+});
+
+test("Store projection preserves nested outline fields and omits absent Optional fields", async () => {
+  const { schemaRuntime } = await import("../src/context_control/schema-contract.js");
+  const runtime = schemaRuntime(`!schema
+syntax: ${syntax}
+type: object
+format: {layout: outline}
+fields:
+  - !schema
+    name: details
+    fields:
+      - summary
+      - !schema
+        name: notes
+        optional: true
+`);
+  const content = "# Report\n\n## details\n\n### summary\nReleased\n";
+  assert.deepEqual(await runtime.businessValue(Buffer.from(content), "text/markdown"), { details: { summary: "Released" } });
 });

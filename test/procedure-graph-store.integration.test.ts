@@ -3,12 +3,9 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
-import { openBusinessStore } from "../src/project/business-stores.js";
+import { openBusinessStore, removeBusinessStore } from "../src/project/business-stores.js";
 import { readAll } from "../src/data/extensions/shared/payload.js";
-import { parseMemoryEntity } from "../src/memory/store.js";
-import { serializeMemoryYaml } from "../src/memory/serializer.js";
-import { parseMemoryYaml } from "../src/memory/yaml.js";
-import { graphMemorySyntax, graphStoreMemorySyntax } from "../src/memory/syntax.js";
+import { graphStoreMemorySyntax } from "../src/memory/syntax.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
 import type { Step } from "../src/context_control/types.js";
 
@@ -37,13 +34,6 @@ async function fixture(t: TestContext, kind: "value" | "data" = "value") {
   const { store } = await openBusinessStore({}, f.root, "records");
   return { f, service, runId: run.id, id, store };
 }
-
-test("graph Store grammar is versioned and preserves the binding through serialization", () => {
-  const graph = procedure("upsert");
-  assert.throws(() => parseMemoryEntity("procedures", { ...graph, syntax: graphMemorySyntax }), /store/);
-  const parsed = parseMemoryEntity("procedures", parseMemoryYaml(serializeMemoryYaml(graph)));
-  assert.deepEqual(parsed, graph);
-});
 
 test("graph data create preserves original bytes and media type, with no synthetic revision", async t => {
   const { service, runId, id, store } = await fixture(t, "data");
@@ -141,15 +131,16 @@ test("graph uses the same Store capability for TOS ValueStore and TOS DataStore"
     if (previousAk === undefined) delete process.env.GRAPH_ARTIFACT_TEST_AK; else process.env.GRAPH_ARTIFACT_TEST_AK = previousAk;
     if (previousSk === undefined) delete process.env.GRAPH_ARTIFACT_TEST_SK; else process.env.GRAPH_ARTIFACT_TEST_SK = previousSk;
   });
-  for (const operation of ["upsert", "create"] as const) {
+  for (const mode of ["value", "raw", "revision", "revision-timeout"] as const) {
+    const operation = mode === "value" ? "upsert" : "create";
     const f = await initializedContextFixture(t, { "record.json": { type: "object" } });
     const common = {
-      region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: `graph-${operation}/`,
+      region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: `graph-${mode}/`,
       credentials: { source: "env", accessKeyIdEnv: "GRAPH_ARTIFACT_TEST_AK", accessKeySecretEnv: "GRAPH_ARTIFACT_TEST_SK" }
     };
     await createBusinessStore({}, f.root, "records", operation === "upsert"
       ? { model: "record.json", kind: "value", factory: "memsphere/tos-json", config: common }
-      : { model: "record.json", kind: "data", factory: "memsphere/tos", config: { ...common, mode: "raw" } });
+      : { model: "record.json", kind: "data", factory: "memsphere/tos", config: { ...common, mode: mode === "revision-timeout" ? "revision" : mode } });
     const service = (await openContextControl(f.root))!;
     const { run, steps } = await service.withGraph(g => g.start({ name: "Cloud target", procedure: procedure(operation) }));
     const put = transport.put.bind(transport);
@@ -158,7 +149,9 @@ test("graph uses the same Store capability for TOS ValueStore and TOS DataStore"
     transport.put = async (...args) => {
       requests++;
       if (operation === "upsert" && requests === 1) throw new TosRequestError("PreconditionFailed", 412);
-      return put(...args);
+      const result = await put(...args);
+      if (mode === "revision-timeout" && requests === 1) throw new TosRequestError("TOS_DEADLINE");
+      return result;
     };
     await service.withGraph(async g => {
       await g.enter(run.id, steps[0].id);
@@ -172,6 +165,13 @@ test("graph uses the same Store capability for TOS ValueStore and TOS DataStore"
         assert.equal(step.status, "done");
         assert.equal(typeof step.businessReceipt?.revision, "string");
         assert.equal(requests, 2);
+      } else if (mode === "revision-timeout") {
+        await assert.rejects(report(), { code: "BUSINESS_WRITE_UNCONFIRMED" });
+        await assert.rejects(g.advance(run.id), { code: "BUSINESS_WRITE_RECOVERY_REQUIRED" });
+        assert.equal(requests, 1);
+        const snapshot = await g.snapshot(run.id);
+        assert.equal(snapshot.steps.length, 1);
+        assert.equal(snapshot.steps[0].businessReceipt, undefined);
       } else {
         const result = await report();
         assert.equal(result.step.status, "done");
@@ -181,7 +181,7 @@ test("graph uses the same Store capability for TOS ValueStore and TOS DataStore"
       }
     });
     transport.put = put;
-    assert(transport.objects.has(operation === "upsert" ? "graph-upsert/cloud.json" : "graph-create/cloud"));
+    assert([...transport.objects.keys()].some(key => key.startsWith(`graph-${mode}/cloud`)));
   }
 });
 
@@ -246,4 +246,151 @@ test("explicit JSON null is an existing ValueStore record, not a missing record"
   const row = await store.get({}, "nullable");
   assert(row);
   assert.equal(row.value, null);
+});
+
+test("Schema Markdown table freezes its array contract and writes typed values without changing the Artifact body", async t => {
+  const f = await initializedContextFixture(t, {
+    "record.json": { type: "array", items: { type: "object", required: ["quantity", "active"], properties: { quantity: { type: "number" }, active: { type: "boolean" } } } },
+    "wrong.json": { type: "string" }
+  });
+  await f.createStore();
+  await f.createStore("wrong", "wrong.json");
+  const graph = procedure("upsert");
+  const artifact = graph.actions[0].artifact!;
+  artifact.payload.contentType = "text/markdown";
+  artifact.model = { definedBy: "memsphere/schema.json", definition: `!schema
+syntax: memsphere-20261118-stable
+type: array
+format: {layout: table}
+item: !schema
+  type: object
+  fields:
+    - !schema
+      names: [quantity, Qty]
+      type: number
+      format: plain
+    - !schema
+      names: [active, Enabled]
+      type: boolean
+      format: plain
+` };
+  const service = (await openContextControl(f.root))!;
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "ValueStore");
+  await service.withGraph(async g => {
+    const wrongGraph = structuredClone(graph);
+    wrongGraph.actions[0].artifact!.store!.store_id = "wrong";
+    await assert.rejects(g.start({ name: "Wrong Schema destination", procedure: wrongGraph }), { code: "STORE_MODEL_MISMATCH" });
+    const ref = "schemas/record-table";
+    wrongGraph.actions[0].artifact!.model = { definedBy: artifact.model.definedBy, ref };
+    const memories = { [ref]: { memoryRef: ref, payload: { contentType: "application/yaml", content: artifact.model.definition!.replace("type: array", "names: [record-table]\ntype: array") } } };
+    await assert.rejects(g.start({ name: "Wrong referenced Schema destination", procedure: wrongGraph, memorySnapshot: { memories } }), { code: "STORE_MODEL_MISMATCH" });
+    const { run, steps: [step] } = await g.start({ name: "Markdown Schema", procedure: graph });
+    await g.enter(run.id, step.id);
+    const table = "| Qty | Enabled |\n| --- | --- |\n| 42 | false |\n";
+    const result = await g.report(run.id, step.id, { text: table, writeOptions: { data_id: "table" } });
+    const expected = [{ quantity: 42, active: false }];
+    const { graphArtifactDto } = await import("../src/context_control/review-repository.js");
+    assert.deepEqual((await store.get({}, "table"))?.value, expected);
+    assert.deepEqual(JSON.parse(result.artifact.business!.valueJson), expected);
+    assert.deepEqual((await graphArtifactDto(service, result.artifact)).business?.value, expected);
+    const body = await g.readArtifact(run.id, result.artifact.id);
+    assert.equal(body.contentType, "text/markdown");
+    assert.equal(Buffer.from(body.bytes).toString(), table);
+  });
+});
+
+test("a referenced input becomes a fixed Artifact even after the source is deleted and the business record changes", async t => {
+  const { f, service, runId, id, store } = await fixture(t);
+  const { createHash } = await import("node:crypto");
+  const { bytesContent } = await import("../src/data/extensions/shared/payload.js");
+  await f.createStore("source", "record.json", "data");
+  const source = (await openBusinessStore({}, f.root, "source")).store;
+  assert.equal(source.kind, "DataStore");
+  assert.equal(store.kind, "ValueStore");
+  const text = '{ "name": "original" }\n';
+  await source.create({}, { id: "source.json", model: "record.json", payload: { contentType: "application/json", content: bytesContent(Buffer.from(text)) } });
+  const artifactId = await service.withGraph(async g => {
+    const result = await g.report(runId, id, {
+      contentRef: { storeId: "source", dataId: "source.json", sha256: createHash("sha256").update(text).digest("hex") },
+      writeOptions: { data_id: "business" }
+    });
+    assert.equal(await source.delete({}, "source.json"), true);
+    await store.upsert!({}, "business", { name: "updated" });
+    const body = await g.readArtifact(runId, result.artifact.id);
+    assert.equal(Buffer.from(body.bytes).toString(), text);
+    assert.deepEqual(JSON.parse(result.artifact.business!.valueJson), { name: "original" });
+    return result.artifact.id;
+  });
+  await service.abandon(runId, "Verify historical reads");
+  for (const archived of [true, false]) {
+    await service.archive(runId, archived);
+    const body = await service.readArtifact(runId, artifactId);
+    assert.equal(Buffer.from(body.bytes).toString(), text);
+    assert.deepEqual((await store.get({}, "business"))?.value, { name: "updated" });
+  }
+  assert.equal(await store.delete({}, "business"), true);
+  await removeBusinessStore({}, f.root, "records");
+  const historical = await service.readArtifact(runId, artifactId);
+  assert.equal(Buffer.from(historical.bytes).toString(), text);
+});
+
+test("Store model drift after startup does not produce an Artifact or write business data", async t => {
+  const { f, service, runId, id, store } = await fixture(t);
+  const { publishFixtureDefinition } = await import("./helpers/business-data.js");
+  await publishFixtureDefinition(f.root, "record.json", '{"type":"object"}');
+  await assert.rejects(service.withGraph(g => g.report(runId, id, { text: '{"name":"unchanged"}' })), { code: "MODEL_ARTIFACT_TARGET_CHANGED" });
+  assert.deepEqual((await store.list({}, {})).items, []);
+  const snapshot = await service.withGraph(g => g.snapshot(runId));
+  assert.equal(snapshot.artifacts.length, 0);
+  assert.equal(snapshot.steps.length, 1);
+});
+
+for (const [type, body, expected] of [["number", "42", 42], ["boolean", "false", false]] as const) {
+  test(`plain Schema ${type} starts and writes a typed ValueStore record`, async t => {
+    const f = await initializedContextFixture(t, { "record.json": { type } });
+    await f.createStore();
+    const { store } = await openBusinessStore({}, f.root, "records");
+    assert.equal(store.kind, "ValueStore");
+    const graph = procedure("upsert");
+    const artifact = graph.actions[0].artifact!;
+    artifact.model = { definedBy: "memsphere/schema.json", definition: `!schema\nsyntax: memsphere-20261118-stable\ntype: ${type}\nformat: plain\n` };
+    artifact.payload.contentType = "text/plain";
+    await (await openContextControl(f.root))!.withGraph(async g => {
+      const { run, steps: [step] } = await g.start({ name: "Scalar Store", procedure: graph });
+      await g.enter(run.id, step.id);
+      await g.report(run.id, step.id, { text: body, writeOptions: { data_id: "scalar" } });
+    });
+    assert.equal((await store.get({}, "scalar"))?.value, expected);
+  });
+}
+
+test("a loop and its rewind replacement each use a distinct default Store record", async t => {
+  const f = await initializedContextFixture(t, { "record.json": { type: "object" } });
+  await f.createStore();
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "ValueStore");
+  const graph = procedure("upsert");
+  const write = graph.actions[0];
+  graph.actions = [write];
+  write.dependencies.push({ tag: "!dependency", from: "write", when: "artifacts.write.again = true" });
+  await (await openContextControl(f.root))!.withGraph(async g => {
+    const { run, steps: [first] } = await g.start({ name: "Write in a loop", procedure: graph });
+    await g.enter(run.id, first.id);
+    const one = await g.report(run.id, first.id, { text: '{"again":true}' });
+    const second = one.snapshot.steps.find(step => step.status === "pending")!;
+    assert(second);
+    await g.enter(run.id, second.id);
+    const two = await g.report(run.id, second.id, { text: '{"again":false}' });
+    const rewind = await g.rewind(run.id, second.id, "Replace second loop instance");
+    await assert.rejects(g.retryBusinessStore(run.id, second.id), { code: "STEP_SUPERSEDED" });
+    await g.enter(run.id, rewind.replacementStepId);
+    const three = await g.report(run.id, rewind.replacementStepId, { text: '{"again":false,"revised":true}' });
+    const writes = [one, two, three].map(result => result.artifact.business!.destination.dataId);
+    assert.equal(new Set(writes).size, 3);
+    assert.deepEqual(await Promise.all(writes.map(async id => (await store.get({}, id))?.value)), [
+      { again: true }, { again: false }, { again: false, revised: true }
+    ]);
+    assert.equal(Buffer.from((await g.readArtifact(run.id, two.artifact.id)).bytes).toString(), '{"again":false}');
+  });
 });

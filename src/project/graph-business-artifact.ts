@@ -1,3 +1,5 @@
+import { schemaRuntime } from "../context_control/schema-contract.js";
+import { MEMSPHERE_SCHEMA_MODEL } from "../memory/schema-model.js";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { withNativeFileLock } from "../file-lock.js";
@@ -55,9 +57,11 @@ export function graphBusinessStores(root: string): GraphBusinessStores {
         const type = opened.runtime.descriptor.root;
         const destinationType = type.kind === "scalar" ? type.scalar : type.kind === "map" ? "object" : type.kind;
         const mime = contentType.split(";")[0].trim().toLowerCase();
-        const schemaType = spec.model.definedBy === "json-schema/draft-07.json" && spec.model.definition
-          ? JSON.parse(spec.model.definition)?.type : undefined;
-        const sourceType = mime === "text/plain" || mime === "text/markdown" && spec.model.definedBy !== "memsphere/schema.json"
+        const schemaType = spec.model.definedBy === MEMSPHERE_SCHEMA_MODEL
+          ? schemaRuntime(spec.model.definition).contract(contentType).type
+          : spec.model.definedBy === "json-schema/draft-07.json" ? JSON.parse(spec.model.definition)?.type : undefined;
+        const text = mime === "text/plain" || mime === "text/markdown";
+        const sourceType = text && spec.model.definedBy !== MEMSPHERE_SCHEMA_MODEL
           ? "string" : schemaType === "integer" ? "number" : schemaType;
         if (typeof sourceType === "string" && sourceType !== destinationType)
           throw serviceError("STORE_MODEL_MISMATCH", `Artifact type ${sourceType} cannot write to Store type ${destinationType}`);

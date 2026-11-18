@@ -119,12 +119,13 @@ export class GraphRuntime {
       ...(review ? { reviewConfig: { reviewPolicies: review.reviews, reviewBindings: review.slots } } : {}),
       frames: [{ id: newId("frame"), type: "graph", graphFrame: { memoryRef, triggers: [], pendingSteps: [], joins: [], processedStepIds: [], nextCompletionSequence: 1 } }] };
     for (const [index, action] of procedure.actions.entries()) {
-      if (action.artifact?.store) {
-        (run.businessTargets ??= Object.create(null))[action.id] =
-          await this.businessStores().freeze(action.artifact.store, action.artifact);
+      const spec = action.artifact;
+      if (spec?.model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
+        (run.schemaContracts ??= {})[action.id] = await freezeSchemaContract(spec, snapshot.memories, { kind: "step", memoryRef, path: `actions[${index}].artifact.model.definition` });
       }
-      if (action.artifact?.model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
-        (run.schemaContracts ??= {})[action.id] = await freezeSchemaContract(action.artifact, snapshot.memories, { kind: "step", memoryRef, path: `actions[${index}].artifact.model.definition` });
+      if (spec?.store) {
+        (run.businessTargets ??= Object.create(null))[action.id] =
+          await this.businessStores().freeze(spec.store, resolvedArtifact(run, action.id, spec));
       }
     }
     await this.rules(run);
