@@ -86,7 +86,7 @@ test("official SDK cloud calibration in an owned lyj-test prefix", { skip: !cred
   await revision.update(context, input("item", "back"), { expectedRevision: repeated.revision });
   await assert.rejects(revision.update(context, input("item", "stale"), { expectedRevision: deleted.revision }), { code: "REVISION_CONFLICT" });
   const current = await revision.get(context, "item"); assert.ok(current && !current.deleted);
-  await controlledPutPair({ client, key: `${base}revision/item`, context, first: 1, condition: { ifMatch: current.revision!.slice(9) }, conflictCode: "REVISION_CONFLICT",
+  await controlledPutPair({ client, key: `${base}revision/item`, context, first: 1, condition: { ifMatch: current.revision! }, conflictCode: "REVISION_CONFLICT",
     write: (gated, ctx, index) => new TosDataStore("probe-revision", model, { ...config, prefix: `${base}revision/`, mode: "revision" }, gated)
       .update(ctx, input("item", index === 0 ? "A" : "B"), { expectedRevision: current.revision }) });
   await assert.rejects(readAll(context, current.data.payload.content), { code: "REVISION_CONFLICT" });

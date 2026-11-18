@@ -1,3 +1,6 @@
+import { Readable } from "node:stream";
+import { encodeJsonChunks } from "../data/extensions/json-serializer/streaming.js";
+import { assertEtag } from "../data/extensions/tos-datastore/revision.js";
 import { validateTosWriteOptions } from "../data/extensions/tos-datastore/write-policy.js";
 import { validateTosMime } from "../data/extensions/tos-datastore/store.js";
 import { withContextControlAccess, isContextControlStore } from "./context-control-access.js";
@@ -8,7 +11,7 @@ import type { PayloadContent } from "../data/api/payload.js";
 import type { Context } from "../data/api/context.js";
 import type { StoredValue } from "../data/api/value-store.js";
 import type { StoredData, DataStoreReadResult } from "../data/api/data-store.js";
-import { JsonPayloadSerializer, decodeJsonBytes, assertJsonDescriptor, encodeJsonValue } from "../data/extensions/json-serializer/index.js";
+import { assertJsonValue, JsonPayloadSerializer, decodeJsonBytes, assertJsonDescriptor, encodeJsonValue } from "../data/extensions/json-serializer/index.js";
 import { bytesContent, consumeContent, readAll, throwIfAborted } from "../data/extensions/shared/payload.js";
 import { parseFilesystemDataStoreConfig } from "../data/extensions/filesystem-datastore/index.js";
 import { validateRelativeFilePath } from "../data/extensions/shared/filesystem.js";
@@ -106,7 +109,12 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
   }
   function requireCas(opened: Opened, expected?: string, edit = false, modifying = false) {
     assertRevision(expected);
-    if (opened.store.kind === "ValueStore") return;
+    if (opened.store.kind === "ValueStore") {
+      if (opened.binding.factory === "memsphere/tos-json" && expected !== undefined) {
+        try { assertEtag(expected); } catch { throw serviceError("INVALID_ARGUMENT", "Expected a single Store revision"); }
+      }
+      return;
+    }
     if (edit || expected !== undefined && !opened.store.capabilities?.conditionalWrite) throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no requested conditional-write capability");
     if (modifying && opened.store.capabilities?.conditionalWrite?.required && expected === undefined) throw serviceError("INVALID_ARGUMENT", "expectedRevision is required");
   }
@@ -142,7 +150,9 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
   async function listDataUnlocked(context: Context, root: string, storeId: string, options: PaginationOptions = {}) {
     const limit = parseListLimit(options.limit);
     const opened = await openBusinessStore(context, root, storeId);
-    const scope = { command: "data.list", scope: { root, storeId, binding: opened.binding, directory: opened.directory } };
+    const binding = opened.binding.factory === "memsphere/tos" || opened.binding.factory === "memsphere/tos-json"
+      ? { ...opened.binding, config: { ...opened.binding.config, dataTimeoutMs: undefined, controlTimeoutMs: undefined } } : opened.binding;
+    const scope = { command: "data.list", scope: { root, storeId, binding, directory: opened.directory } };
     const cursor = decodeListCursor(options.cursor, scope);
     const page = await opened.store.list(context, { limit, cursor });
     await assertModelOperationStamp(root, opened.stamp);
@@ -163,7 +173,7 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
     if (!options.metadataOnly) {
       value = await recordValue(context, opened, record);
       if (options.path !== undefined) {
-        try { encodeJsonValue(value); } catch (cause) { throw serviceError("UNSUPPORTED_CAPABILITY", "Path queries require JSON-compatible values", { cause: String(cause) }); }
+        try { assertJsonValue(value); } catch (cause) { throw serviceError("UNSUPPORTED_CAPABILITY", "Path queries require JSON-compatible values", { cause: String(cause) }); }
         value = queryJsonPath(value, options.path);
       }
     }
@@ -184,6 +194,7 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
       return { payload: { contentType: input.contentType, content: input.kind === "payload" ? bytesContent(input.bytes) : input.content } };
     }
     opened.runtime.reflect(input.value);
+    if (opened.store.kind === "ValueStore") { assertJsonValue(input.value); return { value: input.value }; }
     const content = await new JsonPayloadSerializer().serialize(context, opened.runtime.descriptor, input.value);
     if (opened.store.kind === "DataStore" && contentTypeFor(opened, id) !== undefined && contentTypeFor(opened, id) !== "application/json") throw serviceError("UNSUPPORTED_CAPABILITY", "Structured JSON writes require an application/json Data ID");
     return { value: input.value, payload: { contentType: "application/json", content } };
@@ -206,7 +217,7 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
       let result: StoredValue | DataStoreReadResult | undefined;
       if (opened.store.kind === "ValueStore") result = operation === "create" ? await opened.store.create(context, id, prepared.value) : await opened.store.update(context, id, prepared.value, { expectedRevision: options.expectedRevision });
       else {
-        const data = { id, model: opened.binding.model, payload: prepared.payload };
+        const data = { id, model: opened.binding.model, payload: prepared.payload! };
         if (operation === "create") await opened.store.create(context, data); else await opened.store.update(context, data, { expectedRevision: options.expectedRevision });
         if (!opened.store.capabilities) result = await opened.store.get(context, id);
       }
@@ -293,6 +304,11 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
       return result.destination === undefined ? undefined : { operation: "data.export", id, modelRef: opened.binding.model, out: result.destination, bytes: result.bytes };
     } else {
       const value = await recordValue(context, opened, record);
+      if (opened.binding.factory === "memsphere/tos-json") {
+        const content: PayloadContent = { stream: () => Readable.toWeb(Readable.from(encodeJsonChunks(context, value))) as ReadableStream<Uint8Array> };
+        const result = await exportContent(context, content, out, () => assertModelOperationStamp(root, opened.stamp));
+        return result.destination === undefined ? undefined : { operation: "data.export", id, modelRef: opened.binding.model, out: result.destination, bytes: result.bytes };
+      }
       try { bytes = Buffer.from(encodeJsonValue(value)); }
       catch (cause) { throw serviceError("UNSUPPORTED_CAPABILITY", "Value cannot be exported as JSON", { cause: String(cause) }); }
     }

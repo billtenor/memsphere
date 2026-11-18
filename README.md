@@ -533,3 +533,5 @@ memsphere run step enter --run R --step <replacementStepId>
 ```
 
 执行后须显式 enter 新 pending 目标；受影响后继重建、独立分支保留，旧步骤不能继续提交。写入失败用同一 Run 的 status 恢复。回溯不撤销代码或外部副作用。
+
+TOS JSON ValueStore 使用 `--kind value --factory memsphere/tos-json`，无需 mode。支持原子 upsert、可选 expectedRevision 更新/删除和删除后重建。所有写冲突直接报错。两种 TOS Store 的 `dataTimeoutMs` 与 `controlTimeoutMs` 均默认 120000 毫秒，可在配置和 View 编辑。

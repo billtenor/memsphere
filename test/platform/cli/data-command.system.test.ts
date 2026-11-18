@@ -223,7 +223,7 @@ test("Store discovery does not advertise an incompatible existing raw ValueStore
   assert.equal(read.errorCode, "STORE_INCOMPATIBLE");
   assert.equal(list.items[0].errorCode, "STORE_INCOMPATIBLE");
   assert.match(read.error, /JSON/i); assert.match(list.items[0].error, /JSON/i);
-  assert.deepEqual(read.capabilities, { value: false, payload: false, conditionalWrite: false, edit: false });
+  assert.deepEqual(read.capabilities, { value: false, payload: false, conditionalWrite: false, update: false, upsert: false, edit: false });
 });
 
 test("Store discovery keeps missing and Runtime-unsupported models unavailable without opening data directories", { timeout: 15_000 }, async (t) => {
@@ -241,7 +241,7 @@ test("Store discovery keeps missing and Runtime-unsupported models unavailable w
     assert.equal(read.status, "unavailable");
     assert.equal(typeof read.error, "string"); assert.notEqual(read.error.trim(), "");
     assert.equal(typeof read.errorCode, "string");
-    assert.deepEqual(read.capabilities, { value: false, payload: false, conditionalWrite: false, edit: false });
+    assert.deepEqual(read.capabilities, { value: false, payload: false, conditionalWrite: false, update: false, upsert: false, edit: false });
   }
   assert.deepEqual(await snapshotTree(fixture.root), before);
 });
@@ -303,6 +303,6 @@ test("TOS update policy errors are reported before consuming stdin or resolving 
   project.dataStores = Object.fromEntries(["raw", "revision"].map(mode => [mode, { kind: "data", factory: "memsphere/tos", model: "record.json", config: { mode, region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: `${mode}/`, credentials: { source: "env", accessKeyIdEnv: "MEMSPHERE_MISSING_PROBE_AK", accessKeySecretEnv: "MEMSPHERE_MISSING_PROBE_SK" } } }]));
   await fs.writeFile(path, JSON.stringify(project));
   failure(await cli(t, fixture, ["data", "update", "item", "--store", "revision", "--value-file", "-", "--output", "json"], undefined, true), "INVALID_ARGUMENT");
-  failure(await cli(t, fixture, ["data", "update", "item", "--store", "revision", "--expected-revision", "bad", "--value-file", "-", "--output", "json"], undefined, true), "INVALID_ARGUMENT");
+  failure(await cli(t, fixture, ["data", "update", "item", "--store", "revision", "--expected-revision", "*", "--value-file", "-", "--output", "json"], undefined, true), "INVALID_ARGUMENT");
   failure(await cli(t, fixture, ["data", "update", "item", "--store", "raw", "--value-file", "-", "--output", "json"], undefined, true), "UNSUPPORTED_CAPABILITY");
 });

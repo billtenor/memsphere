@@ -9,9 +9,9 @@ type StoredObject = { bytes: Buffer; headers: ObjectHeaders };
 export class MemoryTosClient implements TosObjectClient {
   readonly objects = new Map<string, StoredObject>();
   readonly calls: Array<{ method: string; key?: string; ifMatch?: string; create?: boolean }> = [];
-  beforeCommit?: (key: string) => Promise<void>;
+  beforeCommit?: (key: string, context: Context) => Promise<void>;
   version = "";
-  async versioning() { this.calls.push({ method: "VERSIONING" }); return this.version; }
+  async versioning(context: Context = {}) { context.signal?.throwIfAborted(); this.calls.push({ method: "VERSIONING" }); return this.version; }
   async head(context: Context, key: string) {
     context.signal?.throwIfAborted(); this.calls.push({ method: "HEAD", key });
     const object = this.objects.get(key);
@@ -40,7 +40,7 @@ export class MemoryTosClient implements TosObjectClient {
     const chunks: Buffer[] = [];
     try { for await (const chunk of body) { context.signal?.throwIfAborted(); chunks.push(Buffer.from(chunk)); } }
     finally { context.signal?.removeEventListener("abort", abort); }
-    await this.beforeCommit?.(key);
+    await this.beforeCommit?.(key, context);
     context.signal?.throwIfAborted();
     const previous = this.objects.get(key);
     if (options.create && previous || options.ifMatch && previous?.headers.etag !== options.ifMatch) throw new TosRequestError("PreconditionFailed", 412, "fake");

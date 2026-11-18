@@ -1,13 +1,18 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { runCli } from "../../src/cli-program.js";
 
-const outputScope = new AsyncLocalStorage<symbol>();
+const outputScope = new AsyncLocalStorage<{ token: symbol; signal?: AbortSignal }>();
+/** Test adapters may consume this signal without changing public CLI handlers. */
+export const cliInvocationSignal = () => outputScope.getStore()?.signal;
 
 /** Run the real command tree/handlers within this test process. Tests that need
  * OS process or shell boundaries must continue to use their subprocess helper.
  * Call serially: environment and standard streams belong to the process.
+ * Participating test adapters consume the optional invocation signal for I/O;
+ * this does not add cancellation options to public command handlers.
  */
-export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.ProcessEnv, entrypoint: string) {
+export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.ProcessEnv, entrypoint: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const previous = { cwd: process.cwd(), env: { ...process.env }, argv: process.argv, exitCode: process.exitCode,
     stdout: process.stdout.write, stderr: process.stderr.write };
   const output: Buffer[] = [], errors: Buffer[] = [];
@@ -15,7 +20,7 @@ export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.P
   const capture = (chunks: Buffer[], target: NodeJS.WriteStream, forward: typeof process.stdout.write) => ((...args: Parameters<typeof process.stdout.write>) => {
     // node:test also writes its result protocol through these streams. Its
     // asynchronous events belong to a different scope and must reach the runner.
-    if (outputScope.getStore() !== token) return Reflect.apply(forward, target, args);
+    if (outputScope.getStore()?.token !== token) return Reflect.apply(forward, target, args);
     const [chunk, encoding, callback] = args;
     chunks.push(typeof chunk === "string" ? Buffer.from(chunk, typeof encoding === "string" ? encoding : undefined) : Buffer.from(chunk));
     (typeof encoding === "function" ? encoding : callback)?.();
@@ -28,7 +33,8 @@ export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.P
     process.argv = [process.execPath, entrypoint, ...args];
     process.exitCode = 0;
     process.stdout.write = capture(output, process.stdout, previous.stdout); process.stderr.write = capture(errors, process.stderr, previous.stderr);
-    await outputScope.run(token, () => runCli(process.argv));
+    await outputScope.run({ token, signal }, () => runCli(process.argv));
+    signal?.throwIfAborted();
     const result = { stdout: Buffer.concat(output).toString(), stderr: Buffer.concat(errors).toString() };
     if (process.exitCode) throw Object.assign(new Error(result.stderr || `CLI exited ${process.exitCode}`), result, { code: process.exitCode });
     return result;

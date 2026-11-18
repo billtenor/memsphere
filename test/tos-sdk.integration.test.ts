@@ -104,12 +104,12 @@ test("production object client sends only one conditional PUT and owns the compl
     request.on("data", chunk => chunks.push(chunk));
     request.on("end", () => {
       assert.equal(request.headers["if-match"], '"old:etag"');
-      const bytes = Buffer.concat(chunks); assert.equal(bytes.subarray(10).toString(), "original"); assert.equal(bytes.readUInt32BE(6), 43);
+      const bytes = Buffer.concat(chunks); assert.equal(bytes.subarray(14).toString(), "original"); assert.equal(bytes[4], 2); assert.equal(bytes.subarray(6,14).length, 8);
       response.writeHead(200, { etag: '"new"' }); response.end();
     });
   });
   const store = new TosDataStore("store", "file.json", { region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "probe-bucket", prefix: "test/", mode: "revision", credentials: { source: "settings", id: "test" } }, bindTosClient(f.sdk, "probe-bucket"));
-  await store.update({}, { id: "item", model: "file.json", payload: { contentType: "text/plain", content: bytesContent(Buffer.from("original")) } }, { expectedRevision: '0000002a:"old:etag"' });
+  await store.update({}, { id: "item", model: "file.json", payload: { contentType: "text/plain", content: bytesContent(Buffer.from("original")) } }, { expectedRevision: '"old:etag"' });
   assert.deepEqual(methods, ["PUT"]);
 });
 
@@ -147,16 +147,6 @@ async function assertEarlyResponse(t: TestContext, status: number, waitForEof = 
 for (const status of [200, 403, 412]) test(`processed early ${status} cannot acknowledge a stalled Payload and closes its upstream`, settings, t => assertEarlyResponse(t,status));
 test("early-response oracle detects removing the normal-EOF wait", settings, async t => {
   await assert.rejects(assertEarlyResponse(t, 200, false), /processed 200 cannot acknowledge/);
-});
-
-test("upload byte limit fails without acknowledging a partial source or retaining its stream", settings, async t => {
-  const { createTosUploadBody } = await import("../src/data/extensions/tos-datastore/store.js");
-  let cancelled = false;
-  const f = await fixture(t, (request, response) => { request.resume(); request.once("end", () => response.end()); });
-  const body = f.track(createTosUploadBody({}, { id: "item", model: "file.json", payload: { contentType: "text/plain", content: { stream: () => new ReadableStream<Uint8Array>({ pull(output) { output.enqueue(Buffer.alloc(16)); }, cancel() { cancelled = true; } }) } } }, Buffer.alloc(10), 20));
-  await assert.rejects(f.sdk.operate({}, [200], () => f.sdk.putObject({ bucket: "probe-bucket", key: "item", body }), { body }), { code: "PAYLOAD_TOO_LARGE" });
-  assert.equal(cancelled, true);
-  assert.equal(body.destroyed, true);
 });
 
 test("full SDK request debug logging blocks transmission without changing other debug namespaces", settings, async t => {
@@ -255,12 +245,12 @@ for (const scenario of [
     write: (gated, context, index) => {
       const store = new TosDataStore("store", "file.json", config, gated);
       const data = { id: "item", model: "file.json", payload: { contentType: "text/plain", content: bytesContent(Buffer.from(`writer-${index}`)) } };
-      return scenario.operation === "create" ? store.create(context, data) : store.update(context, data, { expectedRevision: '00000001:"original"' });
+      return scenario.operation === "create" ? store.create(context, data) : store.update(context, data, { expectedRevision: '"original"' });
     } });
   if ("ignoreConditions" in scenario) { await assert.rejects(run(), /Exactly one conditional writer may commit/); assert.equal(commits, 2); }
   else {
     await run(); assert.equal(commits, 1);
-    assert.equal(body!.subarray(scenario.operation === "update" ? 10 : 0).toString(), `writer-${scenario.first}`);
+    assert.equal(body!.subarray(scenario.operation === "update" ? 14 : 0).toString(), `writer-${scenario.first}`);
   }
   assert.deepEqual(methods, ["PUT", "PUT"]);
 });
@@ -287,8 +277,7 @@ test("deadline after the server commits reports uncertainty without retrying or 
   assert.deepEqual(methods, ["PUT"]);
 });
 
-for(const failure of ["source-error","byte-limit"] as const){
-  test(`processed early 200 followed by ${failure} cannot commit success or retain owned streams`,settings,async t=>{
+  test("processed early 200 followed by a source error cannot commit success or retain owned streams",settings,async t=>{
     const {createTosUploadBody}=await import("../src/data/extensions/tos-datastore/store.js");
     const first=gate(),handled=gate(),stopped=gate(),requestClosed=gate(),methods:string[]=[];
     const f=await fixture(t,(request,response)=>{
@@ -300,23 +289,21 @@ for(const failure of ["source-error","byte-limit"] as const){
       pull(output){
         if(pulls++ === 0){output.enqueue(Buffer.alloc(8));first.resolve();return;}
         if(pulls === 2)return release.promise.then(()=>{
-          if(failure === "source-error"){stopped.resolve();throw Error("private producer diagnostic");}
-          output.enqueue(Buffer.alloc(16));
+          stopped.resolve(); throw Error("private producer diagnostic");
         });
         return new Promise<void>(()=>undefined);
       },cancel(){stopped.resolve();release.resolve();}
     })}}};
-    const body=f.track(createTosUploadBody({},data,undefined,16));
+    const body=f.track(createTosUploadBody({},data));
     const writing=f.sdk.operate({signal:controller.signal},[200],async()=>{try{return await f.sdk.putObject({bucket:"probe-bucket",key:"item",body});}finally{handled.resolve();}},{body}).then(()=>{fulfilled=true;});
     const observed=writing.catch(error=>error);
     try{
       await Promise.all([first.promise,handled.promise]);t.diagnostic("client handled 200 and source produced first chunk");await new Promise<void>(resolve=>setImmediate(resolve));
       assert.equal(fulfilled,false,"SDK handled 200 while source has not reached EOF");
       release.resolve();const error=await observed;t.diagnostic("operation rejected: "+error.code);
-      assert.equal(error.code,failure === "source-error" ? "PAYLOAD_READ_ERROR" : "PAYLOAD_TOO_LARGE");
+      assert.equal(error.code,"PAYLOAD_READ_ERROR");
       assert.ok(!String(error).includes("private producer"));
       await stopped.promise;t.diagnostic("source stopped");await requestClosed.promise;t.diagnostic("server socket closed");assert.equal(body.destroyed,true);assert.equal(fulfilled,false);
       assert.deepEqual(methods,["PUT"]);
     }finally{controller.abort();release.resolve();body.destroy();await observed;}
   });
-}

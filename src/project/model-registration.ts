@@ -642,6 +642,11 @@ async function validateUpgradeCandidate(context: Context, input: ProjectModelInp
     for (const [id, binding] of Object.entries(validated.dataStores ?? {})) {
       const runtime = await runtimeFor(binding.model);
       if (binding.kind === "value") assertJsonDescriptor(runtime.descriptor.root);
+      if (binding.factory === "memsphere/tos-json") {
+        const { preflightBusinessBinding } = await import("./business-stores.js");
+        await preflightBusinessBinding(context, input.root, id, binding, runtime);
+        continue;
+      }
       if (binding.factory === "memsphere/tos") {
         const { TosDataStoreFactory, inspectPhysicalRecords } = await import("../data/extensions/tos-datastore/index.js");
         const { resolveTosCredentials } = await import("../tos-credentials.js");

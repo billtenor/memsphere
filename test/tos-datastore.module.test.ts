@@ -6,16 +6,18 @@ beforeEach(t => t.mock.timers.enable({ apis: ["setTimeout"] }));
 import type { Data } from "../src/data/api/data.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
-import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
-import { encodeRevision, decodeRevision } from "../src/data/extensions/tos-datastore/revision.js";
+import { encodeHeader, decodeHeader } from "../src/data/extensions/tos-datastore/header.js";
+import { assertEtag } from "../src/data/extensions/tos-datastore/revision.js";
 import type { TosConfig } from "../src/data/extensions/tos-datastore/config.js";
 import { casPhase, controlledPutPair } from "./support/tos-cas-barrier.js";
 import { MemoryTosClient } from "./support/tos-object-client.js";
 
+let serial = 0;
+const mutation = () => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64BE(BigInt(++serial)); return bytes; };
 const config = (mode: "raw" | "revision"): TosConfig => ({ mode, region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: "records/",
   credentials: { source: "env", accessKeyIdEnv: "TEST_AK", accessKeySecretEnv: "TEST_SK" } });
 function fixture(mode: "raw" | "revision" = "revision") {
-  const client = new MemoryTosClient(), store = new TosDataStore("records", "file.json", config(mode), client);
+  const client = new MemoryTosClient(), store = new TosDataStore("records", "file.json", config(mode), client, mutation);
   return { client, store };
 }
 function data(id: string, content = "payload"): Data { return { id, model: "file.json", payload: { contentType: "text/plain", content: bytesContent(Buffer.from(content)) } }; }
@@ -30,7 +32,7 @@ for (const mode of ["raw", "revision"] as const) {
     const record = await live(store);
     assert.equal(Buffer.from(await readAll({}, record.data.payload.content)).toString(), "payload");
     assert.equal(record.data.payload.contentType, "text/plain");
-    assert.equal(original.length, Buffer.byteLength("payload") + (mode === "revision" ? 10 : 0));
+    assert.equal(original.length, Buffer.byteLength("payload") + (mode === "revision" ? 14 : 0));
   });
   test(`${mode} empty Payload has valid metadata and no unnecessary content GET`, async () => {
     const { client, store } = fixture(mode); await store.create({}, data("item", ""));
@@ -61,12 +63,12 @@ test("revision update and repeated tombstone delete use exactly one conditional 
   assert.equal(await store.delete({}, "item", { expectedRevision: record.revision }), true);
   assert.deepEqual(client.calls.map(c => c.method), ["PUT"]);
   const deleted = await store.get({}, "item"); assert.ok(deleted?.deleted); assert.equal(await store.has({}, "item"), true);
-  assert.equal(client.objects.get("records/item")!.bytes.length, 10);
+  assert.equal(client.objects.get("records/item")!.bytes.length, 14);
   assert.deepEqual(await store.list({}), { items: [] });
   client.calls.length = 0; assert.equal(await store.delete({}, "item", { expectedRevision: deleted.revision }), true);
   assert.deepEqual(client.calls.map(c => c.method), ["PUT"]);
   const repeated = await store.get({}, "item"); assert.ok(repeated?.deleted);
-  assert.equal(decodeRevision(repeated.revision).counter, decodeRevision(deleted.revision).counter + 1);
+  assert.notEqual(repeated.revision, deleted.revision);
   await assert.rejects(store.create({}, data("item")), { code: "ALREADY_EXISTS" });
   await store.update({}, data("item", "back"), { expectedRevision: repeated.revision });
   assert.equal(Buffer.from(await readAll({}, (await live(store)).data.payload.content)).toString(), "back");
@@ -86,7 +88,7 @@ test("same old revision competition is decided at server commit, without any pre
     assert.equal(result.filter(r => r.status === "fulfilled").length, 1);
     assert.equal((result.find(r => r.status === "rejected") as PromiseRejectedResult).reason.code, "REVISION_CONFLICT");
     assert.deepEqual(client.calls.map(c => c.method), ["PUT", "PUT"]);
-    assert.ok(client.calls.every(c => c.ifMatch === decodeRevision(revision).etag));
+    assert.ok(client.calls.every(c => c.ifMatch === revision));
   } finally { controller.abort(); release(); await settled; }
 });
 
@@ -96,12 +98,13 @@ test("lazy Payload read retains its ETag and rejects concurrent replacement", as
   await assert.rejects(readAll({}, original.data.payload.content), { code: "REVISION_CONFLICT" });
 });
 
-test("counter wraps to zero without exposing a numeric revision", async () => {
+test("same-value writes use fresh internal random identities and expose the raw ETag", async () => {
   const { client, store } = fixture(); await store.create({}, data("item", ""));
-  const object = client.objects.get("records/item")!; object.bytes = Buffer.from(encodeHeader(0xffffffff, false));
-  // The fake's ETag is still a valid old snapshot token; production never derives it from metadata.
-  await store.update({}, data("item", ""), { expectedRevision: encodeRevision(0xffffffff, object.headers.etag!) });
-  const record = await live(store); assert.equal(typeof record.revision, "string"); assert.equal(decodeRevision(record.revision).counter, 0);
+  const first = await live(store), before = Buffer.from(client.objects.get("records/item")!.bytes);
+  await store.update({}, data("item", ""), { expectedRevision: first.revision });
+  const record = await live(store), object = client.objects.get("records/item")!;
+  assert.equal(record.revision, object.headers.etag); assert.notEqual(record.revision, first.revision);
+  assert.notDeepEqual(object.bytes.slice(6,14), before.slice(6,14));
 });
 
 test("physical compatibility enumeration includes deleted records hidden from list", async () => {
@@ -168,7 +171,7 @@ for (const operation of ["create", "update"] as const) for (const first of [0, 1
     if (operation === "update") await store.create({}, data("item", "old"));
     const expectedRevision = operation === "update" ? (await live(store)).revision! : undefined;
     client.calls.length = 0;
-    await controlledPutPair({ client, key: "records/item", first, condition: operation === "create" ? { create: true } : { ifMatch: decodeRevision(expectedRevision!).etag },
+    await controlledPutPair({ client, key: "records/item", first, condition: operation === "create" ? { create: true } : { ifMatch: expectedRevision! },
       conflictCode: operation === "create" ? "ALREADY_EXISTS" : "REVISION_CONFLICT",
       write: (gated, context, index) => {
         const target = new TosDataStore("records", "file.json", config(mode), gated);
@@ -190,12 +193,12 @@ for (const defect of ["status", "range", "length", "etag", "model", "format", "m
       if (defect === "length") out.headers["content-length"] = "9";
       if (defect === "etag") delete out.headers.etag;
       if (defect === "model") delete out.headers["x-tos-meta-memsphere-model"];
-      if (defect === "format") out.headers["x-tos-meta-memsphere-store-format"] = "raw-v1";
+      if (defect === "format") out.headers["x-tos-meta-memsphere-storage-version"] = "raw-v1";
       if (defect === "mime") out.headers["x-tos-meta-memsphere-content-type"] = "invalid";
       if (["short-header", "long-header", "deleted-payload"].includes(defect)) {
         out.stream.destroy();
         const { Readable } = await import("node:stream");
-        const bytes = defect === "deleted-payload" ? encodeHeader(1,true) : new Uint8Array(defect === "short-header" ? 9 : 11);
+        const bytes = defect === "deleted-payload" ? encodeHeader(Buffer.alloc(8, 1),true) : new Uint8Array(defect === "short-header" ? 13 : 15);
         out.stream = Readable.from([bytes]); owned = out.stream;
       }
       return out;
@@ -233,19 +236,20 @@ for (const scenario of ["same-payload", "update-delete", "delete-delete", "tombs
     const {store,client}=fixture();await store.create({},data("item","same"));
     let before=await store.get({},"item");assert.ok(before?.revision);
     if(scenario.startsWith("tombstone-")){await store.delete({},"item",{expectedRevision:before.revision});before=await store.get({},"item");assert.ok(before?.revision);}
-    const revision=before.revision, counter=decodeRevision(revision).counter;
+    const revision=before.revision;
     const deletes=scenario.endsWith("delete-delete") ? [true,true] : scenario.endsWith("update-delete") ? [false,true] : [false,false];
     client.calls.length=0;
-    await controlledPutPair({client,key:"records/item",first,condition:{ifMatch:decodeRevision(revision).etag},conflictCode:"REVISION_CONFLICT",write:async(gated,context,index)=>{
-      const target=new TosDataStore("records","file.json",config("revision"),gated);
+    await controlledPutPair({client,key:"records/item",first,condition:{ifMatch:revision},conflictCode:"REVISION_CONFLICT",write:async(gated,context,index)=>{
+      const target=new TosDataStore("records","file.json",config("revision"),gated,mutation);
       if(deletes[index])await target.delete(context,"item",{expectedRevision:revision});
       else await target.update(context,data("item","same"),{expectedRevision:revision});
     }});
     assert.deepEqual(client.calls.map(c=>c.method),["PUT","PUT"]);
     const physical=client.objects.get("records/item")!;
-    assert.deepEqual(physical.bytes,Buffer.concat([encodeHeader(counter+1,deletes[first]),...(deletes[first]?[]:[Buffer.from("same")])]));
+    assert.equal(decodeHeader(physical.bytes.subarray(0,14)).deleted,deletes[first]);
+    assert.equal(physical.bytes.subarray(14).toString(),deletes[first]?"":"same");
     const winner=await store.get({},"item");assert.ok(winner?.revision);
-    assert.equal(!!winner.deleted,deletes[first]);assert.equal(decodeRevision(winner.revision).counter,counter+1);assert.notEqual(winner.revision,revision);
+    assert.equal(!!winner.deleted,deletes[first]);assert.equal(winner.revision,physical.headers.etag);assert.notEqual(winner.revision,revision);
     if(!winner.deleted)assert.equal(Buffer.from(await readAll({},winner.data.payload.content)).toString(),"same");
     const snapshot=Buffer.from(physical.bytes);client.calls.length=0;
     await assert.rejects(store.update({},data("item","stale"),{expectedRevision:revision}),{code:"REVISION_CONFLICT"});
@@ -255,13 +259,13 @@ for (const scenario of ["same-payload", "update-delete", "delete-delete", "tombs
 }
 
 for(const defect of ["missing-writer","early-failure"] as const){
-  test(`CAS watchdog survives the mocked Store clock and cleans up ${defect}`, {timeout:5000},async()=>{
+  test(`CAS preparation detects ${defect} and cleans up with the mocked Store clock`, {timeout:5000},async()=>{
     const {client,store}=fixture();await store.create({},data("item"));const revision=(await live(store)).revision!;
     const bytes=Buffer.from(client.objects.get("records/item")!.bytes);client.calls.length=0;
-    await assert.rejects(controlledPutPair({client,key:"records/item",first:0,condition:{ifMatch:decodeRevision(revision).etag},conflictCode:"REVISION_CONFLICT",timeoutMs:25,write:async(gated,context,index)=>{
+    await assert.rejects(controlledPutPair({client,key:"records/item",first:0,condition:{ifMatch:revision},conflictCode:"REVISION_CONFLICT",timeoutMs:25,write:async(gated,context,index)=>{
       if(index===1){if(defect === "early-failure")throw Error("controlled failure before PUT");return;}
-      await new TosDataStore("records","file.json",config("revision"),gated).update(context,data("item","new"),{expectedRevision:revision});
-    }}),/CAS barrier deadline: both original conditions prepared/);
+      await new TosDataStore("records","file.json",config("revision"),gated,mutation).update(context,data("item","new"),{expectedRevision:revision});
+    }}),defect === "early-failure" ? /controlled failure before PUT/ : /Writer completed before both original conditions were prepared/);
     assert.deepEqual(client.objects.get("records/item")!.bytes,bytes);assert.deepEqual(client.calls,[]);
   });
 }
@@ -288,4 +292,25 @@ test("list waits for its cancelled sibling to settle and preserves the original 
     assert.equal(settled,false,"List must wait for the cancelled read's asynchronous cleanup");
     released.resolve();await rejected;
   }finally{parent.abort();fail.resolve();released.resolve();await Promise.allSettled([list,observed,rejected]);}
+});
+
+for (const mode of ['raw', 'revision'] as const) test(`${mode} writes storage-version, reads the legacy key and rejects conflicting markers`, async () => {
+  const { store, client } = fixture(mode); await store.create({}, data('metadata'));
+  const headers = client.objects.get('records/metadata')!.headers;
+  assert.equal(headers['x-tos-meta-memsphere-storage-version'], `${mode}-v1`);
+  assert.equal(headers['x-tos-meta-memsphere-store-format'], undefined);
+  headers['x-tos-meta-memsphere-store-format'] = headers['x-tos-meta-memsphere-storage-version'];
+  delete headers['x-tos-meta-memsphere-storage-version'];
+  const previous = await live(store, 'metadata');
+  assert.equal(Buffer.from(await readAll({}, previous.data.payload.content)).toString(), 'payload');
+  headers['x-tos-meta-memsphere-storage-version'] = `${mode}-v1`;
+  headers['x-tos-meta-memsphere-store-format'] = 'conflicting';
+  await assert.rejects(store.has({}, 'metadata'), { code: 'STORE_INCOMPATIBLE' });
+  headers['x-tos-meta-memsphere-store-format'] = `${mode}-v1`;
+  if (mode === 'revision') {
+    await store.update({}, data('metadata', 'new'), { expectedRevision: previous.revision });
+    const updated = client.objects.get('records/metadata')!.headers;
+    assert.equal(updated['x-tos-meta-memsphere-storage-version'], 'revision-v1');
+    assert.equal(updated['x-tos-meta-memsphere-store-format'], undefined);
+  }
 });

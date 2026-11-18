@@ -1,4 +1,5 @@
-import { encodeJsonValue } from "../extensions/json-serializer/index.js";
+import { snapshotJsonValue } from "../extensions/json-serializer/streaming.js";
+import { assertJsonValue } from "../extensions/json-serializer/index.js";
 
 type JsonObject = Record<string, unknown>;
 const noDocument = Symbol("removed JSON document");
@@ -38,26 +39,26 @@ function equal(left: unknown, right: unknown): boolean {
 function change(root: unknown, parts: string[], op: "add" | "replace" | "remove", value?: unknown): unknown {
   if (!parts.length) {
     if (op !== "add" && root === noDocument) fail("JSON Patch document does not exist");
-    return op === "remove" ? noDocument : structuredClone(value);
+    return op === "remove" ? noDocument : snapshotJsonValue(value);
   }
   const parent = get(root, parts.slice(0, -1)); const key = parts.at(-1)!;
   if (Array.isArray(parent)) {
     const position = index(key, parent.length, op === "add");
-    if (op === "add") parent.splice(position, 0, structuredClone(value));
+    if (op === "add") parent.splice(position, 0, snapshotJsonValue(value));
     else if (op === "remove") parent.splice(position, 1);
-    else parent[position] = structuredClone(value);
+    else parent[position] = snapshotJsonValue(value);
   } else if (parent !== null && typeof parent === "object") {
     if (op !== "add" && !Object.hasOwn(parent, key)) fail("JSON Patch target does not exist");
     if (op === "remove") delete (parent as JsonObject)[key];
-    else Object.defineProperty(parent, key, { value: structuredClone(value), writable: true, enumerable: true, configurable: true });
+    else Object.defineProperty(parent, key, { value: snapshotJsonValue(value), writable: true, enumerable: true, configurable: true });
   } else fail("JSON Patch parent must be an object or array");
   return root;
 }
 /** Complete patch on an isolated JSON copy. Runtime validation and CAS happen exactly once afterwards. */
 export function applyJsonPatch(value: unknown, patch: unknown): unknown {
-  encodeJsonValue(value); encodeJsonValue(patch);
+  assertJsonValue(value); assertJsonValue(patch);
   if (!Array.isArray(patch)) fail("JSON Patch must be an array");
-  let result: unknown = structuredClone(value);
+  let result: unknown = snapshotJsonValue(value);
   for (const [operationIndex, entry] of patch.entries()) {
     try {
       if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("JSON Patch operation must be an object");
@@ -71,7 +72,7 @@ export function applyJsonPatch(value: unknown, patch: unknown): unknown {
         case "copy": case "move": {
           const from = pointer(operation.from);
           if (operation.op === "move" && parts.length > from.length && from.every((part, i) => parts[i] === part)) fail("Cannot move into a descendant");
-          const copied = structuredClone(get(result, from));
+          const copied = snapshotJsonValue(get(result, from));
           if (operation.op === "move") result = change(result, from, "remove");
           result = change(result, parts, "add", copied); break;
         }
@@ -86,6 +87,6 @@ export function applyJsonPatch(value: unknown, patch: unknown): unknown {
     }
   }
   if (result === noDocument) fail("Patch removed the root; final result must be a JSON document");
-  encodeJsonValue(result);
+  assertJsonValue(result);
   return result;
 }

@@ -1,4 +1,5 @@
 import { Config } from "./data/api/config.js";
+import { parseTosConnectionConfig } from "./data/extensions/tos-datastore/config.js";
 import { parseTosConfig } from "./data/extensions/tos-datastore/config.js";
 import { withConfigFileLock } from "./config-file-lock.js";
 import { withSharedStoreLock } from "./project/shared-store-lock.js";
@@ -232,18 +233,18 @@ export function validateProjectConfigDraft(
     for (const [id, binding] of Object.entries(candidate.dataStores ?? {})) {
       if (!id.trim() || /^(?:models|runs?|archives?)(?:\/|$)/.test(id) || /^(?:memsphere\/model-registrations|memsphere\/run)(?:\/|$)/.test(id))
         throw new ConfigDraftValidationError([{ path: `dataStores.${id}`, message: "Reserved or invalid Store ID" }]);
-      if (binding.factory === "memsphere/tos") {
-        try { parseTosConfig(new Config(binding.config)); }
+      if (binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json") {
+        try { if (binding.factory === "memsphere/tos") parseTosConfig(new Config(binding.config)); else parseTosConnectionConfig(new Config(binding.config)); }
         catch { throw new ConfigDraftValidationError([{ path: `dataStores.${id}.config`, message: "Invalid TOS Store configuration" }]); }
       }
     }
     for (const [id, previous] of Object.entries(document.raw.dataStores ?? {})) {
       const next = candidate.dataStores?.[id];
       if (!next) continue; // Removing a binding retains the data.
-      const identity = (binding: typeof previous) => binding.factory === "memsphere/tos"
-        ? { ...binding, config: { ...binding.config, credentials: undefined } } : binding;
+      const identity = (binding: typeof previous) => (binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json")
+        ? { ...binding, config: { ...binding.config, credentials: undefined, dataTimeoutMs: undefined, controlTimeoutMs: undefined } } : binding;
       if (!isDeepStrictEqual(identity(previous), identity(next)))
-        throw new ConfigDraftValidationError([{ path: `dataStores.${id}`, message: "Existing Store identity, model, mode and location cannot be changed; only TOS credential references are editable" }]);
+        throw new ConfigDraftValidationError([{ path: `dataStores.${id}`, message: "Existing Store identity, model, mode and location cannot be changed; only TOS credential references and request timeouts are editable" }]);
     }
     // Retained roots are internal isolation state; editing a draft cannot expose old envelopes.
     if (document.raw.modelRegistration?.excludedDirectories?.length) {
