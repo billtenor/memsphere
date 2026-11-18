@@ -21,7 +21,7 @@ const operations: Array<[string[], string, string[]]> = [
   [["review", "resolve"], "review-resolve", ["comment", "disposition", "note", "noteFile", "validationSummary", "validationSummaryFile", "output"]],
   [["review", "submit-for-human"], "review-submit-for-human", ["assignment", "vote", "commentsFile", "summary", "summaryFile", "authorizationNote", "authorizationNoteFile", "output"]],
   [["review", "retry"], "review-retry", ["assignment", "output"]],
-  [["report"], "report", ["name", "artifact", "artifactFile", "file", "contentType", "revisedFrom", "dependsOn", "tag", "output", "revisionSummary", "revisionSummaryFile"]],
+  [["report"], "report", ["name", "artifact", "artifactFile", "file", "contentType", "revisedFrom", "dependsOn", "tag", "output", "revisionSummary", "revisionSummaryFile", "writeOptions"]],
   [["review", "create"], "review-create", ["artifact", "reviewer", "comment", "commentFile", "output"]],
   [["external", "add"], "external-add", ["source", "content", "contentType", "file", "change", "checkpoint", "output"]],
   [["artifact", "tag"], "artifact-tag", ["artifact", "tag", "output"]],

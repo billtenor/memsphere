@@ -74,7 +74,7 @@ async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
   const materials = Object.entries(step.inputs ?? {}).map(([key, refs]) => refs.length
     ? `${key}:\n${refs.map(r => `- ${r.kind}:${r.id}\n  memsphere --project ${quote(project)} run artifact show --run ${quote(run.id)} --artifact ${quote(r.id)}`).join("\n")}`
     : `${key}: []`).join("\n");
-  const prompt = renderPrompt("run.graph-step", run.language, { runId: run.id, stepId: step.id, instruction: a.description, human: a.actor === "human", rules: ruleText || (run.language === "en" ? "None" : "无"), materials: materials || "[]", artifact: JSON.stringify({ name: a.artifact!.name, model: a.artifact!.model, payload: a.artifact!.payload }, null, 2), command: c ? `memsphere continue report --artifact-file <file>` : `memsphere --project ${quote(project)} run report --run ${run.id} --step ${step.id} --artifact-file <file>` });
+  const prompt = renderPrompt("run.graph-step", run.language, { runId: run.id, stepId: step.id, instruction: a.description, human: a.actor === "human", rules: ruleText || (run.language === "en" ? "None" : "无"), materials: materials || "[]", artifact: JSON.stringify({ name: a.artifact!.name, model: a.artifact!.model, payload: a.artifact!.payload, ...(a.artifact!.store ? { store: a.artifact!.store } : {}) }, null, 2), command: c ? `memsphere continue report --artifact-file <file>` : `memsphere --project ${quote(project)} run report --run ${run.id} --step ${step.id} --artifact-file <file>` });
   if (a.artifact?.model.definedBy === "memsphere/schema.json" && step.status === "running") {
     const state = await g.schemaShow(run.id, step.id);
     const command = c ? `memsphere continue enter-schema` : `memsphere --project ${quote(project)} run enter-schema --run ${run.id} --step ${step.id}`;
@@ -162,6 +162,14 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       else emitCommandResult({ runId: run.id, stepId, artifacts: snapshot.artifacts.filter(a => a.stepId === stepId), schemaWriting: await g.schemaShow(run.id, stepId) }, options.output ?? "text");
       return true;
     }
+    if (operation === "store-retry") {
+      const stepId = needed(options.step, "--step");
+      await assertSessionTarget(project, run.id, stepId);
+      await assertReportExecutionCapability();
+      const snapshot = await g.retryBusinessStore(run.id, stepId);
+      emitCommandResult({ runId: run.id, stepId, step: snapshot.steps.find(step => step.id === stepId), prompt: await graphNext(g, snapshot, project) }, options.output ?? "text");
+      return true;
+    }
     if (operation === "rewind") {
       const stepId = needed(options.step, "--step");
       if (options.reason !== undefined && options.reasonFile !== undefined) throw failure("INVALID_ARGUMENT", "Choose --reason or --reason-file");
@@ -213,7 +221,7 @@ export async function graphCommand(operation: string, input: object): Promise<bo
     const stepId = needed(options.step, "--step");
     await assertSessionTarget(project, run.id, stepId);
     if ([options.artifact, options.artifactFile, options.file].filter(v => v !== undefined).length !== 1) throw failure("INVALID_ARGUMENT", "Choose one of --artifact, --artifact-file, --file");
-    if (options.writeOptions || options.revisedFrom || options.tag?.length || options.name) throw failure("INVALID_ARGUMENT", "Graph contract and mandatory inputs are fixed by the Step");
+    if (options.revisedFrom || options.tag?.length || options.name) throw failure("INVALID_ARGUMENT", "Graph contract and mandatory inputs are fixed by the Step");
     if (options.revisionSummary !== undefined && options.revisionSummaryFile !== undefined) throw failure("INVALID_ARGUMENT", "Choose one revision summary source");
     await assertReportExecutionCapability();
     const value = options.file ? JSON.parse(await readFile(options.file, "utf8")) : undefined;
@@ -224,7 +232,12 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       if (!match) throw failure("INVALID_ARGUMENT", "Graph dependencies require fixed artifact:ID or external:ID");
       return { kind: match[1] as "artifact" | "external", id: match[2]! };
     });
-    const result = await g.report(run.id, stepId, { ...(value ?? { text: typeof options.artifact === "string" ? options.artifact : await readFile(options.artifactFile!, "utf8") }), ...(dependencies ? { dependencies } : {}), ...((options.revisionSummary !== undefined || options.revisionSummaryFile) ? { revisionSummary: options.revisionSummary ?? await readFile(options.revisionSummaryFile!, "utf8") } : {}) });
+    let writeOptions;
+    if (options.writeOptions !== undefined) {
+      try { writeOptions = JSON.parse(options.writeOptions); }
+      catch { throw failure("INVALID_ARGUMENT", "--write-options must be inline JSON"); }
+    }
+    const result = await g.report(run.id, stepId, { writeOptions, ...(value ?? { text: typeof options.artifact === "string" ? options.artifact : await readFile(options.artifactFile!, "utf8") }), ...(dependencies ? { dependencies } : {}), ...((options.revisionSummary !== undefined || options.revisionSummaryFile) ? { revisionSummary: options.revisionSummary ?? await readFile(options.revisionSummaryFile!, "utf8") } : {}) });
     let prompt: string;
     if (result.step.status === "done") { await closeStep(project, run.id, stepId); prompt = await graphNext(g, result.snapshot, project); }
     else prompt = await stepPrompt(g, result.snapshot, result.step, project);

@@ -1,3 +1,4 @@
+import type { GraphBusinessStores } from "./business-artifact.js";
 import { automaticOutputs, deriveOutputs, outputOverrides } from "./outputs.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "../data/api/context.js";
@@ -20,10 +21,10 @@ const uniqueRefs = (refs: Ref[]) => [...new Map(refs.map(r => [refKey(r), r])).v
 
 /** Domain writes and recovery use each ValueStore record's uniqueness and CAS. */
 export class ContextControl {
-  constructor(readonly stores: Stores, private readonly contentReader: ContentReader, readonly runtime: ContextRuntime = systemContextRuntime) {}
+  constructor(readonly stores: Stores, private readonly contentReader: ContentReader, readonly runtime: ContextRuntime = systemContextRuntime, private readonly business?: GraphBusinessStores) {}
   /** Graph operations share the same model Stores. */
   async withGraph<T>(action: (runtime: GraphRuntime) => Promise<T>): Promise<T> {
-    return action(new GraphRuntime(this.stores, this.contentReader, this.runtime));
+    return action(new GraphRuntime(this.stores, this.contentReader, this.runtime, this.business));
   }
   private key(entity: Entity, runId: string, entityId: string) { return entity === "run" ? entityId : `${runId}/${entityId}`; }
   private async record<T>(entity: Entity, runId: string, entityId: string, context: Context = {}): Promise<(StoredValue & { value: T }) | undefined> {

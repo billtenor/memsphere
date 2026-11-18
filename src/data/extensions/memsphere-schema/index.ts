@@ -5,7 +5,7 @@ import type { Descriptor, Value } from "../../api/reflection.js";
 import { MEMSPHERE_SCHEMA_MODEL, parseSchemaModel } from "../../../memory/schema-model.js";
 import { inferSchemaType } from "../../../memory/schema.js";
 import type { ArtifactFormatSpec } from "../../../memory/ast.js";
-import { ArtifactValidationFailure, createBuiltInArtifactValidatorRegistry, prepareArtifactCandidate, type CompiledArtifactContract } from "../../../artifact-validation.js";
+import { ArtifactValidationFailure, createBuiltInArtifactValidatorRegistry, prepareArtifactCandidate, schemaBusinessValue, type CompiledArtifactContract } from "../../../artifact-validation.js";
 
 export { MEMSPHERE_SCHEMA_MODEL };
 export function schemaPayloadFormat(contentType: string): ArtifactFormatSpec {
@@ -36,13 +36,21 @@ export class SchemaModelRuntime implements ModelRuntime {
     }
     return { name: node.names[0] ?? "Artifact", type, format, schema: { ...node, format }, final: false };
   }
-  async validatePayload(bytes: Uint8Array, contentType: string): Promise<void> {
+  private async validatedCandidate(bytes: Uint8Array, contentType: string) {
     const contract = this.contract(contentType);
     const registry = createBuiltInArtifactValidatorRegistry();
     const context = { runId: "schema", stepId: "schema", artifactPath: "artifact", attemptId: "validation" };
     const candidate = await prepareArtifactCandidate(contract, { kind: "inline", value: new TextDecoder("utf-8", { fatal: true }).decode(bytes) }, context);
     const result = await registry.execute(registry.resolvePlan(contract), { contract, candidate, context });
     if (result.status !== "passed") throw new ArtifactValidationFailure(result);
+    return { contract, candidate };
+  }
+  async validatePayload(bytes: Uint8Array, contentType: string): Promise<void> {
+    await this.validatedCandidate(bytes, contentType);
+  }
+  async businessValue(bytes: Uint8Array, contentType: string): Promise<unknown> {
+    const { contract, candidate } = await this.validatedCandidate(bytes, contentType);
+    return schemaBusinessValue(this.schema.node, contract, candidate);
   }
 }
 export class SchemaModelRuntimeFactory implements ModelRuntimeFactory<string> {

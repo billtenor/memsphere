@@ -306,3 +306,32 @@ test('rewind JSON argument and superseded errors use the structured stderr contr
   }
   assert.deepEqual(await snapshotTree(f.root), before);
 });
+
+test("graph native and Continue reports validate business options before writing", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const { mutateModel } = await import("../src/project/model-service.js");
+  const { openBusinessStore } = await import("../src/project/business-stores.js");
+  await mutateModel({}, f.root, "create", "cli-record.json", { source: '{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}' });
+  await f.createStore("records", "cli-record.json");
+  const artifact: NonNullable<GraphProcedureMemory["actions"][number]["artifact"]> = {
+    name: "Record", model: { definedBy: "json-schema/draft-07.json", definition: '{"type":"object"}' },
+    payload: { contentType: "application/json" }, store: { store_id: "records", operation: "upsert" }
+  };
+  await writeFile(f.procedure, serializeMemoryYaml({
+    tag: "!procedure", syntax: "memsphere-20261118-stable", names: ["cli-store"], defines: ["Save records"], goals: [], mode: "graph",
+    actions: [{ tag: "!action", id: "write", description: "Save", dependencies: [{ tag: "!dependency", from: "START" }], artifact }]
+  }));
+  const { store } = await openBusinessStore({}, f.root, "records");
+  const first = await f.call("run", "start", "--file", f.procedure, "--name", "Native");
+  const step = (await f.call("run", "show", "--run", first.runId)).steps[0].id;
+  await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", "{}", "--write-options", '{"data_id":"native"}'));
+  assert.deepEqual((await store.list({}, {})).items, []);
+  await f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", '{"data_id":"native"}');
+  const second = await f.call("run", "start", "--file", f.procedure, "--name", "Continue");
+  await assert.rejects(f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"unexpected":true}'));
+  assert.equal((await store.list({}, {})).items.length, 1);
+  const done = await f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"data_id":"continue"}');
+  assert.equal(done.runId, second.runId);
+  assert.equal(done.status, "done");
+  assert.deepEqual((await store.get({}, "continue") as { value: unknown }).value, { name: "continue" });
+});

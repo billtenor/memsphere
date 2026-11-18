@@ -741,7 +741,8 @@ function deriveMarkdownOutlineChildren(
   contract: CompiledArtifactContract,
   candidate: PreparedArtifactCandidate,
   contractPath: string,
-  fieldPath: string
+  fieldPath: string,
+  strictRepeat = false
 ): DerivedSchemaChild[] {
   if (candidate.representation.kind !== "markdown") return [];
   const headings = extractMarkdownHeadings(candidate.representation.ast);
@@ -760,6 +761,8 @@ function deriveMarkdownOutlineChildren(
         for (const [bodyIndex, bodyField] of field.body.entries()) {
           const match = repeatedHeadings[iterationIndex * field.body.length + bodyIndex];
           if (!match) continue;
+          if (strictRepeat && !headingMatches(match, bodyField, iterationIndex + 1))
+            throw new TypeError(`Cannot align Repeat field ${joinFieldPath(fieldPath, primaryFieldName(bodyField))}[${iterationIndex + 1}] with heading ${match.text}`);
           children.push(derivedMarkdownChild(
             bodyField,
             `${path}.body[${bodyIndex}]`,
@@ -1437,4 +1440,68 @@ export async function projectSchemaContent(schema: SchemaNode, contract: Compile
   }
   await walk(schema, contract, candidate, "schema", "");
   return result;
+}
+
+/** Project the validated Markdown structure without treating a missing field as null. */
+export function schemaBusinessValue(schema: SchemaNode, contract: CompiledArtifactContract, candidate: PreparedArtifactCandidate): unknown {
+  function project(node: SchemaNode, current: CompiledArtifactContract, prepared: PreparedArtifactCandidate, path: string): unknown {
+    if (prepared.representation.kind !== "markdown") return prepared.representation.value;
+    if (current.format.options.layout === "outline") {
+      const values = new Map<string, unknown>();
+      const repeats = new Map<string, Map<number, unknown>>();
+      for (const child of deriveMarkdownOutlineChildren(node, current, prepared, "schema", path, true)) {
+        const name = primaryFieldName(child.field);
+        const typed = isSchemaNode(child.field)
+          ? project(child.field, schemaContract(child.field, current), child.candidate, child.fieldPath)
+          : child.candidate.representation.value;
+        if (!child.contractPath.includes(".body[") || !child.contractPath.endsWith("]")) {
+          values.set(name, typed);
+          continue;
+        }
+        const instance = Number(child.fieldPath.match(/\[(\d+)\]$/)?.[1]);
+        if (!Number.isSafeInteger(instance) || instance < 1) throw new TypeError(`Cannot identify Repeat instance: ${child.fieldPath}`);
+        const entries = repeats.get(name) ?? new Map<number, unknown>();
+        entries.set(instance, typed);
+        repeats.set(name, entries);
+      }
+      for (const repeat of node.fields ?? []) {
+        if (typeof repeat !== "object" || repeat.tag !== "!repeat") continue;
+        const count = Math.max(0, ...repeat.body.map(field => repeats.get(primaryFieldName(field))?.size ?? 0));
+        for (const field of repeat.body) {
+          const name = primaryFieldName(field);
+          const entries = repeats.get(name);
+          const ordered = [];
+          for (let instance = 1; instance <= count; instance++) {
+            if (!entries?.has(instance)) throw new TypeError(`Missing Repeat value at ${joinFieldPath(path, name)}[${instance}]; cannot preserve instance alignment`);
+            ordered.push(entries.get(instance));
+          }
+          values.set(name, ordered);
+        }
+      }
+      return Object.fromEntries(values);
+    }
+    if (current.format.options.layout !== "table") return prepared.representation.value;
+    const item = node.item;
+    const rows = prepared.representation.value;
+    if (!Array.isArray(rows) || item?.tag !== "!schema" || !item.fields?.length) return rows;
+    return rows.map((row: Record<string, unknown>, index) => {
+      const values = new Map(Object.entries(row));
+      for (const field of item.fields!) {
+        if (typeof field === "object" && field.tag === "!repeat") continue;
+        const name = primaryFieldName(field);
+        const aliases = fieldNames(field).filter(alias => Object.hasOwn(row, alias));
+        if (aliases.length > 1) throw new TypeError(`Ambiguous table field: ${path}[${index + 1}].${name}`);
+        const key = aliases[0];
+        if (key === undefined) continue;
+        const parent = schemaContract(item, current);
+        const fieldContract = typeof field === "string" ? stringFieldContract(field, parent) : schemaContract(assertSchemaNode(field, name), parent);
+        const child = candidateFromStructuredValue(prepared, row[key], fieldContract, true);
+        if ("decodeError" in child.representation && child.representation.decodeError) throw new TypeError(`Invalid table field: ${path}[${index + 1}].${name}`);
+        values.delete(key);
+        values.set(name, isSchemaNode(field) ? project(field, fieldContract, child, `${path}[${index + 1}].${name}`) : child.representation.value);
+      }
+      return Object.fromEntries(values);
+    });
+  }
+  return project(schema, contract, candidate, "");
 }

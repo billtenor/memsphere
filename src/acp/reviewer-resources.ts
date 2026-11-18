@@ -147,11 +147,13 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     const item = operation === "artifact-show" ? selectArtifact() : externals.find(e => e.id === o.external);
     if (!item) throw denied(String(o.external));
     const body = await service.body(item);
-    if (o.out !== undefined) { await exportReviewerBody(o.out, body.bytes); result = { runId: run.id, id: item.id, contentType: body.contentType, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : {}), out: o.out }; }
+    const business = "business" in item && item.business
+      ? { business: { destination: item.business.destination, value: JSON.parse(item.business.valueJson) } } : {};
+    if (o.out !== undefined) { await exportReviewerBody(o.out, body.bytes); result = { runId: run.id, id: item.id, contentType: body.contentType, ...business, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : {}), out: o.out }; }
     else {
       const text = /^(text\/|application\/(?:json|yaml|x-yaml|xml|javascript))/.test(body.contentType);
       const chars = text ? Array.from(Buffer.from(body.bytes).toString("utf8")) : [];
-      result = { runId: run.id, id: item.id, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : { dependencies: item.dependencies }), contentType: body.contentType, ...(text ? { content: chars.slice(0, 200).join("") } : {}), truncated: chars.length > 200, exportCommand: reviewerCommand(`run ${operation === "artifact-show" ? "artifact" : "external"} show --run ${run.id} --${operation === "artifact-show" ? "artifact" : "external"} ${item.id} --out <file>`) };
+      result = { runId: run.id, id: item.id, ...business, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : { dependencies: item.dependencies }), contentType: body.contentType, ...(text ? { content: chars.slice(0, 200).join("") } : {}), truncated: chars.length > 200, exportCommand: reviewerCommand(`run ${operation === "artifact-show" ? "artifact" : "external"} show --run ${run.id} --${operation === "artifact-show" ? "artifact" : "external"} ${item.id} --out <file>`) };
     }
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;

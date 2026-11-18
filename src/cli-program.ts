@@ -455,6 +455,18 @@ runStep.command("enter")
   .requiredOption("--step <id>", "Step instance id")
   .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("enter", options)) throw new Error("enter requires a graph Run"); });
 
+runStep.command("store")
+  .description("Manage a graph Step's business Store write.")
+  .command("retry")
+  .description("Explicitly retry the fixed candidate's business Store write.")
+  .requiredOption("--run <id>", "Run id")
+  .requiredOption("--step <id>", "Step instance id")
+  .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
+  .action(async options => {
+    const { graphCommand } = await import("./commands/procedure-graph.js");
+    if (!await graphCommand("store-retry", options)) throw new Error("store retry requires a graph Run");
+  });
+
 runStep.command("rewind")
   .description("Rewind a current graph Step, retaining history and rebuilding affected dependencies.")
   .requiredOption("--run <id>", "Run id")

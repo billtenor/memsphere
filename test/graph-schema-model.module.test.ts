@@ -690,3 +690,47 @@ for (const outcome of ["saved", "not_saved", "unconfirmed"] as const) test(`subm
     assert.deepEqual(await g.advance(run), recovered);
   });
 });
+
+test("Store projection preserves typed table values and canonical column names", async () => {
+  const { schemaRuntime } = await import("../src/context_control/schema-contract.js");
+  const runtime = schemaRuntime(`!schema
+syntax: ${syntax}
+type: array
+format: {layout: table}
+item: !schema
+  type: object
+  fields:
+    - !schema
+      names: [quantity, Qty]
+      type: number
+      format: plain
+    - !schema
+      names: [active, Enabled]
+      type: boolean
+      format: plain
+`);
+  const table = "| Qty | Enabled |\n| --- | --- |\n| 42 | false |\n";
+  assert.deepEqual(await runtime.businessValue(Buffer.from(table), "text/markdown"), [{ quantity: 42, active: false }]);
+});
+
+test("Store projection rejects an outline Repeat whose optional fields would lose instance identity", async () => {
+  const { schemaRuntime } = await import("../src/context_control/schema-contract.js");
+  const runtime = schemaRuntime(`!schema
+syntax: ${syntax}
+type: object
+format: {layout: outline}
+fields:
+  - !repeat
+    limit: {min: 0, max: 3}
+    body:
+      - !schema
+        name: quantity
+        type: number
+      - !schema
+        name: note
+        optional: true
+`);
+  const content = "# Values\n\n## quantity 1\n1\n\n## note 1\nA\n\n## quantity 2\n2\n\n## note 2\nB\n";
+  assert.deepEqual(await runtime.businessValue(Buffer.from(content), "text/markdown"), { quantity: [1, 2], note: ["A", "B"] });
+  await assert.rejects(runtime.businessValue(Buffer.from(content.replace("## note 2\nB\n", "")), "text/markdown"), /note\[2\]/);
+});
