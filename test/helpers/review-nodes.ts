@@ -1,17 +1,16 @@
-import type test from "node:test";
 import type { GraphProcedureMemory, RulePart } from "../../src/memory/ast.js";
 import { serializeMemoryYaml } from "../../src/memory/serializer.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { initializedContextFixture } from "./initialized-context.js";
-import { businessFixture } from "./business-data.js";
+import { businessFixture, type FixtureContext } from "./business-data.js";
 import { withCurrentMemorySyntax } from "./memory.js";
 import { reviewConfiguration } from "./review.js";
 import { openContextControl } from "../../src/project/context-control.js";
 import { graphMemorySyntax } from "../../src/memory/syntax.js";
 import * as flow from "../../src/run/store.js";
 import * as reviews from "../../src/context_control/review-repository.js";
-export async function reviewNodeFixture(t: test.TestContext, graph: boolean, secondAgent = false, options: { reuseService?: boolean; statementRule?: boolean; flowContext?: boolean; flowTail?: boolean; project?: { fixture: Awaited<ReturnType<typeof businessFixture>>; service: NonNullable<Awaited<ReturnType<typeof openContextControl>>> } } = {}) {
+export async function reviewNodeFixture(t: FixtureContext, graph: boolean, secondAgent = false, options: { reuseService?: boolean; statementRule?: boolean; flowContext?: boolean; flowTail?: boolean; project?: { fixture: Awaited<ReturnType<typeof businessFixture>>; service: NonNullable<Awaited<ReturnType<typeof openContextControl>>> } } = {}) {
   const f = options.project?.fixture ?? (graph ? await initializedContextFixture(t) : await businessFixture(t, {}));
   const controlPlane = { runner: { permissions: ["artifact.read" as const, "artifact.submit" as const, "decision.decide" as const] }, actors: { human: { kind: "human" as const, name: "Human", permissions: ["artifact.read" as const, "decision.decide" as const] }, agent: { kind: "agent" as const, name: "Agent", permissions: ["artifact.read" as const, "decision.assess" as const], agent: { provider: "test", providerType: "traex" as const, command: process.execPath, args: [], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: 10000 } } } };
   const ruleFile = join(f.root, "memory/statements/checkpoint-rules.yaml");
