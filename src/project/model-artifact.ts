@@ -46,15 +46,17 @@ function canonical(value: unknown): string {
 }
 async function inspect(root: string, storeId: string, expectedModel?: string) {
   const opened = await openBusinessStore({}, root, storeId);
-  if (opened.binding.kind !== "value" || opened.binding.factory !== "memsphere/filesystem-json" || opened.store.kind !== "ValueStore" || !opened.store.upsert)
-    throw serviceError("UNSUPPORTED_CAPABILITY", "Model Artifacts require a filesystem JSON ValueStore with atomic upsert");
+  if (opened.binding.kind !== "value" || opened.store.kind !== "ValueStore" || !opened.store.upsert)
+    throw serviceError("UNSUPPORTED_CAPABILITY", "Model Artifacts require a JSON ValueStore with atomic upsert");
   if (expectedModel && opened.binding.model !== expectedModel)
     throw serviceError("STORE_MODEL_MISMATCH", `Store ${storeId} does not use ${expectedModel}`);
   const host = await createProjectModelHost({}, { root, ...opened.project });
   const model = await host.definition(opened.binding.model);
   const metaDefinition = model.metaModel === JSON_SCHEMA_DRAFT_07 ? (await host.manager.getModel({}, JSON_SCHEMA_DRAFT_07)).definition : (await host.definition(model.metaModel)).definition;
+  const config: Record<string, unknown> = { ...opened.binding.config, directory: opened.directory };
+  if (opened.binding.factory === "memsphere/tos-json") { delete config.dataTimeoutMs; delete config.controlTimeoutMs; }
   const fingerprint = createHash("sha256").update(canonical({
-    binding: { ...opened.binding, config: { ...opened.binding.config, directory: opened.directory } },
+    binding: { ...opened.binding, config },
     metaModel: model.metaModel, definition: model.definition, metaDefinition
   })).digest("hex");
   return { opened, target: { storeId, modelRef: opened.binding.model, fingerprint } };

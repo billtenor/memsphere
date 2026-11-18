@@ -1,4 +1,12 @@
 export const zhCNViewMessages = {
+  "settings.tosNeverVersioned": "仅支持从未启用过版本控制的桶。",
+  "settings.tos.kind": "Store 类型",
+  "settings.tosValueHelp": "JSON 值；支持原子 upsert；更新和删除可选 revision，冲突直接报错；删除后可重新创建。",
+  "settings.tosValueLimit": "完整 JSON 对象最多 4 GiB，读取完整值需要足够内存。",
+  "settings.tos.dataTimeoutMs": "数据请求超时（毫秒）",
+  "settings.tos.controlTimeoutMs": "控制请求超时（毫秒）",
+  "settings.tosInvalidTimeout": "超时必须为 1–2147483647 毫秒的整数。",
+
   "settings.apps": "App 配置",
   "settings.collapseStore": "收起",
   "settings.deleteStoreConfirm": "删除 Store“{id}”的绑定？数据将保留，点击页面保存后生效。",
@@ -21,7 +29,7 @@ export const zhCNViewMessages = {
   "settings.storeWritePolicy": "写入与删除",
   "settings.revisionModeHelp": "允许更新；更新和删除都需要匹配的 revision。删除后保留删除标记，可再次写入，不保留旧正文。",
   "settings.rawModeHelp": "只允许新增，不能覆盖更新；删除会物理移除对象。正文保留原始格式。",
-  "settings.storeLimitsHelp": "模式创建后不能修改。单个对象最多 5 GiB；带 revision 时正文上限少 10 字节。",
+  "settings.storeLimitsHelp": "模式创建后不能修改。单个对象最多 5 GiB；带 revision 时正文上限少 14 字节。",
   "settings.storeDraftHelp": "添加到列表后，点击页面底部“保存”以生效。",
   "settings.savedStores": "已有 Store",
   "settings.businessStoresHelp": "管理本项目的数据存储。每个 Store 绑定一个模型，数据保存在所选位置。",

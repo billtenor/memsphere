@@ -32,7 +32,8 @@
     "./data/extensions/filesystem-json-valuestore": "./dist/data/extensions/filesystem-json-valuestore/index.js",
     "./data/extensions/tos-datastore": "./dist/data/extensions/tos-datastore/index.js",
     "./tos": "./dist/data/extensions/tos-datastore/index.js",
-    "./tos-datastore": "./dist/data/extensions/tos-datastore/index.js"
+    "./tos-datastore": "./dist/data/extensions/tos-datastore/index.js",
+    "./data/extensions/tos-json-valuestore": "./dist/data/extensions/tos-json-valuestore/index.js"
   },
   "files": [
     "dist",
@@ -75,6 +76,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^1.2.1",
     "@phosphor-icons/core": "^2.1.1",
+    "@streamparser/json": "0.0.26",
     "@volcengine/tos-sdk": "2.9.1",
     "ajv": "^8.20.0",
     "commander": "^12.1.0",

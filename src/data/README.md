@@ -101,4 +101,6 @@ tuple、Record、Set 不另设类型。动态对象字段仍由 `ObjectDescripto
 - Project 模型目录通过 `src/project/models.ts` 装配。模型定义 Store 绑定 Draft-07，ModelId 是包含 `.json` 的相对文件路径。相对 `modelsDirectory` 以 Registry 的 Project 根目录为基准，不依赖 Git、Memory 或 cwd。刷新创建新的宿主，不承诺跨请求的文件快照。
 - Manager 的 dependencies 接口保留，但 Project 和内置 JSON Schema Runtime 全部拒绝跨模型引用，只允许本模型内部复用，不下载远端定义或建立 `$id` 别名。所有模型与元模型 ID 统一带 `.json`；未支持的 Runtime 规则明确报错，不改写定义约束。
 
-- TOS DataStore：`memsphere/tos`，通过官方 SDK 使用已有 bucket/prefix；raw 模式不加头且拒绝覆盖，revision 模式用十字节头和 ETag 条件 PUT 支持更新、逻辑删除和普通 update 重新写入。详见 [TOS 扩展](extensions/tos-datastore/README.md)。所有 Store 的公开 revision/expectedRevision 均为字符串，调用方原样回传。
+- TOS DataStore：`memsphere/tos`，通过官方 SDK 使用已有 bucket/prefix；raw 模式不加头且拒绝覆盖，revision 模式用十四字节随机标识头和 ETag 条件 PUT 支持更新、逻辑删除和普通 update 重新写入。详见 [TOS 扩展](extensions/tos-datastore/README.md)。所有 Store 的公开 revision/expectedRevision 均为字符串，调用方原样回传。
+
+- TOS JSON ValueStore：`memsphere/tos-json`，直接存储 JSON 值，不提供 mode；支持可选条件更新/删除、原子 upsert、删除后同 ID 重建。两种 TOS 的公开 revision 都是原始 ETag，内部随机标识由 Store 生成。两类请求超时均默认 120000 毫秒，支持配置和 View 编辑。详见 [TOS ValueStore](extensions/tos-json-valuestore/README.md)。

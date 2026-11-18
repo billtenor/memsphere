@@ -1,4 +1,4 @@
-import { decodeRevision } from "./revision.js";
+import { assertEtag } from "./revision.js";
 
 /** Shared by the Store and read-only previews, before opening the input stream. */
 export function validateTosWriteOptions(mode: "raw" | "revision", operation: "create" | "update" | "delete", expectedRevision: unknown) {
@@ -11,6 +11,6 @@ export function validateTosWriteOptions(mode: "raw" | "revision", operation: "cr
     if (operation === "update" || expectedRevision !== undefined) fail("UNSUPPORTED_CAPABILITY", "Raw TOS Store does not support this write");
     return undefined;
   }
-  try { return decodeRevision(expectedRevision); }
+  try { assertEtag(expectedRevision); return { etag: expectedRevision }; }
   catch { return fail("INVALID_ARGUMENT", "A valid TOS expectedRevision is required"); }
 }

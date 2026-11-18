@@ -9,3 +9,5 @@ export { FilesystemJsonValueStoreFactory, filesystemJsonValueStoreExtension } fr
 export { SchemaModelRuntime, SchemaModelRuntimeFactory, MEMSPHERE_SCHEMA_MODEL } from "./memsphere-schema/index.js";
 
 export { TosDataStoreFactory, tosDataStoreExtension } from "./tos-datastore/index.js";
+
+export { TosJsonValueStoreFactory, tosJsonValueStoreExtension } from "./tos-json-valuestore/index.js";

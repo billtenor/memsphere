@@ -1,10 +1,13 @@
+import { once } from "node:events";
+import { encodeJsonChunks } from "../data/extensions/json-serializer/streaming.js";
 import { Command, Option } from "commander";
 import { readConfig } from "../config.js";
+import { assertEtag } from "../data/extensions/tos-datastore/revision.js";
 import { validateTosWriteOptions } from "../data/extensions/tos-datastore/write-policy.js";
 import { getBusinessBinding, openBusinessStore, serviceError } from "../project/business-stores.js";
 import { listData, readData, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
 import { emitCommandResult } from "./cli-errors.js";
-import { assertInputOptions, readDataInput, readInputText, parseJsonInput, parseRevision } from "./input.js";
+import { assertInputOptions, readDataInput, readJsonInput, readInputText, parseJsonInput, parseRevision } from "./input.js";
 import { registerDataStoreCommands } from "./data-store.js";
 
 const output = (command: Command) => command.addOption(new Option("--output <format>").choices(["text", "json"]).default("text"));
@@ -16,7 +19,14 @@ export function registerDataCommands(program: Command) {
   stored(data.command("list").option("--limit <n>", "Page size, 1–1000; default 100").option("--cursor <token>"))
     .action(async options => { const config = await readConfig(); emitCommandResult({ project: config.project?.name, storeId: options.store, ...await listData({}, config.scopeRoot, options.store, options) }, options.output); });
   stored(data.command("read <id>").option("--metadata-only", "Read metadata without decoding Payload").option("--path <path>", "Query within the JSON value using JSONPath (RFC 9535)"))
-    .action(async (id, options) => { const config = await readConfig(); emitCommandResult({ project: config.project?.name, storeId: options.store, ...await readData({}, config.scopeRoot, options.store, id, options) }, options.output); });
+    .action(async (id, options) => { const config = await readConfig();
+      const result = { ...(config.project ? { project: config.project.name } : {}), storeId: options.store, ...await readData({}, config.scopeRoot, options.store, id, options) };
+      const { binding } = await getBusinessBinding(config.scopeRoot, options.store);
+      if (binding.factory !== "memsphere/tos-json") { emitCommandResult(result, options.output); return; }
+      for await (const chunk of encodeJsonChunks({}, result, { pretty: options.output !== "json" })) {
+        if (!process.stdout.write(chunk)) await once(process.stdout, "drain");
+      }
+    });
   stored(data.command("has <id>"))
     .action(async (id, options) => { const config = await readConfig(); emitCommandResult({ project: config.project?.name, storeId: options.store, ...await hasData({}, config.scopeRoot, options.store, id) }, options.output); });
   for (const operation of ["create", "update"] as const) {
@@ -28,15 +38,19 @@ export function registerDataCommands(program: Command) {
       const config = await readConfig();
       const { binding } = await getBusinessBinding(config.scopeRoot, options.store);
       if (binding.factory === "memsphere/tos") validateTosWriteOptions(binding.config.mode, operation, expectedRevision);
+      else if (binding.factory === "memsphere/tos-json" && expectedRevision !== undefined) {
+        try { assertEtag(expectedRevision); } catch { throw serviceError("INVALID_ARGUMENT", "Expected a single Store revision"); }
+      }
       else if (expectedRevision !== undefined && binding.kind === "data") throw serviceError("UNSUPPORTED_CAPABILITY", "Store has no conditional-write capability");
-      const input = await readDataInput(options, binding.kind === "data");
+      const input = await readDataInput(options, binding.kind === "data", binding.factory === "memsphere/tos-json");
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await writeData({}, config.scopeRoot, options.store, id, operation, input, { expectedRevision, dryRun: options.dryRun }) }, options.output);
     });
   }
   stored(valueInput(data.command("upsert <id>")).option("--dry-run"))
     .action(async (id, options) => {
       assertInputOptions(options, false);
-      const input = await readDataInput(options, false); const config = await readConfig();
+      const config = await readConfig(); const { binding } = await getBusinessBinding(config.scopeRoot, options.store);
+      const input = await readDataInput(options, false, binding.factory === "memsphere/tos-json");
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await upsertData({}, config.scopeRoot, options.store, id, input, { dryRun: options.dryRun }) }, options.output);
     });
   stored(data.command("delete <id>").option("--expected-revision <revision>").option("--dry-run"))
@@ -50,7 +64,7 @@ export function registerDataCommands(program: Command) {
       const expectedRevision = parseRevision(options.expectedRevision); const config = await readConfig();
       const opened = await openBusinessStore({}, config.scopeRoot, options.store);
       if (opened.store.kind !== "ValueStore") throw serviceError("UNSUPPORTED_CAPABILITY", "edit requires a conditional-write ValueStore");
-      const patch = parseJsonInput(options.patch ?? await readInputText(options.patchFile));
+      const patch = options.patch !== undefined ? parseJsonInput(options.patch) : opened.binding.factory === "memsphere/tos-json" ? await readJsonInput(options.patchFile) : parseJsonInput(await readInputText(options.patchFile));
       emitCommandResult({ project: config.project?.name, storeId: options.store, ...await editData({}, config.scopeRoot, options.store, id, patch, { expectedRevision, dryRun: options.dryRun }) }, options.output);
     });
   stored(data.command("export <id>").addOption(new Option("--as <format>").choices(["payload", "json"]).makeOptionMandatory())

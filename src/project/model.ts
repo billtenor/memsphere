@@ -49,14 +49,16 @@ const tosCredentialsReferenceSchema = z.discriminatedUnion("source", [
 ]);
 const tosBindingConfigSchema = z.object({
   region: z.string().min(1), endpoint: z.string().min(1), bucket: z.string().min(1), prefix: z.string().min(1),
-  mode: z.enum(["raw", "revision"]), credentials: tosCredentialsReferenceSchema
+  mode: z.enum(["raw", "revision"]), credentials: tosCredentialsReferenceSchema,
+  dataTimeoutMs: z.number().int().min(1).max(2147483647).optional(), controlTimeoutMs: z.number().int().min(1).max(2147483647).optional()
 }).strict();
 export const businessStoreBindingSchema = z.discriminatedUnion("factory", [
   z.object({ model: z.string().min(1), kind: z.literal("value"), factory: z.literal("memsphere/filesystem-json"), registrationId: z.string().uuid().optional(),
     config: z.object({ directory: businessDirectorySchema }).strict() }).strict(),
   z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/filesystem"), registrationId: z.string().uuid().optional(),
     config: z.object({ directory: businessDirectorySchema, contentTypeExtensions: z.record(z.array(z.string())).optional() }).strict() }).strict(),
-  z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/tos"), registrationId: z.string().uuid().optional(), config: tosBindingConfigSchema }).strict()
+  z.object({ model: z.string().min(1), kind: z.literal("data"), factory: z.literal("memsphere/tos"), registrationId: z.string().uuid().optional(), config: tosBindingConfigSchema }).strict(),
+  z.object({ model: z.string().min(1), kind: z.literal("value"), factory: z.literal("memsphere/tos-json"), registrationId: z.string().uuid().optional(), config: tosBindingConfigSchema.omit({ mode: true }) }).strict()
 ]);
 export type BusinessStoreBinding = z.infer<typeof businessStoreBindingSchema>;
 export const projectConfigSchema = z.object({

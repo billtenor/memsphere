@@ -9,7 +9,7 @@ import { fixture, gate, responseChunk } from "./support/tos-sdk-http.js";
 
 const settings = { timeout: 10_000 };
 const config = (mode: "raw" | "revision") => ({ mode, region:"cn-beijing",endpoint:"tos-cn-beijing.volces.com",bucket:"probe-bucket",prefix:"test/",credentials:{source:"settings" as const,id:"fixture"} });
-const identity = (mode: "raw" | "revision") => ({etag:'"snapshot"',"content-type":mode === "raw" ? "text/plain" : "application/octet-stream","x-tos-meta-memsphere-store-format":`${mode}-v1`,"x-tos-meta-memsphere-model":Buffer.from("file.json").toString("base64url"),"x-tos-meta-memsphere-content-type":"text/plain"});
+const identity = (mode: "raw" | "revision") => ({etag:'"snapshot"',"content-type":mode === "raw" ? "text/plain" : "application/octet-stream","x-tos-meta-memsphere-storage-version":`${mode}-v1`,"x-tos-meta-memsphere-model":Buffer.from("file.json").toString("base64url"),"x-tos-meta-memsphere-content-type":"text/plain"});
 const invoke = (store: TosDataStore, operation: "get" | "has" | "delete", context = {}) => store[operation](context,"item");
 
 for (const operation of ["get","has","delete"] as const) for (const failure of ["NoSuchKey","NoSuchBucket","AccessDenied","ServerError","malformed","oversized","head-denied"] as const) {
@@ -72,18 +72,18 @@ for(const defect of ["ignored-range","bad-range","missing-etag","missing-model",
     const f=await fixture(t,(request,response)=>{
       methods.push(request.method!);const done=gate();closed.push(done.promise);response.once("close",done.resolve);
       assert.equal(request.method,"GET");
-      if(request.headers.range === "bytes=0-9"){
-        const headers:Record<string,string>={...identity("revision"),"content-range":"bytes 0-9/14"};
-        if(defect === "bad-range") headers["content-range"]="bytes 1-10/14";
+      if(request.headers.range === "bytes=0-13"){
+        const headers:Record<string,string>={...identity("revision"),"content-range":"bytes 0-13/18"};
+        if(defect === "bad-range") headers["content-range"]="bytes 1-14/18";
         if(defect === "missing-etag") delete headers.etag;
         if(defect === "missing-model") delete headers["x-tos-meta-memsphere-model"];
-        if(defect === "bad-format") headers["x-tos-meta-memsphere-store-format"]="raw-v1";
+        if(defect === "bad-format") headers["x-tos-meta-memsphere-storage-version"]="raw-v1";
         if(defect === "bad-mime") headers["x-tos-meta-memsphere-content-type"]="invalid";
         response.writeHead(defect === "ignored-range" ? 200 : 206,headers);
-        response.write(defect === "short-header" ? encodeHeader(1,false).slice(0,9) : defect === "long-header" ? Buffer.concat([encodeHeader(1,false),Buffer.of(1)]) : encodeHeader(1,defect === "deleted-payload"));response.end();return;
+        response.write(defect === "short-header" ? encodeHeader(Buffer.alloc(8, 1),false).slice(0,13) : defect === "long-header" ? Buffer.concat([encodeHeader(Buffer.alloc(8, 1),false),Buffer.of(1)]) : encodeHeader(Buffer.alloc(8, 1),defect === "deleted-payload"));response.end();return;
       }
-      assert.equal(request.headers.range,"bytes=10-");assert.equal(request.headers["if-match"],'"snapshot"');
-      const headers:Record<string,string>={...identity("revision"),"content-range":defect === "payload-range" ? "bytes 11-14/15" : "bytes 10-13/14"};
+      assert.equal(request.headers.range,"bytes=14-");assert.equal(request.headers["if-match"],'"snapshot"');
+      const headers:Record<string,string>={...identity("revision"),"content-range":defect === "payload-range" ? "bytes 15-18/19" : "bytes 14-17/18"};
       if(defect === "payload-etag") headers.etag='"changed"';
       response.writeHead(defect === "payload-status" ? 200 : 206,headers);
       response.write(defect === "payload-short" ? "abc" : defect === "payload-long" ? "abcde" : "abcd");response.end();
@@ -117,7 +117,7 @@ for(const operation of ["create","update","delete"] as const) for(const status o
     });
     const store=new TosDataStore("store","file.json",config("revision"),bindTosClient(f.sdk,"probe-bucket"));
     const data={id:"item",model:"file.json",payload:{contentType:"text/plain",content:bytesContent(Buffer.from("body"))}};
-    const options={expectedRevision:'00000001:"original"'};
+    const options={expectedRevision:'"original"'};
     const operationResult=operation === "create" ? store.create({},data) : operation === "update" ? store.update({},data,options) : store.delete({},"item",options);
     if(status === 404 && operation !== "create")await assert.rejects(operationResult,{code:"REVISION_CONFLICT"});
     else await assert.rejects(operationResult,{code:"NoSuchKey",status,requestId:"write-error"});
@@ -136,16 +136,16 @@ for(const phase of ["raw-payload","revision-snapshot","revision-payload"] as con
       }
       if(request.method === "HEAD"){response.writeHead(200,{...identity(mode),"content-length":"4"});response.end();return;}
       assert.equal(request.method,"GET");
-      if(request.headers.range === "bytes=0-9"){
-        const header=encodeHeader(1,false);
-        response.writeHead(206,{...identity(mode),"content-range":"bytes 0-9/14","content-length":"10","x-tos-request-id":phase === "revision-snapshot" ? "stalled-success" : "snapshot"});
+      if(request.headers.range === "bytes=0-13"){
+        const header=encodeHeader(Buffer.alloc(8, 1),false);
+        response.writeHead(206,{...identity(mode),"content-range":"bytes 0-13/18","content-length":"14","x-tos-request-id":phase === "revision-snapshot" ? "stalled-success" : "snapshot"});
         if(phase !== "revision-snapshot"){response.end(header);return;}
         request.socket.once("close",closed.resolve);response.write(header.subarray(0,5));return;
       }
       assert.equal(request.headers["if-match"],'"snapshot"');
-      if(mode === "revision")assert.equal(request.headers.range,"bytes=10-");
+      if(mode === "revision")assert.equal(request.headers.range,"bytes=14-");
       request.socket.once("close",closed.resolve);
-      response.writeHead(mode === "raw" ? 200 : 206,{...identity(mode),"content-length":"4","x-tos-request-id":"stalled-success",...(mode === "revision" ? {"content-range":"bytes 10-13/14"} : {})});response.write("a");
+      response.writeHead(mode === "raw" ? 200 : 206,{...identity(mode),"content-length":"4","x-tos-request-id":"stalled-success",...(mode === "revision" ? {"content-range":"bytes 14-17/18"} : {})});response.write("a");
     });
     const peerGate=f.gate(),controller=f.controller();
     if(cancellation === "deadline")t.mock.timers.enable({apis:["setTimeout"]});
@@ -173,15 +173,15 @@ for (const failure of ["bad-header", "access-denied"] as const) {
         const keys=url.searchParams.get("prefix")==="peer/"?["peer/item"]:["test/bad","test/stalled"];
         response.setHeader("content-type","application/json");response.end(JSON.stringify({Contents:keys.map(Key=>({Key})),IsTruncated:false}));return;
       }
-      const header=encodeHeader(1,false);
+      const header=encodeHeader(Buffer.alloc(8, 1),false);
       if(path.endsWith("/test/bad")){
         badStarted.resolve();
         void failGate.promise.then(()=>{
           if(failure==="access-denied"){response.writeHead(403,{"content-type":"application/json"});response.end(JSON.stringify({Code:"AccessDenied"}));}
-          else {response.writeHead(206,{...identity("revision"),"content-range":"bytes 0-9/14","content-length":"10"});header[0]=0;response.end(header);}
+          else {response.writeHead(206,{...identity("revision"),"content-range":"bytes 0-13/18","content-length":"14"});header[0]=0;response.end(header);}
         });return;
       }
-      response.writeHead(206,{...identity("revision"),"content-range":"bytes 0-9/14","content-length":"10","x-tos-request-id":path.endsWith("/test/stalled")?"list-stalled":"list-peer"});
+      response.writeHead(206,{...identity("revision"),"content-range":"bytes 0-13/18","content-length":"14","x-tos-request-id":path.endsWith("/test/stalled")?"list-stalled":"list-peer"});
       if(path.endsWith("/test/stalled")){request.socket.once("close",siblingClosed.resolve);response.write(header.subarray(0,5));return;}
       assert.ok(path.endsWith("/peer/item"));
       response.once("close",()=>{peerClosed=true;});response.write(header.subarray(0,5));peerStarted.resolve();

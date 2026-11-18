@@ -406,3 +406,27 @@ test("legacy persisted numeric business receipt reads as a string without rewrit
   assert.equal((await readRun(f.runsRoot, completed.id)).events[0].artifact.modelData?.revision, "1");
   assert.equal(await fs.readFile(path, "utf8"), before);
 });
+
+test("model Artifact writes TOS ValueStore through atomic upsert and preserves its historical snapshot", async t => {
+  const { useTosService } = await import("./support/tos-sdk-service.js");
+  const service = useTosService(t), f = await fixture(t);
+  const previous = { ak: process.env.ARTIFACT_TOS_AK, sk: process.env.ARTIFACT_TOS_SK };
+  process.env.ARTIFACT_TOS_AK = "fake-ak"; process.env.ARTIFACT_TOS_SK = "fake-sk";
+  t.after(() => {
+    if (previous.ak === undefined) delete process.env.ARTIFACT_TOS_AK; else process.env.ARTIFACT_TOS_AK = previous.ak;
+    if (previous.sk === undefined) delete process.env.ARTIFACT_TOS_SK; else process.env.ARTIFACT_TOS_SK = previous.sk;
+  });
+  const path = join(f.root, "config.json"), project = JSON.parse(await fs.readFile(path, "utf8"));
+  project.dataStores.records = { kind: "value", model: "record.json", factory: "memsphere/tos-json", config: { region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com", bucket: "test-bucket", prefix: "artifact/", credentials: { source: "env", accessKeyIdEnv: "ARTIFACT_TOS_AK", accessKeySecretEnv: "ARTIFACT_TOS_SK" } } };
+  await fs.writeFile(path, JSON.stringify(project));
+  const run = await f.start();
+  project.dataStores.records.config.controlTimeoutMs = 180000; await fs.writeFile(path, JSON.stringify(project));
+  const done = await f.report(run.id); assert.equal(done.status, "done");
+  const artifact = done.events[0].artifact, receipt = artifact.modelData!;
+  assert.match(receipt.revision!, /^"[^"]+"$/);
+  assert.ok(service.objects.has(`artifact/${receipt.dataId}.json`));
+  const snapshot = await fs.readFile(join(f.runsRoot, artifact.path!), "utf8");
+  assert.deepEqual(JSON.parse(snapshot), (await readData({}, f.root, "records", receipt.dataId)).value);
+  await upsertData({}, f.root, "records", receipt.dataId, { kind: "value", value: { name: "later", count: 2 } });
+  assert.equal(await fs.readFile(join(f.runsRoot, artifact.path!), "utf8"), snapshot);
+});

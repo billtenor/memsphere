@@ -4,7 +4,7 @@ import type { Data } from "../src/data/api/data.js";
 import { bytesContent, readAll } from "../src/data/extensions/shared/payload.js";
 import { TosDataStore } from "../src/data/extensions/tos-datastore/store.js";
 import { encodeHeader } from "../src/data/extensions/tos-datastore/header.js";
-import { encodeRevision, decodeRevision } from "../src/data/extensions/tos-datastore/revision.js";
+import { assertEtag } from "../src/data/extensions/tos-datastore/revision.js";
 import type { TosConfig } from "../src/data/extensions/tos-datastore/config.js";
 import { MemoryTosClient } from "./support/tos-object-client.js";
 
@@ -29,7 +29,7 @@ test("business service retains TOS single-PUT writes, validates dry-run conditio
   const revision = (await live(store)).revision!;
   client.calls.length = 0;
   await assert.rejects(service.writeData({}, "project", "records", "item", "update", payload), { code: "INVALID_ARGUMENT" });
-  await assert.rejects(service.writeData({}, "project", "records", "item", "update", payload, { dryRun: true, expectedRevision: "bad" }), { code: "INVALID_ARGUMENT" });
+  await assert.rejects(service.writeData({}, "project", "records", "item", "update", payload, { dryRun: true, expectedRevision: "*" }), { code: "INVALID_ARGUMENT" });
   assert.equal(client.calls.length, 0);
   await service.writeData({}, "project", "records", "item", "update", payload, { expectedRevision: revision });
   assert.deepEqual(client.calls.map(call => call.method), ["PUT"]);
@@ -38,7 +38,7 @@ test("business service retains TOS single-PUT writes, validates dry-run conditio
   const result = await service.readData({}, "project", "records", "item");
   assert.equal(result.deleted, true); assert.equal(typeof result.revision, "string"); assert.equal("value" in result, false);
   const read=client.read.bind(client);
-  client.read=async(context,key,options)=>{assert.equal(options?.range,"bytes=0-9","A tombstone has no Payload to consume");return read(context,key,options);};
+  client.read=async(context,key,options)=>{assert.equal(options?.range,"bytes=0-13","A tombstone has no Payload to consume");return read(context,key,options);};
   client.calls.length=0;
   await assert.rejects(service.readData({},"project","records","item",{path:"$.x"}),{code:"DATA_DELETED",details:{revision:result.revision}});
   assert.deepEqual(client.calls.map(call=>call.method),["GET"]);
@@ -72,7 +72,7 @@ for (const operation of ["read","validate","export-json"] as const) for (const f
     client.read=async(context,key,options)=>{
       if(options?.ifMatch && !injected){
         injected=true;
-        if(failure === "conflict") {const next=data("item",'"concurrent"');next.payload.contentType="application/json";await store.update({},next,{expectedRevision:encodeRevision(1,current.headers.etag!)});}
+        if(failure === "conflict") {const next=data("item",'"concurrent"');next.payload.contentType="application/json";await store.update({},next,{expectedRevision:current.headers.etag!});}
         else {if(failure === "abort")controller.abort(error);throw error;}
       }
       return read(context,key,options);
@@ -84,7 +84,7 @@ for (const operation of ["read","validate","export-json"] as const) for (const f
     assert.equal(injected,true);assert.equal(published,false);
     assert.equal(client.calls.filter(call=>call.method === "PUT").length,failure === "conflict" ? 1 : 0);
     assert.equal(client.calls.filter(call=>call.method === "DELETE").length,0);
-    assert.equal(client.objects.get("records/item")!.bytes.subarray(10).toString(),failure === "conflict" ? '"concurrent"' : '"first"');
+    assert.equal(client.objects.get("records/item")!.bytes.subarray(14).toString(),failure === "conflict" ? '"concurrent"' : '"first"');
   });
 }
 for(const invalid of ["syntax","utf8","runtime"] as const){
