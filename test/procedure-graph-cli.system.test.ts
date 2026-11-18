@@ -325,6 +325,8 @@ test("graph native and Continue reports validate business options before writing
   const first = await f.call("run", "start", "--file", f.procedure, "--name", "Native");
   const step = (await f.call("run", "show", "--run", first.runId)).steps[0].id;
   await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", "{}", "--write-options", '{"data_id":"native"}'));
+  for (const data_id of ["parent/child", "a".repeat(251)])
+    await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", JSON.stringify({ data_id })), /filename/);
   assert.deepEqual((await store.list({}, {})).items, []);
   await f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", '{"data_id":"native"}');
   const second = await f.call("run", "start", "--file", f.procedure, "--name", "Continue");
@@ -402,4 +404,48 @@ test("graph Store retry closes the terminal Step's Continue binding and preserve
   assert(saved && !saved.deleted);
   assert.equal(Buffer.from(await readAll({}, saved.data.payload.content)).toString(), body);
   await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /No unsuccessful/);
+});
+
+test("Graph report and Continue accept nested file Store IDs and reject traversal", { timeout: 90000 }, async t => {
+  const f = await fixture(t, false, true, true);
+  const { mutateModel } = await import("../src/project/model-service.js");
+  const { openBusinessStore } = await import("../src/project/business-stores.js");
+  const { readAll } = await import("../src/data/extensions/shared/payload.js");
+  await mutateModel({}, f.root, "create", "cli-record.json", { source: '{"type":"object"}' });
+  await f.createStore("records", "cli-record.json", "data");
+  await writeFile(f.procedure, serializeMemoryYaml({
+    tag: "!procedure", syntax: "memsphere-20261118-stable", names: ["cli-files"], defines: ["Save files"], goals: [], mode: "graph",
+    actions: [{
+      tag: "!action", id: "write", description: "Save", dependencies: [{ tag: "!dependency", from: "START" }],
+      artifact: {
+        name: "Record", model: { definedBy: "json-schema/draft-07.json", definition: '{"type":"object"}' },
+        payload: { contentType: "application/json" }, store: { store_id: "records", operation: "create" }
+      }
+    }]
+  }));
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "DataStore");
+  for (const entry of ["native", "continue"] as const) {
+    const { runId } = await f.call("run", "start", "--file", f.procedure, "--name", entry);
+    const before = await f.call("run", "show", "--run", runId);
+    const stepId = before.steps[0].id;
+    const args = entry === "native" ? ["run", "report", "--run", runId, "--step", stepId] : ["continue", "report"];
+    const body = '{ "name": "report" }\n';
+    const report = (data_id: string) => f.call(...args, "--artifact", body, "--write-options", JSON.stringify({ data_id }));
+    const existing = (await store.list({}, {})).items;
+    await assert.rejects(report("reports/../../escape.json"), /not portable/);
+    const rejected = await f.call("run", "show", "--run", runId);
+    assert.deepEqual(rejected.artifacts, []);
+    assert.deepEqual(rejected.steps, before.steps);
+    assert.deepEqual((await store.list({}, {})).items, existing);
+    const dataId = `reports/${entry}.json`;
+    const done = await report(dataId);
+    const after = await f.call("run", "show", "--run", runId);
+    assert.equal(after.steps[0].businessReceipt.artifactId, done.artifactId);
+    assert.equal(after.artifacts[0].business.destination.dataId, dataId);
+    const row = await store.get({}, dataId);
+    assert(row && !row.deleted);
+    assert.equal(row.data.payload.contentType, "application/json");
+    assert.equal(Buffer.from(await readAll({}, row.data.payload.content)).toString(), body);
+  }
 });

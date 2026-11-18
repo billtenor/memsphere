@@ -19,11 +19,16 @@ export const modelArtifactWriteOptionsSchema = z.object({
 }).strict();
 export type ModelArtifactWriteOptions = z.infer<typeof modelArtifactWriteOptionsSchema>;
 
-export function parseModelArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
+export function parseArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
   const result = modelArtifactWriteOptionsSchema.safeParse(value);
   if (!result.success) throw serviceError("INVALID_ARGUMENT", `Invalid write-options: ${result.error.message}`);
-  if (result.data.data_id !== undefined) validateModelArtifactDataId(result.data.data_id);
   return result.data;
+}
+
+export function parseModelArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
+  const options = parseArtifactWriteOptions(value);
+  if (options.data_id !== undefined) validateModelArtifactDataId(options.data_id);
+  return options;
 }
 
 export function validateModelArtifactDataId(id: string): void {

@@ -139,7 +139,7 @@ store:
 
 `store_id` 指向当前 Project 已登记的业务 Store。`upsert` 向支持原子 upsert 的 ValueStore 写入完整校验值，`create` 向 DataStore 创建记录并保留原始字节和 MIME。接纳条件满足后才写入。collect Action 收集引用，需要落 Store 时可由后续生产 Action 提交。
 
-默认记录 ID 由 Run 和 Step 实例确定。也可以在首次有效提交时通过 `--write-options '{"data_id":"record-id"}'` 指定，评审修订沿用相同 ID。文件 DataStore 的 ID 须符合配置的 MIME 扩展名映射。
+默认记录 ID 由 Run 和 Step 实例确定。也可以在首次有效提交时通过 `--write-options '{"data_id":"record-id"}'` 指定，评审修订沿用相同 ID。文件 DataStore 的 ID 可使用 `reports/result.json` 这样的相对路径，每段须是合法文件名，扩展名须符合配置的 MIME 映射。
 
 写入未完成时，先核对固定候选以及业务记录，再用 `memsphere run step store retry --run R --step S` 显式重试。`upsert` 可能覆盖目标记录当前值，`create` 遇到现存 ID 会失败。Run 保留原始候选和已确认的写入回执。回溯、废弃和归档仅修改 Run 状态，已提交的业务记录保留。使用 `memsphere-20261027-stable` 时，接纳产物保存在 Run 的 Artifact Store 中。
 

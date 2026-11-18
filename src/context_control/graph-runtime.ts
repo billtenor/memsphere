@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { parseModelArtifactWriteOptions, type ModelArtifactWriteOptions } from "../project/model-artifact.js";
+import { parseArtifactWriteOptions, type ModelArtifactWriteOptions } from "../project/model-artifact.js";
 import { schemaRuntime } from "./schema-contract.js";
 import type { GraphBusinessStores } from "./business-artifact.js";
 import { startSchemaWriting, writingPosition, checkWritingPosition, reportSchemaItem, skipSchemaItem, repeatSchemaItem, assembleSchemaDraft } from "./schema-writing.js";
@@ -888,7 +888,7 @@ export class GraphRuntime {
     }
     const dependencies = [...new Map([...Object.values(step.inputs ?? {}).flat(), ...extra].map(r => [`${r.kind}:${r.id}`, r])).values()];
     for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
-    const options = input.writeOptions === undefined ? undefined : parseModelArtifactWriteOptions(input.writeOptions);
+    const options = input.writeOptions === undefined ? undefined : parseArtifactWriteOptions(input.writeOptions);
     const target = own(run.businessTargets ?? {}, action.id) ? run.businessTargets![action.id] : undefined;
     if (action.artifact.store && !target) throw failure("INVALID_STATE", "Frozen business Store target missing");
     if (!target && options !== undefined) throw failure("INVALID_ARGUMENT", "--write-options requires an Artifact business Store");

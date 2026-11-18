@@ -1,5 +1,6 @@
 // @integration-platform: native — uses the real project context, file Stores and native locks.
 import assert from "node:assert/strict";
+import { addAbortListener } from "node:events";
 import test, { type TestContext } from "node:test";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
@@ -85,17 +86,21 @@ test("file Store rejects unmapped record IDs before freezing, then accepts its c
   await service.withGraph(async g => {
     const { run, steps: [step] } = await g.start({ name: "Custom extension", procedure: procedure("create") });
     await g.enter(run.id, step.id);
-    for (const data_id of ["undecorated", "standard.json"]) {
-      await assert.rejects(g.report(run.id, step.id, { text: "{}", writeOptions: { data_id } }), { code: "INVALID_ARGUMENT" });
+    for (const [data_id, error] of [
+      ["undecorated", /MIME/], ["standard.json", /MIME/],
+      ["reports/../escape.record", /not portable/], [`${"a".repeat(250)}.record`, /255-byte/]
+    ] as const) {
+      await assert.rejects(g.report(run.id, step.id, { text: "{}", writeOptions: { data_id } }), error);
       const snapshot = await g.snapshot(run.id);
       assert.equal(snapshot.artifacts.length, 0);
       assert.equal(snapshot.steps.length, 1);
       assert.equal(snapshot.steps[0].businessReceipt, undefined);
       assert.deepEqual((await store.list({}, {})).items, []);
     }
-    const result = await g.report(run.id, step.id, { text: "{}", writeOptions: { data_id: "custom.record" } });
-    assert.equal(result.artifact.business!.destination.dataId, "custom.record");
-    const row = await store.get({}, "custom.record");
+    const data_id = `reports/${"a".repeat(248)}.record`;
+    const result = await g.report(run.id, step.id, { text: "{}", writeOptions: { data_id } });
+    assert.equal(result.artifact.business!.destination.dataId, data_id);
+    const row = await store.get({}, data_id);
     assert(row && !row.deleted);
     assert.equal(row.data.payload.contentType, "application/json");
   });
@@ -461,18 +466,32 @@ test("an in-flight Graph write holds the Run lock until its receipt is persisted
   assert.equal(store.kind, "ValueStore");
   const reached = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+  const canceled = Promise.withResolvers<never>();
+  const signal = AbortSignal.any([t.signal, AbortSignal.timeout(12000)]);
+  const onAbort = addAbortListener(signal, () => canceled.reject(signal.reason));
+  void canceled.promise.catch(() => undefined);
   const save = service.stores.step.update.bind(service.stores.step);
   service.stores.step.update = async (...args) => {
     const step = args[2] as Step;
     if (step.id === id && step.frames?.[0]?.submissionFrame.businessReceipt) {
       reached.resolve();
-      await release.promise;
+      await Promise.race([release.promise, canceled.promise]);
+      signal.throwIfAborted();
     }
     return save(...args);
   };
   const pending = service.withGraph(g => g.report(runId, id, { text: '{"name":"first"}', writeOptions: { data_id: "held" } }));
+  const settled = pending.then(() => undefined, () => undefined);
+  f.beforeCleanup(async () => {
+    release.resolve();
+    const cleanupSignal = AbortSignal.timeout(5000);
+    const cleanupTimeout = Promise.withResolvers<never>();
+    const onTimeout = addAbortListener(cleanupSignal, () => cleanupTimeout.reject(cleanupSignal.reason));
+    try { await Promise.race([settled, cleanupTimeout.promise]); }
+    finally { onTimeout[Symbol.dispose](); }
+  });
   try {
-    await Promise.race([reached.promise, pending.then(() => { throw new Error("Write completed without reaching the receipt gate"); })]);
+    await Promise.race([canceled.promise, reached.promise, pending.then(() => { throw new Error("Write completed without reaching the receipt gate"); })]);
     const independentService = (await openContextControl(f.root))!;
     await independentService.withGraph(async g => {
       const before = await g.snapshot(runId);
@@ -485,15 +504,45 @@ test("an in-flight Graph write holds the Run lock until its receipt is persisted
         () => g.retryBusinessStore(runId, id),
         () => g.rewind(runId, id, "Compete with write"),
         () => g.abandon(runId)
-      ]) await assert.rejects(compete(), { code: "LOCK_TIMEOUT" });
+      ]) {
+        signal.throwIfAborted();
+        await assert.rejects(compete(), { code: "LOCK_TIMEOUT" });
+      }
       assert.deepEqual(await g.snapshot(runId), before);
       assert.deepEqual(await store.get({}, "held"), written);
     });
   } finally {
     release.resolve();
-    await pending;
+    try { await Promise.race([settled, canceled.promise]); }
+    finally { onAbort[Symbol.dispose](); }
   }
   const completed = await pending;
   assert.equal(completed.step.businessReceipt?.revision, "1");
   assert.equal(completed.snapshot.steps.filter(step => step.source?.actionId === "next").length, 1);
+});
+
+test("finalized Schema writes its original JSON bytes to a file DataStore", async t => {
+  const f = await initializedContextFixture(t, { "record.json": { type: "object", required: ["name"], properties: { name: { type: "string" } } } });
+  await f.createStore("records", "record.json", "data");
+  const service = (await openContextControl(f.root))!;
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "DataStore");
+  const graph = procedure("create");
+  graph.actions[0].artifact!.model = { definedBy: "memsphere/schema.json", definition: "!schema\nsyntax: memsphere-20261118-stable\ntype: object\nfields: [name]\n" };
+  await service.withGraph(async g => {
+    const { run, steps: [step] } = await g.start({ name: "Schema file", procedure: graph });
+    await g.enter(run.id, step.id);
+    const writing = await g.enterSchema(run.id, step.id);
+    await g.schemaWrite(run.id, step.id, "report", writing.position!, '{"name":"draft"}');
+    assert.deepEqual((await store.list({}, {})).items, []);
+    const text = '{\n  "name": "final"\n}\n';
+    const dataId = "reports/schema.json";
+    const result = await g.report(run.id, step.id, { text, writeOptions: { data_id: dataId } });
+    const stored = await store.get({}, dataId);
+    assert(stored && !stored.deleted);
+    assert.equal(stored.data.payload.contentType, "application/json");
+    assert.equal(Buffer.from(await readAll({}, stored.data.payload.content)).toString(), text);
+    assert.equal(Buffer.from((await g.readArtifact(run.id, result.artifact.id)).bytes).toString(), text);
+    assert.equal(result.step.businessReceipt?.artifactId, writing.draft!.id);
+  });
 });
