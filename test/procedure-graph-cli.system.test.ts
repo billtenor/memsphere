@@ -365,6 +365,25 @@ test("graph Store retry closes the terminal Step's Continue binding and preserve
   const failed = await f.call("run", "show", "--run", runId);
   assert.equal(failed.steps[0].businessReceipt, undefined);
   assert.equal((await requireCommandState("codex-graph-session", f.home)).value.status, "active");
+  const { openContextControl } = await import("../src/project/context-control.js");
+  const { graphPermissionConfig } = await import("../src/context_control/graph-review.js");
+  const service = (await openContextControl(f.root))!;
+  const restricted = graphPermissionConfig({ runner: { permissions: ["artifact.read", "decision.decide"] }, actors: {}, acpProviders: {} }, "en");
+  // Construct the persisted permission fixture around an actual failed candidate.
+  // Production freezes permissions, so it cannot naturally fail a report from this Runner.
+  const setPermissions = (permissionConfig?: import("../src/context_control/types.js").Run["permissionConfig"]) => service.withGraph(async g => {
+    const row = await g.records.require<import("../src/context_control/types.js").Run>("run", runId, runId);
+    const run = { ...row.value, permissionConfig };
+    if (!permissionConfig) delete run.permissionConfig;
+    await g.records.update("run", runId, row, run);
+  });
+  await setPermissions(restricted);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /Runner requires artifact.submit/);
+  const rejected = await f.call("run", "show", "--run", runId);
+  assert.deepEqual(rejected.steps, failed.steps);
+  assert.deepEqual(rejected.artifacts, failed.artifacts);
+  assert.deepEqual((await store.list({}, {})).items.map(item => item.id), [dataId]);
+  await setPermissions();
   const other = await f.call("run", "start", "--file", f.procedure, "--name", "Other session target");
   await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /bound to another target/);
   const existing = await store.get({}, dataId);

@@ -82,3 +82,16 @@ test("graph Store grammar is versioned and round-trips the binding", () => {
   const parsed = parse({ ...bound, syntax: graphStoreMemorySyntax });
   assert.deepEqual(parse(parseMemoryYaml(serializeMemoryYaml(parsed))), parsed);
 });
+
+test("graph Store declaration requires a Store ID and a supported operation", () => {
+  const base = action();
+  for (const store of [
+    { operation: "upsert" },
+    { store_id: "", operation: "upsert" },
+    { store_id: "records" },
+    { store_id: "records", operation: "replace" },
+    { store_id: "records", operation: "create", model: "record.json" }
+  ]) {
+    assert.throws(() => parse({ ...procedure([{ ...base, artifact: { ...base.artifact, store } }]), syntax: graphStoreMemorySyntax }), /store/);
+  }
+});

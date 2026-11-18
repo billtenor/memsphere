@@ -756,3 +756,29 @@ fields:
   const content = "# Report\n\n## details\n\n### summary\nReleased\n";
   assert.deepEqual(await runtime.businessValue(Buffer.from(content), "text/markdown"), { details: { summary: "Released" } });
 });
+
+test("Store projection uses the first validated items branch for each Markdown row", async () => {
+  const { schemaRuntime } = await import("../src/context_control/schema-contract.js");
+  const runtime = schemaRuntime(`!schema
+syntax: ${syntax}
+type: array
+format: {layout: table}
+items:
+  - !schema
+    type: object
+    fields:
+      - !schema
+        names: [quantity, Value]
+        type: number
+        format: plain
+  - !schema
+    type: object
+    fields:
+      - !schema
+        names: [active, Value]
+        type: boolean
+        format: plain
+`);
+  const content = "| Value |\n| --- |\n| 42 |\n| false |\n";
+  assert.deepEqual(await runtime.businessValue(Buffer.from(content), "text/markdown"), [{ quantity: 42 }, { active: false }]);
+});

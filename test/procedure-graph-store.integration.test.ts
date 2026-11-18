@@ -52,6 +52,55 @@ test("graph data create preserves original bytes and media type, with no synthet
   assert.equal(done.step.businessReceipt?.artifactId, done.artifact.id);
 });
 
+test("invalid Graph Store bindings fail at startup", async t => {
+  const f = await initializedContextFixture(t, { "record.json": { type: "object" } });
+  await f.createStore("files", "record.json", "data");
+  await f.createStore("values");
+  const service = (await openContextControl(f.root))!;
+  for (const [store_id, operation, code] of [
+    ["missing", "create", "STORE_NOT_FOUND"],
+    ["files", "upsert", "UNSUPPORTED_CAPABILITY"],
+    ["values", "create", "UNSUPPORTED_CAPABILITY"],
+    [service.stores.step.id, "upsert", "SYSTEM_STORE_FORBIDDEN"]
+  ] as const) {
+    const graph = procedure(operation);
+    graph.actions[0].artifact!.store!.store_id = store_id;
+    await assert.rejects(service.withGraph(g => g.start({ name: "Bad target", procedure: graph })), { code });
+  }
+  for (const id of ["files", "values"]) {
+    const { store } = await openBusinessStore({}, f.root, id);
+    assert.deepEqual((await store.list({}, {})).items, []);
+  }
+});
+
+test("file Store rejects unmapped record IDs before freezing, then accepts its configured extension", async t => {
+  const f = await initializedContextFixture(t, { "record.json": { type: "object" } });
+  await f.createStore("records", "record.json", "data", {
+    directory: "data/records",
+    contentTypeExtensions: { "application/json": [".record"] }
+  });
+  const service = (await openContextControl(f.root))!;
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "DataStore");
+  await service.withGraph(async g => {
+    const { run, steps: [step] } = await g.start({ name: "Custom extension", procedure: procedure("create") });
+    await g.enter(run.id, step.id);
+    for (const data_id of ["undecorated", "standard.json"]) {
+      await assert.rejects(g.report(run.id, step.id, { text: "{}", writeOptions: { data_id } }), { code: "INVALID_ARGUMENT" });
+      const snapshot = await g.snapshot(run.id);
+      assert.equal(snapshot.artifacts.length, 0);
+      assert.equal(snapshot.steps.length, 1);
+      assert.equal(snapshot.steps[0].businessReceipt, undefined);
+      assert.deepEqual((await store.list({}, {})).items, []);
+    }
+    const result = await g.report(run.id, step.id, { text: "{}", writeOptions: { data_id: "custom.record" } });
+    assert.equal(result.artifact.business!.destination.dataId, "custom.record");
+    const row = await store.get({}, "custom.record");
+    assert(row && !row.deleted);
+    assert.equal(row.data.payload.contentType, "application/json");
+  });
+});
+
 for (const boundary of ["before-receipt", "after-receipt"] as const) test(`ordinary recovery never replays business upsert ${boundary}`, async t => {
   const { f, service, runId, id, store } = await fixture(t);
   assert.equal(store.kind, "ValueStore");
@@ -262,17 +311,29 @@ test("Schema Markdown table freezes its array contract and writes typed values w
 syntax: memsphere-20261118-stable
 type: array
 format: {layout: table}
-item: !schema
-  type: object
-  fields:
-    - !schema
-      names: [quantity, Qty]
-      type: number
-      format: plain
-    - !schema
-      names: [active, Enabled]
-      type: boolean
-      format: plain
+items:
+  - !schema
+    type: object
+    fields:
+      - !schema
+        names: [quantity, Qty]
+        type: number
+        format: plain
+      - !schema
+        names: [active, Enabled]
+        type: boolean
+        format: plain
+  - !schema
+    type: object
+    fields:
+      - !schema
+        names: [quantity, Qty]
+        type: boolean
+        format: plain
+      - !schema
+        names: [active, Enabled]
+        type: boolean
+        format: plain
 ` };
   const service = (await openContextControl(f.root))!;
   const { store } = await openBusinessStore({}, f.root, "records");
@@ -393,4 +454,46 @@ test("a loop and its rewind replacement each use a distinct default Store record
     ]);
     assert.equal(Buffer.from((await g.readArtifact(run.id, two.artifact.id)).bytes).toString(), '{"again":false}');
   });
+});
+
+test("an in-flight Graph write holds the Run lock until its receipt is persisted", { timeout: 15000 }, async t => {
+  const { f, service, runId, id, store } = await fixture(t);
+  assert.equal(store.kind, "ValueStore");
+  const reached = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const save = service.stores.step.update.bind(service.stores.step);
+  service.stores.step.update = async (...args) => {
+    const step = args[2] as Step;
+    if (step.id === id && step.frames?.[0]?.submissionFrame.businessReceipt) {
+      reached.resolve();
+      await release.promise;
+    }
+    return save(...args);
+  };
+  const pending = service.withGraph(g => g.report(runId, id, { text: '{"name":"first"}', writeOptions: { data_id: "held" } }));
+  try {
+    await Promise.race([reached.promise, pending.then(() => { throw new Error("Write completed without reaching the receipt gate"); })]);
+    const independentService = (await openContextControl(f.root))!;
+    await independentService.withGraph(async g => {
+      const before = await g.snapshot(runId);
+      const written = await store.get({}, "held");
+      assert.deepEqual(written?.value, { name: "first" });
+      assert.equal(before.steps.length, 1);
+      assert.equal(before.steps[0].businessReceipt, undefined);
+      for (const compete of [
+        () => g.advance(runId),
+        () => g.retryBusinessStore(runId, id),
+        () => g.rewind(runId, id, "Compete with write"),
+        () => g.abandon(runId)
+      ]) await assert.rejects(compete(), { code: "LOCK_TIMEOUT" });
+      assert.deepEqual(await g.snapshot(runId), before);
+      assert.deepEqual(await store.get({}, "held"), written);
+    });
+  } finally {
+    release.resolve();
+    await pending;
+  }
+  const completed = await pending;
+  assert.equal(completed.step.businessReceipt?.revision, "1");
+  assert.equal(completed.snapshot.steps.filter(step => step.source?.actionId === "next").length, 1);
 });
