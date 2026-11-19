@@ -19,11 +19,16 @@ export const modelArtifactWriteOptionsSchema = z.object({
 }).strict();
 export type ModelArtifactWriteOptions = z.infer<typeof modelArtifactWriteOptionsSchema>;
 
-export function parseModelArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
+export function parseArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
   const result = modelArtifactWriteOptionsSchema.safeParse(value);
   if (!result.success) throw serviceError("INVALID_ARGUMENT", `Invalid write-options: ${result.error.message}`);
-  if (result.data.data_id !== undefined) validateModelArtifactDataId(result.data.data_id);
   return result.data;
+}
+
+export function parseModelArtifactWriteOptions(value: unknown): ModelArtifactWriteOptions {
+  const options = parseArtifactWriteOptions(value);
+  if (options.data_id !== undefined) validateModelArtifactDataId(options.data_id);
+  return options;
 }
 
 export function validateModelArtifactDataId(id: string): void {
@@ -44,10 +49,12 @@ function canonical(value: unknown): string {
   if (value && typeof value === "object") return `{${Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`).join(",")}}`;
   return JSON.stringify(value);
 }
-async function inspect(root: string, storeId: string, expectedModel?: string) {
+export async function inspectModelArtifactTarget(root: string, storeId: string, expectedModel?: string, operation: "upsert" | "create" = "upsert") {
   const opened = await openBusinessStore({}, root, storeId);
-  if (opened.binding.kind !== "value" || opened.store.kind !== "ValueStore" || !opened.store.upsert)
-    throw serviceError("UNSUPPORTED_CAPABILITY", "Model Artifacts require a JSON ValueStore with atomic upsert");
+  if (operation === "upsert" && (opened.store.kind !== "ValueStore" || !opened.store.upsert))
+    throw serviceError("UNSUPPORTED_CAPABILITY", "Model Artifacts require a ValueStore with atomic upsert");
+  if (operation === "create" && opened.store.kind !== "DataStore")
+    throw serviceError("UNSUPPORTED_CAPABILITY", "Artifact create requires a DataStore");
   if (expectedModel && opened.binding.model !== expectedModel)
     throw serviceError("STORE_MODEL_MISMATCH", `Store ${storeId} does not use ${expectedModel}`);
   const host = await createProjectModelHost({}, { root, ...opened.project });
@@ -64,7 +71,7 @@ async function inspect(root: string, storeId: string, expectedModel?: string) {
 export async function freezeModelArtifactTargets(root: string, declarations: Array<{ store: string; model?: string }>) {
   const targets: Record<string, ModelArtifactTarget> = {};
   for (const declaration of declarations) {
-    const { target } = await inspect(root, declaration.store, declaration.model);
+    const { target } = await inspectModelArtifactTarget(root, declaration.store, declaration.model);
     targets[declaration.store] = target;
   }
   return targets;
@@ -72,7 +79,7 @@ export async function freezeModelArtifactTargets(root: string, declarations: Arr
 /** Check the opened target, then finish using that Store/runtime snapshot. */
 export async function processModelArtifact(root: string, target: ModelArtifactTarget, value: unknown,
   commit?: { runId: string; stepExecutionId: string; digest: string; dataId?: string }): Promise<ModelArtifactReceipt | undefined> {
-  const current = await inspect(root, target.storeId, target.modelRef);
+  const current = await inspectModelArtifactTarget(root, target.storeId, target.modelRef);
   if (current.target.fingerprint !== target.fingerprint)
     throw serviceError("MODEL_ARTIFACT_TARGET_CHANGED", `Model Artifact target changed: ${target.storeId}; restore the original binding and model before retrying`);
   current.opened.runtime.reflect(value);

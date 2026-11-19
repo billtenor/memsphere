@@ -4,6 +4,7 @@ names:
   - memsphere-data-store
   - 业务数据存储
 defines:
+  - Graph 按 Store 能力选择操作。ValueStore 使用原子 upsert 写完整业务值，DataStore 使用 create 保存原字节与媒体类型。原子创建遇到已有 ID 时拒绝覆盖，同内容不足以证明写入归属。
   - 业务 Store 是 Project 中通过 config.json.dataStores 显式绑定模型、存储实现和位置的数据入口；它与 Memory、模型登记、Run 和归档存储分开。只有绑定到 TOS 的 Store 数据进入云端，不表示整个 Project 已备份。
   - DataStore 保存带模型身份和 MIME 的 Payload 字节；ValueStore 保存由 Runtime 校验的值实例。模型 ID 不是 Store 的隐式选择条件，解除绑定保留数据。
   - revision 是 Store 发出的不透明非空字符串，调用方从读取结果取得并原样作为 expectedRevision 交回。它表示条件写入的前提，不提供历史内容恢复，也不是模型版本；不同 Store 的 token 不可比较大小或互换。

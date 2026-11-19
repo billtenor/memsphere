@@ -1,3 +1,4 @@
+import type { BusinessDestination, BusinessReceipt, BusinessTarget } from "./business-artifact.js";
 import type { ReviewNodes } from "../review-nodes.js";
 import type { GraphArtifactSpec, GraphProcedureMemory } from "../memory/ast.js";
 import type { ControlPlaneActor, DecisionPolicyDefinitionSnapshot, PermissionId, RunReviewConfiguration } from "../control-plane/index.js";
@@ -12,6 +13,7 @@ export type Run = {
   id: string; name: string; status: "running" | "done" | "abandoned"; createdAt: string; language: "zh-CN" | "en";
   outputOverrides?: { addedArtifactIds: string[]; removedArtifactIds: string[] }; endedAt?: string; archived?: boolean;
   abandonment?: { source: "cli" | "view"; reason?: string };
+  businessTargets?: Record<string, BusinessTarget>;
   schemaContracts?: Record<string, import("./schema-contract.js").FrozenSchemaContract>;
   memoryRef?: string;
   memorySnapshot?: { memories: Record<string, { memoryRef: string; payload: { contentType: string; content: string }; app?: AppOwnership[string] }> };
@@ -32,11 +34,12 @@ export type Step = {
   inputs?: Record<string, Ref[]>; artifact?: StepResult;
   reviewRounds?: ReviewRound[];
   validation?: { draftRevision?: string; sha256?: string; artifactId?: string; checkedAt: string; status: "passed" | "failed"; issues: Array<{ message: string; path?: string }> };
+  businessReceipt?: BusinessReceipt & { artifactId: string };
   frames?: Array<{ id: string; type: "submission"; submissionFrame: SubmissionFrame }>;
   writing?: { draftId: string; baseSubmittedArtifactId?: string };
   reads?: Record<string, { readAt: string }>;
 };
-export type Artifact = Body & { writing?: import("./schema-writing.js").SchemaWriting; id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
+export type Artifact = Body & { business?: { destination: BusinessDestination; valueJson: string; sha256: string }; writing?: import("./schema-writing.js").SchemaWriting; id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
 export type External = Body & { id: string; runId: string; source: string; capturedAt: string };
 export type ReviewComment = { commentId?: string; id?: string; body: string; createdAt: string; severity?: "blocking" | "risk" | "suggestion"; anchor?: { targetRef?: Ref; location: string; context?: string } };
 /** New writes have one canonical identity; ReviewComment also reads historical id records. */
@@ -80,7 +83,7 @@ export type GraphFrame = {
   processedStepIds: string[]; nextCompletionSequence: number;
   rewinds?: GraphRewind[]; pendingRewind?: { id: string; workers: RewindWorker[] }; deferredCollects?: DeferredCollect[];
 };
-export type SubmissionFrame = { draft?: { id: string; token: string }; artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
+export type SubmissionFrame = { businessAttempt?: { state: "attempted" | "uncertain" | "failed"; message?: string }; businessReceipt?: BusinessReceipt; draft?: { id: string; token: string }; artifact: Artifact; nextStatus: "awaiting_review" | "done"; round?: ReviewRound; completionSequence?: number; endedAt?: string };
 export type GraphContract = { procedure: GraphProcedureMemory; artifactSpecs: Record<string, GraphArtifactSpec>; rules: Record<string, { asserts: EffectiveRuleTree; suggests: EffectiveRuleTree }> };
 export type Snapshot = { artifactRevisions?: Record<string, string>; run: Run; steps: Step[]; artifacts: Artifact[]; externals: External[]; reviews: Review[]; completeIds: string[]; historicalCompleteIds?: string[]; outputArtifactIds: string[] };
 export type ReportInput = Body & { target?: string; name?: string; revisedFrom?: string; revisedSummary?: string; tags?: string[]; dependencies?: Ref[]; dependsOn?: string[] };

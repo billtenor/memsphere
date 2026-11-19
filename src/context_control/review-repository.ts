@@ -39,7 +39,7 @@ function graphFormat(contentType: string) {
 export async function graphArtifactDto(service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>, artifact: Artifact): Promise<legacy.RunEvent["artifact"]> {
   const body = await service.body(artifact);
   const value = decodeGraphContent(body.bytes, body.contentType);
-  return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType };
+  return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType, ...(artifact.business ? { business: { destination: artifact.business.destination, value: JSON.parse(artifact.business.valueJson) } } : {}) };
 }
 async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl, actorId?:string): Promise<legacy.RunState> {
   const service = providedService ?? (await openContextControl(dirname(runsRoot)))!;
@@ -57,7 +57,7 @@ async function project(runsRoot: string, snapshot: Snapshot, selected?: string, 
         const hash=body?digest(body.bytes):"";
         const value=body?decodeGraphContent(body.bytes,body.contentType):undefined;
         const contentType=body?.contentType??artifact.content?.payload.contentType??"text/plain";
-        const dto:legacy.RunEvent["artifact"]={name:artifact.name,type:value===null?"null":Array.isArray(value)?"array":(typeof value==="undefined"?"string":typeof value),format:graphFormat(contentType),storage:"inline",contentType,...(!viewRoundId||round.id===viewRoundId?{value}:{})};
+        const dto:legacy.RunEvent["artifact"]={name:artifact.name,type:value===null?"null":Array.isArray(value)?"array":(typeof value==="undefined"?"string":typeof value),format:graphFormat(contentType),storage:"inline",contentType,...(artifact.business && body ? { business: { destination: artifact.business.destination, value: JSON.parse(artifact.business.valueJson) } } : {}),...(!viewRoundId||round.id===viewRoundId?{value}:{})};
         const personalReviews = snapshot.reviews.filter(r => r.roundId === round.id);
         const materialDigests = new Map<string, string>();
         for (const targetId of new Set((viewRoundId && round.id !== viewRoundId ? [] : personalReviews).flatMap(r => r.comments.flatMap(c => c.anchor?.targetRef ? [c.anchor.targetRef.id] : [])))) {

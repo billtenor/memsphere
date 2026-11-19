@@ -33,6 +33,7 @@ import {
   assertMemorySyntaxIdentifier,
   controlPlaneMemorySyntax,
   graphMemorySyntax,
+  graphStoreMemorySyntax,
   firstStableMemorySyntax,
   MemorySyntaxRegistry,
   type MemorySyntaxVersion
@@ -800,17 +801,21 @@ const graphAwareFlowSchema = z.preprocess(normalizeNameShorthand, z.object({
   defines: definesSchema, asserts: z.array(rulePartSchema).min(1).optional(), goals: stringArray,
   flow: z.array(flowNodeSchema).default([])
 }).strict());
-const graphNodeSchema = graphProcedureSchema({ names: namesSchema, rule: rulePartSchema, normalize: normalizeNameShorthand });
-const graphOrFlowSchema: z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> = z.unknown().transform((value, context) => {
-  const graph = value !== null && typeof value === "object" && "mode" in value && value.mode === "graph";
-  const result = (graph ? graphNodeSchema : graphAwareFlowSchema).safeParse(value);
-  if (!result.success) {
-    for (const issue of result.error.issues) context.addIssue({ ...issue, fatal: true });
-    return z.NEVER;
-  }
-  return result.data;
-});
-export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(graphOrFlowSchema));
+const graphNodeSchema = (allowStore: boolean) => graphProcedureSchema({ names: namesSchema, rule: rulePartSchema, normalize: normalizeNameShorthand, allowStore });
+const graphOrFlowSchema = (allowStore: boolean): z.ZodType<ProcedureNode, z.ZodTypeDef, unknown> => {
+  const graphSchema = graphNodeSchema(allowStore);
+  return z.unknown().transform((value, context) => {
+    const graph = value !== null && typeof value === "object" && "mode" in value && value.mode === "graph";
+    const result = (graph ? graphSchema : graphAwareFlowSchema).safeParse(value);
+    if (!result.success) {
+      for (const issue of result.error.issues) context.addIssue({ ...issue, fatal: true });
+      return z.NEVER;
+    }
+    return result.data;
+  });
+};
+export const procedureMemorySchema: z.ZodType<ProcedureMemory, z.ZodTypeDef, unknown> = withRootSyntax(requireTopLevelName(graphOrFlowSchema(false)));
+const graphStoreProcedureMemorySchema = withRootSyntax(requireTopLevelName(graphOrFlowSchema(true)));
 
 export {
   definitionPartSchema,
@@ -843,5 +848,6 @@ export const memorySyntaxRegistry = new MemorySyntaxRegistry();
 memorySyntaxRegistry.register({ version: firstStableMemorySyntax, schemas: legacyMemorySchemas });
 memorySyntaxRegistry.register({ version: controlPlaneMemorySyntax, schemas: { ...memorySchemas, procedures: controlPlaneProcedureMemorySchema } });
 memorySyntaxRegistry.register({ version: graphMemorySyntax, schemas: memorySchemas });
+memorySyntaxRegistry.register({ version: graphStoreMemorySyntax, schemas: { ...memorySchemas, procedures: graphStoreProcedureMemorySchema } });
 
 export type { MemoryEntity };

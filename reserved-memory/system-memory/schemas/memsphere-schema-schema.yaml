@@ -5,6 +5,7 @@ names:
   - Schema Schema
 format: yaml
 defines:
+  - Graph Schema Artifact 正式提交且接纳后可绑定业务 Store；ValueStore 保存完整校验值，DataStore 保存原始正文。渐进草稿只保存在 Run 内。
   - 定义 memsphere !schema Memory 的合法内容结构、值契约和组合约束。
   - Schema 的 name/names 标识值契约或字段，不是 Procedure 的单次 Run 名称。
 asserts:

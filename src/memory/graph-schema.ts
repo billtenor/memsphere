@@ -21,6 +21,7 @@ export function graphProcedureSchema(input: {
   names: z.ZodType<string[], z.ZodTypeDef, unknown>;
   rule: z.ZodType<RulePart, z.ZodTypeDef, unknown>;
   normalize: (value: unknown) => unknown;
+  allowStore?: boolean;
 }): z.ZodType<GraphProcedureNode, z.ZodTypeDef, unknown> {
   const rules = z.array(input.rule).min(1).optional();
   const model = z.object({ definedBy: text, definition: text.optional(), ref: text.optional() }).strict().superRefine((value, context) => {
@@ -45,6 +46,10 @@ export function graphProcedureSchema(input: {
   }).transform(value => value as import("./ast.js").GraphModelSpec);
   const artifact = z.object({
     name: text, asserts: rules, suggests: rules, model,
+    store: input.allowStore ? z.object({
+      store_id: text.refine(id => id !== "__proto__" && !id.includes("\0"), "Invalid Store ID"),
+      operation: z.enum(["upsert", "create"])
+    }).strict().optional() : z.never().optional(),
     payload: z.object({ contentType: text }).strict(), review: distinctIds.optional()
   }).strict();
   const dependency = z.object({

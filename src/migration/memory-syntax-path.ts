@@ -3,6 +3,7 @@ import {
   assertMemorySyntaxIdentifier,
   controlPlaneMemorySyntax,
   graphMemorySyntax,
+  graphStoreMemorySyntax,
   firstStableMemorySyntax,
   startMemorySyntax,
   type MemorySyntaxVersion
@@ -68,6 +69,8 @@ memorySyntaxMigrationRegistry.register({
   to: graphMemorySyntax,
   migrate: () => undefined
 });
+
+memorySyntaxMigrationRegistry.register({ from: graphMemorySyntax, to: graphStoreMemorySyntax, migrate: () => undefined });
 
 export function canMigrateMemorySyntax(from: MemorySyntaxVersion, to: MemorySyntaxVersion): boolean {
   return memorySyntaxMigrationRegistry.canMigrate(from, to);

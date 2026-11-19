@@ -318,27 +318,9 @@ export class ArtifactValidatorRegistry {
         continue;
       }
 
-      const failures: ArtifactValidationResult[] = [];
-      let matched = false;
-      for (const [candidateIndex, itemSchema] of (schema.items ?? []).entries()) {
-        const resolvedItemSchema = assertSchemaNode(itemSchema, `${contractPath}.items[${candidateIndex}]`);
-        const itemContract = schemaContract(resolvedItemSchema, contract);
-        const result = await this.#executeSchemaNode(
-          plan,
-          resolvedItemSchema,
-          contract,
-          candidateFromStructuredValue(candidate, element, itemContract, resolvedItemSchema.format !== undefined),
-          rootContext,
-          `${contractPath}.items[${candidateIndex}]`,
-          elementPath
-        );
-        if (result.status === "passed") {
-          matched = true;
-          break;
-        }
-        failures.push(result);
-      }
-      if (!matched) {
+      const { item, failures } = await matchArrayItem(schema.items ?? [], contract, candidate, element, contractPath,
+        (schema, prepared, path) => this.#executeSchemaNode(plan, schema, contract, prepared, rootContext, path, elementPath));
+      if (!item) {
         const expected = (schema.items ?? []).map((item, itemIndex) => schemaContract(assertSchemaNode(item, `${contractPath}.items[${itemIndex}]`), contract).type);
         return {
           status: "failed",
@@ -741,7 +723,8 @@ function deriveMarkdownOutlineChildren(
   contract: CompiledArtifactContract,
   candidate: PreparedArtifactCandidate,
   contractPath: string,
-  fieldPath: string
+  fieldPath: string,
+  strictRepeat = false
 ): DerivedSchemaChild[] {
   if (candidate.representation.kind !== "markdown") return [];
   const headings = extractMarkdownHeadings(candidate.representation.ast);
@@ -760,6 +743,8 @@ function deriveMarkdownOutlineChildren(
         for (const [bodyIndex, bodyField] of field.body.entries()) {
           const match = repeatedHeadings[iterationIndex * field.body.length + bodyIndex];
           if (!match) continue;
+          if (strictRepeat && !headingMatches(match, bodyField, iterationIndex + 1))
+            throw new TypeError(`Cannot align Repeat field ${joinFieldPath(fieldPath, primaryFieldName(bodyField))}[${iterationIndex + 1}] with heading ${match.text}`);
           children.push(derivedMarkdownChild(
             bodyField,
             `${path}.body[${bodyIndex}]`,
@@ -1437,4 +1422,99 @@ export async function projectSchemaContent(schema: SchemaNode, contract: Compile
   }
   await walk(schema, contract, candidate, "schema", "");
   return result;
+}
+
+async function matchArrayItem(
+  choices: NonNullable<SchemaNode["items"]>,
+  contract: CompiledArtifactContract,
+  candidate: PreparedArtifactCandidate,
+  element: unknown,
+  contractPath: string,
+  validate: (schema: SchemaNode, candidate: PreparedArtifactCandidate, path: string) => Promise<ArtifactValidationResult>
+) {
+  const failures: ArtifactValidationResult[] = [];
+  for (const [index, choice] of choices.entries()) {
+    const path = `${contractPath}.items[${index}]`;
+    const item = assertSchemaNode(choice, path);
+    const contractForItem = schemaContract(item, contract);
+    const prepared = candidateFromStructuredValue(candidate, element, contractForItem, item.format !== undefined);
+    const result = await validate(item, prepared, path);
+    if (result.status === "passed") return { item, failures };
+    failures.push(result);
+  }
+  return { failures };
+}
+
+/** Project the validated Markdown structure without treating a missing field as null. */
+export async function schemaBusinessValue(schema: SchemaNode, contract: CompiledArtifactContract, candidate: PreparedArtifactCandidate): Promise<unknown> {
+  const registry = createBuiltInArtifactValidatorRegistry();
+  const context = { runId: "schema", stepId: "schema", artifactPath: "artifact", attemptId: "projection" };
+  async function project(node: SchemaNode, current: CompiledArtifactContract, prepared: PreparedArtifactCandidate, path: string): Promise<unknown> {
+    if (prepared.representation.kind !== "markdown") return prepared.representation.value;
+    if (current.format.options.layout === "outline") {
+      const values = new Map<string, unknown>();
+      const repeats = new Map<string, Map<number, unknown>>();
+      for (const child of deriveMarkdownOutlineChildren(node, current, prepared, "schema", path, true)) {
+        const name = primaryFieldName(child.field);
+        const typed = isSchemaNode(child.field)
+          ? await project(child.field, schemaContract(child.field, current), child.candidate, child.fieldPath)
+          : child.candidate.representation.value;
+        if (!child.contractPath.includes(".body[") || !child.contractPath.endsWith("]")) {
+          values.set(name, typed);
+          continue;
+        }
+        const instance = Number(child.fieldPath.match(/\[(\d+)\]$/)?.[1]);
+        if (!Number.isSafeInteger(instance) || instance < 1) throw new TypeError(`Cannot identify Repeat instance: ${child.fieldPath}`);
+        const entries = repeats.get(name) ?? new Map<number, unknown>();
+        entries.set(instance, typed);
+        repeats.set(name, entries);
+      }
+      for (const repeat of node.fields ?? []) {
+        if (typeof repeat !== "object" || repeat.tag !== "!repeat") continue;
+        const count = Math.max(0, ...repeat.body.map(field => repeats.get(primaryFieldName(field))?.size ?? 0));
+        for (const field of repeat.body) {
+          const name = primaryFieldName(field);
+          const entries = repeats.get(name);
+          const ordered = [];
+          for (let instance = 1; instance <= count; instance++) {
+            if (!entries?.has(instance)) throw new TypeError(`Missing Repeat value at ${joinFieldPath(path, name)}[${instance}]; cannot preserve instance alignment`);
+            ordered.push(entries.get(instance));
+          }
+          values.set(name, ordered);
+        }
+      }
+      return Object.fromEntries(values);
+    }
+    if (current.format.options.layout !== "table") return prepared.representation.value;
+    const rows = prepared.representation.value;
+    if (!Array.isArray(rows) || !node.item && !node.items?.length) return rows;
+    const projected = [];
+    for (const [index, row] of (rows as Record<string, unknown>[]).entries()) {
+      const item = node.item
+        ? assertSchemaNode(node.item, `${path}.item`)
+        : (await matchArrayItem(node.items!, current, prepared, row, path, (schema, candidate) => {
+          const contract = { ...schemaContract(schema, current), schema };
+          return registry.execute(registry.resolvePlan(contract), { contract, candidate, context });
+        })).item;
+      if (!item) throw new TypeError(`No matching Schema item for table row ${index + 1}`);
+      const parent = schemaContract(item, current);
+      const values = new Map(Object.entries(row));
+      for (const field of item.fields ?? []) {
+        if (typeof field === "object" && field.tag === "!repeat") continue;
+        const name = primaryFieldName(field);
+        const aliases = fieldNames(field).filter(alias => Object.hasOwn(row, alias));
+        if (aliases.length > 1) throw new TypeError(`Ambiguous table field: ${path}[${index + 1}].${name}`);
+        const key = aliases[0];
+        if (key === undefined) continue;
+        const fieldContract = typeof field === "string" ? stringFieldContract(field, parent) : schemaContract(assertSchemaNode(field, name), parent);
+        const child = candidateFromStructuredValue(prepared, row[key], fieldContract, true);
+        if ("decodeError" in child.representation && child.representation.decodeError) throw new TypeError(`Invalid table field: ${path}[${index + 1}].${name}`);
+        values.delete(key);
+        values.set(name, isSchemaNode(field) ? await project(field, fieldContract, child, `${path}[${index + 1}].${name}`) : child.representation.value);
+      }
+      projected.push(Object.fromEntries(values));
+    }
+    return projected;
+  }
+  return project(schema, contract, candidate, "");
 }

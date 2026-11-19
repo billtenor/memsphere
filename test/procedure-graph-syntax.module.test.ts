@@ -3,7 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { parseMemoryYaml } from "../src/memory/yaml.js";
 import { parseMemoryEntity } from "../src/memory/store.js";
-import { graphMemorySyntax, controlPlaneMemorySyntax } from "../src/memory/syntax.js";
+import { graphMemorySyntax, graphStoreMemorySyntax, controlPlaneMemorySyntax } from "../src/memory/syntax.js";
 import { serializeMemoryYaml } from "../src/memory/serializer.js";
 import { MemoryNavigation } from "../src/memory/navigation.js";
 import { collectMemoryReferenceTargets } from "../src/memory/references.js";
@@ -73,4 +73,25 @@ for (const newline of ["\n", "\r\n"]) test(`the materials example parses with a 
   assert.equal(p.actions.length, 5);
   assert.equal(p.actions[0].id, "prepare");
   assert.deepEqual(p.actions[1].dependencies.map(d => d.from), ["prepare", "analyze"]);
+});
+
+test("graph Store grammar is versioned and round-trips the binding", () => {
+  const base = action();
+  const bound = procedure([{ ...base, artifact: { ...base.artifact, store: { store_id: "records", operation: "upsert" } } }]);
+  assert.throws(() => parse(bound), /store/);
+  const parsed = parse({ ...bound, syntax: graphStoreMemorySyntax });
+  assert.deepEqual(parse(parseMemoryYaml(serializeMemoryYaml(parsed))), parsed);
+});
+
+test("graph Store declaration requires a Store ID and a supported operation", () => {
+  const base = action();
+  for (const store of [
+    { operation: "upsert" },
+    { store_id: "", operation: "upsert" },
+    { store_id: "records" },
+    { store_id: "records", operation: "replace" },
+    { store_id: "records", operation: "create", model: "record.json" }
+  ]) {
+    assert.throws(() => parse({ ...procedure([{ ...base, artifact: { ...base.artifact, store } }]), syntax: graphStoreMemorySyntax }), /store/);
+  }
 });

@@ -69,6 +69,61 @@
     "writing": {
       "type": "object",
       "description": "当前渐进撰写的内部状态。"
+    },
+    "business": {
+      "type": "object",
+      "properties": {
+        "destination": {
+          "type": "object",
+          "properties": {
+            "storeId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "modelRef": {
+              "type": "string",
+              "minLength": 1
+            },
+            "fingerprint": {
+              "type": "string",
+              "minLength": 1
+            },
+            "operation": {
+              "type": "string",
+              "enum": [
+                "create",
+                "upsert"
+              ]
+            },
+            "dataId": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "storeId",
+            "modelRef",
+            "fingerprint",
+            "operation",
+            "dataId"
+          ],
+          "additionalProperties": false
+        },
+        "valueJson": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "destination",
+        "valueJson",
+        "sha256"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
