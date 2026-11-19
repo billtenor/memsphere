@@ -3,13 +3,13 @@ import { createModelRegistrationStore, modelDefinitionHash } from "../../src/pro
 import fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { TestContext } from "node:test";
 import { createBusinessStore } from "../../src/project/business-stores.js";
 import { ownedSetup } from "../support/owned-setup.js";
 
 export const objectSchema = { type: "object", properties: { name: { type: "string" }, count: { type: "integer", minimum: 0 }, items: { type: "array", items: { type: "integer" } } }, required: ["name", "count"], additionalProperties: false };
 type FixturePreparation = (location: { directory: string; root: string; home: string; cwd: string }, acquire: <T>(operation: () => Promise<T>) => Promise<T>) => Promise<void>;
-export function businessFixture(t: TestContext, schemas: Record<string, unknown> = { "record.json": objectSchema }, prepare?: FixturePreparation) {
+export type FixtureContext = { signal: AbortSignal; after(cleanup: () => Promise<void>): void };
+export function businessFixture(t: FixtureContext, schemas: Record<string, unknown> = { "record.json": objectSchema }, prepare?: FixturePreparation) {
   let directory: string | undefined, initializing: Promise<unknown> | undefined;
   const cleanups: Array<() => Promise<void>> = [];
   const context = { signal: t.signal };
