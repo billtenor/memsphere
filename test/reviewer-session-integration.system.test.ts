@@ -13,7 +13,7 @@ import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { assertWindowsPrerequisites } from "../src/windows-prerequisites.js";
 import { createAgentReviewCliRuntime } from "../src/acp/cli-runtime.js";
-import { graphMemorySyntax } from "../src/memory/syntax.js";
+import { graphMemorySyntax, graphStoreMemorySyntax } from "../src/memory/syntax.js";
 import type { GraphAction, GraphProcedureMemory } from "../src/memory/ast.js";
 import * as reviews from "../src/context_control/review-repository.js";
 import { runGit, gitOutput } from "../src/git.js";
@@ -23,7 +23,7 @@ const entrypoint = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const spec = { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/markdown" } };
 const action = (id: string, from = "START", review = false): GraphAction => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from }], artifact: { ...spec, ...(review ? { review: ["test"] } : {}) } });
 
-async function evidenceFixture(t: test.TestContext) {
+async function evidenceFixture(t: test.TestContext, businessBody?: string) {
   const f = await initializedContextFixture(t, { "text.json": { type: "string" } }), service = (await openContextControl(f.root))!;
   await mkdir(join(f.root, "memory", "concepts"), { recursive: true });
   await writeFile(join(f.root, "memory", "concepts", "live-evidence.yaml"), `!concept\nsyntax: ${graphMemorySyntax}\nnames: [live-evidence]\ndefines: [Current Project auxiliary evidence.]\n`);
@@ -34,13 +34,18 @@ async function evidenceFixture(t: test.TestContext) {
   const configFile=join(f.root,"config.json"), cfg=JSON.parse(await readFile(configFile,"utf8"));
   cfg.store.published_revision=await gitOutput(["rev-parse","HEAD"],join(f.root,"memory")); await writeFile(configFile,JSON.stringify(cfg));
   const procedure: GraphProcedureMemory = { tag: "!procedure", syntax: graphMemorySyntax, mode: "graph", names: ["reviewer-evidence"], defines: ["Evidence"], asserts: ["Global frozen rule"], actions: [{ ...action("A"), artifact: { ...spec, review: ["source"] } }, action("U"), action("B", "A"), action("C", "B", true), { ...action("V", "START", true), artifact: { ...spec, payload: { contentType: "text/plain" }, review: ["test"] } }] };
+  if (businessBody !== undefined) {
+    await f.createStore("records", "text.json");
+    procedure.syntax = graphStoreMemorySyntax;
+    procedure.actions[0].artifact!.store = { store_id: "records", operation: "upsert" };
+  }
   const start = await service.withGraph(g => g.start({ name: "Evidence", procedure, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { owner: { kind: "human", name: "Owner", permissions: ["artifact.read", "decision.decide"] }, tester: { kind: "agent", name: "Tester", permissions: ["artifact.read", "decision.assess"], agent: { provider: "test", providerType: "traex", command: "unused", args: [], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: null, maxRuntimeMs: null } } }, acpProviders: {} }, reviewConfiguration: { reviews: { "reviewer-evidence#actions[A]": { policy: "artifact_acceptance.unanimous" }, "reviewer-evidence#actions[C]": { policy: "artifact_acceptance.unanimous" }, "reviewer-evidence#actions[V]": { policy: "artifact_acceptance.unanimous" } }, slots: { "reviewer-evidence::source": { actorIds: ["owner"] }, "reviewer-evidence::test": { actorIds: ["tester", "owner"] } } } }));
   const runId = start.run.id;
   const produce = async (id: string, text: string, dependencies?: Array<{kind:"artifact"|"external";id:string}>) => service.withGraph(async g => {
     const s = (await g.snapshot(runId)).steps.find(s => s.source?.actionId === id)!;
     await g.enter(runId, s.id); return g.report(runId, s.id, { text, ...(dependencies ? { dependencies } : {}) });
   });
-  const a = await produce("A", "fixed requirements");
+  const a = await produce("A", businessBody ?? "fixed requirements");
   await service.withGraph(async g=>{const round=a.step.reviewRounds![0];await g.submitReview(runId,a.step.id,round.id,"owner","approve");await g.submitReview(runId,a.step.id,round.id,"runner","approve");});
   const u = await produce("U", "UNRELATED_SECRET");
   await produce("B", "fixed plan");
@@ -354,4 +359,30 @@ test('assignment references, preview export and node commands stay bound after s
  const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const exported=run(JSON.parse(preview.stdout).exportCommand.replace('<file>','preview-body.txt'));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
  await reviews.markArtifactReviewAgentCliReady({...f.input,attemptId:f.first.attempt.id});
  const node=await f.cli(['run','review','show']);assert.equal(node.status,0,node.stderr);const command=/^"\$MEMSPHERE_CLI" continue report --artifact .+$/m.exec(node.stdout)?.[0];assert.ok(command,node.stdout);const reported=run(command);assert.equal(reported.status,0,reported.stderr);assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
+});
+
+test("scoped Reviewer reads bound Artifact previews and exports its original body", async t => {
+  const body = "长".repeat(350);
+  const { cli, a, attempt, f, runId } = await evidenceFixture(t, body);
+  const artifact = ["run", "artifact", "show", "--artifact", a.artifact.id];
+  const preview = await cli([...artifact, "--output", "json"]);
+  assert.equal(preview.status, 0, preview.stderr);
+  const projected = JSON.parse(preview.stdout).business;
+  assert.equal(projected.destination.storeId, "records");
+  assert.equal(Array.from(projected.valuePreview).length, 200);
+  assert.equal(projected.valueTruncated, true);
+  const exported = await cli([...artifact, "--out", "stored.md", "--output", "json"]);
+  assert.equal(exported.status, 0, exported.stderr);
+  assert.deepEqual(JSON.parse(exported.stdout).business, { destination: projected.destination });
+  assert.equal(await readFile(join(attempt, "stored.md"), "utf8"), body);
+  const full = await cli(["run", "artifact", "show", "--output", "json"]);
+  assert.equal(full.status, 0, full.stderr);
+  assert.equal(JSON.parse(full.stdout).contextArtifacts.find((item: { artifactId: string }) => item.artifactId === a.artifact.id).artifact.business.value, body);
+  const retry = await cli(["run", "step", "store", "retry", "--run", runId, "--step", a.step.id, "--output", "json"]);
+  assert.equal(retry.status, 1);
+  assert.match(retry.stderr, /REVIEW_SESSION_DENIED/);
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "ValueStore");
+  assert.deepEqual((await store.get({}, projected.destination.dataId))?.value, body);
+  assert.equal((await store.get({}, projected.destination.dataId))?.revision, "1");
 });

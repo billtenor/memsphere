@@ -246,6 +246,7 @@ export type RunEvent = {
   frame: FrameType;
   stepId: string;
   artifact: {
+    business?: { destination: import("../context_control/business-artifact.js").BusinessDestination; value: unknown };
     modelData?: ModelArtifactReceipt;
     modelTarget?: ModelArtifactCandidateTarget;
     name: string;

@@ -2,7 +2,7 @@
 
 本文整理以 Action 和依赖关系定义 Procedure 的图编排语法。Procedure 通过 `mode` 区分原有的 `flow` 模式和新的 `graph` 模式，两种模式并行保留。新流程默认建议显式使用 `mode: graph`；省略 mode 的解析默认仍为 flow。下文除模式说明外，均描述 `graph` 模式：Action 描述生产工作、产物和评审要求；依赖关系决定何时执行；聚合 Action 收集具体产物的引用。
 
-运行语法：`memsphere-20261027-stable`。新建 graph Procedure 必须填写该版本；旧 `memsphere-20260721-stable` 按原 flow 语义保留。完整示例可通过 `run start --file` 执行。
+Graph Procedure 可使用 `memsphere-20261027-stable`。需要业务 Store 时请显式指定 `memsphere-20261118-stable`。旧 `memsphere-20260721-stable` 按原 flow 语义保留。完整示例可通过 `run start --file` 执行。
 
 2026-10-27 共同探索调整：不提供启动时结构化业务参数或 Run 级 `input`。入口 Action 收集或读取业务材料并形成 Artifact，后续通过依赖传递。运行时和 CLI 的整合方案见 `changes/archive/completed/20261026-procedure-graph/implementation-plan.md`；以下说明 graph 的语法和执行语义。
 
@@ -125,7 +125,23 @@ Slot 表达评审视角，具体参与者、权限、是否跳过及决策规则
 
 声明中没有正文，因此没有 `payload.content`。模型定义中的 `type` 是元模型自身的语法，不是恢复旧版 `artifact.type` 字段。
 
-运行时的正文保存于 Artifact 的 `content` 或 `contentRef`。Artifact 的 ID、状态、实际依赖和修订记录不写进 Action 定义。本轮 graph 的模型用于校验正文，接纳后保存到 context_control Artifact Store；不提供向业务 Store 写入的绑定或 `--write-options`。Step 的 `artifactStore` 仍属于既有 flow/模型 Artifact 机制，graph 不设置该字段。
+运行时的正文保存于 Artifact 的 `content` 或 `contentRef`。Artifact 的 ID、状态、实际依赖和修订记录由 Run 管理。
+
+### 业务 Store
+
+使用 `memsphere-20261118-stable` 时，普通生产 Action 可在 `artifact` 中增加以下声明。
+
+```yaml
+store:
+  store_id: accepted-records
+  operation: upsert
+```
+
+`store_id` 指向当前 Project 已登记的业务 Store。`upsert` 向支持原子 upsert 的 ValueStore 写入完整校验值，`create` 向 DataStore 创建记录并保留原始字节和 MIME。接纳条件满足后才写入。collect Action 收集引用，需要落 Store 时可由后续生产 Action 提交。
+
+默认记录 ID 由 Run 和 Step 实例确定。也可以在首次有效提交时通过 `--write-options '{"data_id":"record-id"}'` 指定，评审修订沿用相同 ID。文件 DataStore 的 ID 可使用 `reports/result.json` 这样的相对路径，每段须是合法文件名，扩展名须符合配置的 MIME 映射。
+
+写入未完成时，先核对固定候选以及业务记录，再用 `memsphere run step store retry --run R --step S` 显式重试。`upsert` 可能覆盖目标记录当前值，`create` 遇到现存 ID 会失败。Run 保留原始候选和已确认的写入回执。回溯、废弃和归档仅修改 Run 状态，已提交的业务记录保留。使用 `memsphere-20261027-stable` 时，接纳产物保存在 Run 的 Artifact Store 中。
 
 ## Dependency
 

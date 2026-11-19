@@ -1,3 +1,4 @@
+import { graphBusinessStores } from "./graph-business-artifact.js";
 import { withContextControlAccess } from "./context-control-access.js";
 import { assertModelOperationStamp, readModelOperationStamp, withConsistentModelRead } from "./model-operation.js";
 import { isDeepStrictEqual } from "node:util";
@@ -68,7 +69,7 @@ async function openContextControlSnapshot(root: string, legacyUpgrade: boolean):
     return { bytes: await readAll(context, content), contentType: "application/json" };
   };
   await assertModelOperationStamp(root, stamp);
-  return new ContextControl(stores, contentReader);
+  return new ContextControl(stores, contentReader, undefined, graphBusinessStores(root));
 }
 
 export async function initializeContextControl(root: string) {

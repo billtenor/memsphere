@@ -115,14 +115,14 @@ export async function checkMemorySyntaxMigration(
           : source;
         const parsedSource = parseMemoryYaml(source);
         from = readMemorySyntax(parsedSource);
-        if (from === target) {
+        if (from === target || (target === currentMemorySyntax && memorySyntaxMigrationRegistry.canMigrate(target, from))) {
           parseMemoryEntity(kind, parsedSource);
           output = source;
           prepared.push({
             path,
             absolutePath,
             from,
-            to: target,
+            to: from,
             changed: false,
             sha256: sha256(source),
             outputSha256: sha256(source),

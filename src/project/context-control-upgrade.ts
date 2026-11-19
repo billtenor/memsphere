@@ -18,12 +18,12 @@ const previous = {
   run: ["7d0612cb7ece147e5475fba998cabd5fb35f6f58a315db4c8ac4014e247990a3", "e8766633d676456f375c3bca66ab43d7ce02917d0d49ff3aafa193b9e201bc02"],
   artifact: ["fd4b6bcad2dc712fe0e99d0c8a92fc2bd98acabf3e7ea62c2c8f90e9cbadc9b5", "f029c436c88238c2f3df3faf804a65c2725e1d99758eb8fbd93384c37ec74c9c"]
 };
-// Known pre-graph release and the locally installed graph review candidates.
-const beforeGraph = {
-  artifact: ["875e20287dd6cdfb151b9acc569990c0b7da9bd0a3472a05c08fb71de9fabc20"],
+// Known context model versions compatible with the current additive upgrade.
+const additiveBaselines = {
+  artifact: ["e03ff883ebb3bf84ee49348d8ebdaf3b4c346775f3c597b6c950610f249c7cb0", "875e20287dd6cdfb151b9acc569990c0b7da9bd0a3472a05c08fb71de9fabc20"],
   review: ["e839d8a0c16e1b668bb03063cab252eed95bc48cfeb02f91543a67eba2a40407", "099b094d127fcfa7966ae78965c4f481fa1de837d2f888cbad4a8d7ea286173d", "4c500bea9bfb501d8199b0e17df1ee4c498c34b1a03b0a6995fff1cf327403e8", "11ea5f424c3c698c5c4f9e1d4a9551f40250024ee4b69904f78834fd2848ed2b", "79d284240fd9b34bb0bf388552b72249ed418dbdbd744a0d7a3ad367c84051ab", "32bb75280c78df3ca24e59c8c2da186e51f0511d5d0e18cb39c113d06e8b14ed", "b094fc3caaeb735dede7a3929a02aa3c9047b037a60d29866e85d65fa431aa88", "1e1baa78eddaf7b70f8e1bde5d5bbc937282e2cd305a56d8387a500482641f20"],
-  run: ["5b99d424f1e60d2ecc6e49c0c85cf175166d2561ceb0fd40e66ec69ece51fdfc", "edc72333e9994d3af34efb5c214c94cccaadf868bd25cc6fc243d3b7901696c3", "f406ca9ffc3115d0f82cde97337a63e82ff5417fa8b0512f3f5ce043b71abd00", "fceec83638157a4968d5d89ffb16518f91049d84733ac059a77d23872756f027", "e5602c2afa9081c9d39abf2cd279216bcd3f4cb68e840c66104bc00d1e86feea", "8b4604ece26b05fc674f5de3ff24a8dc95a9650fbbedbbefcad81783128b676b", "594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
-  step: ["8545aa4a0153c87ea9a1e157a0e8542c3bd96c5a566623cca98b3ccde621c480", "6b70cc48053ae663bb848a229fc6e87297df9873784feb3efd8c591aa53ad7ec", "521778e1ee71afeccb41eaa5f07e3b11479baaf676b6a745f70119e463be4b12", "a8bcdf5da03ef45a813c4d956c545067686e49cee99047426fb0a3c4fa63eecd", "9a39b10e98c9d5a3f2d48d4caf8dad5f18e0b1b04cebd45ab8014ffecf295a9a", "43f43c0a5470b3f07f43702a9ac7c6d83a23a7678230a8a2816b989e5ded1053", "7dc7c88dd1d0908628385179c460c523e9ee4ca184156238fd665242c077056c"]
+  run: ["412b08ac48eb49067a110b5710817b40555f764294e9274ec74c16cebec1d199", "5b99d424f1e60d2ecc6e49c0c85cf175166d2561ceb0fd40e66ec69ece51fdfc", "edc72333e9994d3af34efb5c214c94cccaadf868bd25cc6fc243d3b7901696c3", "f406ca9ffc3115d0f82cde97337a63e82ff5417fa8b0512f3f5ce043b71abd00", "fceec83638157a4968d5d89ffb16518f91049d84733ac059a77d23872756f027", "e5602c2afa9081c9d39abf2cd279216bcd3f4cb68e840c66104bc00d1e86feea", "8b4604ece26b05fc674f5de3ff24a8dc95a9650fbbedbbefcad81783128b676b", "594768274b52adbb4897cb50a84f9346b4784cdfdc58330e1eab51bfc40e5835", "d8e723a1995158102a7d66ead4e8d793d8f6c1f450b88880d0671fcce599d9ba"],
+  step: ["117f80200d4713763b646a31fef72153cb899779f5ae1ece795f01bfd7cab2fc", "8545aa4a0153c87ea9a1e157a0e8542c3bd96c5a566623cca98b3ccde621c480", "6b70cc48053ae663bb848a229fc6e87297df9873784feb3efd8c591aa53ad7ec", "521778e1ee71afeccb41eaa5f07e3b11479baaf676b6a745f70119e463be4b12", "a8bcdf5da03ef45a813c4d956c545067686e49cee99047426fb0a3c4fa63eecd", "9a39b10e98c9d5a3f2d48d4caf8dad5f18e0b1b04cebd45ab8014ffecf295a9a", "43f43c0a5470b3f07f43702a9ac7c6d83a23a7678230a8a2816b989e5ded1053", "7dc7c88dd1d0908628385179c460c523e9ee4ca184156238fd665242c077056c"]
 };
 /** Journal admission protects this known release conversion, not generic schema migration. */
 export function upgradeContextControlOutputs(root: string, hooks: ModelOperationHooks = {}) {
@@ -39,7 +39,7 @@ export function upgradeContextControlOutputs(root: string, hooks: ModelOperation
     for (const asset of assets) {
       const installed = { definition: JSON.parse((await host.source(asset.id)).source.replace(/^\uFEFF/, "")) };
       if (isDeepStrictEqual(installed.definition, asset.definition)) continue;
-      if (asset.entity in beforeGraph && beforeGraph[asset.entity as keyof typeof beforeGraph].includes(definitionHash(installed.definition))) {
+      if (asset.entity in additiveBaselines && additiveBaselines[asset.entity as keyof typeof additiveBaselines].includes(definitionHash(installed.definition))) {
         additive.push(asset);
         const path = join(paths.modelsDirectory, asset.id);
         changes.push({ path, before: await optionalFileBytes(path), after: Buffer.from(asset.source) });

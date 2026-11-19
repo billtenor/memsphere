@@ -5,6 +5,8 @@ export const startMemorySyntax = "start";
 export const firstStableMemorySyntax = "memsphere-20260719-stable";
 export const controlPlaneMemorySyntax = "memsphere-20260721-stable";
 export const graphMemorySyntax = "memsphere-20261027-stable";
+export const graphStoreMemorySyntax = "memsphere-20261118-stable";
+// Keep the bundled Memory baseline until the explicit graph Store syntax is adopted.
 export const currentMemorySyntax = graphMemorySyntax;
 
 export type MemorySyntaxVersion = string;

@@ -113,6 +113,13 @@ collect Action 由命令自动完成，Agent 不执行 enter/report；结果是�
 graph 可用 `run external add --run R --source S --content C` 登记原始依据，或用 `--change C --checkpoint D` 捕获同一固定 ChangeSet 的完整证据；两种来源互斥。External 由当前 Step 生产的 Artifact.dependencies 引用，不由 Step 直接引用。上报时用 `--depends-on artifact:A|external:E` 或结构化 `--file` 的 dependencies（互斥），补充 Artifact 须是本实例固定数据/控制来源中已接纳且当前有效的具体版本。强制输入不变；修订省略继承前身补充依赖，空数组清空，非空完整替换。不要为传递验收依据增加调度边或默认读取同 Action 最新产物。
 
 Reviewer 可用 `run review assignment show` 获取固定对象及读取命令；`run artifact show --run R --artifact A --out F` 和 `run external show --run R --external E --out F` 导出完整正文。资源命令不自动混入 assignment，合法全局 Project 参数仍须匹配 Session；直接上下文及其 External、原接纳确认可读，其他分支和当前候选他人草稿不可读。失效/被替换/回溯撤销 Attempt 不能读取；本人成功提交后可回读原轮次。导出在当前 Attempt 目录内新建文件，不覆盖。当前候选和授权上游的 contract show 都须读取完整冻结契约；Schema 模型只返回该合法 Artifact 的 Run 冻结 Schema 定义与规则来源，不回退当前 Project 或返回其他 Action 契约。graph 支持固定 Artifact/External/确认；历史 flow 按 assignment/step 读取固定候选和上下文，遵循提示中的协议适用性。本人读取不依赖其他轮次记录或同轮他人的草稿锚点。导出先在目录内完整暂存正文、核对路径及文件身份，再以不覆盖方式发布；写入失败不产生部分目标文件，不覆盖或删除已有及并发替换的目标，无法发布或核验时明确失败。默认 Memory 辅助读取与显式 Run 冻结读取语义保持区别。
+#### graph：业务 Store 写入
+
+使用 `syntax: memsphere-20261118-stable`，在普通生产 Action 的 `artifact.store` 声明 `store_id` 与 `operation`。ValueStore 的 `upsert` 整条写入校验值；DataStore 的 `create` 保留通过校验的原始字节和媒体类型，已有 ID 时冲突。正式接纳后写入，完成状态及回执保存后推进。JSON/YAML 保留完整解码值，普通文本和 Markdown 保留字符串，Schema 产物写入 ValueStore 时使用结构化校验值。collect 由后继生产 Action 写入。
+
+用 `run report` 或 `continue report --write-options '{"data_id":"record-001"}'` 指定记录 ID，同一 Step 修订和恢复沿用合法候选的 ID。目标变化时先恢复原绑定。结果未确认时查看固定候选和 Store 记录。需要重做时显式执行 `run step store retry --run R --step S`，upsert 可能覆盖期间的新值，同内容的 create 冲突不代表本次成功。历史 Artifact 保存原文，回溯、废弃、归档和恢复归档保留业务写入。
+
+
 #### graph：Schema 渐进式撰写
 
 Artifact 使用 `model: {definedBy: memsphere/schema.json, ref: schemas/canonical-name}`，或以 definition 保存带显式 syntax 的完整 !schema YAML；ref/definition 必须二选一。payload.contentType 决定整体格式，根 format.layout 指定布局，局部字段可声明 format。启动冻结引用及规则，不另建 Schema 定义 Store。

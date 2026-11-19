@@ -9,6 +9,18 @@ import { textContent } from "../src/context_control/types.js";
 import { upgradeContextControlOutputs } from "../src/project/context-control-upgrade.js";
 import { withModelMaintenance } from "../src/project/model-operation.js";
 
+/** Reconstruct the fixed pre-business-write model before applying older version deltas. */
+function removeGraphBusinessFields(entity: string, model: any) {
+  if (entity === "run") delete model.properties.businessTargets;
+  if (entity === "artifact") delete model.properties.business;
+  if (entity === "step") {
+    delete model.properties.businessReceipt;
+    delete model.definitions.SubmissionArtifact.properties.business;
+    delete model.definitions.SubmissionFrame.properties.businessReceipt;
+    delete model.definitions.SubmissionFrame.properties.businessAttempt;
+  }
+}
+
 test("adding archive metadata upgrades the known Run definition without rewriting Run records", async t => {
   const f = await businessFixture(t, {}), s = (await openContextControl(f.root, true))!, run = await s.start("保留版本");
   const schemaPath = join(f.root, "models/json-schema/draft-07/memsphere/context_control/run.json");
@@ -212,6 +224,7 @@ for(const entity of ["run","review"] as const)test(`Tracked Job name upgrade pre
  const f=await businessFixture(t,{}),service=(await openContextControl(f.root,true))!,run=await service.start("enrolled job model");
  const before=await service.stores.run.get({},run.id),path=join(f.root,"data/context_control/runs",`${run.id}.json`),bytes=await readFile(path,"utf8");
  const model=JSON.parse(await readFile(new URL(`../reserved-models/context-control/${entity}.json`,import.meta.url),"utf8"));
+ removeGraphBusinessFields(entity, model);
  // Reconstruct the enrolled-Job release, which predates Schema contracts.
  if(entity==="run")delete model.properties.schemaContracts;
  if(entity==="review")delete model.definitions.ReviewNode.properties.requiresReport;
@@ -233,6 +246,7 @@ test("explicit Schema model upgrade preserves existing records and rejects impli
   for (const asset of readContextControlModels()) {
     if (!(asset.entity in previous)) continue;
     const model = structuredClone(asset.definition) as any;
+    removeGraphBusinessFields(asset.entity, model);
     if (asset.entity === "review") delete model.definitions.ReviewNode.properties.requiresReport;
     else if (asset.entity === "run") delete model.properties.schemaContracts;
     else { delete model.properties.writing; if (asset.entity === "step") { delete model.definitions.SubmissionFrame.properties.draft; delete model.definitions.Validation.properties.draftRevision; delete model.definitions.Validation.allOf; model.definitions.Validation.required.unshift("sha256"); model.definitions.Validation.properties.artifactId.description = "被检查的 Artifact 标识；sha256 对应本次实际检查的内容。"; } }
@@ -263,4 +277,31 @@ test("known numeric draft revision is converted by the explicit context model up
   assert.equal(updated.value.validation.draftRevision, "7");
   assert.equal(updated.revision, persisted.revision + 1);
   assert.ok(await openContextControl(f.root));
+});
+
+test("explicit graph Store model upgrade accepts the previous shipped definitions without rewriting records", async t => {
+  const { readContextControlModels, definitionHash } = await import("../src/context_control/model-assets.js");
+  const f = await businessFixture(t, {});
+  const service = (await openContextControl(f.root, true))!;
+  const run = await service.start("Before graph Store support");
+  const report = await service.report(run.id, { name: "History", content: textContent("unchanged") });
+  const expectedHashes = {
+    run: "412b08ac48eb49067a110b5710817b40555f764294e9274ec74c16cebec1d199",
+    step: "117f80200d4713763b646a31fef72153cb899779f5ae1ece795f01bfd7cab2fc",
+    artifact: "e03ff883ebb3bf84ee49348d8ebdaf3b4c346775f3c597b6c950610f249c7cb0"
+  };
+  const before = await service.snapshot(run.id);
+  for (const asset of readContextControlModels()) {
+    if (!(asset.entity in expectedHashes)) continue;
+    const model = structuredClone(asset.definition);
+    removeGraphBusinessFields(asset.entity, model);
+    assert.equal(definitionHash(model), expectedHashes[asset.entity as keyof typeof expectedHashes]);
+    await publishFixtureDefinition(f.root, asset.id, JSON.stringify(model));
+  }
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
+  const upgrade = await upgradeContextControlOutputs(f.root);
+  assert.deepEqual(upgrade, { changed: true, records: 0 });
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.snapshot(run.id), before);
+  assert.equal((await reopened.readArtifact(run.id, report.artifact.id)).bytes.toString(), "unchanged");
 });

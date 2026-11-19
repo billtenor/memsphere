@@ -1,3 +1,7 @@
+import { AsyncLocalStorage } from "node:async_hooks";
+import { parseArtifactWriteOptions, type ModelArtifactWriteOptions } from "../project/model-artifact.js";
+import { schemaRuntime } from "./schema-contract.js";
+import type { GraphBusinessStores } from "./business-artifact.js";
 import { startSchemaWriting, writingPosition, checkWritingPosition, reportSchemaItem, skipSchemaItem, repeatSchemaItem, assembleSchemaDraft } from "./schema-writing.js";
 import { MEMSPHERE_SCHEMA_MODEL } from "../memory/schema-model.js";
 import { freezeSchemaContract, resolvedArtifact, sameModel, schemaReviewSources, type ResolvedArtifactSpec } from "./schema-contract.js";
@@ -34,13 +38,21 @@ export type GraphStartInput = {
   memorySnapshot?: Run["memorySnapshot"]; memorySource?: Run["memorySource"];
   controlPlane?: ControlPlaneConfig; reviewConfiguration?: RunReviewConfiguration;
 };
-export type GraphReport = { text?: string; content?: Body["content"]; contentRef?: ContentRef; revisionSummary?: string; dependencies?: Ref[] };
+export type GraphReport = { text?: string; content?: Body["content"]; contentRef?: ContentRef; revisionSummary?: string; dependencies?: Ref[]; writeOptions?: ModelArtifactWriteOptions };
 
 /** Graph persistence uses the same model Stores as exploration, with its own completion/recovery rules. */
 export class GraphRuntime {
   readonly records: Records;
   private parsedProcedure?: { reference: string; content: string; value: GraphProcedureMemory };
-  constructor(stores: Stores, private readonly reader: ContentReader, readonly runtime: ContextRuntime = systemContextRuntime) { this.records = new Records(stores); }
+  private readonly writeLock = new AsyncLocalStorage<string>();
+  constructor(stores: Stores, private readonly reader: ContentReader, readonly runtime: ContextRuntime = systemContextRuntime, private readonly business?: GraphBusinessStores) { this.records = new Records(stores); }
+  private businessStores(): GraphBusinessStores {
+    if (!this.business) throw failure("UNSUPPORTED_CAPABILITY", "Graph business Store support is unavailable");
+    return this.business;
+  }
+  private withBusinessLock<T>(runId: string, action: () => Promise<T>): Promise<T> {
+    return this.businessStores().lock(runId, () => this.writeLock.run(runId, action));
+  }
   async stopReviewer(worker: Parameters<typeof stopRewindWorker>[0]): Promise<void> {
     await this.runtime.workers.stop(worker);
   }
@@ -107,8 +119,13 @@ export class GraphRuntime {
       ...(review ? { reviewConfig: { reviewPolicies: review.reviews, reviewBindings: review.slots } } : {}),
       frames: [{ id: newId("frame"), type: "graph", graphFrame: { memoryRef, triggers: [], pendingSteps: [], joins: [], processedStepIds: [], nextCompletionSequence: 1 } }] };
     for (const [index, action] of procedure.actions.entries()) {
-      if (action.artifact?.model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
-        (run.schemaContracts ??= {})[action.id] = await freezeSchemaContract(action.artifact, snapshot.memories, { kind: "step", memoryRef, path: `actions[${index}].artifact.model.definition` });
+      const spec = action.artifact;
+      if (spec?.model.definedBy === MEMSPHERE_SCHEMA_MODEL) {
+        (run.schemaContracts ??= {})[action.id] = await freezeSchemaContract(spec, snapshot.memories, { kind: "step", memoryRef, path: `actions[${index}].artifact.model.definition` });
+      }
+      if (spec?.store) {
+        (run.businessTargets ??= Object.create(null))[action.id] =
+          await this.businessStores().freeze(spec.store, resolvedArtifact(run, action.id, spec));
       }
     }
     await this.rules(run);
@@ -398,13 +415,15 @@ export class GraphRuntime {
       if (!isDeepStrictEqual(oldValue, newValue)) throw failure("RECOVERY_CONFLICT", `Artifact content differs: ${artifact.id}`);
     }
   }
-  private async recoverSubmission(runId: string, stepId: string) {
+  private async recoverSubmission(runId: string, stepId: string, retry = false): Promise<void> {
     const run = await this.productionStep(runId, stepId);
     let row = await this.step(run, stepId); let step = structuredClone(row.value);
     assertContextControlRecord("memsphere/context_control/step.json", step);
     const frameId = step.frames?.find(f => f.type === "submission")?.id;
     let stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
     if (!stage) return;
+    if (stage.artifact.business && stage.nextStatus === "done" && this.writeLock.getStore() !== runId)
+      return this.withBusinessLock(runId, () => this.recoverSubmission(runId, stepId, retry));
     if ((stage.nextStatus === "awaiting_review") !== Object.hasOwn(stage, "round")) throw failure("INVALID_STATE", "Submission round must match awaiting_review status");
     const spec = this.action(run, step).artifact;
     if (!spec) throw failure("INVALID_STATE", "Collect has a submission frame");
@@ -438,6 +457,39 @@ export class GraphRuntime {
       }
       else if (old.value.roundId !== review.roundId || old.value.artifactId !== review.artifactId || !isDeepStrictEqual(old.value.reviewer, review.reviewer)) throw failure("RECOVERY_CONFLICT", `Review identity differs: ${review.id}`);
     }
+    if (stage.nextStatus === "done" && stage.artifact.business && !stage.businessReceipt) {
+      const record = stage.artifact.business;
+      const target = own(run.businessTargets ?? {}, step.source!.actionId) ? run.businessTargets![step.source!.actionId] : undefined;
+      if (!target || !isDeepStrictEqual(target, { storeId: record.destination.storeId, modelRef: record.destination.modelRef, operation: record.destination.operation, fingerprint: record.destination.fingerprint }) || record.sha256 !== checked.sha256)
+        throw failure("INVALID_STATE", "Frozen business candidate does not match its target or payload");
+      const details = { artifactId: stage.artifact.id, runId, stepId, ...record.destination, recoveryCommand: `memsphere run step store retry --run ${runId} --step ${stepId}`,
+        inspectCommand: `memsphere run step show --run ${runId} --step ${stepId}` };
+      const impact = record.destination.operation === "upsert" ? " Retry may replace a newer record." : " Retry cannot replace an existing record.";
+      const recovery = ` Store ${JSON.stringify(record.destination.storeId)}, record ${JSON.stringify(record.destination.dataId)}. Inspect the fixed candidate with ${details.inspectCommand} and check the business record before retrying. To retry explicitly: ${details.recoveryCommand}.`;
+      if (stage.businessAttempt && !retry)
+        throw Object.assign(failure("BUSINESS_WRITE_RECOVERY_REQUIRED", (stage.businessAttempt.message ?? "Previous Store write result is unconfirmed.") + impact + recovery), { details });
+      stage.businessAttempt = { state: "attempted" };
+      await this.records.update("step", runId, row, step);
+      row = await this.step(run, stepId);
+      step = structuredClone(row.value);
+      stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
+      if (!stage) throw failure("RECOVERY_CONFLICT", "Business submission disappeared");
+      await this.productionStep(runId, stepId);
+      try {
+        stage.businessReceipt = await this.businessStores().write(record.destination, { ...checked, value: JSON.parse(record.valueJson) });
+      } catch (cause) {
+        const code = (cause as { code?: string }).code;
+        const known = code && ["ALREADY_EXISTS", "EEXIST", "REVISION_CONFLICT", "MODEL_ARTIFACT_TARGET_CHANGED", "INVALID_ARGUMENT", "UNSUPPORTED_CAPABILITY"].includes(code);
+        const message = (known ? "Store rejected the write: " : "Store write result is unconfirmed: ") + (cause instanceof Error ? cause.message : String(cause));
+        stage.businessAttempt = { state: known ? "failed" : "uncertain", message };
+        try { await this.records.update("step", runId, row, step); } catch { /* The persisted attempt still prevents automatic replay. */ }
+        throw Object.assign(failure(known ? code! : "BUSINESS_WRITE_UNCONFIRMED", message + impact + recovery), { details, cause });
+      }
+      try { await this.records.update("step", runId, row, step); }
+      catch (cause) {
+        throw Object.assign(failure("BUSINESS_RECEIPT_SAVE_FAILED", "Store write succeeded, but its receipt could not be saved." + impact + recovery), { details, cause });
+      }
+    }
     if (stage.nextStatus === "done" && stage.completionSequence === undefined) {
       const completionSequence = await this.reserveCompletion(runId);
       row = await this.step(run, stepId); step = structuredClone(row.value); stage = step.frames?.find(f => f.id === frameId)?.submissionFrame;
@@ -452,6 +504,7 @@ export class GraphRuntime {
     step.validation = { sha256: checked.sha256, artifactId: stage.artifact.id, checkedAt: this.runtime.now(), status: "passed", issues: [] };
     step.artifact = { mode: "produce", id: stage.artifact.id }; step.status = stage.nextStatus;
     if (stage.round && !step.reviewRounds?.some(r => r.id === stage!.round!.id)) step.reviewRounds = [...(step.reviewRounds ?? []), stage.round];
+    if (stage.businessReceipt) step.businessReceipt = { ...stage.businessReceipt, artifactId: stage.artifact.id };
     if (stage.nextStatus === "done") { step.completionSequence = stage.completionSequence; step.endedAt = stage.endedAt; }
     step.frames = step.frames!.filter(f => f.type !== "submission");
     if (stage.draft) delete step.writing;
@@ -477,12 +530,14 @@ export class GraphRuntime {
     if ((await this.run(runId)).revision !== row.revision) throw failure("REVISION_CONFLICT", "Run changed while planning rewind");
     return plan;
   }
-  async rewind(runId: string, stepId: string, reason: string) {
+  async rewind(runId: string, stepId: string, reason: string): Promise<Awaited<ReturnType<GraphRuntime["rewindPreview"]>> & { rewindId: string; replacementStepId: string; snapshot: Snapshot }> {
+    if (this.writeLock.getStore() !== runId && (await this.run(runId)).value.businessTargets)
+      return this.withBusinessLock(runId, () => this.rewind(runId, stepId, reason));
     if (!reason?.trim()) throw failure("INVALID_ARGUMENT", "Rewind reason must be nonblank");
     const before = (await this.run(runId)).value; this.active(before);
     for (const p of ["artifact.read", "artifact.submit", "decision.decide"] as const) this.authorize(before, p);
     requireEffectiveStep(before, stepId);
-    await this.advance(runId);
+    await this.advance(runId, { skipBusinessRecovery: true });
     const row = await this.run(runId), snapshot = await this.snapshotValue(runId);
     if (!isDeepStrictEqual(row.value, snapshot.run)) throw failure("REVISION_CONFLICT", "Run changed while planning rewind");
     const plan = planRewind(snapshot, this.procedure(row.value), stepId);
@@ -609,16 +664,17 @@ export class GraphRuntime {
     frame.deferredCollects = frame.deferredCollects!.filter(g => g.actionId !== gate.actionId || g.dependencyIndex !== gate.dependencyIndex);
     await this.saveRun(row, run); await this.materialize(runId); return true;
   }
-  async advance(runId: string): Promise<Snapshot> {
+  async advance(runId: string, options: { skipBusinessRecovery?: boolean } = {}): Promise<Snapshot> {
     let run = (await this.run(runId)).value;
     if (run.status !== "running") return this.snapshotValue(runId);
     this.active(run); await this.recoverRewind(runId); await this.materialize(runId);
     for (const step of await this.records.list<Step>("step", runId)) if ((step.frames?.length || step.writing) && effectiveStep((await this.run(runId)).value, step.id)) {
+      if (options.skipBusinessRecovery && Object.hasOwn(run.businessTargets ?? {}, step.source?.actionId ?? "")) continue;
       if (step.frames?.length) await this.recoverSubmission(runId, step.id);
       else if (step.writing && step.status === "running") await this.recoverWriting(runId, step.id);
     }
     await this.cancelSupersededReviews(runId);
-    for (const step of await this.records.list<Step>("step", runId)) if (effectiveStep((await this.run(runId)).value, step.id) && step.status === "awaiting_review") await this.settle(runId, step.id);
+    for (const step of await this.records.list<Step>("step", runId)) if (effectiveStep((await this.run(runId)).value, step.id) && step.status === "awaiting_review" && !(options.skipBusinessRecovery && Object.hasOwn(run.businessTargets ?? {}, step.source?.actionId ?? ""))) await this.settle(runId, step.id);
     for (let automatic = 0; automatic < 1000; automatic++) {
       run = (await this.run(runId)).value;
       if (run.status !== "running") return this.snapshotValue(runId);
@@ -767,15 +823,30 @@ export class GraphRuntime {
     } else if (step.frames[0].id !== intent.token) throw failure("RECOVERY_CONFLICT", "Different draft submission frame");
     await this.recoverSubmission(runId, stepId);
   }
-  async report(runId: string, stepId: string, input: GraphReport) {
+  async retryBusinessStore(runId: string, stepId: string): Promise<Snapshot> {
+    const run = await this.productionStep(runId, stepId);
+    this.authorize(run, "artifact.submit");
+    await this.withBusinessLock(runId, async () => {
+      const current = await this.productionStep(runId, stepId);
+      const { value: step } = await this.step(current, stepId);
+      const frame = step.frames?.[0]?.submissionFrame;
+      if (step.status === "done" || !frame?.artifact.business || frame.nextStatus !== "done" || !frame.businessAttempt || frame.businessReceipt)
+        throw failure("INVALID_STATE", "No unsuccessful business Store write to retry");
+      await this.recoverSubmission(runId, stepId, true);
+    });
+    return this.advance(runId);
+  }
+  async report(runId: string, stepId: string, input: GraphReport): Promise<{ snapshot: Snapshot; step: Step; artifact: Artifact }> {
     const run = await this.productionStep(runId, stepId); this.authorize(run, "artifact.submit");
     const row = await this.step(run, stepId); const step = structuredClone(row.value); const action = this.action(run, step);
+    if (action.artifact?.store && this.writeLock.getStore() !== runId)
+      return this.withBusinessLock(runId, () => this.report(runId, stepId, input));
     if (!action.artifact || step.status !== "running") throw failure("STEP_NOT_RUNNING", `Step ${stepId} is ${step.status}; enter it before reporting`);
     if (step.frames?.length) throw Object.assign(failure("RECOVERY_REQUIRED", "A saved submission must be recovered before reporting again"), { details: { runId, stepId, artifactId: step.frames[0].submissionFrame.artifact.id, recoveryCommand: `memsphere run status --run ${runId}` } });
     if ([input.text, input.content, input.contentRef].filter(v => v !== undefined).length !== 1) throw failure("INVALID_ARGUMENT", "Provide exactly one Artifact body");
     if (step.reviewRounds?.length && !input.revisionSummary?.trim()) throw failure("REVISION_SUMMARY_REQUIRED", "A revised Artifact requires a revision summary");
     if (!step.reviewRounds?.length && input.revisionSummary !== undefined) throw failure("INVALID_ARGUMENT", "Revision summary requires a previous Review");
-    const body: Body = input.text !== undefined ? { content: { model: structuredClone(action.artifact.model), payload: { contentType: action.artifact.payload.contentType, content: input.text } } } : input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) };
+    let body: Body = input.text !== undefined ? { content: { model: structuredClone(action.artifact.model), payload: { contentType: action.artifact.payload.contentType, content: input.text } } } : input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) };
     if (body.content && (!sameModel(body.content.model, action.artifact.model))) throw failure("ARTIFACT_CONTRACT_MISMATCH", "Report cannot replace the frozen Artifact model");
     const draft = step.writing ? await this.records.require<Artifact>("artifact", runId, step.writing.draftId) : undefined;
     if (draft && (!draft.value.writing || draft.value.writing.index < draft.value.writing.items.length)) throw failure("SCHEMA_INCOMPLETE", "Complete all Schema fields before submitting");
@@ -817,7 +888,28 @@ export class GraphRuntime {
     }
     const dependencies = [...new Map([...Object.values(step.inputs ?? {}).flat(), ...extra].map(r => [`${r.kind}:${r.id}`, r])).values()];
     for (const ref of dependencies) if (ref.kind === "artifact") await this.contentValue(run, ref.id);
-    const artifact: Artifact = { id: draft?.value.id ?? newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body,
+    const options = input.writeOptions === undefined ? undefined : parseArtifactWriteOptions(input.writeOptions);
+    const target = own(run.businessTargets ?? {}, action.id) ? run.businessTargets![action.id] : undefined;
+    if (action.artifact.store && !target) throw failure("INVALID_STATE", "Frozen business Store target missing");
+    if (!target && options !== undefined) throw failure("INVALID_ARGUMENT", "--write-options requires an Artifact business Store");
+    let business: Artifact["business"];
+    if (target) {
+      const previous = step.artifact?.mode === "produce"
+        ? (await this.records.require<Artifact>("artifact", runId, step.artifact.id)).value.business
+        : undefined;
+      if (previous && options?.data_id !== undefined && options.data_id !== previous.destination.dataId)
+        throw failure("INVALID_ARGUMENT", `Business record ID is frozen: ${previous.destination.dataId}`);
+      const spec = action.artifact;
+      const projectValue = spec.model.definedBy === MEMSPHERE_SCHEMA_MODEL
+        ? () => schemaRuntime(spec.model.definition).businessValue(checked.bytes, checked.contentType)
+        : undefined;
+      const { destination, value } = await this.businessStores().prepare(target, { ...checked, value: checked.decoded }, `${runId}--${stepId}`, previous?.destination.dataId ?? options?.data_id, projectValue);
+      const valueJson = JSON.stringify(value);
+      if (valueJson === undefined) throw failure("CONTENT_INVALID", "Business value cannot be encoded");
+      business = { destination, sha256: checked.sha256, valueJson };
+      body = { content: { model: structuredClone(action.artifact.model), payload: { contentType: checked.contentType, content: Buffer.from(checked.bytes).toString("utf8") } } };
+    }
+    const artifact: Artifact = { id: draft?.value.id ?? newId("artifact"), stepId, name: action.artifact.name, status: "submitted", tags: ["default"], dependencies, ...body, ...(business ? { business } : {}),
       ...(step.artifact?.mode === "produce" ? { revisedFrom: step.artifact.id, revisedSummary: input.revisionSummary } : previousArtifact ? { revisedFrom: previousArtifact, revisedSummary: rewind!.reason } : {}) };
     const round = createGraphRound(run, this.procedure(run), action, artifact.id);
     const token = newId("frame");
@@ -842,7 +934,7 @@ export class GraphRuntime {
       const snapshot = await this.advance(runId); requireEffectiveStep(snapshot.run, stepId);
       return { snapshot, step: snapshot.steps.find(s => s.id === stepId)!, artifact };
     } catch (error) {
-      const details = { ...(error as { details?: object }).details, runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}` };
+      const details = { runId, stepId, artifactId: artifact.id, recoveryCommand: `memsphere run status --run ${runId}`, ...(error as { details?: object }).details };
       if (!savedSubmission) {
         // A Store write may have persisted before its caller observed an error.
         // Read the fixed intent back rather than retrying or claiming no effect.
@@ -914,7 +1006,7 @@ export class GraphRuntime {
       requireEffectiveStep(snapshot.run, stepId);
       return snapshot;
     }
-    catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, reviewId: id, roundId, recoveryCommand: `memsphere run status --run ${runId}`, message: "Review saved; recover status before repeating the vote" } }); }
+    catch (error) { throw Object.assign(error as object, { details: { ...(error as { details?: object }).details, runId, stepId, reviewId: id, roundId, recoveryCommand: (error as { details?: { recoveryCommand?: string } }).details?.recoveryCommand ?? `memsphere run status --run ${runId}`, message: "Review saved; follow the recovery command before repeating the vote" } }); }
   }
   ready(snapshot: Snapshot) { const order = this.creationOrder(snapshot.run, snapshot.steps); return snapshot.steps.filter(s => effectiveStep(snapshot.run, s.id) && (s.status === "pending" || s.status === "running") && this.action(snapshot.run, s).artifact).sort((a, b) => order.get(a.id)! - order.get(b.id)!); }
   async finish(runId: string) {
@@ -926,7 +1018,9 @@ export class GraphRuntime {
     const value = { ...row.value, status: "done" as const, endedAt: this.runtime.now() };
     await this.records.update("run", runId, row, value); return value;
   }
-  async abandon(runId: string, reason?: string, source: "cli" | "view" = "cli") {
+  async abandon(runId: string, reason?: string, source: "cli" | "view" = "cli"): Promise<Run> {
+    if (this.writeLock.getStore() !== runId && (await this.run(runId)).value.businessTargets)
+      return this.withBusinessLock(runId, () => this.abandon(runId, reason, source));
     const row = await this.run(runId);
     if (row.value.status === "done") throw failure("RUN_FINISHED", "Completed Run cannot be abandoned");
     if (row.value.status !== "abandoned") await this.records.update("run", runId, row, { ...row.value, status: "abandoned", endedAt: this.runtime.now(), abandonment: { source, ...(reason ? { reason } : {}) } });

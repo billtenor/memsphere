@@ -126,7 +126,9 @@ export type GraphModelSpec = { definedBy: string } & (
   | { definition: string; ref?: never }
   | { ref: string; definition?: never }
 );
+export type GraphStoreBinding = { store_id: string; operation: "upsert" | "create" };
 export type GraphArtifactSpec = {
+  store?: GraphStoreBinding;
   name: string;
   asserts?: RulePart[];
   suggests?: RulePart[];

@@ -306,3 +306,146 @@ test('rewind JSON argument and superseded errors use the structured stderr contr
   }
   assert.deepEqual(await snapshotTree(f.root), before);
 });
+
+test("graph native and Continue reports validate business options before writing", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const { mutateModel } = await import("../src/project/model-service.js");
+  const { openBusinessStore } = await import("../src/project/business-stores.js");
+  await mutateModel({}, f.root, "create", "cli-record.json", { source: '{"type":"object","required":["name"],"properties":{"name":{"type":"string"}}}' });
+  await f.createStore("records", "cli-record.json");
+  const artifact: NonNullable<GraphProcedureMemory["actions"][number]["artifact"]> = {
+    name: "Record", model: { definedBy: "json-schema/draft-07.json", definition: '{"type":"object"}' },
+    payload: { contentType: "application/json" }, store: { store_id: "records", operation: "upsert" }
+  };
+  await writeFile(f.procedure, serializeMemoryYaml({
+    tag: "!procedure", syntax: "memsphere-20261118-stable", names: ["cli-store"], defines: ["Save records"], goals: [], mode: "graph",
+    actions: [{ tag: "!action", id: "write", description: "Save", dependencies: [{ tag: "!dependency", from: "START" }], artifact }]
+  }));
+  const { store } = await openBusinessStore({}, f.root, "records");
+  const first = await f.call("run", "start", "--file", f.procedure, "--name", "Native");
+  const step = (await f.call("run", "show", "--run", first.runId)).steps[0].id;
+  await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", "{}", "--write-options", '{"data_id":"native"}'));
+  for (const data_id of ["parent/child", "a".repeat(251)])
+    await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", JSON.stringify({ data_id })), /filename/);
+  assert.deepEqual((await store.list({}, {})).items, []);
+  await f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", '{"data_id":"native"}');
+  const second = await f.call("run", "start", "--file", f.procedure, "--name", "Continue");
+  await assert.rejects(f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"unexpected":true}'));
+  assert.equal((await store.list({}, {})).items.length, 1);
+  const done = await f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"data_id":"continue"}');
+  assert.equal(done.runId, second.runId);
+  assert.equal(done.status, "done");
+  assert.deepEqual((await store.get({}, "continue") as { value: unknown }).value, { name: "continue" });
+});
+
+test("graph Store retry closes the terminal Step's Continue binding and preserves its candidate", { timeout: 90000 }, async t => {
+  const f = await fixture(t);
+  const { mutateModel } = await import("../src/project/model-service.js");
+  const { openBusinessStore } = await import("../src/project/business-stores.js");
+  const { bytesContent, readAll } = await import("../src/data/extensions/shared/payload.js");
+  await mutateModel({}, f.root, "create", "cli-record.json", { source: '{"type":"object"}' });
+  await f.createStore("records", "cli-record.json", "data");
+  await writeFile(f.procedure, serializeMemoryYaml({
+    tag: "!procedure", syntax: "memsphere-20261118-stable", names: ["cli-retry"], defines: ["Retry records"], goals: [], mode: "graph",
+    actions: [{
+      tag: "!action", id: "write", description: "Save", dependencies: [{ tag: "!dependency", from: "START" }],
+      artifact: {
+        name: "Record", model: { definedBy: "json-schema/draft-07.json", definition: '{"type":"object"}' },
+        payload: { contentType: "application/json" }, store: { store_id: "records", operation: "create" }
+      }
+    }]
+  }));
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "DataStore");
+  const dataId = "retry.json";
+  const previous = '{"name":"existing"}';
+  await store.create({}, { id: dataId, model: "cli-record.json", payload: { contentType: "application/json", content: bytesContent(Buffer.from(previous)) } });
+  const { runId } = await f.call("run", "start", "--file", f.procedure, "--name", "Retry");
+  const { steps: [step] } = await f.call("run", "show", "--run", runId);
+  const body = '{ "name": "candidate" }\n';
+  await assert.rejects(f.call("continue", "report", "--artifact", body, "--write-options", '{"data_id":"retry.json"}'), /exists/i);
+  const failed = await f.call("run", "show", "--run", runId);
+  assert.equal(failed.steps[0].businessReceipt, undefined);
+  assert.equal((await requireCommandState("codex-graph-session", f.home)).value.status, "active");
+  const { openContextControl } = await import("../src/project/context-control.js");
+  const { graphPermissionConfig } = await import("../src/context_control/graph-review.js");
+  const service = (await openContextControl(f.root))!;
+  const restricted = graphPermissionConfig({ runner: { permissions: ["artifact.read", "decision.decide"] }, actors: {}, acpProviders: {} }, "en");
+  // Construct the persisted permission fixture around an actual failed candidate.
+  // Production freezes permissions, so it cannot naturally fail a report from this Runner.
+  const setPermissions = (permissionConfig?: import("../src/context_control/types.js").Run["permissionConfig"]) => service.withGraph(async g => {
+    const row = await g.records.require<import("../src/context_control/types.js").Run>("run", runId, runId);
+    const run = { ...row.value, permissionConfig };
+    if (!permissionConfig) delete run.permissionConfig;
+    await g.records.update("run", runId, row, run);
+  });
+  await setPermissions(restricted);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /Runner requires artifact.submit/);
+  const rejected = await f.call("run", "show", "--run", runId);
+  assert.deepEqual(rejected.steps, failed.steps);
+  assert.deepEqual(rejected.artifacts, failed.artifacts);
+  assert.deepEqual((await store.list({}, {})).items.map(item => item.id), [dataId]);
+  await setPermissions();
+  const other = await f.call("run", "start", "--file", f.procedure, "--name", "Other session target");
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /bound to another target/);
+  const existing = await store.get({}, dataId);
+  assert(existing && !existing.deleted);
+  assert.equal(Buffer.from(await readAll({}, existing.data.payload.content)).toString(), previous);
+  assert.deepEqual((await f.call("run", "show", "--run", runId)).steps, failed.steps);
+  const otherStep = (await f.call("run", "show", "--run", other.runId)).steps[0].id;
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", other.runId, "--step", otherStep), /No unsuccessful/);
+  await f.invoke("run", "step", "enter", "--run", runId, "--step", step.id);
+  assert.equal(await store.delete({}, dataId), true);
+  const result = await f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id);
+  assert.equal(result.step.status, "done");
+  assert.equal(result.step.businessReceipt.artifactId, failed.artifacts[0].id);
+  assert.equal((await requireCommandState("codex-graph-session", f.home)).value.status, "closed");
+  const saved = await store.get({}, dataId);
+  assert(saved && !saved.deleted);
+  assert.equal(Buffer.from(await readAll({}, saved.data.payload.content)).toString(), body);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /No unsuccessful/);
+});
+
+test("Graph report and Continue accept nested file Store IDs and reject traversal", { timeout: 90000 }, async t => {
+  const f = await fixture(t, false, true, true);
+  const { mutateModel } = await import("../src/project/model-service.js");
+  const { openBusinessStore } = await import("../src/project/business-stores.js");
+  const { readAll } = await import("../src/data/extensions/shared/payload.js");
+  await mutateModel({}, f.root, "create", "cli-record.json", { source: '{"type":"object"}' });
+  await f.createStore("records", "cli-record.json", "data");
+  await writeFile(f.procedure, serializeMemoryYaml({
+    tag: "!procedure", syntax: "memsphere-20261118-stable", names: ["cli-files"], defines: ["Save files"], goals: [], mode: "graph",
+    actions: [{
+      tag: "!action", id: "write", description: "Save", dependencies: [{ tag: "!dependency", from: "START" }],
+      artifact: {
+        name: "Record", model: { definedBy: "json-schema/draft-07.json", definition: '{"type":"object"}' },
+        payload: { contentType: "application/json" }, store: { store_id: "records", operation: "create" }
+      }
+    }]
+  }));
+  const { store } = await openBusinessStore({}, f.root, "records");
+  assert.equal(store.kind, "DataStore");
+  for (const entry of ["native", "continue"] as const) {
+    const { runId } = await f.call("run", "start", "--file", f.procedure, "--name", entry);
+    const before = await f.call("run", "show", "--run", runId);
+    const stepId = before.steps[0].id;
+    const args = entry === "native" ? ["run", "report", "--run", runId, "--step", stepId] : ["continue", "report"];
+    const body = '{ "name": "report" }\n';
+    const report = (data_id: string) => f.call(...args, "--artifact", body, "--write-options", JSON.stringify({ data_id }));
+    const existing = (await store.list({}, {})).items;
+    await assert.rejects(report("reports/../../escape.json"), /not portable/);
+    const rejected = await f.call("run", "show", "--run", runId);
+    assert.deepEqual(rejected.artifacts, []);
+    assert.deepEqual(rejected.steps, before.steps);
+    assert.deepEqual((await store.list({}, {})).items, existing);
+    const dataId = `reports/${entry}.json`;
+    const done = await report(dataId);
+    const after = await f.call("run", "show", "--run", runId);
+    assert.equal(after.steps[0].businessReceipt.artifactId, done.artifactId);
+    assert.equal(after.artifacts[0].business.destination.dataId, dataId);
+    const row = await store.get({}, dataId);
+    assert(row && !row.deleted);
+    assert.equal(row.data.payload.contentType, "application/json");
+    assert.equal(Buffer.from(await readAll({}, row.data.payload.content)).toString(), body);
+  }
+});
