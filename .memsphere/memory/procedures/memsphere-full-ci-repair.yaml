@@ -1,0 +1,138 @@
+!procedure
+syntax: memsphere-20261027-stable
+mode: graph
+names:
+  - memsphere-full-ci-repair
+  - Full CI 修复流程
+defines:
+  - 修复 memsphere 仓库 master 的三平台 Full CI 失败，验证修复 PR 的确切版本，交由 human 合入并完成清理。
+asserts:
+  - 返工沿用同一个 Run 和 PR，保留各轮记录和原有测试覆盖。
+actions:
+  - !action
+    id: diagnose
+    description: 查询最新远端 master 提交的 Full CI，读取失败日志并定位原因。
+    actor: agent
+    asserts:
+      - 确认失败对应最新 master 提交，记录运行链接、失败项和根因依据。
+    dependencies:
+      - !dependency
+        from: START
+    artifact:
+      name: Full CI 故障分析
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: repair
+    description: 基于故障分析在独立开发分支修复问题，完成受影响的本地验证。
+    actor: agent
+    asserts:
+      - 从最新 master 修复已确认的问题，记录受影响验证的命令、结果和未覆盖范围。
+    dependencies:
+      - !dependency
+        from: diagnose
+    artifact:
+      name: 修复与本地验证记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: pr
+    description: 提交并推送已验证的修复，创建或更新以 master 为目标的 PR。
+    actor: agent
+    asserts:
+      - PR 说明原故障、修复和验证结果，记录链接及已验证的 head SHA。有 Memory 变更时附校验通过的 ChangeSet。
+      - !ref
+        target: statements/memsphere-repository-git-rules
+    dependencies:
+      - !dependency
+        from: repair
+    artifact:
+      name: 修复 PR 提交记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: technical_acceptance
+    description: 处理本轮待修问题，整理当前 PR 版本的材料并提交正式技术评审。
+    actor: agent
+    asserts:
+      - 返工后复验并更新 PR。评审材料固定当前 head、差异和验证证据，通过 Artifact 依赖引用采用的材料。
+      - 研发和测试均参与评审，采用 artifact_acceptance.unanimous。修改后提交新一轮评审。
+      - !ref
+        target: statements/memsphere-repository-development-rules
+      - !ref
+        target: statements/memsphere-repository-testing-rules
+    dependencies:
+      - !dependency
+        from: pr
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "rework"
+    artifact:
+      name: Full CI 修复技术验收材料
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+      review:
+        - 研发工程师
+        - 测试工程师
+  - !action
+    id: release_gate
+    description: 跟进修复 PR 当前 head 的三平台 Full CI，核对是否满足合入条件。
+    actor: agent
+    asserts:
+      - 触发或复用当前 head 的 Full CI，等待终态。只有该 head 包含最新 master，且技术评审、三平台 Full CI 汇总及 GitHub 合入门禁均通过时，才取 ready。
+      - 检查未通过或版本过期时取 rework。记录运行链接、评审轮次和准出依据。
+    dependencies:
+      - !dependency
+        from: technical_acceptance
+    artifact:
+      name: Full CI 准出记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"object","additionalProperties":false,"required":["route","prUrl","headSha","masterSha","evidence"],"properties":{"route":{"enum":["rework","ready"]},"prUrl":{"type":"string","minLength":1},"headSha":{"type":"string","minLength":1},"masterSha":{"type":"string","minLength":1},"evidence":{"type":"string","minLength":1}}}'
+      payload:
+        contentType: application/json
+  - !action
+    id: human_merge
+    description: 由 human 核对准出记录并操作合入修复 PR。
+    actor: human
+    asserts:
+      - 按准出版本合入并记录合入提交。版本或门禁变化时，交回 Runner 重新核验。
+    dependencies:
+      - !dependency
+        from: release_gate
+        when: artifacts.release_gate.route = "ready"
+    artifact:
+      name: Human 合入记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown
+  - !action
+    id: cleanup
+    description: 核验实际合入结果并清理本轮开发分支和临时资源。
+    actor: agent
+    asserts:
+      - 确认修复已进入 master 后，只清理本轮已无用途的本地资源。保留未提交或未合入的改动，记录合入和清理结果。
+    dependencies:
+      - !dependency
+        from: human_merge
+    artifact:
+      name: 合入核验与清理记录
+      model:
+        definedBy: json-schema/draft-07.json
+        definition: '{"type":"string"}'
+      payload:
+        contentType: text/markdown

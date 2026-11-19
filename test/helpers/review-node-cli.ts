@@ -1,7 +1,6 @@
 import { invokeCliModule } from "./cli-module.js";
 import assert from "node:assert/strict";
 import { after, type TestContext } from "node:test";
-import type test from "node:test";
 import { cp } from "node:fs/promises";
 import { businessFixture } from "./business-data.js";
 import { openContextControl } from "../../src/project/context-control.js";
@@ -13,11 +12,19 @@ import { createAgentReviewCliRuntime } from "../../src/acp/cli-runtime.js";
 import { reviewNodeFixture } from "./review-nodes.js";
 // CLI content tests start with an already bound Reviewer. Build that state once
 // through real APIs; each scenario owns independent model/data byte copies.
-const cleanups: Array<() => unknown> = [];
-after(async () => { for (const cleanup of cleanups) await cleanup(); });
+const cleanups: Array<() => Promise<void>> = [];
+const templateController = new AbortController();
+after(async () => {
+  templateController.abort();
+  await Promise.allSettled([template]);
+  for (const cleanup of cleanups) await cleanup();
+});
 let template: ReturnType<typeof reviewNodeFixture> | undefined;
 async function preparedReview(t: TestContext) {
-  template ??= reviewNodeFixture({ after: cleanup => { cleanups.push(cleanup); } } as TestContext, true, false, { reuseService: true });
+  template ??= reviewNodeFixture({
+    signal: templateController.signal,
+    after: cleanup => { cleanups.push(cleanup); }
+  }, true, false, { reuseService: true });
   const base = await template;
   const f = await businessFixture(t, {});
   for (const entry of ["config.json", "models", "data"]) await cp(join(base.root, entry), join(f.root, entry), { recursive: true });
@@ -27,7 +34,7 @@ async function preparedReview(t: TestContext) {
   const claimed = { ...context, attempt: context.assignment.attempts!.at(-1)! };
   return { ...f, runId: base.runId, input, claimed, bound: { ...input, attemptId: claimed.attempt.id }, controlPlane: base.controlPlane };
 }
-export async function reviewCliFixture(t: test.TestContext, project?: {
+export async function reviewCliFixture(t: TestContext, project?: {
   fixture: Awaited<ReturnType<typeof businessFixture>>;
   service: NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
 }) {

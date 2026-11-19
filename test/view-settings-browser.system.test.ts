@@ -71,7 +71,7 @@ test("Settings browser preserves omitted sections and stays responsive", async (
     await page.getByRole("heading", { name: "界面服务", exact: true, level: 3 }).waitFor();
     assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/view");
     await page.goForward();
-    await participantSettings.waitFor();
+    await participantSettings.and(page.locator('[aria-current="page"]')).waitFor();
     assert.equal(new URL(page.url()).pathname, "/projects/demo/settings/participants");
     const directSettings = await browser.newPage();
     await directSettings.goto(`http://127.0.0.1:${port}/settings/project`, { waitUntil: "networkidle" });

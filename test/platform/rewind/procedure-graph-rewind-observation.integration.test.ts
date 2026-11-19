@@ -12,21 +12,32 @@ import { createConnection } from "node:net";
 
 const original = { pid: 123, group: 123, started: "original creation" };
 
-async function liveChild(t: test.TestContext) {
-  const child = spawn(process.execPath, ["-e", "process.on('message',()=>{});process.send('ready');"], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
+async function readyChild(t: test.TestContext) {
+  const child = spawn(process.execPath, ["-e", "process.on('message', message => process.send(message));process.send('ready');"], { stdio: ["ignore", "ignore", "inherit", "ipc"] });
   t.after(() => stopFixtureChild(child));
-  await bounded(once(child, "message"), "fixture readiness");
+  const [ready] = await bounded(once(child, "message"), "fixture readiness");
+  assert.equal(ready, "ready");
+  return child;
+}
+
+async function liveChild(t: test.TestContext) {
+  const child = await readyChild(t);
   const identity = await captureProcessIdentity(child.pid!);
   assert.ok(identity);
   return { child, identity };
 }
 
 test("owned child cleanup after exit leaves a real unrelated fixture alive", async t => {
-  const old = await liveChild(t), unrelated = await liveChild(t);
-  assert.ok(sameProcess(old.identity, await captureProcessIdentity(old.child.pid!)));
-  await stopFixtureChild(old.child); // The check-to-cleanup window closes here.
-  await stopFixtureChild(old.child);
-  assert.ok(sameProcess(unrelated.identity, await captureProcessIdentity(unrelated.child.pid!)));
+  const old = await readyChild(t), unrelated = await readyChild(t);
+  await stopFixtureChild(old);
+  assert.notEqual(old.signalCode ?? old.exitCode, null, "the owned child has exited");
+  await stopFixtureChild(old);
+
+  // A response on the original IPC channel identifies the unrelated child.
+  const reply = once(unrelated, "message");
+  unrelated.send("still alive");
+  const [message] = await bounded(reply, "unrelated fixture response");
+  assert.equal(message, "still alive");
 });
 
 test("a failed Job probe cannot skip other owned Jobs, workers or transport cleanup", async t => {
