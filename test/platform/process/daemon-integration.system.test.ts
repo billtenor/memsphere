@@ -119,11 +119,12 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
     : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
   const { daemonStatus, stopDaemon: stop } = await import("../../../src/daemon/service.js");
   let daemon: ReturnType<typeof spawn> | undefined;
-  const startDaemon = async () => {
+  const startDaemon = async (preload?: string) => {
     assert.equal(daemon, undefined);
     await mkdir(join(f.home, ".runtime"), { recursive: true });
     const lifetime = new AbortController();
-    daemon = spawn(process.execPath, [cli, "daemon", "serve"], { cwd: f.root, env, stdio: "ignore" });
+    const nodeArgs = preload ? ["--import", preload] : [];
+    daemon = spawn(process.execPath, [...nodeArgs, cli, "daemon", "serve"], { cwd: f.root, env, stdio: "ignore" });
     daemon.once("error", error => lifetime.abort(error));
     daemon.once("exit", (code, signal) => lifetime.abort(new Error(`Fixture daemon exited: ${code ?? signal}`)));
     try {
@@ -457,6 +458,88 @@ test("Claude notification restart distinguishes interrupted attempts and never r
   await f.startDaemon();
   assert.ok((await readTask(registered.id, f.home))!.value.claudeDelivery?.readAt);
   assert.equal(f.messages.length, 2);
+});
+
+test("Claude callback can read a ready Review before the daemon commits the send receipt", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const gates = await processGates(t.signal);
+  t.after(() => gates.close());
+  const f = await claudeNotificationFixture(t, `
+    const { copyFileSync, existsSync } = require("node:fs");
+    const { join } = require("node:path");
+    const target = join(process.cwd(), "send-receipt-lock");
+    if (existsSync(target)) copyFileSync(target, join(process.cwd(), "hold-send-receipt"));
+  `);
+  const gateModule = new URL("../../fixtures/process-gates.mjs", import.meta.url).href;
+  const trigger = join(f.root, "hold-send-receipt");
+  const preload = join(f.directory, "receive-before-send.mjs");
+  // Isolate the write barrier to the daemon's process. Review wait runs in
+  // another CLI process and can use the actual row lock while the daemon waits.
+  await writeFile(preload, `
+import fs from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { processGate } from ${JSON.stringify(gateModule)};
+const trigger = ${JSON.stringify(trigger)};
+const open = fs.open;
+let held = false;
+fs.open = async (path, ...args) => {
+  if (!held && existsSync(trigger) && String(path) === readFileSync(trigger, "utf8")) {
+    held = true;
+    await processGate(${JSON.stringify(gates.endpoint)}, "publish", "committing-send");
+    await processGate(${JSON.stringify(gates.endpoint)}, "wait", "finish-send");
+  }
+  return open(path, ...args);
+};
+syncBuiltinESMExports();
+`);
+  f.beforeCleanup(() => { gates.publish("finish-send"); });
+  await f.startDaemon(preload);
+  await f.call("continue", "review", "wait");
+  const registered = (await f.waitForTask("running")).value;
+  assert.equal(registered.claudeDelivery, undefined);
+  // The initial delivery identity and the send receipt use the same row lock.
+  // The roster fixture arms the barrier after the daemon records the identity.
+  await writeFile(join(f.root, "send-receipt-lock"), daemonTaskLock(f.home, registered.id));
+  const { readTask, listTasks } = await import("../../../src/daemon/tasks.js");
+  await f.completeAgent();
+  await gates.wait("committing-send");
+  const before = (await readTask(registered.id, f.home))!;
+  assert.equal(before.value.status, "running");
+  assert.equal(before.value.claudeDelivery?.sentAt, undefined);
+  const callback = `${registered.id}:${before.value.claudeDelivery!.id}`;
+  const expected = `${notification(f.reviewId)} --callback '${callback}'`;
+  assert.deepEqual(await f.waitForMessages(1), [expected]);
+  const contextBefore = await f.reviewState();
+  const stateBefore = await requireCommandState("claude-origin-session", f.home);
+  const dispatch = () => readdir(join(f.root, ".runtime", "review-dispatch")).catch(error => {
+    if (error.code !== "ENOENT") throw error;
+    return [];
+  });
+  const dispatchBefore = await dispatch();
+  try {
+    const result = await f.call("run", "review", "wait", "--review", f.reviewId, "--callback", callback);
+    assert.ok(result.stdout.includes(f.reviewId));
+    assert.match(result.stdout, /通过/);
+    const early = (await readTask(registered.id, f.home))!;
+    assert.equal(early.value.status, "running");
+    assert.equal(early.value.claudeDelivery?.sentAt, undefined);
+    assert.ok(early.value.claudeDelivery?.readAt);
+    assert.match((await f.call("continue", "review", "wait", "--callback", callback)).stdout, /产物评审信息/);
+    assert.deepEqual(await readTask(registered.id, f.home), early);
+    assert.deepEqual(await f.reviewState(), contextBefore);
+    assert.deepEqual(await requireCommandState("claude-origin-session", f.home), stateBefore);
+    assert.deepEqual(await dispatch(), dispatchBefore);
+    gates.publish("finish-send");
+    const completed = await f.waitForTask("completed", registered.id);
+    assert.ok(completed.value.claudeDelivery?.sentAt);
+    assert.equal(completed.value.claudeDelivery?.readAt, early.value.claudeDelivery?.readAt);
+    assert.deepEqual(await listTasks(f.home), [completed]);
+    assert.deepEqual(f.messages, [expected]);
+  } finally {
+    gates.publish("finish-send");
+  }
 });
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {

@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { recordClaudeDelivery, type TaskRow } from "../src/daemon/tasks.js";
 
-test("Claude delivery merges an independent read and send after a revision conflict", async () => {
+test("Claude delivery merges an independent read and send after a revision conflict", async t => {
   const id = "task-1";
   const deliveryId = "00000000-0000-4000-8000-000000000000";
   const baseline = "2026-11-22T12:00:00.000Z";
+  const observedAt = "2026-11-22T12:00:02.000Z";
+  t.mock.timers.enable({ apis: ["Date"], now: new Date(observedAt) });
   let row: TaskRow = {
     id, revision: "1", value: {
       id, type: "review-wait", status: "running",
@@ -47,6 +49,6 @@ test("Claude delivery merges an independent read and send after a revision confl
   assert.deepEqual(conflicts, ["1"]);
   assert.equal(row.revision, "3");
   assert.equal(row.value.status, "completed");
-  assert.ok(row.value.claudeDelivery?.sentAt);
-  assert.ok(row.value.claudeDelivery?.readAt);
+  assert.equal(row.value.claudeDelivery?.sentAt, observedAt);
+  assert.equal(row.value.claudeDelivery?.readAt, observedAt);
 });
