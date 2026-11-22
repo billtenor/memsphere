@@ -6,7 +6,7 @@ import { configureApp } from "../app/install.js";
 import { resolveProjectContext } from "../project/resolver.js";
 import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
-import { detectRunnerAgents } from "../runner/identity.js";
+import { agentTypes, detectRunnerAgents } from "../runner/identity.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
@@ -2895,7 +2895,8 @@ function globalSettingsPayload(
       ...localizeAcpProviderDefinition(definition, document.raw.language),
       defaultInstance: defaultAcpProviderInstance(definition.type)
     })),
-    providerReferences: providerReferenceMap(projects)
+    providerReferences: providerReferenceMap(projects),
+    runnerAgentTypes: agentTypes
   };
 }
 

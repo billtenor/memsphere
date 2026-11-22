@@ -4,24 +4,24 @@ import { z } from "zod";
 import { resolveMemsphereHome } from "../home.js";
 import { validateFilename } from "../data/extensions/shared/filesystem.js";
 import { detectAcpProviderInstance } from "../acp/detection.js";
-import { listAcpProviderDefinitions, defaultAcpProviderInstance } from "../acp/catalog.js";
+import { requireAcpProviderDefinition, defaultAcpProviderInstance } from "../acp/catalog.js";
 import { spawnCommand } from "../platform-process.js";
 import { resolveQueueCommand } from "./queue-command.js";
+import { agentTypes, runnerSessionVariables, type AgentType } from "./agent-types.js";
+import { supportsClaudeNotifications } from "./claude-notifications.js";
 
-export const agentTypes = ["codex", "traex"] as const;
-export type AgentType = typeof agentTypes[number];
+export { agentTypes, type AgentType } from "./agent-types.js";
 const settings = z.object({ identity_enabled: z.boolean().default(false), async_enabled: z.boolean().default(false) }).strict()
   .refine(v => !v.async_enabled || v.identity_enabled, "Asynchronous execution requires Agent identity");
-export const runnerAgentsSchema = z.object({ codex: settings.optional(), traex: settings.optional() }).strict();
+export const runnerAgentsSchema = z.object({ codex: settings.optional(), traex: settings.optional(), claude: settings.optional() }).strict();
 export type RunnerAgents = z.infer<typeof runnerAgentsSchema>;
 export type AgentIdentity = { agentType: AgentType; sessionId: string; id: string };
-const variables = { codex: "CODEX_THREAD_ID", traex: "TRAECLI_THREAD_ID" } as const;
 
 export function detectIdentity(env: NodeJS.ProcessEnv = process.env): AgentIdentity | undefined {
-  const found = agentTypes.filter(type => env[variables[type]]?.trim());
+  const found = agentTypes.filter(type => env[runnerSessionVariables[type]]?.trim());
   if (found.length > 1) throw new Error("AGENT_IDENTITY_CONFLICT: multiple current Agent sessions are present");
   if (!found.length) return undefined;
-  const agentType = found[0], sessionId = env[variables[agentType]]!;
+  const agentType = found[0], sessionId = env[runnerSessionVariables[agentType]]!;
   if (sessionId !== sessionId.trim()) throw new Error("INVALID_SESSION_ID: surrounding whitespace");
   const id = `${agentType}-${sessionId}`;
   validateFilename(sessionId);
@@ -52,11 +52,19 @@ export async function currentIdentity(required = false, home?: string): Promise<
   return undefined;
 }
 
+export async function detectRunnerAgent(type: AgentType) {
+  const definition = requireAcpProviderDefinition(type);
+  const result = await detectAcpProviderInstance(type, { ...defaultAcpProviderInstance(type), command: type }, {
+    ...definition,
+    ...(type === "claude" ? { installHelp: "Install and authenticate the Claude Code CLI." } : {})
+  });
+  return { ...result, asyncSupported: type === "claude"
+    ? supportsClaudeNotifications(result.version)
+    : result.status === "installed" };
+}
+
 export async function detectRunnerAgents() {
-  return Promise.all(agentTypes.map(async type => {
-    const definition = listAcpProviderDefinitions().find(d => d.type === type)!;
-    return detectAcpProviderInstance(type, { ...defaultAcpProviderInstance(type), command: type }, { ...definition, defaultCommand: type });
-  }));
+  return Promise.all(agentTypes.map(detectRunnerAgent));
 }
 
 export async function checkQueueCapability(command: string): Promise<void> {

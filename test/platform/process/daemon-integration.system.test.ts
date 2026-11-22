@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { execFile, spawn } from "node:child_process";
 import { once } from "node:events";
+import { createServer } from "node:net";
 import { watch } from "node:fs";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
@@ -18,6 +19,7 @@ import { readProjectConfig } from "../../../src/config.js";
 import { openCommandStates } from "../../../src/home/command-state-store.js";
 import type { GraphProcedureMemory } from "../../../src/memory/ast.js";
 import { completeReview } from "../../helpers/review-node-materials.js";
+import { stripRunnerEnvironment } from "../../../src/runner/agent-types.js";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
 const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`;
@@ -89,12 +91,12 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false) {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex") {
   // Installation and Embedded worktree discovery are not part of daemon
   // delivery. Reuse installed models in separate Managed filesystem Stores.
   const f = await initializedContextFixture(t);
   const bin = join(f.directory, "bin"); await mkdir(bin);
-  const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
+  const runnerAgents = { [runnerType]: { identity_enabled: true, async_enabled: true } };
   const provider = join(bin, "codex-acp");
   await writeTestCommand(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) console.log("controlled reviewer fixture"); else { console.error("ACP dispatch is outside this test boundary"); process.exitCode = 1; }\n`);
   const queue = join(f.directory, "queue.json");
@@ -104,7 +106,9 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
   await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
-  const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
+  const env: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: f.home, PATH: `${bin}${delimiter}${process.env.PATH}` };
+  stripRunnerEnvironment(env);
+  env[runnerType === "claude" ? "CLAUDE_CODE_SESSION_ID" : "CODEX_THREAD_ID"] = "origin-session";
   // These commands still communicate with the real daemon process. Keep
   // native entry/exit and simultaneous registrations in dedicated scenarios.
   const call = (...args: string[]) => processBoundary
@@ -175,8 +179,9 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
     await graph.enter(started.runId, work.id);
     await graph.report(started.runId, work.id, { text: "candidate" });
   });
-  await (await openCommandStates(true, f.home))!.create({}, "codex-origin-session", {
-    id: "codex-origin-session", agentType: "codex", sessionId: "origin-session", updatedAt: new Date().toISOString(),
+  const stateId = `${runnerType}-origin-session`;
+  await (await openCommandStates(true, f.home))!.create({}, stateId, {
+    id: stateId, agentType: runnerType, sessionId: "origin-session", updatedAt: new Date().toISOString(),
     commandGroup: "run", groupId: started.runId, status: "active", parameters: { project: "test-project", step: work.id }, state: { reads: {} }
   });
   const snapshot = await service.snapshot(started.runId);
@@ -214,9 +219,59 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
       comments: vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }],
       authorizationNote: "Isolated fixture vote" });
   };
-  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } } }));
+  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { [runnerType]: { identity_enabled: true, async_enabled: enabled } } }));
   return { ...f, call, env, queue, queueLog, queueCommand:fake, started, reviewId, reviewState, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, waitForTask };
 }
+
+test("Claude notification is completed on socket write and only the bound session can record read-back", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const f = await reviewFixture(t, "success", true, true, "claude");
+  const path = join(f.directory, `${process.pid}.sock`);
+  const roster = [{ sessionId: "origin-session", pid: process.pid, startedAt: 1795350000000, kind: "interactive", status: "idle", cwd: f.root }];
+  await writeTestCommand(join(dirname(f.queueCommand), "claude"), `#!${process.execPath}
+if (process.argv[2] === "--version") console.log("2.1.330 (Claude Code)");
+else if (process.argv.slice(2).join(" ") === "agents --json") console.log(${JSON.stringify(JSON.stringify(roster))});
+else process.exitCode = 1;
+`);
+  let receive!: (message: string) => void;
+  const received = new Promise<string>(resolve => { receive = resolve; });
+  const server = createServer(socket => {
+    let contents = "";
+    socket.setEncoding("utf8");
+    socket.on("data", data => { contents += data; });
+    socket.on("end", () => receive(JSON.parse(contents).message.content));
+  });
+  f.beforeCleanup(async () => {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  server.listen(path);
+  await once(server, "listening", { signal: t.signal });
+  f.env.CLAUDE_CODE_MESSAGING_SOCKET = path;
+  await f.startDaemon();
+  assert.match((await f.call("continue", "review", "wait")).stdout, /已登记异步等待/);
+  await f.completeAgent();
+  const { value: sent } = await f.waitForTask("completed");
+  assert.ok(sent.claudeDelivery?.sentAt);
+  assert.equal(sent.claudeDelivery?.readAt, undefined);
+  const callback = `${sent.id}:${sent.claudeDelivery!.id}`;
+  assert.equal(await received, `${notification(f.reviewId)} --callback '${callback}'`);
+
+  const args = ["run", "review", "wait", "--review", f.reviewId, "--callback", callback];
+  await assert.rejects(exec(process.execPath, [cli, "--project", "test-project", ...args], {
+    cwd: f.root, env: { ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }
+  }), /does not belong to the current session/);
+  await assert.rejects(f.call("run", "review", "wait", "--review", "different-review", "--callback", callback),
+    /does not belong to the current session/);
+  await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${sent.id}:00000000-0000-4000-8000-000000000000`),
+    /does not belong to the current session/);
+  assert.equal((await f.waitForTask("completed")).value.claudeDelivery?.readAt, undefined);
+  assert.match((await f.call("continue", "review", "wait", "--callback", callback)).stdout, /产物评审信息/);
+  const firstRead = (await f.waitForTask("completed")).value.claudeDelivery?.readAt;
+  assert.ok(firstRead);
+  assert.match((await f.call(...args)).stdout, /产物评审信息/);
+  assert.equal((await f.waitForTask("completed")).value.claudeDelivery?.readAt, firstRead);
+});
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t, "success", true, true);

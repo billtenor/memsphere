@@ -106,7 +106,8 @@ function providerInstanceFileSchema(type: AcpProviderType) {
     validateAcpProviderConfiguration({
       type,
       command: defaults.command,
-      args: input.args ?? defaults.args
+      args: input.args ?? defaults.args,
+      env: input.env
     });
   } catch (error) {
     context.addIssue({
@@ -137,14 +138,16 @@ export const acpProviderConfigSchema = z.object({
   traex: providerInstanceFileSchema("traex").optional(),
   qwen: providerInstanceFileSchema("qwen").optional(),
   kimi: providerInstanceFileSchema("kimi").optional(),
-  codex: providerInstanceFileSchema("codex").optional()
+  codex: providerInstanceFileSchema("codex").optional(),
+  claude: providerInstanceFileSchema("claude").optional()
 }).strict();
 
 const providerInstancesInputSchema = z.object({
   traex: providerInstanceInputSchema("traex").optional(),
   qwen: providerInstanceInputSchema("qwen").optional(),
   kimi: providerInstanceInputSchema("kimi").optional(),
-  codex: providerInstanceInputSchema("codex").optional()
+  codex: providerInstanceInputSchema("codex").optional(),
+  claude: providerInstanceInputSchema("claude").optional()
 }).strict();
 
 const agentRuntimeInputSchema = z.object({

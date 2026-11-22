@@ -79,6 +79,10 @@ export const zhCNViewMessages = {
   "settings.runners": "Runner Agent",
   "settings.runnerIdentity": "开启 Agent 身份",
   "settings.runnerAsync": "开启 Agent 异步执行",
+  "settings.runnerClaudeSessionCheck": "异步等待时验证当前会话是否有可用收件箱。",
+  "settings.runnerClaudeSyncHelp": "此平台或版本未验证异步通知，可关闭异步执行使用同步等待。",
+  "settings.provider.installHelp.claude": "安装已验证的 @agentclientprotocol/claude-agent-acp@0.109.1 适配器，并认证 Claude Code。",
+  "settings.provider.windowsReason.claude": "原生 Windows 上的 Claude 评审者工具与进程生命周期仍待验证。",
 
   "settings.optionalActorName": "选填，未填时显示 ID",
   "settings.registrationMigrationRequired": "已有模型登记数据，需要重新校验并明确确认迁移。",

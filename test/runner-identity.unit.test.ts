@@ -3,6 +3,9 @@ import test from "node:test";
 import { detectIdentity, runnerAgentsSchema } from "../src/runner/identity.js";
 import { taskSchema } from "../src/daemon/tasks.js";
 import { parseWindowsNodeShim } from "../src/runner/queue-command.js";
+import { stripRunnerEnvironment } from "../src/runner/agent-types.js";
+import { supportsClaudeNotifications } from "../src/runner/claude-notifications.js";
+import { authorizeClaudeTool, claudeReviewerSession } from "../src/acp/claude-reviewer.js";
 
 
 test("Windows Node shim resolution keeps static paths and rejects ambiguous launchers", () => {
@@ -25,10 +28,43 @@ test("Windows Node shim resolution keeps static paths and rejects ambiguous laun
 test("identity is the current Agent session and ambiguous or unsafe IDs fail closed", () => {
   assert.equal(detectIdentity({}), undefined);
   assert.deepEqual(detectIdentity({ TRAECLI_THREAD_ID: "abc" }), { agentType: "traex", sessionId: "abc", id: "traex-abc" });
+  assert.deepEqual(detectIdentity({ CLAUDE_CODE_SESSION_ID: "abc" }), { agentType: "claude", sessionId: "abc", id: "claude-abc" });
   assert.throws(() => detectIdentity({ CODEX_THREAD_ID: "a", TRAECLI_THREAD_ID: "b" }), /CONFLICT/);
+  assert.throws(() => detectIdentity({ CODEX_THREAD_ID: "a", CLAUDE_CODE_SESSION_ID: "b" }), /CONFLICT/);
   for (const id of ["../secret", "a/b", "a\\b", " spaced", "x".repeat(245)]) assert.throws(() => detectIdentity({ CODEX_THREAD_ID: id }));
   assert.equal(detectIdentity({ CODEX_THREAD_ID: "x".repeat(244) })!.id.length, 250);
   assert.throws(() => runnerAgentsSchema.parse({ codex: { async_enabled: true } }));
+});
+
+test("managed processes strip all inherited Runner identity and Claude inbox credentials", () => {
+  const env = { CODEX_THREAD_ID: "codex", TRAECLI_THREAD_ID: "traex", CLAUDE_CODE_SESSION_ID: "claude",
+    CLAUDE_CODE_MESSAGING_SOCKET: "socket", CLAUDE_CODE_MESSAGING_TOKEN: "token", TERM: "xterm" };
+  stripRunnerEnvironment(env);
+  assert.deepEqual(env, { TERM: "xterm" });
+});
+
+test("Claude notification support tracks the verified native version and platform", () => {
+  assert.equal(supportsClaudeNotifications("2.1.330 (Claude Code)", "linux"), true);
+  assert.equal(supportsClaudeNotifications("2.1.331 (Claude Code)", "linux"), false);
+  assert.equal(supportsClaudeNotifications("2.1.330", "win32"), false);
+});
+
+test("Claude Reviewer only permits a one-time literal launcher command in its own session", async () => {
+  const request = (command: string, sessionId = "review-session") => ({
+    sessionId,
+    options: [{ optionId: "always", name: "Always", kind: "allow_always" as const }, { optionId: "once", name: "Once", kind: "allow_once" as const }],
+    toolCall: { toolCallId: "tool", kind: "execute" as const, rawInput: { command } }
+  });
+  const actual = (command: string, sessionId?: string) => authorizeClaudeTool(request(command, sessionId), "/work", "review-session");
+  assert.deepEqual(await actual(`"$MEMSPHERE_CLI" run review submit --artifact '{"vote":"approve"}'`), { outcome: { outcome: "selected", optionId: "once" } });
+  for (const command of [
+    "git status", '"$MEMSPHERE_CLI" run review assignment show && printf side-effect',
+    '"$MEMSPHERE_CLI" run review assignment "$HOME"', '"$MEMSPHERE_CLI" run review assignment show\n'
+  ]) {
+    assert.deepEqual(await actual(command), { outcome: { outcome: "cancelled" } });
+  }
+  assert.deepEqual(await actual('"$MEMSPHERE_CLI" run review assignment show', "other"), { outcome: { outcome: "cancelled" } });
+  assert.deepEqual(claudeReviewerSession("/work", "model").mcpServers, []);
 });
 
 

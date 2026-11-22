@@ -1,9 +1,10 @@
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
-import { currentIdentity, readRunnerAgents, detectRunnerAgents, checkQueueCapability } from "../runner/identity.js";
+import { currentIdentity, readRunnerAgents, detectRunnerAgent, checkQueueCapability } from "../runner/identity.js";
 import { currentCommandState, assertSessionTarget } from "../home/command-state-store.js";
 import { inspectReview, renderReviewResult, reviewReady } from "../daemon/review.js";
-import { ensureDaemon, daemonControl } from "../daemon/service.js";
-import { registerTask } from "../daemon/tasks.js";
+import { ensureDaemon, ensureClaudeNotificationDaemon, daemonControl } from "../daemon/service.js";
+import { registerTask, type DaemonTask } from "../daemon/tasks.js";
+import { prepareClaudeReviewRecipient, readClaudeReviewCallback } from "../daemon/claude-review-callback.js";
 import { tryContextCommand, startExploration, contextRunList } from "./context-control.js";
 import { graphCommand, startGraphIfApplicable, printGraphStart, printGraphReviewOutput } from "./procedure-graph.js";
 import type { Snapshot as GraphSnapshot } from "../context_control/types.js";
@@ -97,7 +98,7 @@ type RunStartOptions = {
   output?: "text" | "json";
 };
 
-type ReviewWaitOptions = { review?: string };
+type ReviewWaitOptions = { review?: string; callback?: string };
 
 type ReviewVoteOptions = {
   review?: string;
@@ -360,6 +361,10 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const reviewId = options.review?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
   const config = await readConfig();
+  if (options.callback !== undefined) {
+    await readClaudeReviewCallback(config, reviewId, options.callback);
+    return;
+  }
   const located = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
   await assertSessionTarget(config.project!.name, located.run.id, reviewId.startsWith("graph-review-") ? located.review.stepId : undefined);
   await dispatchArtifactReviewAgents({ config, run: located.run });
@@ -371,12 +376,24 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
     return;
   }
   const runner = identity && (await readRunnerAgents())[identity.agentType];
-  if (runner?.async_enabled) {
-    const detected = (await detectRunnerAgents()).find(d => d.type === identity!.agentType);
-    if (!detected?.path || detected.status !== "installed") throw new Error("RUNNER_UNAVAILABLE: install the Runner Agent or disable asynchronous execution in settings");
-    await checkQueueCapability(detected.path);
-    await ensureDaemon();
-    const task = await registerTask({ input: { project: config.project!.name, runId: context.run.id, ...(reviewId.startsWith("graph-review-") ? { stepId: context.review.stepId } : {}), reviewId, roundId: context.round.id, configPath: config.configPath, cwd: process.cwd() }, recipient: { agentType: identity!.agentType, sessionId: identity!.sessionId, agentCommand: detected.path } });
+  if (identity && runner?.async_enabled) {
+    const taskInput: DaemonTask["input"] = {
+      project: config.project!.name, runId: context.run.id,
+      ...(reviewId.startsWith("graph-review-") ? { stepId: context.review.stepId } : {}),
+      reviewId, roundId: context.round.id, configPath: config.configPath, cwd: process.cwd()
+    };
+    let recipient: DaemonTask["recipient"];
+    if (identity.agentType === "claude") {
+      recipient = await prepareClaudeReviewRecipient(identity.sessionId, taskInput);
+      await ensureClaudeNotificationDaemon();
+    } else {
+      const detected = await detectRunnerAgent(identity.agentType);
+      if (!detected.path || detected.status !== "installed") throw new Error("RUNNER_UNAVAILABLE: install the Runner Agent or disable asynchronous execution in settings");
+      await checkQueueCapability(detected.path);
+      await ensureDaemon();
+      recipient = { agentType: identity.agentType, sessionId: identity.sessionId, agentCommand: detected.path };
+    }
+    const task = await registerTask({ input: taskInput, recipient });
     await daemonControl("notify");
     console.log(renderPrompt("run.async-wait", resolvePromptLocale(context.run.language), { taskId: task.id }));
     return;
