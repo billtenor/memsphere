@@ -161,7 +161,14 @@ export async function runDaemon(home = resolveMemsphereHome()) {
         } catch (e) { viewError = (e as Error).message; }
       };
       const openView = () => opening ??= doOpenView().finally(() => { opening = undefined; });
-      for (const row of await listTasks(home)) if (row.value.status === "running") await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message: "Daemon exited during task execution; notification may have been sent. Explicit retry required." } }, home);
+      for (const row of await listTasks(home)) {
+        if (row.value.status !== "running") continue;
+        const beforeClaudeSend = row.value.recipient.agentType === "claude" && !row.value.claudeDelivery;
+        const message = beforeClaudeSend
+          ? "Daemon exited before attempting to write the Claude Code notification. Explicit retry required."
+          : "Daemon exited during task execution; notification may have been sent. Explicit retry required.";
+        await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message } }, home);
+      }
       const active = new Map<string, { row: TaskRow; sending: boolean }>();
       const executionErrors = new Map<string, { id: string; error: string }>();
       const stopNotifications = new AbortController();

@@ -34,6 +34,18 @@ export class ClaudeNotificationError extends Error {
   }
 }
 
+class ClaudeInboxCheckError extends Error {}
+
+function failureReason(error: unknown): string {
+  if (error instanceof ClaudeInboxCheckError) return error.message;
+  const failure = error as (NodeJS.ErrnoException & { killed?: boolean }) | undefined;
+  if (failure?.code === "ABORT_ERR") return "cancelled";
+  if (failure?.killed) return "timed out";
+  // Process output and Node error messages can include local data and credentials.
+  if (typeof failure?.code === "string" && /^[A-Z][A-Z0-9_]{1,28}$/.test(failure.code)) return failure.code;
+  return "operation failed";
+}
+
 async function runClaudeCommand(command: string, args: string[], cwd: string, configDir?: string, signal?: AbortSignal) {
   const result = await execute(command, args, {
     cwd,
@@ -47,20 +59,25 @@ async function runClaudeCommand(command: string, args: string[], cwd: string, co
 }
 
 async function readRoster(command: string, cwd: string, configDir?: string, signal?: AbortSignal) {
-  return rosterSchema.parse(JSON.parse(await runClaudeCommand(command, ["agents", "--json"], cwd, configDir, signal)));
+  const output = await runClaudeCommand(command, ["agents", "--json"], cwd, configDir, signal);
+  try {
+    return rosterSchema.parse(JSON.parse(output));
+  } catch {
+    throw new ClaudeInboxCheckError("invalid local session list");
+  }
 }
 
 function selectSession(roster: z.infer<typeof rosterSchema>, sessionId: string) {
   const matches = roster.filter(row => row.sessionId === sessionId && row.pid !== undefined);
-  if (matches.length !== 1) throw new Error("The original Claude Code session is not uniquely present in the local session list");
+  if (matches.length !== 1) throw new ClaudeInboxCheckError("original session is missing or ambiguous");
   return { pid: matches[0].pid!, startedAt: matches[0].startedAt };
 }
 
 async function socketIdentity(path: string, pid: number) {
-  if (!isAbsolute(path) || basename(path) !== `${pid}.sock`) throw new Error("Claude Code inbox path does not match the running session");
+  if (!isAbsolute(path) || basename(path) !== `${pid}.sock`) throw new ClaudeInboxCheckError("inbox path does not match the running session");
   const stat = await lstat(path, { bigint: true });
   if (!stat.isSocket() || stat.uid !== BigInt(process.getuid!()) || await realpath(path) !== path) {
-    throw new Error("Claude Code inbox is not a direct socket owned by the current user");
+    throw new ClaudeInboxCheckError("inbox is not a direct socket owned by the current user");
   }
   return { device: String(stat.dev), inode: String(stat.ino) };
 }
@@ -76,7 +93,7 @@ export async function captureClaudeInbox(input: { command: string; version?: str
     const { pid, startedAt } = selectSession(await readRoster(input.command, input.cwd, configDir), input.sessionId);
     return { path, pid, startedAt, ...await socketIdentity(path, pid), ...(configDir ? { configDir } : {}) };
   } catch (error) {
-    throw new Error("Could not verify the current Claude Code inbox; disable asynchronous execution to wait synchronously", { cause: error });
+    throw new Error(`Could not verify the current Claude Code inbox (${failureReason(error)}); disable asynchronous execution to wait synchronously`);
   }
 }
 
@@ -93,24 +110,24 @@ function writeInbox(path: string, message: string, signal: AbortSignal): Promise
     }
     const socket = createConnection(path);
     let settled = false;
-    const finish = (success: boolean) => {
+    const finish = (reason?: string) => {
       if (settled) return;
       settled = true;
       signal.removeEventListener("abort", abort);
       socket.destroy();
-      if (success) resolvePromise();
+      if (!reason) resolvePromise();
       else reject(new ClaudeNotificationError(
         writing ? "claude_send_uncertain" : "claude_send_not_written",
-        writing ? "Claude Code inbox write did not finish; outcome may be unknown" : "Could not connect to the original Claude Code inbox"
+        writing ? `Claude Code inbox write did not finish (${reason}); outcome may be unknown` : `Could not connect to the original Claude Code inbox (${reason})`
       ));
     };
-    const abort = () => finish(false);
+    const abort = () => finish(signal.reason instanceof DOMException && signal.reason.name === "TimeoutError" ? "timed out" : "cancelled");
     signal.addEventListener("abort", abort, { once: true });
-    socket.once("error", () => finish(false));
-    socket.once("close", () => finish(false));
+    socket.once("error", error => finish(failureReason(error)));
+    socket.once("close", () => finish("connection closed"));
     socket.once("connect", () => {
       writing = true;
-      socket.end(encodeClaudeNotification(message), (error?: Error) => finish(!error));
+      socket.end(encodeClaudeNotification(message), (error?: Error) => finish(error ? failureReason(error) : undefined));
     });
   });
 }
@@ -118,16 +135,19 @@ function writeInbox(path: string, message: string, signal: AbortSignal): Promise
 export async function sendClaudeNotification(input: { command: string; sessionId: string; inbox: ClaudeInbox; cwd: string; message: string; signal: AbortSignal }): Promise<void> {
   const signal = AbortSignal.any([input.signal, AbortSignal.timeout(5000)]);
   const { inbox } = input;
+  let check = "CLI version";
   try {
     const version = await runClaudeCommand(input.command, ["--version"], input.cwd, inbox.configDir, signal);
-    if (!supportsClaudeNotifications(version.trim())) throw new Error("Unverified Claude Code notification version");
+    if (!supportsClaudeNotifications(version.trim())) throw new ClaudeInboxCheckError("version is not verified for notifications");
+    check = "local session list";
     const current = selectSession(await readRoster(input.command, input.cwd, inbox.configDir, signal), input.sessionId);
+    check = "inbox identity";
     const identity = await socketIdentity(inbox.path, current.pid);
     if (current.pid !== inbox.pid || current.startedAt !== inbox.startedAt || identity.device !== inbox.device || identity.inode !== inbox.inode) {
-      throw new Error("The original Claude Code inbox has changed");
+      throw new ClaudeInboxCheckError("original process or socket has changed");
     }
-  } catch {
-    throw new ClaudeNotificationError("claude_send_not_written", "Could not verify the original Claude Code inbox before sending");
+  } catch (error) {
+    throw new ClaudeNotificationError("claude_send_not_written", `Could not verify the original Claude Code inbox before sending (${check}: ${failureReason(error)})`);
   }
   await writeInbox(inbox.path, input.message, signal);
 }

@@ -6,6 +6,7 @@ import { parseWindowsNodeShim } from "../src/runner/queue-command.js";
 import { stripRunnerEnvironment } from "../src/runner/agent-types.js";
 import { supportsClaudeNotifications } from "../src/runner/claude-notifications.js";
 import { authorizeClaudeTool, claudeReviewerSession } from "../src/acp/claude-reviewer.js";
+import { acpProviderConfigSchema } from "../src/control-plane/schema.js";
 
 
 test("Windows Node shim resolution keeps static paths and rejects ambiguous launchers", () => {
@@ -65,6 +66,15 @@ test("Claude Reviewer only permits a one-time literal launcher command in its ow
   }
   assert.deepEqual(await actual('"$MEMSPHERE_CLI" run review assignment show', "other"), { outcome: { outcome: "cancelled" } });
   assert.deepEqual(claudeReviewerSession("/work", "model").mcpServers, []);
+});
+
+test("Claude Reviewer configuration restricts adapter arguments and environment overrides", () => {
+  assert.equal(acpProviderConfigSchema.safeParse({ claude: { env: { ANTHROPIC_BASE_URL: "https://api.example.test" } } }).success, true);
+  for (const claude of [
+    { args: ["--system-prompt", "unexpected"] },
+    { env: { BASH_ENV: "/fixture/config" } },
+    { env: { CLAUDE_AGENT_ACP_PROTOCOL: "v2" } }
+  ]) assert.equal(acpProviderConfigSchema.safeParse({ claude }).success, false);
 });
 
 

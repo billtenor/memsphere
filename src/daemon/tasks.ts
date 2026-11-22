@@ -89,17 +89,18 @@ export async function updateTask(row: TaskRow, changes: Partial<DaemonTask>, hom
 
 /** A concurrent read and send can each record an observation of the same delivery. */
 export async function recordClaudeDelivery(
-  id: string, deliveryId: string, observed: "sentAt" | "readAt", home?: string
+  id: string, deliveryId: string, observed: "sentAt" | "readAt", home?: string,
+  tasks = { read: readTask, update: updateTask }
 ): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
-    const row = await readTask(id, home);
+    const row = await tasks.read(id, home);
     const delivery = row?.value.claudeDelivery;
     if (!row || delivery?.id !== deliveryId || !["running", "completed"].includes(row.value.status)) {
       throw new Error("Claude notification delivery is no longer current");
     }
     if (delivery[observed]) return;
     try {
-      await updateTask(row, {
+      await tasks.update(row, {
         claudeDelivery: { ...delivery, [observed]: new Date().toISOString() },
         ...(observed === "sentAt" ? { status: "completed", error: undefined } : {})
       }, home);

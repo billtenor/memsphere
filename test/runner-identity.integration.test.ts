@@ -72,5 +72,12 @@ test("Claude send and read observations independently update the same persisted 
     error: { code: "claude_send_uncertain", message: "Outcome unknown", stage: "send" } }, home);
   const retried = await retryFailedTask(next.id, home, recipient);
   assert.equal(retried.claudeDelivery, undefined);
+  const retryDeliveryId = randomUUID();
+  await updateTask((await readTask(next.id, home))!, { status: "running", claudeDelivery: { id: retryDeliveryId } }, home);
+  await recordClaudeDelivery(next.id, retryDeliveryId, "sentAt", home);
+  const newDelivery = (await readTask(next.id, home))!;
   await assert.rejects(recordClaudeDelivery(next.id, deliveryId, "readAt", home), /no longer current/);
+  assert.deepEqual(await readTask(next.id, home), newDelivery);
+  await recordClaudeDelivery(next.id, retryDeliveryId, "readAt", home);
+  assert.ok((await readTask(next.id, home))!.value.claudeDelivery?.readAt);
 });
