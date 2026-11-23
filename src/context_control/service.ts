@@ -201,10 +201,8 @@ export class ContextControl {
         const value: Step = { id: a.stepId, runId, createdAt: this.runtime.now(), status: "running", artifact: { mode: "produce", id: a.id },
           ...(a.initialStepReviewConfiguration ? { reviewConfiguration: a.initialStepReviewConfiguration } : {}),
           ...(a.schemaContract ? { writing: { draftId: a.id, ...(a.revisedFrom ? { baseSubmittedArtifactId: a.revisedFrom } : {}) } } : {}) };
-        try { await this.create("step", runId, value); }
-        catch (error) { if ((error as { code?: string }).code !== "ALREADY_EXISTS") throw error; }
+        await this.create("step", runId, value);
         step = await this.require<Step>("step", runId, a.stepId);
-        if (step.value.runId !== runId || step.value.artifact?.mode !== "produce" || step.value.artifact.id !== a.id) throw failure("RECOVERY_CONFLICT", "Step belongs to another Artifact");
       }
       if (a.status === "submitted" && step.value.status !== "done") {
         await this.update("step", runId, step, { ...step.value, status: "done", endedAt: this.runtime.now() });

@@ -106,8 +106,7 @@ export function registerReviewNodeCommands(run: Command) {
   write(comment.command("update").description("Edit Comment body/severity without advancing.")).requiredOption("--comment <id>").action((o, c) => reviewNodeCommand("comment-update", explicitOptions(c, o)));
   target(comment.command("delete").description("Delete a Comment without changing progress or judgment.")).option("--assignment <id>").requiredOption("--comment <id>").addOption(new Option("--output <format>").choices(["text", "json"]).default("text")).action((o, c) => reviewNodeCommand("comment-delete", explicitOptions(c, o)));
   const submit = review.commands.find(c => c.name() === "submit")!;
-  submit.options.find(o => o.attributeName() === "vote")!.mandatory = false;
-  submit.options.find(o => o.attributeName() === "assignment")!.mandatory = false;
+  for (const option of submit.options) if (["vote", "assignment"].includes(option.attributeName())) option.mandatory = false;
   target(submit);
   submit.option("--artifact <value>").option("--artifact-file <path>");
   // Existing human/free-exploration routes keep their original handlers and targets.
