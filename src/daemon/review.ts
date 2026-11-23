@@ -6,6 +6,7 @@ import { buildArtifactReviewSummaryPromptModel, buildArtifactReviewNextActionPro
 import { renderRunOutput } from "../prompts/run-output.js";
 import { resolvePromptLocale } from "../prompts/locale.js";
 import { artifactReviewWaitReady } from "../artifact-review.js";
+import { explorationReviewIdentity } from "../context_control/exploration-review.js";
 
 export async function inspectReview(config: MemsphereConfig, reviewId: string) {
   if (reviewId.startsWith("graph-review-")) {
@@ -27,6 +28,7 @@ export function reviewResumeNotification(project: string, reviewId: string) {
 export async function renderReviewResult(config: MemsphereConfig, context: ReviewContext): Promise<string> {
   const { run, review, round } = context;
   const locale = resolvePromptLocale(run.language);
+  if (explorationReviewIdentity(review.id)) return renderPrompt("run.review-summary", locale, buildArtifactReviewSummaryPromptModel(review, round, locale));
   if (!review.id.startsWith("graph-review-")) return renderRunOutput({ kind: "review", run, review, round, runsRoot: config.runsRoot }, resolvePromptLocale(run.language));
   const summary = renderPrompt("run.review-summary", locale, buildArtifactReviewSummaryPromptModel(review, round, locale));
   const service = (await openContextControl(config.scopeRoot))!;

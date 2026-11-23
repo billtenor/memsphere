@@ -9,6 +9,7 @@ import { resolveRuleParts, RuleResolutionError } from "../memory/rules.js";
 import { toEffectiveRuleDisplayTree } from "../memory/serializer.js";
 import type { StatementMemory } from "../memory/ast.js";
 import { projectGraphRound } from "./graph-review.js";
+import { explorationReviewHandle } from "./exploration-review.js";
 
 /** Basic list metadata must not depend on any child records. */
 export function contextRunSummary(run: Run & { unavailable?: boolean; error?: string }) {
@@ -31,8 +32,23 @@ export function contextRunPayload(snapshot: Snapshot, lightweight = false) {
     const round = step.reviewRounds!.at(-1)!; const projected = projectGraphRound(run, step, round, snapshot.reviews);
     return { id: graphReviewHandle(run.id, step.id), stepId: step.id, currentRoundId: round.id, status: projected.status === "changes_requested" ? "awaiting_revision" : projected.status, round: projected };
   }) : [];
+  const explorationReviews = graph ? undefined : snapshot.reviews.flatMap(r => r.exploration ? [{ id: explorationReviewHandle(run.id, r.id), roundId: r.roundId!, artifactId: r.artifactId,
+    status: run.status !== "running" && r.status !== "submitted" ? "cancelled" : r.attempts?.at(-1)?.completion?.kind === "failed" ? "failed" : r.status,
+    reviewer: r.exploration.configuration.reviewer, vote: r.vote?.value, createdAt: r.createdAt }] : [])
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+  const workflow = graph ? undefined : { name: run.name, steps: snapshot.steps };
   return { ...run, artifactReviewSummaries, outputArtifactIds: snapshot.outputArtifactIds, representation: "context-control", procedureName: p?.names[0] ?? "", updatedAt: run.endedAt ?? snapshot.steps.map(s => s.endedAt ?? s.createdAt).sort().at(-1) ?? run.createdAt,
-    contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, artifacts: snapshot.artifacts.map(a => ({ ...a, ...(a.writing ? { writingProgress: { index: a.writing.index, items: a.writing.items.map(item => ({ id: item.id, path: item.schemaContext?.path })), skipped: a.writing.skipped, submitting: Boolean(a.writing.submission), validation: snapshot.steps.find(s => s.id === a.stepId)?.validation?.artifactId === a.id && snapshot.steps.find(s => s.id === a.stepId)?.validation?.draftRevision === snapshot.artifactRevisions?.[a.id] ? snapshot.steps.find(s => s.id === a.stepId)?.validation : undefined } } : {}) })), ...(graph ? { graph } : {}) } };
+    contextRevision: createHash("sha256").update(JSON.stringify(snapshot)).digest("hex"), eventCount: snapshot.completeIds.length, archived: Boolean(run.archived), readOnly: Boolean(run.archived), context: { ...snapshot, reviews: snapshot.reviews.filter(r => !r.exploration), workflow, explorationReviews,
+      artifacts: snapshot.artifacts.map(a => {
+        if (!a.schemaContract) return { ...a, ...(a.writing ? { writingProgress: writingProgress(a, snapshot) } : {}) };
+        const { content: _content, contentRef: _ref, writing: _writing, schemaContract, initialStepReviewConfiguration: _configuration, ...metadata } = a;
+        return { ...metadata, schema: schemaContract.sources.source.memoryRef, ...(a.writing ? { writingProgress: writingProgress(a, snapshot) } : {}) };
+      }), ...(graph ? { graph } : {}) } };
+}
+function writingProgress(a: Snapshot["artifacts"][number], snapshot: Snapshot) {
+  const writing = a.writing!, validation = snapshot.steps.find(s => s.id === a.stepId)?.validation;
+  return { index: writing.index, items: writing.items.map(item => ({ id: item.id, path: item.schemaContext?.path })), skipped: writing.skipped, submitting: Boolean(writing.submission),
+    validation: validation?.artifactId === a.id && validation.draftRevision === snapshot.artifactRevisions?.[a.id] ? validation : undefined };
 }
 /** Resolve displayed rules from the Run's frozen Memory only; never read current project Memory. */
 export async function contextRunDetailPayload(snapshot: Snapshot, lightweight = false, projection?: { surface: 'overview' | 'artifacts' | 'action'; actionId?: string }) {
@@ -83,7 +99,7 @@ export async function contextRunSummaries(service: ContextControl | undefined) {
   if (!service) return [];
   return Promise.all((await service.listRunEntries()).map(async entry => {
     if (entry.run) {
-      try { const { context: _, ...summary } = contextRunPayload(await service.snapshot(entry.id)); return summary; }
+      try { const { context: _, ...summary } = contextRunPayload(await service.inspect(entry.id)); return summary; }
       catch (error) { return { ...entry.run, updatedAt: entry.run.createdAt, unavailable: true, error: error instanceof Error ? error.message : String(error) }; }
     }
     return { id: entry.id, name: entry.id, status: "running" as const, createdAt: "", updatedAt: "", archived: false, unavailable: true, error: entry.error };

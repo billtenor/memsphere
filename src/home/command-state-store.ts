@@ -32,14 +32,16 @@ export async function requireCommandState(id: string, home?: string): Promise<Co
   if (!state || Object.keys(state).some(k => !["lastArtifactId", "reads"].includes(k)) || state.lastArtifactId !== undefined && typeof state.lastArtifactId !== "string" || state.reads !== undefined && (typeof state.reads !== "object" || state.reads === null || Array.isArray(state.reads) || Object.entries(state.reads).some(([key, value]) => !/^(artifact|external):.+/.test(key) || !value || typeof value.readAt !== "string"))) throw failure("INVALID_STATE", "Invalid run command state");
   return row;
 }
-export async function createCommandState(project: string, runId: string, stepId?: string) {
+export async function createCommandState(project: string, runId: string, stepId?: string, reviewId?: string, expected?: { row?: CommandStateRow }) {
   const identity = await currentIdentity();
   if (!identity) return undefined;
   const store = (await openCommandStates(true))!;
-  const matches = (row: CommandStateRow | undefined) => row?.value.status === "active" && row.value.groupId === runId && row.value.parameters.project === project && row.value.parameters.step === stepId;
+  if (stepId && reviewId) throw failure("INVALID_ARGUMENT", "A session targets either a Step or a Review");
+  const matches = (row: CommandStateRow | undefined) => row?.value.status === "active" && row.value.groupId === runId && row.value.parameters.project === project && row.value.parameters.step === stepId && row.value.parameters.review === reviewId;
   const previous = await store.get({}, identity.id) as CommandStateRow | undefined;
   if (matches(previous)) return previous!.value;
-  const value: CommandState = { ...identity, updatedAt: new Date().toISOString(), commandGroup: "run", groupId: runId, status: "active", parameters: { project, ...(stepId ? { step: stepId } : {}) }, state: { reads: {} } };
+  if (expected && previous?.revision !== expected.row?.revision) throw failure("REVISION_CONFLICT", "Session binding changed concurrently; explicitly enter the target again");
+  const value: CommandState = { ...identity, updatedAt: new Date().toISOString(), commandGroup: "run", groupId: runId, status: "active", parameters: { project, ...(stepId ? { step: stepId } : {}), ...(reviewId ? { review: reviewId } : {}) }, state: { reads: {} } };
   try {
     if (previous) await store.update({}, identity.id, value, { expectedRevision: previous.revision });
     else await store.create({}, identity.id, value);
@@ -53,6 +55,11 @@ export async function createCommandState(project: string, runId: string, stepId?
     if (matches(current)) return current!.value;
     throw failure("REVISION_CONFLICT", "Session binding changed concurrently; explicitly enter the target again");
   }
+}
+export async function releaseCommandTarget(row: CommandStateRow | undefined, project: string, runId: string, target: { step?: string; review?: string }) {
+  if (row?.value.status !== "active" || row.value.groupId !== runId || row.value.parameters.project !== project ||
+      row.value.parameters.step !== target.step || row.value.parameters.review !== target.review) return;
+  await updateCommandState(row, { ...row.value, parameters: { project } });
 }
 export async function currentCommandState(required = false): Promise<CommandStateRow | undefined> {
   const identity = await currentIdentity(required);

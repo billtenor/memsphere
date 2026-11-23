@@ -543,7 +543,7 @@ runSchema.command("report").description("Save the current graph Schema field to 
 
 const runReview = run
   .command("review")
-  .description("Manage formal Procedure Review or light free exploration feedback.");
+  .description("Manage Procedure Review, progressive exploration Review, or light feedback.");
 
 const reviewWait = runReview
   .command("wait")
@@ -566,7 +566,7 @@ runReview
   .command("retry")
   .description("Retry one failed Agent Assignment in the current Review round.")
   .requiredOption("--review <id>", "artifact review id")
-  .requiredOption("--assignment <identity-or-assignment-id>", "agent identity or assignment id")
+  .option("--assignment <identity-or-assignment-id>", "agent identity or assignment id for a Procedure Review")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runReviewRetryCommand);
 
@@ -660,7 +660,10 @@ run
   .description("Enter a schema artifact writing flow.")
   .argument("[schema-name]", "schema primary name or alias; omit for the current inline schema")
   .requiredOption("--run <id>", "run id")
-  .option("--step <id>", "graph Step id")
+  .option("--step <id>", "existing Schema Step id")
+  .option("--name <name>", "new free exploration Artifact name")
+  .option("--content-type <mime>", "new free exploration Schema format")
+  .option("--revised-from <id>", "free exploration Schema Artifact to revise")
   .addOption(new Option("--output <format>", "text or json").choices(["text", "json"]).default("text"))
   .action(runEnterSchemaCommand);
 

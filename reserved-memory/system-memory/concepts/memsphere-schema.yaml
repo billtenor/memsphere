@@ -14,3 +14,5 @@ defines:
   - graph 产物以 model.definedBy 为 memsphere/schema.json 使用 Schema；definition 为显式 syntax 的完整 !schema YAML，或以并列 ref 引用 schemas/canonical-name，二者必须二选一。
   - graph 的 payload.contentType 决定整体序列化格式；Schema 字段的 format 描述局部格式，根 format.layout 约束布局；layout-only 写法用于 Markdown，根格式冲突明确拒绝。
   - graph 的 Schema 支持渐进式撰写；中间内容持续保存同一 draft Artifact，完成后同 ID 提交，提交后修改创建新的修订草稿；Schema Runtime 不提供反射。
+  - 自由探索以 run enter-schema NAME --run R --name TITLE --content-type TYPE 创建 Step 与草稿，并冻结 Schema 及引用。用 --step S 恢复同一草稿，用 --revised-from A 从已提交版本冻结的 Schema 建立新修订草稿。
+  - 进入 Schema 后通过 schema report、skip、repeat 和位置 token 逐项保存。Continue 从会话取得 Step；原生命令使用 Run 和 Step。可以导出完整草稿，最终 report 校验后提交原 Artifact ID。

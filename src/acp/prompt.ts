@@ -1,4 +1,5 @@
 import { reviewerCommand } from "./reviewer-invocation.js";
+import { explorationReviewIdentity, isModelReviewHandle } from "../context_control/exploration-review.js";
 import { reviewerCapabilities } from "./reviewer-commands.js";
 import { reviewNodeView } from "../review-nodes.js";
 import { reviewNodePromptModel } from "../prompts/review-nodes.js";
@@ -24,7 +25,7 @@ export async function buildArtifactReviewerPrompt(input: {
   if (!submission) throw new Error(`Artifact Review Submission not found: ${round.submissionId}`);
   const contract = buildAgentReviewContract(input.context);
   const step = currentStep(run);
-  if (!step || step.id !== review.stepId) {
+  if ((!step || step.id !== review.stepId) && !explorationReviewIdentity(review.id)) {
     throw new Error(`Artifact Review current Step is unavailable: ${review.stepId}`);
   }
   const systemPrompt = run.controlPlane?.actors[assignment.actorId]?.systemPrompt;
@@ -40,13 +41,13 @@ export async function buildArtifactReviewerPrompt(input: {
     };
   });
   if (assignment.nodeTree) {
-    const capabilities = reviewerCapabilities(review.id.startsWith("graph-review-") ? "graph" : "flow");
+    const capabilities = reviewerCapabilities(isModelReviewHandle(review.id) ? "graph" : "flow");
     const materials = {
       allowedOperations: capabilities.commands,
       capabilities,
       artifact: { ...contract.artifact, schema: capabilities.protocol === "graph"
         ? { readCommand: reviewerCommand("run artifact contract show --assignment ") + assignment.id }
-        : summarizeAgentReviewSchema(step.schema) },
+        : summarizeAgentReviewSchema(step?.schema) },
       inputs: submission.contextArtifacts.map(a => ({ stepId: a.stepId, artifactId: a.artifactId, name: a.artifact.name, readCommand: capabilities.protocol === "graph" && a.artifactId ? reviewerCommand(`run artifact show --run ${run.id} --artifact ${a.artifactId} --out ${a.artifactId}.txt`) : reviewerCommand(`run artifact show --step ${JSON.stringify(a.stepId)} --out context-${submission.contextArtifacts.indexOf(a)}.txt`) })),
       externals: submission.contextExternals?.map(e => ({ ...e, readCommand: reviewerCommand(`run external show --run ${run.id} --external ${e.externalId} --out ${e.externalId}.txt`) })),
       memorySource: run.memorySource,
@@ -65,6 +66,7 @@ export async function buildArtifactReviewerPrompt(input: {
       rolePrompts, JSON.stringify(materials, null, 2), permissions
     ));
   }
+  if (!step) throw new Error("Review node state is unavailable");
   const promptId = input.promptVersion === "artifact-review-v1"
     ? "acp.artifact-review.initial"
     : "acp.artifact-review.initial-v2";

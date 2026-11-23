@@ -76,7 +76,8 @@ export function requestedCliOutput(program: Command, args: readonly string[]): "
   }
   const structured = (path[0] === "project" && path[1] === "upgrade") || path[0] === "model" || path[0] === "data" || path[0] === "continue"
     || (path[1] === "list" && ["project", "memory", "archive"].includes(path[0]))
-    || (path[0] === "run" && path[1] === "step" && path[2] === "rewind")
+    || (path[0] === "run" && path[1] === "step" && ["rewind", "configure", "show"].includes(path[2]))
+    || (path[0] === "run" && ["enter", "enter-schema", "schema", "skip", "repeat"].includes(path[1]))
     || (path[0] === "run" && ["start", "report", "status", "show", "abandon", "finish", "artifact", "external", "review", "outputs"].includes(path[1]));
   return (structured || Boolean(process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID)) && output === "json" ? "json" : "text";
 }

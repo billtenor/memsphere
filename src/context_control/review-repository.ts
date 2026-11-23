@@ -1,4 +1,4 @@
-import { reviewCommentId, mutateReviewNode, type NodeMutation } from "../review-nodes.js";
+import { reviewCommentId, reviewNodeView, type NodeMutation } from "../review-nodes.js";
 /** Adapts model-backed graph Reviews to the existing Review application protocol.
  * These DTOs are transient; the graph Run never stores legacy artifactReviews.
  */
@@ -18,6 +18,7 @@ import type { Artifact, Review, Run, Snapshot, Step } from "./types.js";
 import { failure } from "./errors.js";
 import { effectiveStep } from "./graph-rewind.js";
 import type { ContextControl } from "./service.js";
+import { ExplorationReviews, explorationReviewHandle, explorationReviewIdentity, isModelReviewHandle, mutateModelReviewNode } from "./exploration-review.js";
 export * from "../run/store.js";
 const digest = (text: string | Uint8Array) => createHash("sha256").update(text).digest("hex");
 export const graphReviewHandle = (run: string, step: string) => `graph-review-${run}__${step}`;
@@ -40,6 +41,50 @@ export async function graphArtifactDto(service: NonNullable<Awaited<ReturnType<t
   const body = await service.body(artifact);
   const value = decodeGraphContent(body.bytes, body.contentType);
   return { name: artifact.name, type: value === null ? "null" : Array.isArray(value) ? "array" : typeof value, format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType, ...(artifact.business ? { business: { destination: artifact.business.destination, value: JSON.parse(artifact.business.valueJson) } } : {}) };
+}
+export function explorationArtifactDto(artifact: Artifact, body: Awaited<ReturnType<ContextControl["body"]>>): legacy.RunEvent["artifact"] {
+  const mime = mimeType(body.contentType);
+  let value: unknown;
+  if (["application/json", "application/yaml", "application/x-yaml", "text/yaml"].includes(mime)) {
+    try { value = decodeGraphContent(body.bytes, body.contentType); }
+    catch { value = Buffer.from(body.bytes).toString("utf8"); }
+  } else if (mime.startsWith("text/")) value = Buffer.from(body.bytes).toString("utf8");
+  return { name: artifact.name, type: value === undefined ? "string" : value === null ? "null" : Array.isArray(value) ? "array" : typeof value,
+    format: graphFormat(body.contentType), storage: "inline", value, contentType: body.contentType };
+}
+async function explorationRepository(input: { runsRoot: string; service?: ContextControl }) {
+  const service = input.service ?? await openContextControl(dirname(input.runsRoot));
+  if (!service) throw failure("NOT_FOUND", "Context Control Stores not found");
+  return new ExplorationReviews(service);
+}
+function explorationRun(run: Run): legacy.RunState {
+  return { contractVersion: 3, id: run.id, name: run.name, language: run.language, status: run.status,
+    procedureName: "", memoryRoot: "", createdAt: run.createdAt, updatedAt: run.endedAt ?? run.createdAt, stack: [], events: [], artifactReviews: [] };
+}
+async function projectExploration(repository: ExplorationReviews, runId: string, recordId: string, full: boolean) {
+  const { run, row, artifact, step, round, permissions } = await repository.locate(runId, recordId);
+  const value = row.value, refs = value.exploration!.materials;
+  const hash = refs[0].sha256;
+  const material = full ? await repository.materials(runId, value) : undefined;
+  const frozen = projectGraphRound({ ...run, permissionConfig: permissions }, { ...step, reviewRounds: [round] }, round, [value], hash,
+    new Map(refs.map(ref => [ref.id, ref.sha256])), `exploration:${run.id}#${step.id}`);
+  const dto = explorationRun(run);
+  dto.controlPlane = createControlPlaneSnapshot({ runner: permissions.runner, actors: Object.fromEntries(Object.entries(permissions.actors).map(([id, actor]) =>
+    [id, actor.kind === "agent" ? { ...actor, agent: { ...actor.agent, idleTimeoutMs: actor.agent.idleTimeoutMs ?? null, maxRuntimeMs: actor.agent.maxRuntimeMs ?? null } } : actor])), acpProviders: {} });
+  const contextArtifacts = material?.artifacts.filter(a => a.id !== artifact.id)
+    .map(a => ({ artifactId: a.id, stepId: a.stepId, artifact: explorationArtifactDto(a, material.bodies.get(a.id)!) })) ?? [];
+  const review: ArtifactReview<legacy.RunEvent["artifact"]> = {
+    id: explorationReviewHandle(run.id, value.id), stepId: step.id, artifactName: artifact.name, policyId: round.reviewConfig.policy.id, controlPlane: frozen.controlPlane!,
+    status: value.status === "cancelled" || run.status !== "running" && value.status !== "submitted" ? "cancelled" : frozen.status === "passed" ? "passed" : frozen.status === "changes_requested" ? "awaiting_revision" : "pending",
+    currentRoundId: round.id, createdAt: value.createdAt, updatedAt: value.endedAt ?? value.startedAt ?? value.createdAt,
+    rounds: [frozen], submissions: [{ id: artifact.id, digest: hash, createdAt: round.createdAt,
+      artifact: material ? explorationArtifactDto(artifact, material.bodies.get(artifact.id)!) : { name: artifact.name, type: "string", format: graphFormat(refs[0].contentType), storage: "inline" },
+      contextArtifacts, contextExternals: material?.externals.map(e => ({ externalId: e.id, source: e.source, capturedAt: e.capturedAt })),
+      ...(artifact.revisedSummary && artifact.revisedFrom ? { revisionSummary: { body: artifact.revisedSummary, digest: digest(artifact.revisedSummary), createdAt: round.createdAt, previousSubmissionId: artifact.revisedFrom } } : {}) }],
+    ...(frozen.status === "passed" ? { outcome: { status: "passed", submissionId: artifact.id, roundId: round.id, completedAt: value.endedAt! } } : {})
+  };
+  dto.artifactReviews = [review];
+  return { run: dto, review };
 }
 async function project(runsRoot: string, snapshot: Snapshot, selected?: string, viewRoundId?:string, viewMaterialIndex?:number,providedService?:ContextControl, actorId?:string): Promise<legacy.RunState> {
   const service = providedService ?? (await openContextControl(dirname(runsRoot)))!;
@@ -104,9 +149,16 @@ export async function readRun(runsRoot: string, id: string): Promise<legacy.RunS
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") throw missing; throw error; }
   const service = await openContextControl(dirname(runsRoot)); const run = service && await service.findRun(id);
   if (run && isGraphRun(run)) return project(runsRoot, await service!.snapshot(id));
+  if (run && service) {
+    const repository = new ExplorationReviews(service), dto = explorationRun(run);
+    dto.artifactReviews = await Promise.all((await repository.list(id)).map(async r => (await projectExploration(repository, id, r.id, false)).review));
+    return dto;
+  }
   throw missing;
 }
 export async function findArtifactReview(input: Parameters<typeof legacy.findArtifactReview>[0] & {viewRoundId?:string;viewMaterialIndex?:number;service?:ContextControl;viewActorId?:string}) {
+  const exploration = explorationReviewIdentity(input.reviewId);
+  if (exploration) return projectExploration(await explorationRepository(input), exploration.runId, exploration.recordId, true);
   const id = identity(input.reviewId); if (!id) return legacy.findArtifactReview(input);
   const run = await use(input, async (g,_,service) => {
     const snapshot = await g.reviewSnapshot(id.runId,id.stepId,input.viewRoundId,input.viewActorId);
@@ -118,22 +170,22 @@ export async function findArtifactReview(input: Parameters<typeof legacy.findArt
   return { run, review };
 }
 export async function readArtifactReviewForActor(input: Parameters<typeof legacy.readArtifactReviewForActor>[0] & { service?: ContextControl }) {
-  if (!identity(input.reviewId)) return legacy.readArtifactReviewForActor(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.readArtifactReviewForActor(input);
   return legacy.artifactReviewForActor({ ...await findArtifactReview({ ...input, viewRoundId: input.roundId, viewActorId: input.actorId }), roundId: input.roundId, actorId: input.actorId });
 }
 export async function readArtifactReviewForRunner(input: Parameters<typeof legacy.readArtifactReviewForRunner>[0]) {
-  if (!identity(input.reviewId)) return legacy.readArtifactReviewForRunner(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.readArtifactReviewForRunner(input);
   const value = await findArtifactReview(input); const round = value.review.rounds.find(r => r.id === value.review.currentRoundId)!;
   if (!round.controlPlane!.permissions.runner.effective.includes("artifact.read")) throw failure("PERMISSION_DENIED", "Runner requires artifact.read");
   return { ...value, round };
 }
 export async function waitForArtifactReview(input: Parameters<typeof legacy.waitForArtifactReview>[0]) {
-  if (!identity(input.reviewId)) return legacy.waitForArtifactReview(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.waitForArtifactReview(input);
   const interval = input.pollIntervalMs ?? 1000;
   if (!Number.isFinite(interval) || interval < 0) throw failure("INVALID_ARGUMENT", "Invalid polling interval");
   for (;;) {
     input.signal?.throwIfAborted();
-    await use(input, (g, id) => g.advance(id.runId));
+    if (identity(input.reviewId)) await use(input, (g, id) => g.advance(id.runId));
     const result = await readArtifactReviewForRunner(input);
     if (artifactReviewWaitReady(result.review, result.round)) return result;
     await delay(interval, undefined, { signal: input.signal });
@@ -158,6 +210,21 @@ export async function submitArtifactReviewHumanAssignmentForRunner(input: Parame
   return readArtifactReviewForActor({ ...input, actorId: actor });
 }
 type AttemptInput = { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string };
+type AgentTarget = Omit<AttemptInput, "attemptId"> & { service?: ContextControl };
+async function mutateAgentRecord(input: AgentTarget, action: (review: Review, runtime: ContextControl["runtime"]) => Promise<void>) {
+  const exploration = explorationReviewIdentity(input.reviewId);
+  if (exploration) {
+    const repository = await explorationRepository(input);
+    return repository.mutate(exploration.runId, exploration.recordId, input.roundId, input.actorId, async (review, _run, _step, round) => {
+      if (round.reviewConfig.reviewers[input.actorId]?.kind !== "agent") throw failure("INVALID_ARGUMENT", "Expected Agent Reviewer");
+      await action(review, repository.service.runtime);
+    });
+  }
+  return use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
+    if (step.reviewRounds!.at(-1)!.reviewConfig.reviewers[input.actorId]?.kind !== "agent") throw failure("INVALID_ARGUMENT", "Expected Agent Reviewer");
+    await action(review, g.runtime);
+  }));
+}
 async function agentContext(input: AttemptInput): Promise<legacy.ArtifactReviewAgentContext> {
   const context = await readArtifactReviewForActor(input);
   const attempt = context.assignment.attempts?.find(a => a.id === input.attemptId);
@@ -175,17 +242,15 @@ export async function assertArtifactReviewAgentAttemptRunning(input: AttemptInpu
   }
 }
 async function mutateAttempt(input: AttemptInput, change: (review: Review, attempt: NonNullable<Review["attempts"]>[number], now: () => string) => void) {
-  await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
-    const round = step.reviewRounds!.at(-1)!;
-    if (round.reviewConfig.reviewers[input.actorId]?.kind !== "agent") throw failure("INVALID_ARGUMENT", "Expected Agent Reviewer");
+  await mutateAgentRecord(input, async (review, runtime) => {
     const attempt = review.attempts?.at(-1);
     if (review.status !== "running" || !attempt || attempt.id !== input.attemptId || attempt.completion) throw failure("REVIEW_CONFLICT", "Review attempt is not current and running");
-    change(review, attempt, g.runtime.now);
-  }));
+    change(review, attempt, runtime.now);
+  });
   return agentContext(input);
 }
 export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<typeof legacy.claimArtifactReviewAgentAssignment>[0], "workerPid"> & { workerPid?: number; workerJob?: string }) {
-  if (!identity(input.reviewId)) {
+  if (!isModelReviewHandle(input.reviewId)) {
     if (input.workerPid === undefined) throw failure("INVALID_ARGUMENT", "Legacy worker PID required");
     return legacy.claimArtifactReviewAgentAssignment({ ...input, workerPid: input.workerPid });
   }
@@ -194,51 +259,68 @@ export async function claimArtifactReviewAgentAssignment(input: Omit<Parameters<
   if (!actorId) throw failure("NOT_FOUND", "Agent Assignment not found");
   input = { ...input, actorId };
   let attemptId: string | undefined;
-  await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
-    if (step.reviewRounds!.at(-1)!.reviewConfig.reviewers[input.actorId]?.kind !== "agent") throw failure("INVALID_ARGUMENT", "Expected Agent Reviewer");
+  const claim = async () => mutateAgentRecord(input, async (review, runtime) => {
     if (review.status !== "pending") return;
     let attempt = review.attempts?.at(-1);
-    if (!attempt) { attempt = { id: `attempt-${randomUUID()}`, createdAt: g.runtime.now() }; review.attempts = [attempt]; }
+    if (!attempt) { attempt = { id: `attempt-${randomUUID()}`, createdAt: runtime.now() }; review.attempts = [attempt]; }
     if (attempt.startedAt || attempt.completion) throw failure("REVIEW_CONFLICT", "Queued Agent attempt is not available");
-    attempt.startedAt = g.runtime.now();
+    attempt.startedAt = runtime.now();
     if (input.workerPid !== undefined) {
       attempt.workerPid = input.workerPid;
-      const identity = await g.runtime.workers.captureIdentity(input.workerPid);
+      const identity = await runtime.workers.captureIdentity(input.workerPid);
       if (identity) attempt.workerIdentity = identity;
     }
     if (input.workerJob) {
-      if (input.workerPid !== g.runtime.workers.pid || g.runtime.workers.platform !== "win32" || !attempt.workerIdentity)
+      if (input.workerPid !== runtime.workers.pid || runtime.workers.platform !== "win32" || !attempt.workerIdentity)
         throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Only the enrolled Windows worker may register its job");
       attempt.workerJob = input.workerJob;
     }
     attemptId = attempt.id; review.status = "running"; review.startedAt ??= attempt.startedAt;
-  }));
+  });
+  try { await claim(); }
+  catch (error) {
+    if ((error as { code?: string }).code === "REVISION_CONFLICT") return undefined;
+    throw error;
+  }
   return attemptId ? agentContext({ ...input, attemptId }) : undefined;
 }
 export async function markArtifactReviewAgentCliReady(input: Parameters<typeof legacy.markArtifactReviewAgentCliReady>[0] & { service?: ContextControl }) {
-  if (!identity(input.reviewId)) return legacy.markArtifactReviewAgentCliReady(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.markArtifactReviewAgentCliReady(input);
   return mutateAttempt(input, (_r, a, now) => { a.cliReadyAt ??= now(); a.session = { ...a.session, ...(input.protocolVersion !== undefined ? { protocolVersion: input.protocolVersion } : {}), ...(input.sessionId ? { id: input.sessionId } : {}), ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
 }
 export async function recordArtifactReviewAgentSession(input: Parameters<typeof legacy.recordArtifactReviewAgentSession>[0]) {
-  if (!identity(input.reviewId)) return legacy.recordArtifactReviewAgentSession(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.recordArtifactReviewAgentSession(input);
   return mutateAttempt(input, (_r, a) => { a.session = { ...a.session, protocolVersion: input.protocolVersion, id: input.sessionId, ...(input.agentName ? { agentName: input.agentName } : {}), ...(input.agentVersion ? { agentVersion: input.agentVersion } : {}) }; });
 }
 /** Lifecycle evidence is saved before Provider termination, independently of voting. */
 export async function recordArtifactReviewAgentProcesses(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; workerPid: number; providerPid?: number }): Promise<void> {
+  const exploration = explorationReviewIdentity(input.reviewId);
+  if (exploration && input.providerPid !== undefined) {
+    const repository = await explorationRepository(input);
+    return repository.recordProcesses(exploration.runId, exploration.recordId, input);
+  }
   if (!identity(input.reviewId) || input.providerPid === undefined) return;
   await use(input, (g, id) => g.recordReviewProcesses(id.runId, id.stepId, input.roundId, input.actorId, input.attemptId, input.workerPid, input.providerPid));
 }
 export async function recordArtifactReviewAgentStop(input: Parameters<typeof legacy.recordArtifactReviewAgentStop>[0]) {
-  if (!identity(input.reviewId)) return legacy.recordArtifactReviewAgentStop(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.recordArtifactReviewAgentStop(input);
   const context = await agentContext(input);
   if (context.assignment.status === "submitted") {
-    await use(input, (g, id) => g.recordReviewStop(id.runId, id.stepId, input.roundId, input.actorId, input.attemptId, input.stopReason));
+    const exploration = explorationReviewIdentity(input.reviewId);
+    if (exploration) {
+      const repository = await explorationRepository(input);
+      await repository.mutate(exploration.runId, exploration.recordId, input.roundId, input.actorId, async value => {
+        const attempt = value.attempts?.at(-1);
+        if (value.status !== "submitted" || attempt?.id !== input.attemptId || !attempt.completion) throw failure("REVIEW_CONFLICT", "Submitted Agent attempt does not match");
+        attempt.completion.stopReason = input.stopReason;
+      }, true);
+    } else await use(input, (g, id) => g.recordReviewStop(id.runId, id.stepId, input.roundId, input.actorId, input.attemptId, input.stopReason));
     return agentContext(input);
   }
   return mutateAttempt(input, (_r, a, now) => { a.completion = { kind: "failed", at: now(), stopReason: input.stopReason, failure: { stage: "prompt", code: "stopped_before_submit", message: "Agent stopped without submitting its Review" } }; });
 }
 export async function failArtifactReviewAgentAssignment(input: Parameters<typeof legacy.failArtifactReviewAgentAssignment>[0]) {
-  if (!identity(input.reviewId)) return legacy.failArtifactReviewAgentAssignment(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.failArtifactReviewAgentAssignment(input);
   const context = await agentContext(input);
   if (context.assignment.status === "submitted") return context;
   return mutateAttempt(input, (_r, a, now) => {
@@ -247,16 +329,16 @@ export async function failArtifactReviewAgentAssignment(input: Parameters<typeof
   });
 }
 export async function retryArtifactReviewAgentAssignment(input: Parameters<typeof legacy.retryArtifactReviewAgentAssignment>[0]) {
-  if (!identity(input.reviewId)) return legacy.retryArtifactReviewAgentAssignment(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.retryArtifactReviewAgentAssignment(input);
   const located = await findArtifactReview(input);
   const actorId = located.review.rounds.find(r => r.id === input.roundId)?.assignments.find(a => a.actorId === input.actorId || a.id === input.actorId)?.actorId;
   if (!actorId) throw failure("NOT_FOUND", "Agent Assignment not found");
   input = { ...input, actorId };
-  await use(input, (g, id) => g.mutateReview(id.runId, id.stepId, input.roundId, input.actorId, async (review, _run, step) => {
-    if (step.reviewRounds!.at(-1)!.reviewConfig.reviewers[input.actorId]?.kind !== "agent" || review.attempts?.at(-1)?.completion?.kind !== "failed") throw failure("INVALID_ARGUMENT", "Only a failed Agent assignment may be retried");
+  await mutateAgentRecord(input, async (review, runtime) => {
+    if (review.attempts?.at(-1)?.completion?.kind !== "failed") throw failure("INVALID_ARGUMENT", "Only a failed Agent assignment may be retried");
     review.status = "pending"; if (!review.nodeTree) review.comments = []; delete review.vote;
-    review.attempts = [...(review.attempts ?? []), { id: `attempt-${randomUUID()}`, createdAt: g.runtime.now() }];
-  }));
+    review.attempts = [...(review.attempts ?? []), { id: `attempt-${randomUUID()}`, createdAt: runtime.now() }];
+  });
   const context = await readArtifactReviewForActor(input);
   return { ...context, attempt: context.assignment.attempts!.at(-1)! };
 }
@@ -271,10 +353,14 @@ export async function appendArtifactReviewAgentComment(input: Parameters<typeof 
   });
 }
 export async function submitArtifactReviewAgentAssignment(input: Parameters<typeof legacy.submitArtifactReviewAgentAssignment>[0]) {
-  if (!identity(input.reviewId)) return legacy.submitArtifactReviewAgentAssignment(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.submitArtifactReviewAgentAssignment(input);
   const context = await agentContext(input);
   if (context.assignment.status !== "running" || context.attempt.id !== context.assignment.attempts?.at(-1)?.id || !context.attempt.cliReadyAt) throw failure("REVIEW_CONFLICT", "Current Agent attempt requires its CLI handshake before submission");
-  await use(input, (g, id) => g.submitReview(id.runId, id.stepId, input.roundId, input.actorId, input.vote, context.assignment.draft.comments, input.summary, undefined, { attemptId: input.attemptId }));
+  const exploration = explorationReviewIdentity(input.reviewId);
+  if (exploration) {
+    const repository = await explorationRepository(input);
+    await repository.submit(exploration.runId, exploration.recordId, input.roundId, input.actorId, input.vote, input.summary, input.attemptId);
+  } else await use(input, (g, id) => g.submitReview(id.runId, id.stepId, input.roundId, input.actorId, input.vote, context.assignment.draft.comments, input.summary, undefined, { attemptId: input.attemptId }));
   return agentContext(input);
 }
 export async function updateArtifactReviewDraft(input: Parameters<typeof legacy.updateArtifactReviewDraft>[0]) {
@@ -311,27 +397,28 @@ export async function resolveArtifactReviewComment(input: Parameters<typeof lega
 }
 
 export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation: NodeMutation }) {
-  if (!identity(input.reviewId)) return legacy.mutateArtifactReviewNodes(input);
+  if (!isModelReviewHandle(input.reviewId)) return legacy.mutateArtifactReviewNodes(input);
   const context = await agentContext(input);
   if (context.review.currentRoundId !== input.roundId) throw failure("REVIEW_CONFLICT", "Review Round is no longer current");
   const submission = context.review.submissions.find(s => s.id === context.round.submissionId)!;
   // Reads and node writes consume the same personal, frozen context selection.
   // The personal CAS below still checks that this Round is current at save time.
-  const materialIds = [
+  const materialIds = new Set([
     `artifact:${submission.id}`,
     ...submission.contextArtifacts.flatMap(a => a.artifactId ? [`artifact:${a.artifactId}`] : []),
     ...(submission.contextExternals ?? []).map(e => `external:${e.externalId}`)
-  ];
+  ]);
   return mutateAttempt(input, (review, _attempt, now) => {
-    if (!review.nodeTree || !review.nodeStates) throw failure("INVALID_STATE", "Review nodes are not enabled");
-    review.comments = mutateReviewNode({ nodeTree: review.nodeTree, nodeStates: review.nodeStates }, review.comments, input.mutation, item => {
-      const native = item.anchor;
-      if (native) {
-        if (Object.keys(native).some(k => !["location", "context", "targetRef"].includes(k)) || typeof native.location !== "string" || !native.location.trim() || native.context !== undefined && (typeof native.context !== "string" || native.context.length > 500)) throw failure("INVALID_ARGUMENT", "Invalid graph Comment anchor");
-        const ref = native.targetRef as { kind?: string; id?: string } | undefined;
-        if (ref && (Object.keys(ref).some(k => !["kind", "id"].includes(k)) || !["artifact", "external"].includes(ref.kind!) || !materialIds.includes(`${ref.kind}:${ref.id}`))) throw failure("INVALID_ARGUMENT", "Comment anchor is outside the current materials");
-      }
-      return { commentId: `comment-${randomUUID()}`, body: item.body, severity: item.severity, createdAt: now(), ...(native ? { anchor: native as NonNullable<Review["comments"][number]["anchor"]> } : {}) };
-    });
+    mutateModelReviewNode(review, input.mutation, materialIds, now, () => `comment-${randomUUID()}`);
   });
+}
+
+export async function explorationReviewView(repository: ExplorationReviews, runId: string, review: Review, selection: { all?: boolean; nodeId?: string } = {}) {
+  const { round, run } = await repository.locate(runId, review.id);
+  const attempt = review.attempts?.at(-1);
+  const status = run.status !== "running" && review.status !== "submitted" ? "cancelled" : review.status;
+  return { runId, reviewId: explorationReviewHandle(runId, review.id), roundId: round.id, artifactId: review.artifactId, stepId: review.exploration!.stepId, createdAt: review.createdAt,
+    reviewer: review.exploration!.configuration.reviewer, configuration: review.exploration!.configuration, status,
+    materials: review.exploration!.materials, ...reviewNodeView(review, review.comments, { ...selection, allFields: true, status }),
+    vote: review.vote, attempt: attempt ? { id: attempt.id, createdAt: attempt.createdAt, startedAt: attempt.startedAt, completion: attempt.completion } : undefined };
 }

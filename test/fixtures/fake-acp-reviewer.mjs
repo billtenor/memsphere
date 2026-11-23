@@ -131,6 +131,12 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
     const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
     graph = Boolean(detail.reviewProgress);
+    if (process.env.EXPLORATION_TEST_EXTERNAL) {
+      const args = ["run", "external", "show", "--run", process.env.MEMSPHERE_REVIEW_RUN_ID, "--external"];
+      const external = JSON.parse(await invokeReviewCli([...args, process.env.EXPLORATION_TEST_EXTERNAL, "--output", "json"]));
+      assert.equal(external.source, "used");
+      await assert.rejects(invokeReviewCli([...args, process.env.EXPLORATION_TEST_UNATTACHED, "--output", "json"]), /REVIEW_RESOURCE_DENIED|outside this Review/);
+    }
   }
   if (graph) {
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));

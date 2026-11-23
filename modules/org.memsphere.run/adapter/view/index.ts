@@ -729,7 +729,8 @@ class RunApplication {
     if (!init?.method && path.startsWith("/api/runs?") && new URLSearchParams(path.split("?")[1]).get("representation") === "summary" && this.#summaries) {
       return this.#summaries.read(projectApiUrl(this.#config, path), this.#controller.signal);
     }
-    const response = await fetch(projectApiUrl(this.#config, path), { ...init, signal: this.#controller.signal });
+    const signal = init?.signal ? AbortSignal.any([this.#controller.signal, init.signal]) : this.#controller.signal;
+    const response = await fetch(projectApiUrl(this.#config, path), { ...init, signal });
     if (!response.ok) throw new Error((await response.text()) || `${response.status}`);
     return response.status === 204 ? null : response.json();
   }
@@ -797,7 +798,7 @@ class RunApplication {
       if (!this.#contextGraph || this.#contextGraphRun !== this.#detail.id) {
         this.#contextGraph?.dispose();
     this.#disposeInlineReview();
-        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase, (runId, reviewId, roundId) => this.#openReview(runId, reviewId, roundId), (runId,reviewId,roundId,container,content,panel)=>this.#mountInlineReview(runId,reviewId,roundId,container,content,panel), ()=>this.#disposeInlineReview());
+        this.#contextGraph = createContextGraph(this.#ui, (path, init) => this.#request(path, init), this.#config.locale, this.#config.projectApiBase, (runId, reviewId, roundId) => this.#openReview(runId, reviewId, roundId), (runId,reviewId,roundId,container,content,panel)=>this.#mountInlineReview(runId,reviewId,roundId,container,content,panel), ()=>this.#disposeInlineReview());
         this.#contextGraphRun = this.#detail.id;
       }
       if (!this.#detailRoot.contains(this.#contextGraph.element)) {

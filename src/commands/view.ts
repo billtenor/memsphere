@@ -10,6 +10,8 @@ import { detectRunnerAgents } from "../runner/identity.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
+import { ExplorationReviews, explorationReviewIdentity, isModelReviewHandle } from "../context_control/exploration-review.js";
+import { configureExplorationStep, explorationStepConfiguration } from "./context-control.js";
 import { openContextControl } from "../project/context-control.js";
 import { contextRunDetailPayload, contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
 import { createContextRunReader } from "../project/context-run-summaries.js";
@@ -116,6 +118,7 @@ import {
   currentArtifactReview,
   ensureCurrentSchemaDraft,
   findArtifactReview,
+  explorationReviewView,
   listRuns,
   listRunSummaries,
   parseRunState,
@@ -1481,6 +1484,58 @@ async function handleRequest(
   // operation chooses a source. A failed/conflicting source never falls back.
   const contextRunPath = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/|$)/);
   const contextLocation = contextRunPath ? await contextRunForView(config, decodeURIComponent(contextRunPath[1])) : undefined;
+  const explorationMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/exploration\/(steps|reviews)\/([^/]+)$/);
+  if (explorationMatch && (request.method === "GET" || request.method === "POST")) {
+    if (!contextLocation || isGraphRun(contextLocation.run)) { sendJson(response, 404, { error: "Free exploration Run not found" }); return; }
+    const { service, run } = contextLocation, id = decodeURIComponent(explorationMatch[3]);
+    const repository = new ExplorationReviews(service);
+    try {
+      if (explorationMatch[2] === "steps") {
+        if (request.method === "GET") {
+          sendJson(response, 200, await withContextControlViewRead(config.scopeRoot, () => explorationStepConfiguration(service, config, run.id, id))); return;
+        }
+        const body = await readJsonBody<Record<string, unknown>>(request);
+        const keys = Object.keys(body);
+        for (const key of keys) {
+          const value = body[key];
+          if ((key === "asserts" || key === "suggests") && Array.isArray(value) && value.every(x => typeof x === "string")) continue;
+          if (key === "reviewer" && typeof value === "string") continue;
+          if (["clearAsserts", "clearSuggests", "clearReviewer"].includes(key) && value === true) continue;
+          throw new Error(`Invalid Step configuration field: ${key}`);
+        }
+        sendJson(response, 200, await configureExplorationStep(service, config, run.id, id, body)); return;
+      }
+      if (request.method === "GET") {
+        const target = explorationReviewIdentity(id);
+        if (target?.runId !== run.id) throw new Error("Run/Review identity mismatch");
+        const view = await withContextControlViewRead(config.scopeRoot, async () => {
+          const { row } = await repository.locate(run.id, target.recordId);
+          return explorationReviewView(repository, run.id, row.value, { all: true });
+        });
+        sendJson(response, 200, view); return;
+      }
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      response.once("close", abort);
+      try {
+        if (response.destroyed) abort();
+        const review = await repository.start(config, run.id, id, controller.signal);
+        const view = await explorationReviewView(repository, run.id, review);
+        let warning: string | undefined;
+        if (review.attempts && !controller.signal.aborted) {
+          try {
+            const target = await findArtifactReview({ runsRoot, reviewId: view.reviewId, service });
+            if (!controller.signal.aborted) await dispatchArtifactReviewAgents({ config, run: target.run });
+          }
+          catch (error) { warning = `Review saved. Resume dispatch with run review wait --review ${view.reviewId}: ${error instanceof Error ? error.message : String(error)}`; }
+        }
+        if (!controller.signal.aborted) sendJson(response, 200, { ...view, warning });
+      } finally {
+        response.off("close", abort);
+      }
+    } catch (error) { if (!response.destroyed) sendJson(response, 400, { code: (error as { code?: string }).code, error: error instanceof Error ? error.message : String(error) }); }
+    return;
+  }
   const contextArtifactMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/(artifacts|externals)\/([^/]+)\/content$/);
   if (request.method === "GET" && contextArtifactMatch) {
     if (!contextLocation) { sendJson(response, 404, { error: "Run not found" }); return; }
@@ -1620,7 +1675,7 @@ async function handleRequest(
       const runId = decodeURIComponent(directArtifactReviewRoundMatch[1]);
       const reviewId = decodeURIComponent(directArtifactReviewRoundMatch[2]);
       const roundId = decodeURIComponent(directArtifactReviewRoundMatch[3]);
-      const located = reviewId.startsWith("graph-review-") ? { runsRoot, ...await withContextControlViewRead(config.scopeRoot,async()=>findArtifactReview({ runsRoot, reviewId,service:await contextControlForView(config),...(compact?{viewRoundId:roundId,viewMaterialIndex:material.startsWith("context:")?Number(material.slice(8)):undefined}:{}) })) } : await readViewRunById(config, runId);
+      const located = isModelReviewHandle(reviewId) ? { runsRoot, ...await withContextControlViewRead(config.scopeRoot,async()=>findArtifactReview({ runsRoot, reviewId,service:await contextControlForView(config),...(compact?{viewRoundId:roundId,viewMaterialIndex:material.startsWith("context:")?Number(material.slice(8)):undefined}:{}) })) } : await readViewRunById(config, runId);
       if (located.run.id !== runId) throw new Error("Run/Review identity mismatch");
       const review = located.run.artifactReviews?.find((candidate) => candidate.id === reviewId);
       if (!review) throw new Error(`Artifact Review not found: ${reviewId}`);
@@ -1797,7 +1852,7 @@ async function handleRequest(
           sendJson(response,200,{run:{...base,context:{...payload.context,run,lazy:true}}});return;
         }
       }
-      sendJson(response, 200, { run: await contextRunDetailPayload(await contextLocation.service.snapshot(runId)) });
+      sendJson(response, 200, { run: await withContextControlViewRead(config.scopeRoot, async () => contextRunDetailPayload(await contextLocation.service.inspect(runId))) });
       return;
     }
     let located: Awaited<ReturnType<typeof readViewRunById>>;
@@ -2490,7 +2545,7 @@ async function findViewArtifactReview(
   config: MemsphereConfig,
   reviewId: string
 ): Promise<{ runsRoot: string; run: RunState; review: NonNullable<RunState["artifactReviews"]>[number] }> {
-  if (reviewId.startsWith("graph-review-")) return { runsRoot: config.runsRoot, ...await findArtifactReview({ runsRoot: config.runsRoot, reviewId }) };
+  if (isModelReviewHandle(reviewId)) return { runsRoot: config.runsRoot, ...await findArtifactReview({ runsRoot: config.runsRoot, reviewId }) };
   const roots = [config.runsRoot, join(config.archiveRoot, "runs")];
   for (const runsRoot of roots) {
     try {

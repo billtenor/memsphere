@@ -1,3 +1,4 @@
+import { runGit } from "../src/git.js";
 import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -8,7 +9,7 @@ import { textContent } from "../src/context_control/types.js";
 import { readProjectConfig } from "../src/config.js";
 import { openCommandStates } from "../src/home/command-state-store.js";
 import { createViewServer } from "../src/commands/view.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { startRun, reportRun } from "../src/run/store.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -117,6 +118,7 @@ test("Run header finishes exploration, archives it, and restores it without reop
     assert.equal(restored.archived, false); assert.equal(restored.status, "done");
     assert.equal((await commandStore.get({},"codex-lifecycle"))!.value.status,"closed");
     assert.equal(await page.getByRole("button", { name: "结束运行", exact: true }).count(), 0);
+    await page.getByRole("button", { name: "产物视角" }).click();
     await page.getByRole("button", { name: "交付 v1", exact: true }).click();
     await page.getByText("可交付正文", { exact: true }).waitFor();
     assert.deepEqual((await service.snapshot(run.id)).outputArtifactIds, [a.id]);
@@ -136,6 +138,7 @@ test("real Run graph changes history without opening an overlay and keeps its di
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     await page.goto(`${origin}/projects/test-project/tasks/${run.id}`);
+    await page.getByRole("button", { name: "产物视角" }).click();
     await page.getByRole("button", { name: "方案 v2", exact: true }).waitFor();
     await page.locator(".cc-graph[data-layout-ready]").waitFor();
     assert.equal(await page.locator(".cc-node").count(), 3);
@@ -144,15 +147,15 @@ test("real Run graph changes history without opening an overlay and keeps its di
     await Promise.all([page.waitForResponse(r => new URL(r.url()).pathname.endsWith(`/runs/${run.id}`)), page.getByRole("button", { name: "刷新", exact: true }).click()]);
     assert.equal(await page.evaluate(() => (window as any).__graph === document.querySelector(".cc-graph") && !!document.querySelector(".cc-history[open]")), true);
     await page.getByRole("button", { name: "v1 · 方案", exact: true }).click();
-    assert.equal(await page.locator("dialog").count(), 0);
+    assert.equal(await page.locator("dialog.cc-dialog[open]").count(), 0);
     assert.equal(await page.locator(".cc-node").count(), 2);
     await page.getByRole("button", { name: "方案 v1", exact: true }).click();
     await page.getByText("旧正文", { exact: true }).waitFor();
-    await page.evaluate(() => { (window as any).__dialog = document.querySelector("dialog"); });
+    await page.evaluate(() => { (window as any).__dialog = document.querySelector<HTMLDialogElement>("dialog.cc-dialog"); });
     assert.equal(await page.getByRole("button",{name:/^(上一版|下一版)$/}).count(),0);
     await page.locator(".cc-version-select").selectOption({label:"v2 · 方案"});
     await page.getByText("新正文", { exact: true }).waitFor(); await page.getByText("新版本意见", { exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => (window as any).__dialog === document.querySelector("dialog") && document.querySelector("dialog")!.open), true);
+    assert.equal(await page.evaluate(() => (window as any).__dialog === document.querySelector<HTMLDialogElement>("dialog.cc-dialog") && document.querySelector<HTMLDialogElement>("dialog.cc-dialog")!.open), true);
     await page.locator('.cc-related').getByRole('button',{name:'需求',exact:true}).click();await page.getByText('固定需求',{exact:true}).waitFor();await page.getByRole('button',{name:'← 返回',exact:true}).click();await page.getByText('新正文',{exact:true}).waitFor();
     const review=page.locator(".cc-pane-review"),divider=page.getByRole("separator",{name:"调整评审栏宽度",exact:true});
     assert.ok(Math.abs((await review.boundingBox())!.width/(await page.locator(".cc-modal-columns").boundingBox())!.width-.3)<.01);
@@ -165,7 +168,7 @@ test("real Run graph changes history without opening an overlay and keeps its di
     await page.getByRole("button", { name: "评审", exact: true }).click();
     assert.equal(await page.getByRole("region", { name: "评审", exact: true }).isVisible(), true);
     assert.equal(await page.getByRole("region", { name: "产物内容", exact: true }).isVisible(), false);
-    await page.keyboard.press("Escape"); await page.locator("dialog").waitFor({ state: "detached" });
+    await page.keyboard.press("Escape"); await page.locator("dialog.cc-dialog").waitFor({ state: "detached" });
     assert.equal(await page.locator(".cc-node").count(), 3);
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
@@ -187,6 +190,7 @@ test("External projection, full details, edge endpoints and two-axis grab pannin
     const page = await browser.newPage({ viewport: { width: 1280, height: 850 } });
     const errors: string[] = []; page.on("pageerror", e => errors.push(e.message));
     await page.goto(`${origin}/projects/test-project/tasks/${run.id}`);
+    await page.getByRole("button", { name: "产物视角" }).click();
     await page.getByRole("button", { name: /共享外部来源/ }).waitFor();
     assert.equal(await page.getByRole("button", { name: /历史独占来源/ }).count(), 0);
     await page.getByRole("button", { name: /尚未使用的资料/ }).waitFor();
@@ -221,8 +225,75 @@ test("External projection, full details, edge endpoints and two-axis grab pannin
     assert.equal(await page.locator("dialog .cc-pane-review").count(), 0); assert.equal(await page.locator("dialog .cc-version-select").count(), 0);
     await page.keyboard.press("Escape");
     await service.updateOutputs(run.id, [], await service.outputs(run.id));
-    await page.reload(); await page.getByRole("button", { name: /尚未使用的资料/ }).waitFor();
+    await page.reload(); await page.getByRole("button", { name: "产物视角" }).click(); await page.getByRole("button", { name: /尚未使用的资料/ }).waitFor();
     assert.equal(await page.locator("[data-artifact-id]").count(), 0); assert.equal(await page.locator(".cc-external").count(), 1);
     assert.deepEqual(errors, []);
+  } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test("exploration shares Run perspectives and keeps the selected Review and configuration during refresh", { timeout: 60000 }, async t => {
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  await runGit(["init", "-b", "master"], { cwd: f.root });
+  await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Embedded fixture"], { cwd: f.root });
+  const configuration = join(f.root, "config.json");
+  const project = JSON.parse(await readFile(configuration, "utf8"));
+  await writeFile(configuration, JSON.stringify({ ...project, store: { type: "embedded", repository_path: f.root, memory_path: "memory" } }));
+  const config = await readProjectConfig("test-project", f.home);
+  const { ExplorationReviews } = await import("../src/context_control/exploration-review.js");
+  const { freezeExplorationSchema } = await import("../src/context_control/exploration-contract.js");
+  await mkdir(join(config.memoryRoot, "schemas"), { recursive: true });
+  await mkdir(join(config.memoryRoot, "statements"), { recursive: true });
+  await writeFile(join(config.memoryRoot, "schemas", "shared-report.yaml"), withCurrentMemorySyntax("!schema\nnames: [shared-report]\ntype: object\nformat: {layout: outline}\nfields: [Summary]\n"));
+  const statement = join(config.memoryRoot, "statements", "review-fact.yaml");
+  await writeFile(statement, withCurrentMemorySyntax("!statement\nnames: [review-fact]\nasserts: [Inspect the source]\n"));
+  const run = await service.start("Shared exploration page");
+  const draft = await service.enterExplorationSchema(run.id, { name: "Visible draft", contentType: "text/markdown",
+    contract: await freezeExplorationSchema(config, "Visible draft", "shared-report", "text/markdown") });
+  const { artifact, step } = await service.report(run.id, { name: "Exploration candidate", content: textContent("Candidate content") });
+  await service.configureExplorationStep(run.id, step.id, { asserts: ["statements/review-fact"], reviewer: "runner" });
+  const repository = new ExplorationReviews(service);
+  const original = await repository.start(config, run.id, artifact.id);
+  await writeFile(statement, withCurrentMemorySyntax("!statement\nnames: [review-fact]\nasserts: [Inspect the updated source]\n"));
+  await repository.start(config, run.id, artifact.id);
+  const server = createViewServer(config);
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, browser = await browserScope();
+  try {
+    const runUrl = `${origin}/api/projects/test-project/runs/${run.id}`;
+    const failed = await fetch(`${runUrl}/exploration/reviews/${draft.artifactId}`, { method: "POST", body: "{}" });
+    assert.equal((await failed.json()).code, "INCOMPLETE_ARTIFACT");
+    const unconfigured = (await service.report(run.id, { name: "Unconfigured", content: textContent("Unconfigured") })).artifact;
+    const missing = await fetch(`${runUrl}/exploration/reviews/${unconfigured.id}`, { method: "POST", body: "{}" });
+    assert.equal((await missing.json()).code, "REVIEWER_REQUIRED");
+    assert.equal((await repository.list(run.id)).length, 2);
+    const page = await browser.newPage();
+    await page.goto(`${origin}/projects/test-project/tasks`);
+    await page.locator(`[data-item-id="${run.id}"]`).click();
+    await page.getByRole("button", { name: "流程视角" }).waitFor();
+    await page.getByRole("button", { name: /Visible draft/ }).click();
+    const dialog = page.locator('dialog.cc-dialog[open]');
+    await dialog.getByText("执行信息", { exact: true }).click();
+    await dialog.getByText("schemas/shared-report", { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+    await page.getByRole("button", { name: "产物视角" }).click();
+    await page.locator(`[data-artifact-id="${artifact.id}"]`).click();
+    const round = dialog.getByLabel("评审轮次");
+    const id = `exploration-review-${run.id}__${original.id}`;
+    await round.selectOption(id);
+    await dialog.getByText("渐进评审节点", { exact: true }).click();
+    await dialog.getByText("Inspect the source", { exact: true }).waitFor();
+    await dialog.getByText("评审配置", { exact: true }).click();
+    const input = dialog.getByLabel("建议 Statement（每行一个引用）");
+    await input.fill("unsaved local configuration");
+    const field = await input.elementHandle();
+    await service.review(run.id, artifact.id, "human", ["new review comment"]);
+    await page.getByRole("button", { name: "刷新", exact: true }).evaluate(el => (el as HTMLButtonElement).click());
+    await dialog.getByText("new review comment", { exact: true }).waitFor();
+    assert.equal(await field?.evaluate(node => node.isConnected), false);
+    assert.equal(await input.inputValue(), "unsaved local configuration");
+    assert.equal(await round.inputValue(), id);
+    await dialog.getByText("Inspect the source", { exact: true }).waitFor();
+    await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+    assert.equal(await page.locator("dialog.cc-dialog[open]").count(), 0);
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });

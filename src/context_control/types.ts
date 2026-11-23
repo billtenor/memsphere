@@ -27,6 +27,11 @@ export type Run = {
   frames?: Array<{ id: string; type: "graph"; graphFrame: GraphFrame }>;
 };
 export type StepResult = { mode: "produce"; id: string } | { mode: "collect"; items: Record<string, string[]> };
+export type StepReviewConfiguration = {
+  asserts?: string[]; suggests?: string[]; reviewer?: string;
+  inheritedFrom?: { stepId: string; artifactId: string };
+  edited?: Array<"asserts" | "suggests" | "reviewer">;
+};
 export type Step = {
   id: string; runId: string; createdAt: string; status: "pending" | "running" | "awaiting_review" | "done" | "failed" | "cancelled";
   startedAt?: string; endedAt?: string; completionSequence?: number;
@@ -37,14 +42,21 @@ export type Step = {
   businessReceipt?: BusinessReceipt & { artifactId: string };
   frames?: Array<{ id: string; type: "submission"; submissionFrame: SubmissionFrame }>;
   writing?: { draftId: string; baseSubmittedArtifactId?: string };
+  reviewConfiguration?: StepReviewConfiguration;
   reads?: Record<string, { readAt: string }>;
 };
-export type Artifact = Body & { business?: { destination: BusinessDestination; valueJson: string; sha256: string }; writing?: import("./schema-writing.js").SchemaWriting; id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
+export type Artifact = Body & { business?: { destination: BusinessDestination; valueJson: string; sha256: string }; writing?: import("./schema-writing.js").SchemaWriting; schemaContract?: import("./schema-contract.js").FrozenSchemaContract; initialStepReviewConfiguration?: StepReviewConfiguration; id: string; stepId: string; name: string; status: "draft" | "submitted"; tags: string[]; dependencies: Ref[]; revisedFrom?: string; revisedSummary?: string };
 export type External = Body & { id: string; runId: string; source: string; capturedAt: string };
 export type ReviewComment = { commentId?: string; id?: string; body: string; createdAt: string; severity?: "blocking" | "risk" | "suggestion"; anchor?: { targetRef?: Ref; location: string; context?: string } };
 /** New writes have one canonical identity; ReviewComment also reads historical id records. */
 export type NewReviewComment = Omit<ReviewComment, "id" | "commentId"> & { commentId: string; id?: never };
 export type Review = {
+  exploration?: {
+    runId: string; stepId: string; fingerprint: string;
+    configuration: Pick<StepReviewConfiguration, "asserts" | "suggests" | "reviewer">;
+    materials: Array<Ref & { sha256: string; contentType: string }>;
+    permissions: NonNullable<Run["permissionConfig"]>;
+  };
   nodeTree?: ReviewNodes["nodeTree"];
   nodeStates?: ReviewNodes["nodeStates"];
   id: string; roundId?: string; artifactId: string;
