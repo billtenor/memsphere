@@ -4,7 +4,7 @@ import type { ArtifactReviewVoteValue } from "../artifact-review.js";
 import type { MemsphereConfig } from "../config.js";
 import { assertReviewNodes, createReviewNodes, mutateReviewNode, type NodeMutation } from "../review-nodes.js";
 import { failure } from "./errors.js";
-import { explorationRules } from "./exploration-contract.js";
+import { explorationReviewerConfigError, explorationRules } from "./exploration-contract.js";
 import { isGraphRun } from "./graph-runtime.js";
 import { graphPermissionConfig, graphReviewId } from "./graph-review.js";
 import { definitionHash } from "./model-assets.js";
@@ -40,7 +40,7 @@ export class ExplorationReviews {
     const projectId = setting.reviewer.startsWith("project:") ? setting.reviewer.slice(8) : "";
     const actor = !runner && Object.hasOwn(configured.actors, projectId) ? configured.actors[projectId] : undefined;
     if (!runner && (actor?.kind !== "agent" || !actor.permissions.includes("artifact.read") || !actor.permissions.some(p => p === "decision.assess" || p === "decision.decide")))
-      throw failure("INVALID_REVIEWER", "The configured Project reviewer is unavailable");
+      throw failure("INVALID_REVIEWER", explorationReviewerConfigError(config, setting.reviewer) ?? "The configured Project reviewer is unavailable");
     if (!configured.runner.permissions.includes("artifact.read") || runner && !configured.runner.permissions.includes("decision.decide"))
       throw failure("PERMISSION_DENIED", "Runner lacks the permissions for this Review");
     const actorId = runner ? "runner" : projectId === "runner" ? "project:runner" : projectId;

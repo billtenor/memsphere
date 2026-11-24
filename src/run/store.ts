@@ -1063,7 +1063,8 @@ export async function startRun(input: {
   const reviewConfiguration = validateRunReviewConfiguration(
     preflight,
     input.reviewConfiguration,
-    controlPlane
+    controlPlane,
+    input.controlPlane?.actorErrors
   );
   const steps = instantiateProcedureTemplate(rootTemplate, controlPlane, reviewConfiguration);
   if (!steps.length) {
@@ -3619,7 +3620,8 @@ export function buildRunReviewPreflight(
 export function validateRunReviewConfiguration(
   preflight: RunReviewPreflight,
   configuration: RunReviewConfiguration | undefined,
-  snapshot: ControlPlaneSnapshot | undefined
+  snapshot: ControlPlaneSnapshot | undefined,
+  actorErrors?: ReadonlyMap<string, string>
 ): RunReviewConfiguration | undefined {
   if (!preflight.reviews.length) return undefined;
   if (!configuration) throw new RunReviewConfigurationRequired(preflight);
@@ -3656,7 +3658,9 @@ export function validateRunReviewConfiguration(
           continue;
         }
         seenActorIds.add(actorId);
-        if (snapshot && !snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
+        if (snapshot && !Object.hasOwn(snapshot.actors, actorId)) {
+          issues.push(`slots.${key}.actors: ${actorErrors?.get(actorId) ?? `unknown Actor id ${actorId}`}`);
+        }
       }
     }
   }

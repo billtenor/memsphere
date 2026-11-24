@@ -33,6 +33,10 @@ export function explorationReviewerOptions(config: Pick<MemsphereConfig, "contro
   return options;
 }
 
+export function explorationReviewerConfigError(config: Pick<MemsphereConfig, "controlPlane">, reviewer: string) {
+  return reviewer.startsWith("project:") ? config.controlPlane?.actorErrors?.get(reviewer.slice("project:".length)) : undefined;
+}
+
 export async function explorationRules(config: MemsphereConfig, setting: Pick<StepReviewConfiguration, "asserts" | "suggests">) {
   const live = createMemoryCatalogForConfig(config), catalog = await live.snapshot?.() ?? live;
   const rules = async (channel: "asserts" | "suggests") => {

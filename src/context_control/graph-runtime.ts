@@ -106,16 +106,22 @@ export class GraphRuntime {
     const procedure = parseMemoryEntity("procedures", input.procedure) as GraphProcedureMemory;
     if (procedure.mode !== "graph") throw failure("INVALID_ARGUMENT", "Expected a graph Procedure");
     for (const a of procedure.actions) if (a.artifact && a.artifact.model.definedBy !== MEMSPHERE_SCHEMA_MODEL) await validateGraphSpec(a.artifact);
-    const cp = input.controlPlane && createControlPlaneSnapshot(input.controlPlane);
-    if (cp && Object.hasOwn(cp.actors, "runner")) throw failure("INVALID_ARGUMENT", "Graph Actor id runner conflicts with the Runner permission identity; use a distinct Actor id");
+    let controlPlane = input.controlPlane;
+    if (controlPlane && Object.hasOwn(controlPlane.actors, "runner")) {
+      const { runner: _reserved, ...actors } = controlPlane.actors;
+      const actorErrors = new Map(controlPlane.actorErrors);
+      actorErrors.set("runner", "Graph Actor id runner conflicts with the Runner permission identity; use a distinct Actor id");
+      controlPlane = { ...controlPlane, actors, actorErrors };
+    }
+    const cp = controlPlane && createControlPlaneSnapshot(controlPlane);
     const template: RunProcedureTemplate = { memoryName: procedure.names[0], steps: procedure.actions.map(a => ({ id: `actions[${a.id}]`, instruction: a.description, artifact: a.artifact?.name, reviewSlots: a.artifact?.review })) };
-    const review = validateRunReviewConfiguration(buildRunReviewPreflight({ [procedure.names[0]]: template }, cp), input.reviewConfiguration, cp);
+    const review = validateRunReviewConfiguration(buildRunReviewPreflight({ [procedure.names[0]]: template }, cp), input.reviewConfiguration, cp, controlPlane?.actorErrors);
     const memoryRef = `procedures/${procedure.names[0]}`;
     const snapshot = structuredClone(input.memorySnapshot ?? { memories: { [memoryRef]: { memoryRef, payload: { contentType: "application/yaml", content: serializeMemoryYaml(procedure) } } } });
     for (const memory of Object.values(snapshot.memories)) if (memory.app && !memory.app.enabled) throw failure("APP_DISABLED", `App is disabled: ${memory.app.id}`);
     const run: Run = { id: newId("run"), name: input.name, language: input.language ?? "zh-CN", status: "running", createdAt: this.runtime.now(), memoryRef, memorySnapshot: snapshot,
       ...(input.memorySource ? { memorySource: structuredClone(input.memorySource) } : {}),
-      ...(input.controlPlane ? { permissionConfig: graphPermissionConfig(input.controlPlane, input.language ?? "zh-CN") } : {}),
+      ...(controlPlane ? { permissionConfig: graphPermissionConfig(controlPlane, input.language ?? "zh-CN") } : {}),
       ...(review ? { reviewConfig: { reviewPolicies: review.reviews, reviewBindings: review.slots } } : {}),
       frames: [{ id: newId("frame"), type: "graph", graphFrame: { memoryRef, triggers: [], pendingSteps: [], joins: [], processedStepIds: [], nextCompletionSequence: 1 } }] };
     for (const [index, action] of procedure.actions.entries()) {

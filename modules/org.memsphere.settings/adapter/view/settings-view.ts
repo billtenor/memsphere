@@ -1289,7 +1289,8 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
       else {
         this.#providerDetection = Object.fromEntries((payload.results ?? []).map((result: JsonObject) => [result.id, result]));
         this.persistDetection();
-        this.state.notice = this.t("settings.providerDetectionCompleted", "ACP 提供方检测完成。");
+        this.state.errors = payload.errors ?? [];
+        this.state.notice = this.state.errors.length ? "" : this.t("settings.providerDetectionCompleted", "ACP 提供方检测完成。");
       }
     } finally { this.#detecting = false; this.render(); }
   }

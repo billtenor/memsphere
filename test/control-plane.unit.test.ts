@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { getAgentReviewProvider } from "../src/acp/provider.js";
+import { globalConfigFileSchema } from "../src/config.js";
 import {
   authorizeArtifactOperation,
+  controlPlaneSnapshotSchema,
   createControlPlaneSnapshot,
   listDecisionPolicyDefinitions,
   listPermissionDefinitions,
@@ -9,8 +12,10 @@ import {
   renderPermissionGuidance,
   requireDecisionPolicyDefinition,
   requirePermissionDefinition,
-  resolveArtifactControlPlane
+  resolveArtifactControlPlane,
+  resolveAvailableProjectControlPlane
 } from "../src/control-plane/index.js";
+import { projectConfigSchema } from "../src/project/model.js";
 
 const rawConfig = {
   runner: {
@@ -42,6 +47,31 @@ const rawConfig = {
     }
   }
 };
+
+test("configuration reads isolate bad entries and still reject invalid outer structure", () => {
+  const store = { type: "managed", published_revision: "fixture" };
+  for (const invalid of [null, [], 17, "invalid"]) {
+    assert.equal(globalConfigFileSchema.safeParse({ acp_providers: invalid }).success, false);
+    assert.equal(projectConfigSchema.safeParse({ store, control_plane: { runner: rawConfig.runner, actors: invalid } }).success, false);
+  }
+  assert.equal(globalConfigFileSchema.safeParse({ language: "en", unknown: true }).success, false);
+  assert.equal(projectConfigSchema.safeParse({ store, unknown: true }).success, false);
+  assert.equal(projectConfigSchema.safeParse({ store, control_plane: { runner: { permissions: ["unknown"] }, actors: {} } }).success, false);
+
+  const providers = { codex: null, qwen: 17 };
+  const actors = { ...rawConfig.actors, empty: null, scalar: 17, usesCodex: { ...rawConfig.actors.agent, agent: { provider: "codex" } } };
+  const home = globalConfigFileSchema.parse({ acp_providers: providers });
+  const project = projectConfigSchema.parse({ store, control_plane: { runner: rawConfig.runner, actors } });
+  assert.deepEqual(home.acp_providers, providers);
+  assert.deepEqual(project.control_plane?.actors, actors);
+  const resolved = resolveAvailableProjectControlPlane(project.control_plane!, home.acp_providers);
+  assert.deepEqual(Object.keys(resolved.actors), ["human", "agent"]);
+  assert.match(resolved.actorErrors!.get("empty")!, /control_plane\.actors\.empty/);
+  assert.match(resolved.actorErrors!.get("scalar")!, /control_plane\.actors\.scalar/);
+  assert.match(resolved.actorErrors!.get("usesCodex")!, /acp_providers\.codex/);
+  assert.equal(Object.hasOwn(resolved.acpProviders, "codex"), false);
+  assert.equal(Object.hasOwn(resolved.acpProviders, "qwen"), false);
+});
 
 test("built-in control plane catalogs are complete and reject unknown ids", () => {
   const permissions = listPermissionDefinitions();
@@ -309,13 +339,24 @@ test("Human Actors need no system prompt while Agent prompts retain their existi
   for (const prompt of ["", "  "]) assert.throws(() => parseAgent({ system_prompt: prompt }), /must not be blank/);
 });
 
-test("Frozen historical snapshots retain their Human prompt without rewriting history", async () => {
-  const { controlPlaneSnapshotSchema } = await import("../src/control-plane/schema.js");
+test("Frozen historical snapshots retain their Human prompt without rewriting history", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
   snapshot.actors.human.systemPrompt = "Historical prompt";
   const before = JSON.stringify(snapshot);
   assert.equal(controlPlaneSnapshotSchema.parse(snapshot).actors.human.systemPrompt, "Historical prompt");
   assert.equal(JSON.stringify(snapshot), before);
+});
+
+test("A frozen Actor with an unfamiliar Provider remains readable", () => {
+  const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
+  const actor = snapshot.actors.agent;
+  assert.equal(actor.kind, "agent");
+  actor.agent.providerType = "claude";
+
+  const frozen = controlPlaneSnapshotSchema.parse(snapshot).actors.agent;
+  assert.equal(frozen.kind, "agent");
+  assert.equal(frozen.agent.providerType, "claude");
+  assert.throws(() => getAgentReviewProvider(frozen.agent.providerType), /agent_provider_unsupported: claude/);
 });
 
 

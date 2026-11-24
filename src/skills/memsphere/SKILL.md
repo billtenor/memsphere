@@ -285,6 +285,8 @@ Home config.json 的 language 支持 zh-CN/en，缺省 zh-CN，同时影响 Agen
 
 Agent Actor 指向 Home ACP Provider 实例和可选 model，Provider 当前支持 traex/qwen/kimi/codex；安装、认证和账户由 Provider 自己负责。Human Actor 不配置 system_prompt。Provider 的非托管参数、非敏感环境变量及 timeout 在 Home 配置，工作目录与托管安全参数由运行时管理。
 
+单个 Provider 或 Actor 配置无效时，Run 查询、其他 Actor 和无关设置仍可用。显式绑定或启动受影响的评审时，按诊断修复相关条目。设置保存无关修改时保留已有的无效条目，新提交的条目仍需通过校验。旧 Run 使用冻结配置，CLI 不支持其中的 Provider 类型时仍可查询该 Run，启动对应 Agent 才报错。
+
 在“设置 → App 配置”中选择已安装的 App，可编辑其持久化配置，停用的 App 也可配置。View 与 `app configure` 共用安装状态，`app show` 返回当前配置和配置版本；版本冲突保留草稿，先重新读取核对，不自动覆盖。无效 JSON 会阻止校验/保存；保存超时仅表示结果未确认，重新读取核实。写盘成功与运行中 View 应用分开，按提示重启。
 
 开发 App 设置扩展时，复用标准 View Package 的 `entrypoints.settings` 引用和 `portableSlots.appSettingsConfiguration`，通过公共 `ui.settingsForm` 组织业务字段；框架负责设置样式和保存，不自建挂载协议、业务 DOM 或 CSS。细节见 App 契约与 View SDK，示例为费用 App 的 settings 包。

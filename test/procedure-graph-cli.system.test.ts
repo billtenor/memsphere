@@ -139,6 +139,54 @@ test("independent CLI processes enter idempotently and complete different Steps 
   assert.equal(result.run.frames[0].graphFrame.processedStepIds.length, 2);
 });
 
+test("CLI isolates invalid ACP Providers and Actors until a Review Slot binds them", { timeout: 60000 }, async t => {
+  const f = await fixture(t);
+  const configPath = join(f.root, "config.json"), homeConfigPath = join(f.home, "config.json");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  const homeConfig = JSON.parse(await readFile(homeConfigPath, "utf8"));
+  const permissions = ["artifact.read", "decision.assess"];
+  config.control_plane = {
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: {
+      good: { kind: "agent", permissions, agent: { provider: "kimi" } },
+      unknown: { kind: "agent", permissions, agent: { provider: "claude" } },
+      damaged: { kind: "agent", permissions, agent: { provider: "codex" } },
+      malformed: { kind: "human", permissions: "artifact.read" },
+      runner: { kind: "human", permissions }
+    }
+  };
+  const home = { ...homeConfig, acp_providers: { claude: {}, codex: { startup_timeout_ms: 0 }, kimi: { startup_timeout_ms: 1000 } } };
+  await writeFile(configPath, JSON.stringify(config));
+  await writeFile(homeConfigPath, JSON.stringify(home));
+  await writeFile(f.procedure, (await readFile(f.procedure, "utf8")).replace("      payload:", "      review: [approval]\n      payload:"));
+  const binding = join(f.directory, "review.json");
+  const start = async (actorId: string) => {
+    await writeFile(binding, JSON.stringify({
+      reviews: { "cli-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } },
+      slots: { "cli-graph::approval": { actors: [actorId] } }
+    }));
+    return f.call("run", "start", "--file", f.procedure, "--review-config", binding, "--name", "Review");
+  };
+
+  const { runId } = await start("good");
+  await f.call("run", "status", "--run", runId);
+  const snapshot = await f.call("run", "show", "--run", runId);
+  assert.deepEqual(Object.keys(snapshot.run.permissionConfig.actors), ["good"]);
+  assert.equal(snapshot.run.permissionConfig.actors.good.agent.startupTimeoutMs, 1000);
+  const beforeFailedStarts = (await f.invoke("run", "status")).stdout;
+  await assert.rejects(start("unknown"), /control_plane\.actors\.unknown\.agent\.provider.*Unknown ACP Provider id: claude/);
+  await assert.rejects(start("damaged"), /control_plane\.actors\.damaged\.agent\.provider.*acp_providers\.codex\.startup_timeout_ms/);
+  await assert.rejects(start("malformed"), /control_plane\.actors\.malformed\.permissions/);
+  await assert.rejects(start("runner"), /Graph Actor id runner conflicts/);
+  assert.equal((await f.invoke("run", "status")).stdout, beforeFailedStarts);
+
+  home.acp_providers.kimi.startup_timeout_ms = 0;
+  await writeFile(homeConfigPath, JSON.stringify(home));
+  await f.call("run", "status", "--run", runId);
+  const historical = await f.call("run", "show", "--run", runId);
+  assert.deepEqual(historical.run.permissionConfig, snapshot.run.permissionConfig);
+});
+
 test("CLI module Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
   const f = await fixture(t);
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));

@@ -6,7 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
 import {
   acpProviderConfigSchema,
-  resolveProjectControlPlane,
+  controlPlaneEntriesFileSchema,
+  resolveAvailableProjectControlPlane,
   type ControlPlaneConfig
 } from "./control-plane/index.js";
 import { defaultPromptLocale, promptLocales, type PromptLocale } from "./prompts/locale.js";
@@ -101,6 +102,10 @@ export const globalConfigSchema = z.object({
   debug: z.object({ agent_review: z.boolean().optional() }).strict().optional()
 }).strict();
 
+export const globalConfigFileSchema = globalConfigSchema.extend({
+  acp_providers: controlPlaneEntriesFileSchema.optional()
+});
+
 async function readProjectExecutionConfig(options: {
   projectConfigPath?: string;
   home?: string;
@@ -142,7 +147,7 @@ async function readProjectExecutionConfig(options: {
     modelRegistration: context.primary.config.modelRegistration,
     dataStores: context.primary.config.dataStores,
     controlPlane: context.primary.config.control_plane
-      ? resolveProjectControlPlane(context.primary.config.control_plane, global.acp_providers)
+      ? resolveAvailableProjectControlPlane(context.primary.config.control_plane, global.acp_providers)
       : undefined,
     debug: { agentReview: global.debug?.agent_review ?? false, root: join(homePaths(home).runtimeRoot, "debug") },
     view: global.view
@@ -169,9 +174,9 @@ export async function readProjectConfig(project: string, home?: string): Promise
   return readProjectExecutionConfig({ project, home, memoryScope: "canonical" });
 }
 
-async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConfigSchema>> {
+async function readGlobalConfig(path: string): Promise<z.infer<typeof globalConfigFileSchema>> {
   try {
-    return globalConfigSchema.parse(JSON.parse(await readFile(path, "utf8")));
+    return globalConfigFileSchema.parse(JSON.parse(await readFile(path, "utf8")));
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return {};
     throw new Error(`invalid global config: ${path}`, { cause: error });
