@@ -14,6 +14,9 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { businessFixture } from "../../helpers/business-data.js";
 import { initializedContextFixture } from "../../helpers/initialized-context.js";
+import { withCurrentMemorySyntax } from "../../helpers/memory.js";
+import { ExplorationReviews, explorationReviewHandle } from "../../../src/context_control/exploration-review.js";
+import { textContent } from "../../../src/context_control/types.js";
 import { openContextControl } from "../../../src/project/context-control.js";
 import { readProjectConfig } from "../../../src/config.js";
 import { openCommandStates, requireCommandState } from "../../../src/home/command-state-store.js";
@@ -94,7 +97,7 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex") {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex", mode: "graph" | "exploration" = "graph") {
   // Installation and Embedded worktree discovery are not part of daemon
   // delivery. Reuse installed models in separate Managed filesystem Stores.
   const f = await initializedContextFixture(t);
@@ -107,16 +110,39 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const fake = join(bin, "codex");
   await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
+  const configPath = join(f.root, "config.json");
+  const project = JSON.parse(await readFile(configPath, "utf8"));
+  if (mode === "exploration") {
+    // Statement resolution reads the Project's Memory through a real Workspace.
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Exploration fixture"], { cwd: f.root, signal: t.signal });
+    project.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+  }
+  await writeFile(configPath, JSON.stringify({ ...project, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
   const env: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: f.home, PATH: `${bin}${delimiter}${process.env.PATH}` };
   stripRunnerEnvironment(env);
   env[runnerType === "claude" ? "CLAUDE_CODE_SESSION_ID" : "CODEX_THREAD_ID"] = "origin-session";
   // These commands still communicate with the real daemon process. Keep
   // native entry/exit and simultaneous registrations in dedicated scenarios.
+  const cliLifetime = new AbortController();
+  const cliSignal = AbortSignal.any([t.signal, cliLifetime.signal]);
+  const cliClosures = new Set<Promise<void>>();
+  const nativeCall = (commandEnv: NodeJS.ProcessEnv, ...args: string[]) => {
+    cliSignal.throwIfAborted();
+    const result = exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env: commandEnv, signal: cliSignal });
+    // An aborted execFile can reject before its child has released the streams.
+    const closed = new Promise<void>(resolve => { result.child.once("close", () => resolve()); });
+    cliClosures.add(closed);
+    void closed.then(() => cliClosures.delete(closed));
+    return result;
+  };
+  f.beforeCleanup(async () => {
+    cliLifetime.abort();
+    await Promise.all(cliClosures);
+  });
   const call = (...args: string[]) => processBoundary
-    ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
-    : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
+    ? nativeCall(env, ...args)
+    : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli, t.signal);
   const { daemonStatus, stopDaemon: stop } = await import("../../../src/daemon/service.js");
   let daemon: ReturnType<typeof spawn> | undefined;
   const startDaemon = async (preload?: string) => {
@@ -176,28 +202,15 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   // not the CLI boundary under test. Construct them through domain APIs/Stores.
   const config = await readProjectConfig("test-project", f.home);
   const service = (await openContextControl(f.root))!;
-  const procedure: GraphProcedureMemory = {
-    tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
-    actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
-      artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
-  };
-  const initial = await service.withGraph(g => g.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
-    reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
-      slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } }));
-  const started = { runId: initial.run.id };
-  const work = initial.steps[0];
-  await service.withGraph(async graph => {
-    await graph.enter(started.runId, work.id);
-    await graph.report(started.runId, work.id, { text: "candidate" });
-  });
+  const { runId, reviewId, target, otherReviewId } = mode === "exploration"
+    ? await explorationReviewTarget(service, config)
+    : await graphReviewTarget(service, config, includeAgent);
+  const started = { runId };
   const stateId = `${runnerType}-origin-session`;
   await (await openCommandStates(true, f.home))!.create({}, stateId, {
     id: stateId, agentType: runnerType, sessionId: "origin-session", updatedAt: new Date().toISOString(),
-    commandGroup: "run", groupId: started.runId, status: "active", parameters: { project: "test-project", step: work.id }, state: { reads: {} }
+    commandGroup: "run", groupId: runId, status: "active", parameters: { project: "test-project", ...target }, state: { reads: {} }
   });
-  const snapshot = await service.snapshot(started.runId);
-  const step = snapshot.steps.find(s => s.reviewRounds?.length)!;
-  const reviewId = `graph-review-${started.runId}__${step.id}`;
   // Reuse this fixture's opened model service. Each query still reads current
   // records; reopening and revalidating all model bindings is not under test.
   const reviewInput = { runsRoot: join(f.root, "runs"), reviewId, service };
@@ -231,15 +244,52 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
       authorizationNote: "Isolated fixture vote" });
   };
   const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { [runnerType]: { identity_enabled: true, async_enabled: enabled } } }));
-  return { ...f, call, env, queue, queueLog, queueCommand:fake, started, reviewId, reviewState, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, interruptDaemon, waitForTask };
+  return { ...f, call, nativeCall, env, queue, queueLog, queueCommand:fake, started, reviewId, otherReviewId, reviewState, service, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, interruptDaemon, waitForTask };
+}
+
+type FixtureService = NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
+type FixtureConfig = Awaited<ReturnType<typeof readProjectConfig>>;
+
+async function graphReviewTarget(service: FixtureService, config: FixtureConfig, includeAgent: boolean) {
+  const procedure: GraphProcedureMemory = {
+    tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
+    actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
+      artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
+  };
+  return service.withGraph(async graph => {
+    const initial = await graph.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
+      reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
+        slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } });
+    const runId = initial.run.id, step = initial.steps[0].id;
+    await graph.enter(runId, step);
+    await graph.report(runId, step, { text: "candidate" });
+    return { runId, reviewId: `graph-review-${runId}__${step}`, target: { step }, otherReviewId: undefined };
+  });
+}
+
+async function explorationReviewTarget(service: FixtureService, config: FixtureConfig) {
+  const statements = join(config.memoryRoot, "statements");
+  await mkdir(statements, { recursive: true });
+  await writeFile(join(statements, "candidate.yaml"), withCurrentMemorySyntax("!statement\nnames: [candidate]\nasserts: [Review the candidate]\n"));
+  const run = await service.start("Async exploration", "zh-CN");
+  const repository = new ExplorationReviews(service);
+  const prepare = async (name: string, reviewer: string) => {
+    const { artifact, step } = await service.report(run.id, { name, content: textContent("Candidate") });
+    await service.configureExplorationStep(run.id, step.id, { asserts: ["statements/candidate"], reviewer });
+    const review = await repository.start(config, run.id, artifact.id);
+    return explorationReviewHandle(run.id, review.id);
+  };
+  const reviewId = await prepare("Notified candidate", "project:agent");
+  const otherReviewId = await prepare("Other candidate", "runner");
+  return { runId: run.id, reviewId, target: { review: reviewId }, otherReviewId };
 }
 
 function daemonTaskLock(home: string, taskId: string) {
   return join(home, "data", "daemon-tasks", FILESYSTEM_JSON_METADATA_DIRECTORY, `${recordStateKey(`${taskId}.json`)}.lock`);
 }
 
-async function claudeNotificationFixture(t: TestContext, beforeRoster = "") {
-  const f = await reviewFixture(t, "success", true, true, "claude");
+async function claudeNotificationFixture(t: TestContext, beforeRoster = "", mode: "graph" | "exploration" = "graph") {
+  const f = await reviewFixture(t, "success", true, true, "claude", mode);
   const path = join(f.directory, `${process.pid}.sock`);
   const roster = [{ sessionId: "origin-session", pid: process.pid, startedAt: 1795350000000, kind: "interactive", status: "idle", cwd: f.root }];
   await writeTestCommand(join(dirname(f.queueCommand), "claude"), `#!${process.execPath}
@@ -314,14 +364,10 @@ test("Claude notification is completed on socket write and only the bound sessio
     });
     assert.deepEqual(await observableState(), before);
   };
-  const fromOtherSession = (...commandArgs: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...commandArgs], {
-    cwd: f.root, env: { ...f.env, CLAUDE_CODE_SESSION_ID: "other-session" }
-  });
+  const fromOtherSession = (...commandArgs: string[]) => f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "other-session" }, ...commandArgs);
   await rejectsWithoutSideEffects(/does not belong to the current session/,
     () => fromOtherSession(...args), () => fromOtherSession(...continueArgs));
-  await assert.rejects(exec(process.execPath, [cli, "--project", "test-project", ...args], {
-    cwd: f.root, env: { ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }
-  }), /does not belong to the current session/);
+  await assert.rejects(f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...args), /does not belong to the current session/);
   await assert.rejects(f.call("run", "review", "wait", "--review", "different-review", "--callback", callback),
     /does not belong to the current session/);
   await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${sent.id}:00000000-0000-4000-8000-000000000000`),
@@ -372,6 +418,100 @@ test("Claude notification is completed on socket write and only the bound sessio
   assert.ok(firstRead);
   assert.match((await f.call(...args)).stdout, /产物评审信息/);
   assert.equal((await f.waitForTask("completed")).value.claudeDelivery?.readAt, firstRead);
+});
+
+test("Claude exploration notifications return only the Review bound to the original session", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const f = await claudeNotificationFixture(t, "", "exploration");
+  const { listTasks, readTask, updateTask } = await import("../../../src/daemon/tasks.js");
+  const stateId = "claude-origin-session";
+  const states = (await openCommandStates(false, f.home))!;
+  const original = (await requireCommandState(stateId, f.home)).value;
+  const { runId } = f.started;
+  const native = ["run", "review", "wait", "--review", f.reviewId];
+  const continuation = ["continue", "review", "wait"];
+  const callback = (ref: string, args: string[]) => f.call(...args, "--callback", ref);
+  const context = async () => ({
+    run: await f.service.snapshot(runId),
+    state: await states.get({}, stateId),
+    dispatch: await readdir(join(f.root, ".runtime", "review-dispatch")).catch(error => {
+      if (error.code !== "ENOENT") throw error;
+      return [];
+    })
+  });
+  const failsWithoutChanges = async (diagnostic: RegExp, ...calls: Array<() => ReturnType<typeof f.call>>) => {
+    const before = { context: await context(), tasks: await listTasks(f.home) };
+    for (const call of calls) {
+      await assert.rejects(call, (error: Error & { stdout?: string }) => {
+        assert.match(error.message, diagnostic);
+        assert.equal(error.stdout ?? "", "");
+        return true;
+      });
+    }
+    assert.deepEqual({ context: await context(), tasks: await listTasks(f.home) }, before);
+  };
+  const bind = async (review?: string) => {
+    const previous = await requireCommandState(stateId, f.home);
+    const parameters = { project: "test-project", ...(review ? { review } : {}) };
+    await states.update({}, stateId, { ...original, parameters }, { expectedRevision: previous.revision });
+  };
+
+  await f.startDaemon();
+  assert.match((await f.call(...native)).stdout, /已登记异步等待/);
+  const registered = await f.waitForTask("running");
+  assert.match((await f.call(...continuation)).stdout, new RegExp(registered.id));
+  assert.deepEqual(registered.value.input, {
+    project: "test-project", runId, reviewId: f.reviewId, roundId: (await f.reviewState()).round.id,
+    configPath: join(f.root, "config.json"), cwd: f.root
+  });
+  assert.equal(registered.value.claudeDelivery, undefined);
+  // Reserve a delivery identity while the controlled Reviewer is still pending.
+  // The daemon cannot issue a notification until the result becomes ready.
+  const earlyId = randomUUID();
+  await updateTask(registered, { claudeDelivery: { id: earlyId } }, f.home);
+  const early = `${registered.id}:${earlyId}`;
+  await failsWithoutChanges(/unfinished Review round/, () => callback(early, native), () => callback(early, continuation));
+  await updateTask((await readTask(registered.id, f.home))!, { claudeDelivery: undefined }, f.home);
+
+  await f.completeAgent();
+  const sent = await f.waitForTask("completed", registered.id);
+  assert.ok(sent.value.claudeDelivery?.sentAt);
+  assert.equal(sent.value.claudeDelivery.readAt, undefined);
+  const ref = `${sent.id}:${sent.value.claudeDelivery.id}`;
+  const expected = `${notification(f.reviewId)} --callback '${ref}'`;
+  assert.deepEqual(await f.waitForMessages(1), [expected]);
+  await failsWithoutChanges(/Invalid Claude Code notification reference/,
+    () => callback("bogus", native), () => callback("bogus", continuation));
+  await failsWithoutChanges(/does not belong to the current session/,
+    () => callback(early, native), () => callback(early, continuation),
+    () => f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...native, "--callback", ref));
+  await updateTask(sent, { input: { ...sent.value.input, roundId: "obsolete-round" } }, f.home);
+  await failsWithoutChanges(/obsolete or unfinished Review round/, () => callback(ref, native), () => callback(ref, continuation));
+  await updateTask((await readTask(sent.id, f.home))!, { input: sent.value.input }, f.home);
+
+  assert.ok(f.otherReviewId);
+  await bind(f.otherReviewId);
+  await failsWithoutChanges(/not bound|does not belong/, () => callback(ref, native), () => callback(ref, continuation));
+  await bind();
+  await failsWithoutChanges(/not bound|requires a graph Step Review/, () => callback(ref, native), () => callback(ref, continuation));
+  await bind(f.reviewId);
+
+  const beforeRead = await context();
+  const stdout = (await callback(ref, native)).stdout;
+  assert.ok(stdout.includes(f.reviewId));
+  assert.ok(stdout.includes(sent.value.input.roundId));
+  assert.match(stdout, /自由探索评审|Exploration Review/);
+  const read = (await readTask(sent.id, f.home))!;
+  assert.ok(read.value.claudeDelivery?.readAt);
+  assert.deepEqual(read.value, {
+    ...sent.value, updatedAt: read.value.updatedAt,
+    claudeDelivery: { ...sent.value.claudeDelivery, readAt: read.value.claudeDelivery.readAt }
+  });
+  assert.equal((await callback(ref, continuation)).stdout, stdout);
+  assert.deepEqual(await context(), beforeRead);
+  assert.deepEqual(await listTasks(f.home), [read]);
+  assert.deepEqual(f.messages, [expected]);
 });
 
 test("Claude notification restart distinguishes interrupted attempts and never resends without retry", {
