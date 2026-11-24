@@ -1,5 +1,6 @@
 import type { MemsphereConfig } from "../config.js";
 import { requireEffectiveStep } from "../context_control/graph-rewind.js";
+import { explorationReviewIdentity } from "../context_control/exploration-review.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { currentCommandState } from "../home/command-state-store.js";
 import { openContextControl } from "../project/context-control.js";
@@ -8,15 +9,17 @@ import { currentIdentity, detectRunnerAgent, readRunnerAgents } from "../runner/
 import { readTask, recordClaudeDelivery, type ClaudeRecipient, type DaemonTask } from "./tasks.js";
 import { renderReviewResult, reviewReady } from "./review.js";
 
-type ReviewTarget = Pick<DaemonTask["input"], "project" | "runId" | "stepId">;
+type ReviewTarget = Pick<DaemonTask["input"], "project" | "runId" | "stepId" | "reviewId">;
 
 async function requireBoundTarget(target: ReviewTarget) {
-  const state = (await currentCommandState(Boolean(target.stepId)))?.value;
-  // Historical Flow runs are explicitly addressed and have no graph Step binding.
+  const explorationReview = explorationReviewIdentity(target.reviewId) ? target.reviewId : undefined;
+  const state = (await currentCommandState(Boolean(target.stepId || explorationReview)))?.value;
+  // Historical Flow runs are explicitly addressed and have no Step or Review binding.
   if (!state) return;
   if (state.status !== "active" || state.groupId !== target.runId
-      || state.parameters.project !== target.project || state.parameters.step !== target.stepId) {
-    throw new Error("Claude Code session is not bound to this Run or Step; enter the intended target first");
+      || state.parameters.project !== target.project || state.parameters.step !== target.stepId
+      || state.parameters.review !== explorationReview) {
+    throw new Error("Claude Code session is not bound to this Run, Step, or Review; enter the intended target first");
   }
 }
 

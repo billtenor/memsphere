@@ -6,8 +6,8 @@ names:
 defines:
   - Graph 生产 Artifact 可通过 artifact.store 绑定业务 Store；评审通过后完成原子 upsert 或 create，先持久化回执再推进。产物历史和评审使用独立固定正文。结果未确认时可查业务记录和候选，再显式重做同一 Step。
   - "graph 的调度来源与验收依据分开：Action.dependencies 和 Step.inputs 决定执行实例；Runner 可在 report 中为候选 Artifact 显式声明本实例合法祖先 Artifact 及 External，供后续固定评审读取。该声明不新增调度边，也不默认递归公开全部上游。修订与回溯后的新候选固定新依赖，历史轮次继续按旧候选引用读取。"
-  - "Continue 仅在开启 Agent 身份并识别当前会话时可用，命令为 memsphere continue report 或 review wait，不接收独立 context ID；状态通过 agentType-sessionId 定位，保留具体 Run/Step 绑定。"
-  - "身份模式下 review wait 与 status 不 enter 后继或修改会话绑定，前台 report/vote 接纳后可正式进入唯一后继；后台通知提供显式回读命令。Claude Code 通知固定任务和轮次，原会话通过身份与上下文校验后回读。"
+  - "Continue 仅在开启 Agent 身份并识别当前会话时可用，命令为 memsphere continue report 或 review wait，不接收独立 context ID；状态通过 agentType-sessionId 定位，保留具体 Run、Step 或自由探索 Review 绑定。"
+  - "身份模式下的 Procedure review wait 与 status 不 enter 后继或修改会话绑定，前台 report/vote 接纳后可正式进入唯一后继。后台通知提供显式回读命令。Claude Code 通知固定任务和轮次，原会话通过身份与上下文校验后回读。"
   - memsphere 中用于描述一个任务从开始到结束如何执行的 Memory。
   - 在个性化软件的语义资产中，Procedure 把反复出现的工作组织为可执行、可检查、可复用的运行入口，并通过 Run 与 Artifact 留下过程和结果。
   - Procedure 通过 goals 描述目标，通过 asserts 声明全局约束，并通过 flow 安排有序 Action、分支、循环和对子流程的调用。
@@ -32,7 +32,7 @@ defines:
   - 不指定 Procedure 的 run start 是自由探索入口，使用上下文控制模型和产物依赖图，不执行本 Memory 的 flow，也不改变旧流程执行的 Artifact、Schema 或正式 Review 协议；具体动线见 memsphere-run。
   - "新 syntax memsphere-20261027-stable 支持 mode: graph，以 actions 定义带依赖的生产图；mode 缺省为 flow。两种执行实现并行保留，完整 graph 关键字规则见 memsphere-yaml-syntax-rules。"
   - graph Action 的 description 描述工作，dependencies 决定触发；普通 artifact 使用 model/payload 契约，collect 是 Runtime 自动收集引用的节点。启动没有结构化业务 input，入口 Action 自行准备业务材料。
-  - graph Run 使用上下文控制模型 Store；旧 flow 的存储和执行保持原协议，自由探索仍在 report 完整成果时才创建 Step。
+  - graph Run 使用上下文控制模型 Store；旧 flow 的存储和执行保持原协议，自由探索在 report 完整成果或 enter-schema 开始撰写时创建 Step。自由探索的 Step 可保存独立的渐进评审配置。
   - "新建流程默认推荐显式使用 mode: graph，以 dependencies 组织生产和返工；省略 mode 的解析默认值仍为 flow。项目与市场的敏捷需求开发流程使用 graph。"
   - graph 通过 run step rewind 对已经开始的当前普通生产 Step 发起回溯。dry-run 只读预览；执行必须填写 reason 或 reason-file，生成新的 pending Step，并返回显式 step enter 命令。目标输入保持原上游版本，受影响后继按实际依赖重建，独立分支保留。
   - 回溯保留旧 Step 的状态、产物、依赖与评审记录；旧 Step 退出当前有效执行链，迟到上报、投票和评审修改不能推进流程。新目标首次产物关联旧目标候选 revisedFrom；没有旧候选时只记录步骤替代关系。回溯不撤销代码、Git 或外部业务副作用。

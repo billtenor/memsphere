@@ -81,6 +81,13 @@ memsphere run outputs list --run <id>
 
 已保存 Artifact/Step 后报错，先查状态和产物再重试，不假设重报会去重。
 
+### 自由探索：按 Schema 撰写和按 Statement 评审
+
+- 已有 Schema 时，用 `run enter-schema NAME --run R --name TITLE --content-type text/markdown` 建立草稿。用 `--step S` 恢复，或用 `--revised-from A` 从旧版冻结 Schema 开始修订。依次 `schema show/report`、`skip`、`repeat`，保存传位置 token；字段支持 `--artifact` 或 `--artifact-file`。导出用 `run artifact export --run R --step S --file F`。最终 `run report --run R --step S` 提交原草稿 ID，可同时声明 `--depends-on`。
+- 以 `run step show --run R --step S` 查看评审配置和缺项。用 `run step configure --run R --step S` 配置 `--asserts statements/NAME`、`--suggests statements/NAME` 及 `--reviewer runner` 或 `project:ID`。分别替换或清空规则通道。原始 External 先登记到 Run，再在提交候选时声明为产物依赖。
+- 已提交候选用 `run review start --run R --artifact A` 固定本轮材料、规则和评审人。Runner 用 `run review show/report/update/comment/submit --run R --review V` 渐进审查。委派对象由系统启动，Runner 用 `run review wait --review V` 或 `run review retry --review V`。用 `run review list --run R --artifact A --progressive` 查看历史。
+- 可用 `run enter --run R --review V` 恢复同一评审。Continue 在 Schema 或 Review 上下文内自动带入当前目标。成功提交草稿、提交 Runner 评审或成功等待当前委派后返回 Run。原生命令可以显式定位目标。View 的流程和产物视角共用 Step 详情。
+
 ### Procedure：按步骤执行
 
 启动前读取选定 Procedure 及适用 Memory。名称与 `--file` 二选一，均需 `--name`。试运行已验证 active ChangeSet 的 Procedure 用 `run start <procedure> --change <id> --name <name>`，不能与 `--file` 混用；其 Concept、Statement、Schema、Procedure 都用 `memory list/read --run <run-id>` 从冻结候选读取。后续候选变更不影响已启动 Run。
@@ -107,7 +114,7 @@ flow 普通步骤用 `run report --run <id> --artifact <text>` 或 `--artifact-f
 
 collect Action 由命令自动完成，Agent 不执行 enter/report；结果是按 Step 创建序固定的具体 Artifact 引用数组，空数组保留，无额外聚合 Artifact 或 Review。普通依赖只传本次正式采用的产物；when 使用 JSONata 且严格返回 boolean，不提供全局业务 State。原始 MIME 解码、现有模型校验或求值失败应按错误修复，不能当作 false 跳过。
 
-`run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store，但自由探索仍在 report 完整成果时才创建 Step。
+`run status --run R` 可恢复未完成写入并推进；`run show`、`step show`、列表和 View 详情只读。使用 `memory list/read --run R` 阅读固定 Memory 快照。全部 Step 完成且没有未齐 Join 后通过 `run finish --run R` 结束；归档恢复只改变历史可见性。已有上下文模型须按提示显式 `project models initialize` 升级，旧 flow 不迁移。graph 与自由探索共用模型 Store。自由探索可通过 report 完整成果或 enter-schema 撰写草稿创建 Step。
 
 
 graph 可用 `run external add --run R --source S --content C` 登记原始依据，或用 `--change C --checkpoint D` 捕获同一固定 ChangeSet 的完整证据；两种来源互斥。External 由当前 Step 生产的 Artifact.dependencies 引用，不由 Step 直接引用。上报时用 `--depends-on artifact:A|external:E` 或结构化 `--file` 的 dependencies（互斥），补充 Artifact 须是本实例固定数据/控制来源中已接纳且当前有效的具体版本。强制输入不变；修订省略继承前身补充依赖，空数组清空，非空完整替换。不要为传递验收依据增加调度边或默认读取同 Action 最新产物。

@@ -124,6 +124,56 @@
         "sha256"
       ],
       "additionalProperties": false
+    },
+    "schemaContract": {
+      "type": "object"
+    },
+    "initialStepReviewConfiguration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "asserts": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "suggests": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reviewer": {
+          "type": "string"
+        },
+        "inheritedFrom": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "stepId",
+            "artifactId"
+          ],
+          "properties": {
+            "stepId": {
+              "type": "string"
+            },
+            "artifactId": {
+              "type": "string"
+            }
+          }
+        },
+        "edited": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "asserts",
+              "suggests",
+              "reviewer"
+            ]
+          }
+        }
+      }
     }
   },
   "required": [

@@ -20,6 +20,7 @@ defines:
   - Human 委托 Runner 提交的评审仍归属于 Human；Runner 是该次提交的受托执行者。
   - Artifact Review Comment 与用于修改长期 Memory 的 ChangeSet Comment 是两种不同对象。
   - 自由探索中的轻量 Review 是产物的评论记录，不具有正式评审的 Round、Assignment 和 Vote，也不构成产物接纳门禁。
+  - 自由探索的渐进评审由已提交 Artifact 发起。Step 保存用 asserts 和 suggests 通道解析的 Statement 引用，以及 runner 或 project:ID 评审人。每轮固定候选、其声明依赖、有效规则和评审身份。
   - graph 正式评审把不可变产物与参与名单固定在 Step.reviewRounds，每位 Actor 每轮独立保存个人 Review；Runner 的正式决定同样为个人 Review。对外通过临时投影复用评审协议、ACP 和 View，不在新 Run 持久化旧 artifactReviews。
   - graph 候选尚未通过评审时不会成为下游材料或 collect 成员；Agent Reviewer 失败保留未决状态，显式 retry 同轮同人新建 attempt，旧 attempt 失效。修订复用 Step 并创建新 Artifact 和轮次。
   - graph 回溯涉及的旧 Step 评审保留原候选、正文、依赖、草稿意见与已提交票，未提交评审转为 cancelled。旧轮次只读，不能再认领、握手、重试、编辑意见或投票来推动当前流程；历史材料按当时接纳事实读取。
@@ -37,3 +38,5 @@ defines:
   - "历史 flow 当前候选的契约按绑定 Review 的 Procedure/Step 定位；原步骤接纳、进入其他步骤或 Run 结束后仍从冻结 plan 与 Procedure 快照读取，保留原策略及模型目标。默认、assignment 和候选 step 入口一致；上下文快照缺少所属契约时明确拒绝 contract 查询。旧记录的调用祖先规则存在歧义时返回 REVIEW_CONTEXT_INVALID，不拼合或猜测规则。"
   - "Reviewer 的可执行入口由 Attempt 注入的 MEMSPHERE_CLI 固定，初始提示、提醒、节点操作及返回的 readCommand/exportCommand 均显式调用该 Session launcher。PATH 或同名 memsphere 工具可能指向其他安装，不能替代绑定入口；变量缺失时明确失败，不回退全局安装。材料中的普通命令示例也须采用同一入口，原 Project/Run/Assignment、授权范围与生命周期检查仍由 CLI 处理。"
   - "graph Artifact 使用 memsphere/schema.json 时，受限 contract show 仅返回所选合法 Artifact 对应 Action 在该 Run 中冻结的完整 Schema 定义与规则来源；不回退当前 Project，不暴露其他 Action 的 Schema 契约。"
+  - 自由探索的 Runner 在原生 run review 或绑定该 Review 的 Continue 中推进节点。委派由 Project Agent 使用其受限 Assignment 和 Attempt 执行；Runner 可查看、等待或重试。单轮结论记录在 Review，Artifact 提交状态保持独立。
+  - 同候选和冻结配置已有可恢复轮次时，发起返回原轮次。提交后可针对同一候选再次发起。修订产物使用新 Step，初始配置从前一版 Step 复制。所有旧轮次可按原 ID 回看。

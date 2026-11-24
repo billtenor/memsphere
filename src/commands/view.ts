@@ -10,6 +10,7 @@ import { agentTypes, detectRunnerAgents } from "../runner/identity.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
+import { isModelReviewHandle } from "../context_control/exploration-review.js";
 import { openContextControl } from "../project/context-control.js";
 import { contextRunDetailPayload, contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
 import { createContextRunReader } from "../project/context-run-summaries.js";
@@ -1620,7 +1621,7 @@ async function handleRequest(
       const runId = decodeURIComponent(directArtifactReviewRoundMatch[1]);
       const reviewId = decodeURIComponent(directArtifactReviewRoundMatch[2]);
       const roundId = decodeURIComponent(directArtifactReviewRoundMatch[3]);
-      const located = reviewId.startsWith("graph-review-") ? { runsRoot, ...await withContextControlViewRead(config.scopeRoot,async()=>findArtifactReview({ runsRoot, reviewId,service:await contextControlForView(config),...(compact?{viewRoundId:roundId,viewMaterialIndex:material.startsWith("context:")?Number(material.slice(8)):undefined}:{}) })) } : await readViewRunById(config, runId);
+      const located = isModelReviewHandle(reviewId) ? { runsRoot, ...await withContextControlViewRead(config.scopeRoot,async()=>findArtifactReview({ runsRoot, reviewId,service:await contextControlForView(config),...(compact?{viewRoundId:roundId,viewMaterialIndex:material.startsWith("context:")?Number(material.slice(8)):undefined}:{}) })) } : await readViewRunById(config, runId);
       if (located.run.id !== runId) throw new Error("Run/Review identity mismatch");
       const review = located.run.artifactReviews?.find((candidate) => candidate.id === reviewId);
       if (!review) throw new Error(`Artifact Review not found: ${reviewId}`);
@@ -1797,7 +1798,8 @@ async function handleRequest(
           sendJson(response,200,{run:{...base,context:{...payload.context,run,lazy:true}}});return;
         }
       }
-      sendJson(response, 200, { run: await contextRunDetailPayload(await contextLocation.service.snapshot(runId)) });
+      const action = representation === "action" ? { surface: "action" as const, actionId: url.searchParams.get("action") ?? undefined } : undefined;
+      sendJson(response, 200, { run: await withContextControlViewRead(config.scopeRoot, async () => contextRunDetailPayload(await contextLocation.service.inspect(runId), false, action, config)) });
       return;
     }
     let located: Awaited<ReturnType<typeof readViewRunById>>;
@@ -2452,6 +2454,7 @@ function artifactReviewSummary(
       status: round.status,
       submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
       total: round.assignments.length,
+      reviewProgress: round.reviewProgress,
       decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
       bindingSource: round.bindingSource,
       severity,
@@ -2490,7 +2493,7 @@ async function findViewArtifactReview(
   config: MemsphereConfig,
   reviewId: string
 ): Promise<{ runsRoot: string; run: RunState; review: NonNullable<RunState["artifactReviews"]>[number] }> {
-  if (reviewId.startsWith("graph-review-")) return { runsRoot: config.runsRoot, ...await findArtifactReview({ runsRoot: config.runsRoot, reviewId }) };
+  if (isModelReviewHandle(reviewId)) return { runsRoot: config.runsRoot, ...await findArtifactReview({ runsRoot: config.runsRoot, reviewId }) };
   const roots = [config.runsRoot, join(config.archiveRoot, "runs")];
   for (const runsRoot of roots) {
     try {
@@ -2640,6 +2643,7 @@ function publicArtifactReviewRounds(review: ArtifactReviewContext["review"],sele
     revision: round.revision,
     createdAt: round.createdAt,
     bindingSource: round.bindingSource,
+    reviewProgress: round.reviewProgress,
     assignments: round.assignments.map((assignment) => ({
       id: assignment.id,
       actorId: assignment.actorId,
@@ -2654,6 +2658,7 @@ function publicArtifactReviewRounds(review: ArtifactReviewContext["review"],sele
       attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
     })),
     votes: round.votes.map(vote=>selectedRoundId?{subject:vote.subject,binding:vote.binding,value:vote.value,automatic:vote.automatic,submittedAt:vote.submittedAt}:publicArtifactReviewVote(vote)),
+    runnerOpinion: publicArtifactReviewOpinion(round.runnerOpinion),
     result: round.result,
     commentDispositions: structuredClone(round.commentDispositions ?? []),
     revisionSummary: review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary

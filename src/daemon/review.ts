@@ -2,10 +2,11 @@ import type { MemsphereConfig } from "../config.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { openContextControl } from "../project/context-control.js";
 import { renderPrompt } from "../prompts/renderer.js";
-import { buildArtifactReviewSummaryPromptModel, buildArtifactReviewNextActionPromptModel } from "../prompts/index.js";
+import { buildArtifactReviewSummaryPromptModel, buildArtifactReviewNextActionPromptModel, buildExplorationReviewResultPromptModel } from "../prompts/index.js";
 import { renderRunOutput } from "../prompts/run-output.js";
 import { resolvePromptLocale } from "../prompts/locale.js";
 import { artifactReviewWaitReady } from "../artifact-review.js";
+import { explorationReviewIdentity } from "../context_control/exploration-review.js";
 
 export async function inspectReview(config: MemsphereConfig, reviewId: string) {
   if (reviewId.startsWith("graph-review-")) {
@@ -21,8 +22,8 @@ export function reviewReady(context: ReviewContext) {
 }
 export const automaticMessagePrefix = "[Memsphere 自动消息]";
 
+const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 export function reviewResumeNotification(project: string, reviewId: string, callback?: string) {
-  const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
   const target = `memsphere --project ${quote(project)} run review wait --review ${quote(reviewId)}`;
   return `请执行命令以继续：\n${target}${callback ? ` --callback ${quote(callback)}` : ""}`;
 }
@@ -30,6 +31,10 @@ export function reviewResumeNotification(project: string, reviewId: string, call
 export async function renderReviewResult(config: MemsphereConfig, context: ReviewContext): Promise<string> {
   const { run, review, round } = context;
   const locale = resolvePromptLocale(run.language);
+  if (explorationReviewIdentity(review.id)) {
+    const retry = `memsphere --project ${quote(config.project!.name)} run review retry --review ${quote(review.id)}`;
+    return renderPrompt("run.exploration-review-result", locale, buildExplorationReviewResultPromptModel(review, round, retry, locale));
+  }
   if (!review.id.startsWith("graph-review-")) return renderRunOutput({ kind: "review", run, review, round, runsRoot: config.runsRoot }, resolvePromptLocale(run.language));
   const summary = renderPrompt("run.review-summary", locale, buildArtifactReviewSummaryPromptModel(review, round, locale));
   const service = (await openContextControl(config.scopeRoot))!;

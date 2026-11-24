@@ -3,6 +3,44 @@
   "title": "Review",
   "description": "一位参与者在某轮中的独立评审实例，保存个人进度、评论、投票和执行记录；按 roundId 汇聚得到整轮评审视图。",
   "properties": {
+    "exploration": {
+      "type": "object",
+      "title": "自由探索评审快照",
+      "description": "冻结本轮 Run 与 Step、规范化配置、材料摘要和参与者授权。",
+      "properties": {
+        "runId": { "$ref": "#/definitions/Id" },
+        "stepId": { "$ref": "#/definitions/Id" },
+        "fingerprint": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "configuration": {
+          "type": "object",
+          "properties": {
+            "asserts": { "type": "array", "items": { "type": "string" } },
+            "suggests": { "type": "array", "items": { "type": "string" } },
+            "reviewer": { "type": "string", "pattern": "^(runner|project:.+)$" }
+          },
+          "required": ["asserts", "suggests", "reviewer"],
+          "additionalProperties": false
+        },
+        "materials": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "$ref": "#/definitions/Id" },
+              "kind": { "enum": ["artifact", "external"] },
+              "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+              "contentType": { "type": "string", "minLength": 1 }
+            },
+            "required": ["id", "kind", "sha256", "contentType"],
+            "additionalProperties": false
+          }
+        },
+        "permissions": { "type": "object" }
+      },
+      "required": ["runId", "stepId", "fingerprint", "configuration", "materials", "permissions"],
+      "additionalProperties": false
+    },
     "id": {
       "$ref": "#/definitions/Id",
       "title": "评审标识",

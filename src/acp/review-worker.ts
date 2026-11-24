@@ -48,7 +48,7 @@ export async function runArtifactReviewAgentWorker(options: AgentReviewWorkerOpt
   options.signal?.throwIfAborted();
   let workerJob: string | undefined;
   let enrollmentFailure: unknown;
-  if (process.platform === "win32" && reviewId.startsWith("graph-review-")) {
+  if (process.platform === "win32" && isModelReviewHandle(reviewId)) {
     try {
       const identity = await captureProcessIdentity(process.pid);
       if (!identity) throw new Error("Worker creation identity unavailable");
@@ -237,3 +237,4 @@ function requiredOption(value: string | undefined, name: string): string {
   if (!normalized) throw new Error(`${name} is required`);
   return normalized;
 }
+import { isModelReviewHandle } from "../context_control/exploration-review.js";

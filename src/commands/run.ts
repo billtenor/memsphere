@@ -1,6 +1,7 @@
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { currentIdentity, readRunnerAgents, detectRunnerAgent, checkQueueCapability } from "../runner/identity.js";
-import { currentCommandState, assertSessionTarget } from "../home/command-state-store.js";
+import { currentCommandState, assertSessionTarget, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
+import { explorationReviewIdentity } from "../context_control/exploration-review.js";
 import { inspectReview, renderReviewResult, reviewReady } from "../daemon/review.js";
 import { ensureDaemon, ensureClaudeNotificationDaemon, daemonControl } from "../daemon/service.js";
 import { registerTask, type DaemonTask } from "../daemon/tasks.js";
@@ -98,7 +99,7 @@ type RunStartOptions = {
   output?: "text" | "json";
 };
 
-type ReviewWaitOptions = { review?: string; callback?: string };
+type ReviewWaitOptions = { review?: string; callback?: string; sessionRow?: CommandStateRow };
 
 type ReviewVoteOptions = {
   review?: string;
@@ -365,12 +366,21 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
     await readClaudeReviewCallback(config, reviewId, options.callback);
     return;
   }
+  const exploration = explorationReviewIdentity(reviewId), session = exploration ? options.sessionRow ?? await currentCommandState() : undefined;
   const located = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
-  await assertSessionTarget(config.project!.name, located.run.id, reviewId.startsWith("graph-review-") ? located.review.stepId : undefined);
+  if (exploration && !located.round.assignments.length) throw new Error("Use run review show for a Runner Review");
+  if (!exploration) await assertSessionTarget(config.project!.name, located.run.id, reviewId.startsWith("graph-review-") ? located.review.stepId : undefined);
+  const release = async (result: typeof located) => {
+    if (!exploration || !result.round.assignments.every(a => a.status === "submitted")) return;
+    try { await releaseCommandTarget(session, config.project!.name, exploration.runId, { review: reviewId }); }
+    catch { console.error(`Review submitted. Return to the Run with memsphere run enter --run ${exploration.runId}`); }
+  };
   await dispatchArtifactReviewAgents({ config, run: located.run });
   const identity = await currentIdentity();
   const context = await inspectReview(config, reviewId);
   if (reviewReady(context)) {
+    await release(context);
+    if (exploration) { console.log(await renderReviewResult(config, context)); return; }
     if (identity) console.log(await renderReviewResult(config, context));
     else if (!await printGraphReviewOutput(context.review, context.round, context.run.id)) printRunOutput({ kind: "review", run: context.run, review: context.review, round: context.round, runsRoot: config.runsRoot });
     return;
@@ -399,6 +409,8 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
     return;
   }
   const result = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  await release(result);
+  if (exploration) { console.log(await renderReviewResult(config, result)); return; }
   if (identity) { console.log(await renderReviewResult(config, result)); return; }
   if (await printGraphReviewOutput(result.review, result.round, result.run.id)) return;
   printRunOutput({ kind: "review", run: result.run, review: result.review, round: result.round, runsRoot: config.runsRoot });
@@ -441,11 +453,14 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
 
 export async function runReviewRetryCommand(options: ReviewRetryOptions): Promise<void> {
   const reviewId = options.review?.trim();
-  const assignment = options.assignment?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
-  if (!assignment) throw new Error("--assignment <actor-or-assignment-id> is required");
+  const exploration = explorationReviewIdentity(reviewId);
+  if (!exploration && !options.assignment?.trim()) throw new Error("--assignment <actor-or-assignment-id> is required");
+  if (exploration && options.assignment !== undefined) throw new Error("This Review fixes its assigned Project reviewer");
   const config = await readConfig();
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
+  const assignment = exploration ? located.review.rounds[0]?.assignments[0]?.actorId : options.assignment?.trim();
+  if (!assignment) throw new Error("This Review does not have a delegated Agent assignment");
   const context = await retryArtifactReviewAgentAssignment({
     runsRoot: config.runsRoot,
     reviewId,
@@ -718,7 +733,7 @@ export async function runTryRunCommand(options: RunIdOptions): Promise<void> {
 
 export async function runStepShowCommand(options: RunStepShowOptions): Promise<void> {
   if (await tryReviewerResource("step-show", options)) return;
-  if (await graphCommand("step-show", options)) return;
+  if (await tryContextCommand("step-show", options)) return;
   const runId = requireRunId(options.run);
   const stepRef = requireStepRef(options.step);
   const config = await readConfig();
@@ -745,7 +760,7 @@ export async function runArtifactShowCommand(options: RunArtifactShowOptions): P
 }
 
 export async function runArtifactExportCommand(options: { run: string; step: string; file: string; force?: boolean }): Promise<void> {
-  if (await graphCommand("schema-export", options)) return;
+  if (await tryContextCommand("schema-export", options)) return;
   const config = await readConfig();
   const run = await readRun(config.runsRoot, requireRunId(options.run));
   await exportRunArtifact(config.runsRoot, run, requireStepRef(options.step), options.file, options.force, join(config.archiveRoot, "runs"));
@@ -898,7 +913,7 @@ export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions):
 }
 
 export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {
-  if (await graphCommand("schema-enter", { ...options, schemaName })) return;
+  if (await tryContextCommand("schema-enter", { ...options, schemaName })) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await enterSchema({
@@ -918,7 +933,7 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
 }
 
 export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promise<void> {
-  if (await graphCommand("schema-show", options)) return;
+  if (await tryContextCommand("schema-show", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, runId));
@@ -936,7 +951,7 @@ export function buildSchemaWritingDetail(snapshot: SchemaWritingSnapshot): unkno
 }
 
 export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
-  if (await graphCommand("schema-repeat", { ...options, count: countValue })) return;
+  if (await tryContextCommand("schema-repeat", { ...options, count: countValue })) return;
   const runId = requireRunId(options.run);
   if (!/^\d+$/.test(countValue)) {
     throw new Error("repeat count must be a non-negative integer");
@@ -951,7 +966,7 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
 }
 
 export async function runSkipCommand(options: RunIdOptions): Promise<void> {
-  if (await graphCommand("schema-skip", options)) return;
+  if (await tryContextCommand("schema-skip", options)) return;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await skipRun({ runsRoot: config.runsRoot, runId });
@@ -1287,5 +1302,5 @@ function locatedStepRef(located: LocatedRunStep): string {
 }
 
 export async function runSchemaReportCommand(options: object): Promise<void> {
-  if (!await graphCommand("schema-report", options)) throw new Error("schema report requires a graph Step; flow uses run report");
+  if (!await tryContextCommand("schema-report", options)) throw new Error("schema report requires a graph or free exploration Step; flow uses run report");
 }
