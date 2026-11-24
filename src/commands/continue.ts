@@ -62,14 +62,14 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     const config = await readConfig();
     const service = await openContextControl(config.scopeRoot);
     const run = service && await service.findRun(row.value.groupId);
-    if (!run) throw failure("NOT_FOUND", "CommandState does not refer to a model-backed Run");
+    if (!service || !run) throw failure("NOT_FOUND", "CommandState does not refer to a model-backed Run");
     const stepId = row.value.parameters.step;
     const graph = isGraphRun(run);
     if (graph && !stepId) throw failure("INVALID_STATE", "Graph CommandState requires a fixed Step binding");
-    const step = stepId ? graph ? (await service!.inspect(run.id)).steps.find(s => s.id === stepId) : await service!.explorationStep(run.id, stepId) : undefined;
+    const step = stepId ? graph ? (await service.inspect(run.id)).steps.find(s => s.id === stepId) : await service.explorationStep(run.id, stepId) : undefined;
     if (stepId && !step) throw failure("NOT_FOUND", "CommandState Step not found");
     if (graph && stepId) requireEffectiveStep(run, stepId);
-    return { ...row.value, row, graph, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: graph ? step?.status ?? run.status : run.status, available: row.value.status === "active" && run.status === "running" && (!graph || step?.status !== "done") };
+    return { ...row.value, row, graph, scope: { config, service }, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: graph ? step?.status ?? run.status : run.status, available: row.value.status === "active" && run.status === "running" && (!graph || step?.status !== "done") };
   };
   let context: ReturnType<typeof loadContext> | undefined;
   const load = () => context ??= loadContext();
@@ -108,7 +108,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       const reviewId = context.parameters.review;
       if (!context.graph && ["review-show", "review-list"].includes(operation)) {
         if (operation === "review-show" && !reviewId) throw failure("INVALID_ARGUMENT", "Enter a Review with run enter --run R --review V");
-        await contextOnlyCommand(operation, { ...options, run: context.groupId, review: reviewId });
+        await contextOnlyCommand(operation, { ...options, run: context.groupId, review: reviewId }, context.scope);
         return;
       }
       if (!context.available) throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
@@ -116,7 +116,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         if (operation === "review-wait") await (await import("./run.js")).runReviewWaitCommand({ review: reviewId, ...options, sessionRow: context.row });
         else if (operation === "review-retry") await (await import("./run.js")).runReviewRetryCommand({ ...options, review: reviewId });
         else if (["review-report", "review-update", "review-comment-add", "review-comment-update", "review-comment-delete", "review-submit"].includes(operation))
-          await reviewNodeCommand(operation.slice(7), { ...(options as ReviewNodeOptions), run: context.groupId, review: reviewId, sessionRow: context.row });
+          await reviewNodeCommand(operation.slice(7), { ...(options as ReviewNodeOptions), run: context.groupId, review: reviewId, sessionRow: context.row }, context.scope);
         else throw failure("SESSION_CONTEXT_CONFLICT", "Return to the general Run context with run enter --run R");
         return;
       }
@@ -138,7 +138,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       if (!step && operation.startsWith("schema-") && operation !== "schema-enter") throw failure("INVALID_ARGUMENT", "Enter a Schema draft first with run enter-schema --run R --step S");
       if (!context.graph && ["review-report", "review-update", "review-comment-add", "review-comment-update", "review-comment-delete", "review-submit"].includes(operation))
         throw failure("INVALID_ARGUMENT", "Enter a Review with run enter --run R --review V");
-      await contextOnlyCommand(operation, { ...options, run: context.groupId, step, sessionStateId: context.id, sessionRow: context.row });
+      await contextOnlyCommand(operation, { ...options, run: context.groupId, step, sessionStateId: context.id, sessionRow: context.row }, context.scope);
     });
   }
 }

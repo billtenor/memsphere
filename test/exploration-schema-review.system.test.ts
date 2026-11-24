@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
-import { ExplorationReviews, explorationReviewHandle } from "../src/context_control/exploration-review.js";
+import { ExplorationReviews, explorationReviewHandle, explorationReviewIdentity, mutateModelReviewNode } from "../src/context_control/exploration-review.js";
 import { dispatchArtifactReviewAgents } from "../src/acp/dispatcher.js";
 import * as reviews from "../src/context_control/review-repository.js";
 import { ContextControl } from "../src/context_control/service.js";
@@ -127,7 +127,7 @@ test("Step configuration changes only selected fields and Continue rejects anoth
   const candidate = await f.call("continue", "report", "--name", "Candidate", "--artifact", "Body");
   const S = candidate.stepId;
   const configure = (...options: string[]) => f.call("continue", "step", "configure", "--step", S, ...options);
-  const show = () => f.call("run", "step", "show", "--run", R, "--step", S);
+  const configuration = async () => (await f.service.explorationStep(R, S)).reviewConfiguration;
   const configured = await configure("--asserts", "fact", "--suggests", "fact", "--reviewer", "runner");
   for (const options of [
     ["--asserts", "fact", "--clear-asserts"],
@@ -137,22 +137,22 @@ test("Step configuration changes only selected fields and Continue rejects anoth
   await assert.rejects(configure("--asserts", "statements/absent"), /absent/);
   await assert.rejects(configure("--suggests", ""));
   await assert.rejects(configure("--reviewer", "project:absent"), /INVALID_REVIEWER/);
-  assert.deepEqual((await show()).configuration, configured.configuration);
+  assert.deepEqual(await configuration(), configured.configuration);
   for (const [option, field] of [["--clear-asserts", "asserts"], ["--clear-suggests", "suggests"], ["--clear-reviewer", "reviewer"]] as const) {
-    const expected = { ...(await show()).configuration };
+    const expected = { ...await configuration() };
     if (field === "reviewer") delete expected[field];
     else expected[field] = [];
     assert.deepEqual((await configure(option)).configuration, expected);
   }
 
   const other = (await f.call("run", "start", "--name", "Foreign Run")).id;
-  const foreign = await f.call("continue", "report", "--name", "Foreign candidate", "--artifact", "Other body");
+  const foreign = await f.service.report(other, { name: "Foreign candidate", content: textContent("Other body") });
   const draft = await f.call("continue", "enter-schema", "report", "--name", "Local draft", "--content-type", "text/markdown");
   await assert.rejects(f.call("continue", "step", "configure", "--step", S, "--reviewer", "runner"), /NOT_FOUND/);
   await assert.rejects(f.call("continue", "review", "start", "--artifact", candidate.artifactId), /NOT_FOUND/);
   assert.equal((await f.call("continue", "schema", "show")).position, draft.position);
   await f.call("run", "enter", "--run", R);
-  await assert.rejects(f.call("continue", "review", "start", "--artifact", foreign.artifactId), /NOT_FOUND/);
+  await assert.rejects(f.call("continue", "review", "start", "--artifact", foreign.artifact.id), /NOT_FOUND/);
   const repository = new ExplorationReviews(f.service);
   assert.deepEqual(await repository.list(R), []);
   assert.deepEqual(await repository.list(other), []);
@@ -162,7 +162,7 @@ for (const schema of [false, true]) {
   test(`${schema ? "Schema" : "ordinary"} CLI revision reviews retained and newly attached External independently`, { timeout: 30000 }, async t => {
     const f = await fixture(t);
     const R = (await f.call("run", "start", "--name", "Review material versions")).id;
-    const first = (await f.call("continue", "external", "add", "--source", "First", "--content", "First material")).externalId;
+    const first = (await f.service.addExternal(R, "First", { content: textContent("First material") })).id;
     const write = async (draft: { position: string }) => {
       const notes = await f.call("continue", "schema", "report", "--position", draft.position, "--artifact", "# Findings");
       const count = await f.call("continue", "skip", "--position", notes.position);
@@ -180,10 +180,18 @@ for (const schema of [false, true]) {
     const A1 = original.artifactId, S1 = original.stepId;
     await f.call("continue", "step", "configure", "--step", S1, "--asserts", "fact", "--reviewer", "runner");
     const old = await f.call("continue", "review", "start", "--artifact", A1);
-    let progress = old;
-    while (progress.node) progress = await f.call("continue", "review", "report", "--artifact", '{"applicable":true}');
-    await f.call("continue", "review", "submit", "--artifact", '{"vote":"approve"}');
-    const second = (await f.call("continue", "external", "add", "--source", "Second", "--content", "Second material")).externalId;
+    const repository = new ExplorationReviews(f.service);
+    const { recordId } = explorationReviewIdentity(old.reviewId)!;
+    const { round, actor } = await repository.locate(R, recordId);
+    // Prepare the historical nodes directly. The Runner Review scenario above
+    // exercises node reports through the CLI, and this case still submits via Continue.
+    await repository.mutate(R, recordId, round.id, actor, async review => {
+      for (let node = currentReviewNode(review); node; node = currentReviewNode(review)) {
+        mutateModelReviewNode(review, { operation: "report", expectedNodeId: node.nodeId, artifact: { applicable: true } }, new Set(), f.service.runtime.now, () => assert.fail("No test comment expected"));
+      }
+    });
+    assert.equal((await f.call("continue", "review", "submit", "--artifact", '{"vote":"approve"}')).status, "submitted");
+    const second = (await f.service.addExternal(R, "Second", { content: textContent("Second material") })).id;
     const dependencies = ["--depends-on", `external:${first}`, "--depends-on", `external:${second}`];
     let revision;
     if (schema) {
