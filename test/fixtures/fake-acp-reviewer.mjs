@@ -23,7 +23,7 @@ const app = acp
       agentInfo: { name: "memsphere-fake-reviewer", version: "1.0.0" }
     };
   })
-  .onRequest(acp.methods.agent.session.new, ({ params }) => {
+  .onRequest(acp.methods.agent.session.new, async ({ params }) => {
     if (process.env.MEMSPHERE_WORKSPACE_ROOT) {
       assert.equal(realpathSync(params.cwd), realpathSync(process.cwd()));
       assert.equal(params.cwd, process.env.MEMSPHERE_WORKSPACE_ROOT);
@@ -31,11 +31,11 @@ const app = acp
     }
     const sessionId = `fake-${randomUUID()}`;
     sessions.add(sessionId);
+    if (process.env.EXPLORATION_TEST_LAUNCHES) await appendFile(process.env.EXPLORATION_TEST_LAUNCHES, `${sessionId}\n`);
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client, signal }) => {
     if (!sessions.has(params.sessionId)) throw new Error(`unknown session: ${params.sessionId}`);
-    if (process.env.EXPLORATION_TEST_LAUNCHES) await appendFile(process.env.EXPLORATION_TEST_LAUNCHES, `${params.sessionId}\n`);
     if (mode === "exit-zero") process.exit(0);
     if (mode === "exit-error") process.exit(7);
     if (mode === "exit-signal") process.kill(process.pid, "SIGTERM");

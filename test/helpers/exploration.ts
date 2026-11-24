@@ -1,9 +1,11 @@
 import { runGit } from "../../src/git.js";
+import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { readProjectConfig } from "../../src/config.js";
+import type { ContextControl } from "../../src/context_control/service.js";
+import { readProjectConfig, type MemsphereConfig } from "../../src/config.js";
 import { openContextControl } from "../../src/project/context-control.js";
 import { invokeCliModule } from "./cli-module.js";
 import { initializedContextFixture } from "./initialized-context.js";
@@ -36,4 +38,21 @@ export async function explorationFixture(t: TestContext) {
   };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   return { ...f, config, service, invoke, call, statement, schema };
+}
+
+export function delegatedReviewConfig(config: MemsphereConfig, env: Record<string, string> = {}, mode = "approve"): MemsphereConfig {
+  return { ...config, controlPlane: { runner: { permissions: ["artifact.read", "decision.decide"] }, actors: {
+    reader: { kind: "agent", name: "Reader", permissions: ["artifact.read", "decision.assess"], agent: {
+      provider: "test", providerType: "codex", command: process.execPath,
+      args: [fileURLToPath(new URL("../fixtures/fake-acp-reviewer.mjs", import.meta.url)), mode],
+      env, startupTimeoutMs: 10000, idleTimeoutMs: 20000, maxRuntimeMs: null
+    } }
+  }, acpProviders: {} } };
+}
+
+export async function writeFixtureSchema(service: ContextControl, draft: Awaited<ReturnType<ContextControl["enterExplorationSchema"]>>) {
+  const title = await service.writeExplorationSchema(draft.runId, draft.stepId, "report", draft.position, "# Report");
+  const notes = await service.writeExplorationSchema(draft.runId, draft.stepId, "skip", title.position);
+  const written = await service.writeExplorationSchema(draft.runId, draft.stepId, "report", notes.position, "42");
+  assert.equal(written.phase, "awaiting_finalization");
 }

@@ -1,32 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { join } from "node:path";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dispatchArtifactReviewAgents } from "../src/acp/dispatcher.js";
-import { ExplorationReviews, explorationReviewHandle, mutateModelReviewNode } from "../src/context_control/exploration-review.js";
-import * as reviews from "../src/context_control/review-repository.js";
+import { writeFile } from "node:fs/promises";
+import { ExplorationReviews, mutateModelReviewNode } from "../src/context_control/exploration-review.js";
 import { textContent } from "../src/context_control/types.js";
-import { explorationFixture as fixture, explorationTestCli as cli } from "./helpers/exploration.js";
+import { explorationFixture as fixture, writeFixtureSchema } from "./helpers/exploration.js";
 import { freezeExplorationSchema } from "../src/context_control/exploration-contract.js";
-import { ContextControl } from "../src/context_control/service.js";
-import { openCommandStates } from "../src/home/command-state-store.js";
-import { currentReviewNode, reviewNodeProgress } from "../src/review-nodes.js";
-import type { MemsphereConfig } from "../src/config.js";
-import { inspectReview, renderReviewResult, reviewResumeNotification } from "../src/daemon/review.js";
+import type { ContextControl } from "../src/context_control/service.js";
+import { currentReviewNode } from "../src/review-nodes.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
-import { captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
-import { stopFixtureJob, untilFixture } from "./helpers/fixture-process.js";
-
-function delegatedReviewConfig(config: MemsphereConfig, env: Record<string, string> = {}): MemsphereConfig {
-  return { ...config, controlPlane: { runner: { permissions: ["artifact.read", "decision.decide"] }, actors: {
-    reader: { kind: "agent", name: "Reader", permissions: ["artifact.read", "decision.assess"], agent: {
-      provider: "test", providerType: "codex", command: process.execPath,
-      args: [fileURLToPath(new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url)), "approve"],
-      env, startupTimeoutMs: 10000, idleTimeoutMs: 20000, maxRuntimeMs: null
-    } }
-  }, acpProviders: {} } };
-}
 
 test("simultaneous Review starts converge and cancellation during preparation creates no Review", { timeout: 30000 }, async t => {
   const f = await fixture(t), R = (await f.service.start("race")).id;
@@ -63,152 +44,6 @@ test("simultaneous Review starts converge and cancellation during preparation cr
   assert.deepEqual((await repository.list(R)).map(r => r.id), [first.id]);
 });
 
-test("delegated exploration Review recovers dispatch and retries one restricted assignment with saved nodes", { timeout: 60000 }, async t => {
-  const f = await fixture(t), R = (await f.service.start("delegated")).id;
-  const attached = await f.service.addExternal(R, "used", { content: textContent("authorized source") });
-  const unattached = await f.service.addExternal(R, "not used", { content: textContent("unattached source") });
-  const { artifact, step } = await f.service.report(R, { name: "candidate", content: textContent("review this"), dependencies: [{ kind: "external", id: attached.id }] });
-  await f.service.configureExplorationStep(R, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
-  const repository = new ExplorationReviews(f.service);
-  const launches = join(f.directory, "provider-sessions");
-  const cfg = delegatedReviewConfig(f.config, {
-    EXPLORATION_TEST_EXTERNAL: attached.id, EXPLORATION_TEST_UNATTACHED: unattached.id,
-    EXPLORATION_TEST_CRASH_MARKER: join(f.directory, "node-saved"), EXPLORATION_TEST_LAUNCHES: launches
-  });
-  const value = await repository.start(cfg, R, artifact.id), reviewId = explorationReviewHandle(R, value.id);
-  const common = { runsRoot: cfg.runsRoot, reviewId, roundId: value.roundId!, actorId: "reader" };
-  let dispatchWork: Promise<unknown> | undefined;
-  let releaseLaunchGate = () => {};
-  const attempts = async () => (await repository.locate(R, value.id)).row.value.attempts ?? [];
-  const ownWorkerExited = async (attempt: Awaited<ReturnType<typeof attempts>>[number]) => {
-    if (!attempt.workerPid || !attempt.workerIdentity) return true;
-    const live = await captureProcessIdentity(attempt.workerPid);
-    return live?.started !== attempt.workerIdentity.started;
-  };
-  f.beforeCleanup(async () => {
-    releaseLaunchGate();
-    await dispatchWork?.catch(() => undefined);
-    for (const attempt of await attempts()) {
-      if (!attempt.workerPid || await ownWorkerExited(attempt)) continue;
-      if (attempt.workerJob) await stopFixtureJob(attempt.workerJob);
-      else await stopRewindWorker({ reviewId, attemptId: attempt.id, pid: attempt.workerPid, identity: attempt.workerIdentity, members: attempt.workerMembers });
-      await untilFixture(() => ownWorkerExited(attempt), "owned exploration Review worker exit");
-    }
-  });
-  const oldHome = process.env.MEMSPHERE_HOME; process.env.MEMSPHERE_HOME = f.home;
-  try {
-    const run = await reviews.readRun(cfg.runsRoot, R);
-    const dispatch = (readRun?: typeof reviews.readRun) => dispatchArtifactReviewAgents({ config: cfg, run,
-      workspaceRoot: f.cwd, runtime: { nodeExecutable: process.execPath, cliEntrypoint: cli } }, { readRun });
-    const runtime = join(cfg.scopeRoot, ".runtime");
-    await mkdir(runtime, { recursive: true });
-    const blocked = join(runtime, "review-dispatch");
-    await writeFile(blocked, "injected failure before launching a worker");
-    try { await assert.rejects(dispatch(), /EEXIST|ENOTDIR/); }
-    finally { await rm(blocked); }
-    assert.equal((await repository.start(cfg, R, artifact.id)).id, value.id);
-    assert.deepEqual(await attempts(), value.attempts);
-
-    const launchGate = new Promise<void>(resolve => { releaseLaunchGate = resolve; });
-    let snapshots = 0;
-    const concurrentRead: typeof reviews.readRun = async (...args) => {
-      const current = await reviews.readRun(...args);
-      if (++snapshots <= 2) {
-        if (snapshots === 2) releaseLaunchGate();
-        await launchGate;
-      }
-      return current;
-    };
-    const dispatches = [dispatch(concurrentRead), dispatch(concurrentRead)];
-    dispatchWork = Promise.allSettled(dispatches);
-    try {
-      await Promise.all(dispatches);
-    } finally { releaseLaunchGate(); }
-    const wait = () => reviews.waitForArtifactReview({ runsRoot: cfg.runsRoot, reviewId, signal: t.signal, pollIntervalMs: 150 });
-    await wait();
-    const failed = await reviews.readArtifactReviewForActor(common);
-    assert.equal(failed.assignment.status, "failed");
-    const first = (await attempts())[0];
-    assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity);
-    await untilFixture(() => ownWorkerExited(first), "first exploration Review worker exit");
-    assert.equal(reviewNodeProgress(failed.assignment)?.processed, 1);
-    assert.equal((await attempts()).length, 1);
-    assert.equal((await readFile(launches, "utf8")).trim().split("\n").length, 1);
-    const failure = failed.assignment.attempts![0].failure!;
-    const failedReceipt = (await f.invoke("run", "review", "wait", "--review", reviewId)).stdout;
-    assert.ok(failedReceipt.includes(`${failure.stage} [${failure.code}] ${failure.message}`));
-    assert.ok(failedReceipt.includes(`run review retry --review '${reviewId}'`));
-    assert.match(failedReceipt, /1\/\d+/);
-    assert.doesNotMatch(failedReceipt, /产物已被接受|Run 已推进|Artifact was accepted|advanced to the next step/);
-    const attemptId = failed.assignment.attempts![0].id;
-    const retried = await reviews.retryArtifactReviewAgentAssignment(common);
-    assert.notEqual(retried.attempt.id, attemptId);
-    await assert.rejects(reviews.assertArtifactReviewAgentAttemptRunning({ ...common, attemptId }), /no longer current/);
-    assert.deepEqual(retried.assignment.nodeStates, failed.assignment.nodeStates);
-    await assert.rejects(reviews.mutateArtifactReviewNodes({ ...common, attemptId, mutation: { operation: "report", expectedNodeId: currentReviewNode(retried.assignment)!.nodeId, artifact: { applicable: true } } }), /not current and running/);
-    assert.equal(await (dispatchWork = dispatch()), 1);
-    const draft = await f.call("run", "enter-schema", "report", "--run", R, "--name", "Unrelated draft", "--content-type", "text/markdown");
-    const home = (await openCommandStates(false, f.home))!, session = "codex-free-schema-review";
-    const target = await home.get({}, session);
-    const result = await wait();
-    assert.equal(result.round.assignments[0].submitted?.vote, "approve", JSON.stringify(result.round.assignments[0].attempts));
-    const second = (await attempts())[1];
-    assert.ok(second.workerPid && second.workerPid !== process.pid && second.workerIdentity);
-    await untilFixture(() => ownWorkerExited(second), "retried exploration Review worker exit");
-    const before = await f.service.inspect(R);
-    const note = reviewResumeNotification("test-project", reviewId);
-    assert.equal(note, `请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`);
-    const rendered = await renderReviewResult(cfg, await inspectReview(cfg, reviewId));
-    const resumed = (await f.invoke("run", "review", "wait", "--review", reviewId)).stdout.trim();
-    assert.equal(resumed, rendered);
-    assert.match(resumed, /评审人投票：通过|Reviewer vote: approve/);
-    assert.match(resumed, /Reader/);
-    assert.doesNotMatch(resumed, /产物已被接受|Run 已推进|Artifact was accepted|advanced to the next step|同轮重试|Retry this round/);
-    assert.deepEqual(await home.get({}, session), target);
-    assert.equal((await f.call("continue", "schema", "show")).stepId, draft.stepId);
-    assert.deepEqual(await f.service.inspect(R), before);
-    assert.equal((await repository.list(R)).length, 1);
-  } finally {
-    if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome;
-  }
-});
-
-test("waiting for a delegated change request or abstention reports only the Review opinion", { timeout: 30000 }, async t => {
-  const f = await fixture(t), repository = new ExplorationReviews(f.service);
-  const R = (await f.service.start("Delegated opinions", "en")).id;
-  for (const vote of ["request_changes", "abstain"] as const) {
-    const { artifact, step } = await f.service.report(R, { name: vote, content: textContent("Candidate") });
-    await f.service.configureExplorationStep(R, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
-    const pending = await repository.start(delegatedReviewConfig(f.config), R, artifact.id);
-    const reviewId = explorationReviewHandle(R, pending.id);
-    const target = { runsRoot: f.config.runsRoot, reviewId, roundId: pending.roundId!, actorId: "reader", service: f.service };
-    const claimed = await reviews.claimArtifactReviewAgentAssignment(target);
-    assert.ok(claimed);
-    const attempt = { ...target, attemptId: claimed.attempt.id };
-    await reviews.markArtifactReviewAgentCliReady(attempt);
-    let context = claimed;
-    for (let node = currentReviewNode(context.assignment); node; node = currentReviewNode(context.assignment)) {
-      context = await reviews.mutateArtifactReviewNodes({ ...attempt,
-        mutation: { operation: "report", expectedNodeId: node.nodeId, artifact: { applicable: true } } });
-    }
-    await reviews.submitArtifactReviewAgentAssignment({ ...attempt, vote, summary: "Recorded opinion" });
-    const before = await f.service.inspect(R);
-    const output = (await f.invoke("run", "review", "wait", "--review", reviewId)).stdout;
-    assert.ok(output.includes(`Reviewer vote: ${vote}`));
-    assert.match(output, /Status: submitted/);
-    assert.match(output, /Recorded opinion/);
-    assert.doesNotMatch(output, /revise the Artifact|Run advanced|Artifact was accepted|Retry this round/);
-    assert.deepEqual(await f.service.inspect(R), before);
-  }
-});
-
-async function writeSchema(service: ContextControl, draft: Awaited<ReturnType<ContextControl["enterExplorationSchema"]>>) {
-  const title = await service.writeExplorationSchema(draft.runId, draft.stepId, "report", draft.position, "# Report");
-  const notes = await service.writeExplorationSchema(draft.runId, draft.stepId, "skip", title.position);
-  const written = await service.writeExplorationSchema(draft.runId, draft.stepId, "report", notes.position, "42");
-  assert.equal(written.phase, "awaiting_finalization");
-}
-
 for (const schema of [false, true]) {
   test(`${schema ? "Schema" : "ordinary"} revision recovers its original Step and distinct Review inputs`, { timeout: 30000 }, async t => {
     const f = await fixture(t), { service } = f, R = (await service.start("revision recovery")).id;
@@ -218,7 +53,7 @@ for (const schema of [false, true]) {
     if (schema) {
       const contract = await freezeExplorationSchema(f.config, "Report", "report", "text/markdown");
       const draft = await service.enterExplorationSchema(R, { name: "Report", contentType: "text/markdown", contract });
-      await writeSchema(service, draft);
+      await writeFixtureSchema(service, draft);
       A1 = { ...await service.submitExplorationSchema(R, draft.stepId, { dependsOn: [`external:${first.id}`] }), candidates: [] };
     } else {
       A1 = await service.report(R, { name: "Report", content: textContent("First body"), dependsOn: [`external:${first.id}`] });
@@ -247,7 +82,7 @@ for (const schema of [false, true]) {
       const draft = await service.enterExplorationSchema(R, { stepId: ids.stepId });
       assert.equal(draft.artifactId, ids.artifactId);
       assert.deepEqual(draft.draft.schemaContract, A1.artifact.schemaContract);
-      await writeSchema(service, draft);
+      await writeFixtureSchema(service, draft);
       const result = await service.submitExplorationSchema(R, ids.stepId, { dependsOn: [`external:${second.id}`] });
       assert.equal(result.artifact.id, ids.artifactId);
     } else {
@@ -264,55 +99,6 @@ for (const schema of [false, true]) {
     assert.deepEqual(newReview.exploration!.materials.map(ref => ref.id), [ids.artifactId, second.id]);
   });
 }
-
-test("interrupted Schema submission resumes within its original Artifact and releases the completed Continue target", { timeout: 30000 }, async t => {
-  const f = await fixture(t), R = (await f.call("run", "start", "--name", "Resume submission")).id;
-  const draft = await f.call("continue", "enter-schema", "report", "--name", "Report", "--content-type", "text/markdown");
-  await writeSchema(f.service, draft);
-  const store = f.service.stores.step, update = store.update;
-  store.update = async () => { throw new Error("Step update interrupted"); };
-  try {
-    await assert.rejects(f.service.submitExplorationSchema(R, draft.stepId, {}), { code: "SCHEMA_RECOVERY_REQUIRED" });
-  } finally { store.update = update; }
-  const saved = await f.service.inspect(R);
-  assert.equal(saved.artifacts.find(a => a.id === draft.artifactId)?.status, "submitted");
-  assert.equal(saved.steps.find(step => step.id === draft.stepId)?.status, "running");
-  const result = await f.call("run", "enter-schema", "--run", R, "--step", draft.stepId);
-  assert.equal(result.phase, "submitted");
-  assert.equal(result.artifactId, draft.artifactId);
-  const next = await f.call("continue", "report", "--name", "Follow-up", "--artifact", "Next artifact");
-  assert.notEqual(next.artifactId, draft.artifactId);
-  assert.ok((await f.service.inspect(R)).completeIds.includes(draft.artifactId));
-});
-
-test("a late Schema submission cannot release a newer Home target", { timeout: 30000 }, async t => {
-  const f = await fixture(t), R = (await f.call("run", "start", "--name", "Home race")).id;
-  const draft = await f.call("continue", "enter-schema", "report", "--name", "First", "--content-type", "text/markdown");
-  const another = await f.service.enterExplorationSchema(R, { name: "Second", contentType: "text/markdown", contract: draft.draft.schemaContract });
-  await writeSchema(f.service, draft);
-  const original = ContextControl.prototype.submitExplorationSchema;
-  let saved!: () => void, resume!: () => void;
-  const persisted = new Promise<void>(resolve => { saved = resolve; });
-  const gate = new Promise<void>(resolve => { resume = resolve; });
-  t.signal.addEventListener("abort", resume, { once: true });
-  ContextControl.prototype.submitExplorationSchema = async function (...args) {
-    const result = await original.apply(this, args);
-    saved();
-    await gate;
-    return result;
-  };
-  const late = f.call("continue", "report");
-  f.beforeCleanup(async () => { resume(); ContextControl.prototype.submitExplorationSchema = original; await late.catch(() => undefined); });
-  const home = (await openCommandStates(false, f.home))!, session = "codex-free-schema-review";
-  try {
-    await Promise.race([persisted, late.then(() => assert.fail("Submission was not paused after persistence"))]);
-    const row = (await home.get({}, session))!;
-    await home.update({}, session, { ...(row.value as object), parameters: { project: "test-project", step: another.stepId } }, { expectedRevision: row.revision });
-  } finally { resume(); ContextControl.prototype.submitExplorationSchema = original; }
-  assert.equal((await late).artifactId, draft.artifactId);
-  assert.equal((await f.call("continue", "schema", "show")).stepId, another.stepId);
-  assert.ok((await f.service.inspect(R)).completeIds.includes(draft.artifactId));
-});
 
 test("start overlapping submission returns the observed round and allows a later independent round", { timeout: 30000 }, async t => {
   const f = await fixture(t), R = (await f.service.start("Review submit race")).id;
