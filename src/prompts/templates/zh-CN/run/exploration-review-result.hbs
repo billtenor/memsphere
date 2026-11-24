@@ -1,0 +1,28 @@
+自由探索评审
+- review_id：{{reviewId}}
+- review_round_id：{{roundId}}
+- 状态：{{status}}
+{{#if actorName}}
+- 评审人：{{actorName}}
+{{/if}}
+{{#if progress}}
+- 节点进度：{{progress.processed}}/{{progress.total}}
+{{/if}}
+{{#if opinion}}
+- 评审人投票：{{opinion.vote}}
+{{#if opinion.summary}}
+- 结论：{{opinion.summary}}
+{{/if}}
+{{#each opinion.comments}}
+- 意见 [{{severity}}]：{{body}}
+{{/each}}
+{{/if}}
+{{#if failed}}
+{{#if failed.attemptId}}
+- 执行尝试：{{failed.attemptId}}
+{{/if}}
+{{#if failed.failure}}
+- 失败阶段：{{failed.failure.stage}} [{{failed.failure.code}}] {{failed.failure.message}}
+{{/if}}
+- 同轮重试：{{failed.command}}
+{{/if}}

@@ -1,24 +1,33 @@
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { Command, Option } from "commander";
 import { readFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { boundReviewNodeContext, boundReviewNodeView, mutateBoundReviewNode, submitBoundReviewNodes } from "../acp/review-session.js";
-import { nodeCommentInputSchema, nodeCommentUpdateSchema, nodeReportSchema, nodeUpdateSchema } from "../review-nodes.js";
+import { currentReviewNode, nodeCommentInputSchema, nodeCommentUpdateSchema, nodeReportSchema, nodeSubmitSchema, nodeUpdateSchema, type NodeMutation } from "../review-nodes.js";
 import { renderReviewNodeOutput } from "../prompts/review-nodes.js";
 import { contextOnlyCommand, type Options } from "./context-control.js";
+import { readConfig } from "../config.js";
+import { openContextControl } from "../project/context-control.js";
+import { ExplorationReviews, explorationReviewIdentity, mutateModelReviewNode } from "../context_control/exploration-review.js";
+import { explorationReviewView } from "../context_control/review-repository.js";
+import { failure } from "../context_control/errors.js";
+import { currentCommandState, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 
-export type ReviewNodeOptions = { assignment?: string; node?: string; comment?: string; all?: boolean; artifact?: string; artifactFile?: string; output?: "text" | "json" };
+export type ReviewNodeOptions = { run?: string; review?: string; assignment?: string; node?: string; comment?: string; all?: boolean; artifact?: string; artifactFile?: string; output?: "text" | "json"; sessionRow?: CommandStateRow };
 export async function reviewNodeCommand(operation: string, options: ReviewNodeOptions) {
   for (const key of ["vote", "summary", "summaryFile", "body", "bodyFile", "bodyStdin", "severity", "target", "sourceHash", "submissionId", "context"]) {
     if ((options as Record<string, unknown>)[key] !== undefined) throw new Error(`review_node_content_must_use_artifact: ${key}`);
   }
   const binding = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
-  if (!binding || options.assignment && options.assignment !== binding) throw new Error("review_assignment_not_bound");
+  if (binding && (options.review || options.run || options.assignment && options.assignment !== binding)) throw new Error("review_assignment_not_bound");
+  if (!binding && (!options.run || !options.review || options.assignment)) throw failure("INVALID_ARGUMENT", "Specify an exploration Run and Review");
   const reading = ["show", "list"].includes(operation);
   if (options.node && options.all) throw new Error("review_show_node_all_exclusive");
   if (reading || operation === "comment-delete") {
     if (options.artifact !== undefined || options.artifactFile !== undefined) throw new Error("review_no_artifact_expected");
   } else if ((options.artifact !== undefined) === (options.artifactFile !== undefined)) throw new Error("review_artifact_source_required_exclusive");
   const input = reading || operation === "comment-delete" ? undefined : JSON.parse(options.artifact ?? await readFile(options.artifactFile!, "utf8"));
+  if (!binding) { await explorationReviewNodes(operation, options, input); return; }
   let result: unknown;
   if (reading) result = await boundReviewNodeView({ nodeId: options.node, all: options.all, list: operation === "list" });
   else if (operation === "submit") result = await submitBoundReviewNodes(input);
@@ -34,6 +43,46 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
   if (options.output === "json") console.log(JSON.stringify(result));
   else { const context = await boundReviewNodeContext(); console.log(renderReviewNodeOutput(operation, result, context.run.language ?? "zh-CN")); }
 }
+
+async function explorationReviewNodes(operation: string, options: ReviewNodeOptions, input: unknown) {
+  const session = options.sessionRow ?? await currentCommandState();
+  const target = explorationReviewIdentity(options.review!);
+  if (!target || target.runId !== options.run) throw failure("INVALID_ARGUMENT", "Review does not belong to this Run");
+  const config = await readConfig(), service = await openContextControl(config.scopeRoot);
+  if (!service) throw failure("NOT_FOUND", "Context Control Stores not found");
+  const repository = new ExplorationReviews(service);
+  const { run, round, row, actor } = await repository.locate(target.runId, target.recordId);
+  if (actor !== "runner") throw failure("PERMISSION_DENIED", "Only the assigned Project reviewer can write to this Review");
+  if (operation === "submit") {
+    const submission = nodeSubmitSchema.parse(input);
+    await repository.submit(run.id, row.value.id, round.id, actor, submission.vote, submission.summary);
+  } else {
+    let mutation: NodeMutation;
+    if (operation === "report") {
+      const current = currentReviewNode(row.value);
+      if (!current) throw failure("REVIEW_CONFLICT", "There is no current Review node");
+      mutation = { operation, expectedNodeId: current.nodeId, artifact: nodeReportSchema.parse(input) };
+    } else if (operation === "update" && options.node) mutation = { operation, nodeId: options.node, artifact: nodeUpdateSchema.parse(input) };
+    else if (operation === "comment-add") mutation = { operation, nodeId: options.node, artifact: nodeCommentInputSchema.parse(input) };
+    else if (operation === "comment-update" && options.comment) mutation = { operation, commentId: options.comment, artifact: nodeCommentUpdateSchema.parse(input) };
+    else if (operation === "comment-delete" && options.comment) mutation = { operation, commentId: options.comment };
+    else throw failure("INVALID_ARGUMENT", "Provide the required Review node or Comment target");
+    await repository.materials(run.id, row.value);
+    const allowed = new Set(row.value.exploration!.materials.map(ref => `${ref.kind}:${ref.id}`));
+    await repository.mutate(run.id, row.value.id, round.id, actor, async value => {
+      mutateModelReviewNode(value, mutation, allowed, service.runtime.now, () => `comment-${randomUUID()}`);
+    });
+  }
+  let warning: string | undefined;
+  if (operation === "submit") {
+    try { await releaseCommandTarget(session, config.project!.name, run.id, { review: options.review }); }
+    catch { warning = `Review submitted. Return to the Run with memsphere run enter --run ${run.id}`; }
+  }
+  const current = (await repository.locate(run.id, row.value.id)).row.value;
+  const result = { ...await explorationReviewView(repository, run.id, current), ...(warning ? { warnings: [warning] } : {}) };
+  if (options.output === "json") console.log(JSON.stringify(result));
+  else console.log(renderReviewNodeOutput(operation, result, run.language));
+}
 // Commander can consume shared flags on a parent command. Prefer explicitly
 // supplied options over child defaults, so native and Continue agree.
 function explicitOptions(command: Command, options: ReviewNodeOptions): ReviewNodeOptions {
@@ -47,16 +96,18 @@ function explicitOptions(command: Command, options: ReviewNodeOptions): ReviewNo
 }
 export function registerReviewNodeCommands(run: Command) {
   const review = run.commands.find(c => c.name() === "review")!;
-  const write = (c: Command) => c.option("--assignment <id>").option("--artifact <value>", "JSON artifact string").option("--artifact-file <path>", "JSON artifact file").addOption(new Option("--output <format>").choices(["text", "json"]).default("text"));
+  const target = (c: Command) => c.option("--run <id>").option("--review <id>");
+  const write = (c: Command) => target(c).option("--assignment <id>").option("--artifact <value>", "JSON artifact string").option("--artifact-file <path>", "JSON artifact file").addOption(new Option("--output <format>").choices(["text", "json"]).default("text"));
   write(review.command("report").description("Report the current review node and advance.")).action(o => reviewNodeCommand("report", o));
   write(review.command("update").description("Replace a node without advancing.")).requiredOption("--node <id>").action(o => reviewNodeCommand("update", o));
   const comment = review.commands.find(c => c.name() === "comment")!;
   for (const option of comment.options) if (["assignment", "severity"].includes(option.attributeName())) option.mandatory = false;
   write(comment.command("add").description("Add a Comment to the current or selected node.")).option("--node <id>").action((o, c) => reviewNodeCommand("comment-add", explicitOptions(c, o)));
   write(comment.command("update").description("Edit Comment body/severity without advancing.")).requiredOption("--comment <id>").action((o, c) => reviewNodeCommand("comment-update", explicitOptions(c, o)));
-  comment.command("delete").description("Delete a Comment without changing progress or judgment.").option("--assignment <id>").requiredOption("--comment <id>").addOption(new Option("--output <format>").choices(["text", "json"]).default("text")).action((o, c) => reviewNodeCommand("comment-delete", explicitOptions(c, o)));
+  target(comment.command("delete").description("Delete a Comment without changing progress or judgment.")).option("--assignment <id>").requiredOption("--comment <id>").addOption(new Option("--output <format>").choices(["text", "json"]).default("text")).action((o, c) => reviewNodeCommand("comment-delete", explicitOptions(c, o)));
   const submit = review.commands.find(c => c.name() === "submit")!;
-  submit.options.find(o => o.attributeName() === "vote")!.mandatory = false;
+  for (const option of submit.options) if (["vote", "assignment"].includes(option.attributeName())) option.mandatory = false;
+  target(submit);
   submit.option("--artifact <value>").option("--artifact-file <path>");
   // Existing human/free-exploration routes keep their original handlers and targets.
   for (const op of ["list", "show"]) {

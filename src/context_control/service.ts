@@ -4,10 +4,14 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Context } from "../data/api/context.js";
 import type { ValueStore, StoredValue } from "../data/api/value-store.js";
 import type { Entity } from "./model-assets.js";
-import type { Artifact, Body, External, NewReviewComment, Ref, ReportInput, Review, Run, Snapshot, Step } from "./types.js";
+import type { Artifact, Body, External, NewReviewComment, Ref, ReportInput, Review, Run, Snapshot, Step, StepReviewConfiguration } from "./types.js";
 import { failure } from "./errors.js";
 import { effectiveStep } from "./graph-rewind.js";
 import { GraphRuntime, isGraphRun } from "./graph-runtime.js";
+import { MEMSPHERE_SCHEMA_MODEL } from "../memory/schema-model.js";
+import { assembleSchemaDraft, checkWritingPosition, repeatSchemaItem, reportSchemaItem, skipSchemaItem, startSchemaWriting, writingPosition } from "./schema-writing.js";
+import { decodeGraphContent, validateGraphBody, validateGraphSpec } from "./graph-content.js";
+import type { FrozenSchemaContract } from "./schema-contract.js";
 export { failure } from "./errors.js";
 
 export type Stores = Record<Entity, ValueStore>;
@@ -111,12 +115,22 @@ export class ContextControl {
     const all=(await Promise.all(stepIds.map(id=>this.record<Step>("step",runId,id)))).flatMap(row=>row?[row.value]:[]);
     const selected=surface==="action"?all.filter(s=>s.source?.actionId===actionId):all;
     let artifacts:Artifact[]=[];
+    let externals: External[] = [];
     const selectedRevisions = new Map<string, string | undefined>();
     if(surface!=="overview"){
       const ids=new Set<string>();
-      for(const step of selected){if(step.writing)ids.add(step.writing.draftId);if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())ids.add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
+      const externalIds = new Set<string>();
+      for(const step of selected){if(step.writing)ids.add(step.writing.draftId);if(step.artifact?.mode==="produce")ids.add(step.artifact.id);if(surface==="action")for(const round of step.reviewRounds??[])ids.add(round.artifactId);for(const ref of Object.values(step.inputs??{}).flat())(ref.kind === "external" ? externalIds : ids).add(ref.id);if(step.artifact?.mode==="collect")for(const id of Object.values(step.artifact.items).flat())ids.add(id);}
       const rows = (await Promise.all([...ids].map(id=>this.record<Artifact>("artifact",runId,id)))).filter((row): row is NonNullable<typeof row> => Boolean(row));
       artifacts = rows.map(row => { selectedRevisions.set(row.value.id, row.revision); return row.value; });
+      for (const artifact of artifacts) {
+        for (const dependency of artifact.dependencies) if (dependency.kind === "external") externalIds.add(dependency.id);
+      }
+      externals = (await Promise.all([...externalIds].map(id => this.record<External>("external", runId, id)))).flatMap(row => {
+        if (!row) return [];
+        const { id, runId, source, capturedAt } = row.value;
+        return [{ id, runId, source, capturedAt }];
+      });
     }
     // A draft changes independently from its Step. Expose only its revision in
     // the overview so visible dialogs can invalidate their lazy content cache.
@@ -125,7 +139,7 @@ export class ContextControl {
     artifacts=artifacts.map(({content,contentRef,writing,...a})=>{if(writing)Object.assign(a,{writingProgress:{index:writing.index,items:writing.items.map(item=>({id:item.id,path:item.schemaContext?.path})),skipped:writing.skipped,submitting:Boolean(writing.submission),validation:all.find(s=>s.id===a.stepId)?.validation?.artifactId===a.id&&all.find(s=>s.id===a.stepId)?.validation?.draftRevision===draftRevisions.get(a.stepId)?all.find(s=>s.id===a.stepId)?.validation:undefined}});if(a.revisedFrom&&!artifacts.some(other=>other.id===a.revisedFrom))delete a.revisedFrom;return a;});
     const steps=all.map(s=>({id:s.id,runId:s.runId,createdAt:s.createdAt,status:s.status,source:s.source,writing:s.writing ? {...s.writing,revision:draftRevisions.get(s.id),validation:s.validation} : undefined,startedAt:s.startedAt,endedAt:s.endedAt,artifact:s.artifact,
       ...(surface!=="overview"&&selected.some(x=>x.id===s.id)?{artifact:s.artifact,inputs:s.inputs,reviewRounds:s.reviewRounds}: {})}));
-    return {run,steps,artifacts,externals:[],reviews:[],completeIds:all.filter(s=>s.status==="done"&&s.artifact?.mode==="produce").map(s=>(s.artifact as {id:string}).id),outputArtifactIds:[]};
+    return {run,steps,artifacts,externals,reviews:[],completeIds:all.filter(s=>s.status==="done"&&s.artifact?.mode==="produce").map(s=>(s.artifact as {id:string}).id),outputArtifactIds:[]};
   }
   async snapshot(runId: string): Promise<Snapshot> {
     const run = await this.require<Run>("run", runId, runId);
@@ -133,6 +147,7 @@ export class ContextControl {
     if (run.value.status === "running") await this.recover(runId);
     return this.snapshotValue(runId);
   }
+  async inspect(runId: string): Promise<Snapshot> { return this.snapshotValue(runId); }
   private async snapshotValue(runId: string): Promise<Snapshot> {
     const run = (await this.require<Run>("run", runId, runId)).value;
     if (isGraphRun(run)) return this.withGraph(graph => graph.snapshot(runId));
@@ -144,7 +159,9 @@ export class ContextControl {
     const completeIds = artifacts.filter(a => a.status === "submitted" && steps.some(s => s.id === a.stepId && s.status === "done" && s.artifact?.mode === "produce" && s.artifact.id === a.id)).map(a => a.id);
     const selected = deriveOutputs(run, artifacts, completeIds);
     if (selected.some(id => !completeIds.includes(id))) throw failure("INCOMPLETE_ARTIFACT", "Output override references an incomplete or unknown Artifact");
-    return { run, steps, artifacts, externals, reviews, completeIds, outputArtifactIds: selected };
+    const draftRows = await Promise.all(artifacts.filter(a => a.writing).map(a => this.record<Artifact>("artifact", runId, a.id)));
+    const artifactRevisions = Object.fromEntries(draftRows.flatMap(row => row?.revision ? [[row.value.id, row.revision]] : []));
+    return { run, steps, artifacts, externals, reviews, artifactRevisions, completeIds, outputArtifactIds: selected };
   }
   private async complete(runId: string, artifactId: string): Promise<Artifact> {
     const a = (await this.require<Artifact>("artifact", runId, artifactId)).value;
@@ -191,8 +208,11 @@ export class ContextControl {
       }
       if (a.status === "submitted") { await this.body(a); await this.validateRefs(runId, a.dependencies, a.id); }
       if (!step) {
-        const value: Step = { id: a.stepId, runId, createdAt: this.runtime.now(), status: "running", artifact: { mode: "produce", id: a.id } };
-        await this.create("step", runId, value); step = await this.require<Step>("step", runId, a.stepId);
+        const value: Step = { id: a.stepId, runId, createdAt: this.runtime.now(), status: "running", artifact: { mode: "produce", id: a.id },
+          ...(a.initialStepReviewConfiguration ? { reviewConfiguration: a.initialStepReviewConfiguration } : {}),
+          ...(a.schemaContract ? { writing: { draftId: a.id, ...(a.revisedFrom ? { baseSubmittedArtifactId: a.revisedFrom } : {}) } } : {}) };
+        await this.create("step", runId, value);
+        step = await this.require<Step>("step", runId, a.stepId);
       }
       if (a.status === "submitted" && step.value.status !== "done") {
         await this.update("step", runId, step, { ...step.value, status: "done", endedAt: this.runtime.now() });
@@ -237,6 +257,156 @@ export class ContextControl {
     const row = await this.require<Step>("step", runId, stepId);
     await this.update("step", runId, row, { ...row.value, reads });
   }
+  async explorationStep(runId: string, stepId: string) {
+    const run = (await this.require<Run>("run", runId, runId)).value;
+    if (isGraphRun(run)) throw failure("INVALID_ARGUMENT", "Expected a free exploration Step");
+    const step = (await this.require<Step>("step", runId, stepId)).value;
+    if (step.runId !== runId || step.artifact?.mode !== "produce") throw failure("INVALID_STATE", "Invalid exploration Step");
+    return step;
+  }
+  async configureExplorationStep(runId: string, stepId: string, fields: { asserts?: string[]; suggests?: string[]; reviewer?: string | null }) {
+    await this.running(runId);
+    await this.explorationStep(runId, stepId);
+    const row = await this.require<Step>("step", runId, stepId);
+    const next = { ...row.value.reviewConfiguration };
+    const edited = new Set(next.edited);
+    if (!Object.keys(fields).length) throw failure("INVALID_ARGUMENT", "Specify at least one configuration field");
+    for (const key of ["asserts", "suggests"] as const) if (fields[key] !== undefined) {
+      next[key] = [...fields[key]];
+      edited.add(key);
+    }
+    if (fields.reviewer !== undefined) {
+      if (fields.reviewer === null) delete next.reviewer;
+      else next.reviewer = fields.reviewer;
+      edited.add("reviewer");
+    }
+    next.edited = [...edited];
+    const value = { ...row.value, reviewConfiguration: next };
+    await this.update("step", runId, row, value);
+    return value;
+  }
+  private async inheritedReviewConfiguration(runId: string, a: Artifact): Promise<StepReviewConfiguration> {
+    const source = (await this.require<Step>("step", runId, a.stepId)).value.reviewConfiguration;
+    return {
+      ...(source?.asserts ? { asserts: [...source.asserts] } : {}),
+      ...(source?.suggests ? { suggests: [...source.suggests] } : {}),
+      ...(source?.reviewer ? { reviewer: source.reviewer } : {}),
+      inheritedFrom: { stepId: a.stepId, artifactId: a.id }
+    };
+  }
+  async enterExplorationSchema(runId: string, input: { stepId?: string; revisedFrom?: string; name?: string; contentType?: string; contract?: FrozenSchemaContract }) {
+    const run = (await this.running(runId)).value;
+    if (isGraphRun(run)) throw failure("INVALID_ARGUMENT", "Expected a free exploration Run");
+    if (input.stepId) {
+      const saved = (await this.list<Artifact>("artifact", runId)).find(a => a.stepId === input.stepId && a.schemaContract);
+      if (!saved) throw failure("NOT_FOUND", `No Schema draft for Step ${input.stepId}`);
+      await this.redoArtifact(runId, saved);
+      return this.explorationSchemaShow(runId, input.stepId);
+    }
+    const previous = input.revisedFrom ? await this.complete(runId, input.revisedFrom) : undefined;
+    const contract = previous ? previous.schemaContract : input.contract;
+    if (!contract) throw failure("INVALID_ARGUMENT", "A frozen Schema is required");
+    const name = nonblank(previous?.name ?? input.name, "name");
+    const contentType = nonblank(previous?.content?.payload.contentType ?? input.contentType, "content type");
+    const draft: Artifact = { id: id("artifact"), stepId: id("step"), name, status: "draft", tags: tags(), dependencies: previous?.dependencies ?? [], schemaContract: contract,
+      content: { model: { definedBy: MEMSPHERE_SCHEMA_MODEL, definition: contract.definition }, payload: { contentType, content: "" } },
+      writing: startSchemaWriting(contract.definition, contentType, name),
+      ...(previous ? { revisedFrom: previous.id, initialStepReviewConfiguration: await this.inheritedReviewConfiguration(runId, previous) } : {}) };
+    await validateGraphSpec({ name, model: draft.content!.model, payload: { contentType } });
+    try {
+      await this.create("artifact", runId, draft);
+      await this.redoArtifact(runId, draft);
+    } catch (error) {
+      const saved = await this.record<Artifact>("artifact", runId, draft.id).catch(() => undefined);
+      if (saved) throw this.schemaRecovery(error, runId, draft);
+      throw error;
+    }
+    return this.explorationSchemaShow(runId, draft.stepId);
+  }
+  private async schemaArtifact(runId: string, stepId: string) {
+    const step = await this.explorationStep(runId, stepId);
+    const row = await this.require<Artifact>("artifact", runId, step.writing?.draftId ?? "");
+    if (!row.value.schemaContract || row.value.stepId !== stepId || step.artifact?.mode !== "produce" || step.artifact.id !== row.value.id) throw failure("INVALID_STATE", "Invalid Schema Step target");
+    return { step, row };
+  }
+  async explorationSchemaShow(runId: string, stepId: string) {
+    const { step, row } = await this.schemaArtifact(runId, stepId);
+    const draft = row.value, writing = draft.writing;
+    return { runId, stepId, artifactId: draft.id, draft, requirements: draft.schemaContract?.sources,
+      phase: draft.status === "submitted" ? step.status === "done" ? "submitted" : "submitting" : writing?.index === writing?.items.length ? "awaiting_finalization" : "writing",
+      current: writing?.items[writing.index], position: writing && writing.index < writing.items.length ? writingPosition(draft, row.revision!) : undefined,
+      validation: step.validation?.artifactId === draft.id && step.validation.draftRevision === row.revision ? step.validation : undefined,
+      progress: writing ? { completed: writing.index, total: writing.items.length, remaining: writing.items.length - writing.index, skipped: writing.skipped } : undefined };
+  }
+  async writeExplorationSchema(runId: string, stepId: string, operation: "report" | "skip" | "repeat", position: string | undefined, value?: string | number) {
+    await this.running(runId);
+    const { row } = await this.schemaArtifact(runId, stepId);
+    const draft = structuredClone(row.value);
+    checkWritingPosition(draft, row.revision!, position);
+    const writing = draft.writing!, payload = draft.content!.payload;
+    if (operation === "report") {
+      const item = writing.items[writing.index];
+      try {
+        if (item.format?.name === "json" || item.format?.name === "yaml") decodeGraphContent(Buffer.from(String(value)), `application/${item.format.name}`);
+        await reportSchemaItem(writing, String(value));
+      } catch (error) {
+        await this.noteSchemaValidation(runId, draft, row.revision!, String(value), error, item.schemaContext?.path);
+        throw error;
+      }
+    }
+    else if (operation === "skip") skipSchemaItem(writing);
+    else repeatSchemaItem(writing, Number(value));
+    payload.content = assembleSchemaDraft(writing, draft.name, payload.contentType);
+    await this.update("artifact", runId, row, draft);
+    return this.explorationSchemaShow(runId, stepId);
+  }
+  async submitExplorationSchema(runId: string, stepId: string, input: { text?: string; dependsOn?: string[] }) {
+    await this.running(runId);
+    const { step, row } = await this.schemaArtifact(runId, stepId);
+    const draft = row.value;
+    if (draft.status === "submitted") {
+      if (input.text !== undefined && input.text !== draft.content?.payload.content) throw failure("REVISION_CONFLICT", "Schema Artifact already submitted with different content");
+      if (input.dependsOn !== undefined) {
+        const refs = await this.reportDependencies(runId, input, draft.dependencies);
+        if (JSON.stringify(refs) !== JSON.stringify(draft.dependencies)) throw failure("REVISION_CONFLICT", "Schema Artifact already submitted with different dependencies");
+      }
+      await this.redoArtifact(runId, draft);
+      return { artifact: draft, step: await this.explorationStep(runId, stepId) };
+    }
+    if (step.status !== "running" || !draft.writing || draft.writing.index !== draft.writing.items.length) throw failure("SCHEMA_INCOMPLETE", "Complete all Schema fields before submitting");
+    const content = structuredClone(draft.content!);
+    if (input.text !== undefined) content.payload.content = input.text;
+    try { await validateGraphBody({ content }, { name: draft.name, model: content.model, payload: { contentType: content.payload.contentType } }, this.contentReader); }
+    catch (error) { await this.noteSchemaValidation(runId, draft, row.revision!, content.payload.content, error); throw error; }
+    const dependencies = await this.reportDependencies(runId, input, draft.dependencies);
+    await this.validateRefs(runId, dependencies, draft.id);
+    const { writing: _writing, ...saved } = draft;
+    const artifact: Artifact = { ...saved, content, status: "submitted", dependencies };
+    try {
+      await this.update("artifact", runId, row, artifact);
+      await this.redoArtifact(runId, artifact);
+    } catch (error) {
+      const saved = await this.record<Artifact>("artifact", runId, artifact.id).catch(() => undefined);
+      if (saved?.value.status === "submitted") throw this.schemaRecovery(error, runId, artifact);
+      throw error;
+    }
+    return { artifact, step: await this.explorationStep(runId, stepId) };
+  }
+  private schemaRecovery(error: unknown, runId: string, artifact: Artifact) {
+    const recoveryCommand = `memsphere run enter-schema --run ${runId} --step ${artifact.stepId}`;
+    const cause = error instanceof Error ? error.message : String(error);
+    return Object.assign(failure("SCHEMA_RECOVERY_REQUIRED", `${cause}. Saved Artifact ${artifact.id}. Recover with: ${recoveryCommand}`),
+      { details: { runId, stepId: artifact.stepId, artifactId: artifact.id, recoveryCommand } });
+  }
+  private async noteSchemaValidation(runId: string, draft: Artifact, draftRevision: string, text: string, error: unknown, path?: string) {
+    const row = await this.require<Step>("step", runId, draft.stepId);
+    try {
+      await this.update("step", runId, row, { ...row.value, validation: { artifactId: draft.id, draftRevision, sha256: createHash("sha256").update(text).digest("hex"),
+        checkedAt: this.runtime.now(), status: "failed", issues: [{ message: error instanceof Error ? error.message : String(error), path }] } });
+    } catch (saveError) {
+      if ((saveError as { code?: string }).code !== "REVISION_CONFLICT") throw saveError;
+    }
+  }
   async createArtifact(runId: string, input: { name?: string; revisedFrom?: string; tags?: string[] }) {
     if (input.name !== undefined) nonblank(input.name, "name");
     if (input.revisedFrom !== undefined) nonblank(input.revisedFrom, "revisedFrom");
@@ -248,6 +418,23 @@ export class ContextControl {
       return artifact;
     });
   }
+  private async reportDependencies(runId: string, input: Pick<ReportInput, "dependencies" | "dependsOn">, inherited: Ref[] = []): Promise<Ref[]> {
+    if (input.dependsOn === undefined) return uniqueRefs(input.dependencies ?? inherited);
+    if (input.dependencies !== undefined) throw failure("INVALID_ARGUMENT", "Cannot combine dependencies and depends-on");
+    const dependencies: Ref[] = [];
+    for (const selector of input.dependsOn) {
+      const split = selector.indexOf(":"), kind = selector.slice(0, split), key = selector.slice(split + 1);
+      if (split < 1 || !key) throw failure("INVALID_ARGUMENT", `Invalid dependency: ${selector}`);
+      if (kind === "tag") {
+        const snap = await this.snapshotValue(runId);
+        const matches = snap.artifacts.filter(a => snap.completeIds.includes(a.id) && a.tags.includes(key));
+        if (!matches.length) throw failure("NO_TAG_MATCH", `No submitted Artifact tagged ${key}`);
+        dependencies.push(...matches.map(a => ({ kind: "artifact" as const, id: a.id })));
+      } else if (kind === "artifact" || kind === "external") dependencies.push({ kind, id: key });
+      else throw failure("INVALID_ARGUMENT", `Invalid dependency: ${selector}`);
+    }
+    return uniqueRefs(dependencies);
+  }
   async report(runId: string, input: ReportInput) {
     if (isGraphRun((await this.require<Run>("run", runId, runId)).value)) throw failure("INVALID_ARGUMENT", "Graph report requires an explicit Step");
     for (const field of ["name", "target", "revisedFrom"] as const) if (input[field] !== undefined) nonblank(input[field], field);
@@ -256,25 +443,14 @@ export class ContextControl {
     return this.writeRecord(runId, async () => {
       const target = input.target ? await this.require<Artifact>("artifact", runId, input.target) : undefined;
       if (target?.value.status === "submitted") throw failure("ALREADY_SUBMITTED", "Artifact is submitted; create a new revision");
+      if (target?.value.schemaContract) throw failure("INVALID_ARGUMENT", "Submit the Schema draft through its Step");
       if (target && (input.name !== undefined || input.revisedFrom !== undefined)) throw failure("INVALID_ARGUMENT", "target cannot redefine name/revisedFrom");
       if (input.dependencies && input.dependsOn) throw failure("INVALID_ARGUMENT", "Cannot combine dependencies and depends-on");
       const revisedFrom = target?.value.revisedFrom ?? input.revisedFrom;
       const previous = revisedFrom ? await this.complete(runId, revisedFrom) : undefined;
-      let dependencies = input.dependencies ?? previous?.dependencies ?? [];
-      if (input.dependsOn !== undefined) {
-        dependencies = [];
-        for (const selector of input.dependsOn) {
-          const split = selector.indexOf(":"); const kind = selector.slice(0, split), key = selector.slice(split + 1);
-          if (split < 1 || !key) throw failure("INVALID_ARGUMENT", `Invalid dependency: ${selector}`);
-          if (kind === "tag") {
-            const snap = await this.snapshotValue(runId); const matches = snap.artifacts.filter(a => snap.completeIds.includes(a.id) && a.tags.includes(key));
-            if (!matches.length) throw failure("NO_TAG_MATCH", `No submitted Artifact tagged ${key}`);
-            dependencies.push(...matches.map(a => ({ kind: "artifact" as const, id: a.id })));
-          } else if (kind === "artifact" || kind === "external") dependencies.push({ kind, id: key });
-          else throw failure("INVALID_ARGUMENT", `Invalid dependency: ${selector}`);
-        }
-      }
-      const artifact: Artifact = { id: target?.value.id ?? id("artifact"), stepId: target?.value.stepId ?? id("step"), name: target?.value.name ?? nonblank(input.name ?? previous?.name, "name"), status: "submitted", tags: tags([...(target?.value.tags ?? []), ...(input.tags ?? [])]), dependencies: uniqueRefs(dependencies), ...(revisedFrom ? { revisedFrom } : {}), ...(input.revisedSummary !== undefined ? { revisedSummary: input.revisedSummary } : {}), ...(input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) }) };
+      if (previous?.schemaContract) throw failure("INVALID_ARGUMENT", "Use enter-schema --revised-from to revise a Schema Artifact");
+      const dependencies = await this.reportDependencies(runId, input, previous?.dependencies);
+      const artifact: Artifact = { id: target?.value.id ?? id("artifact"), stepId: target?.value.stepId ?? id("step"), name: target?.value.name ?? nonblank(input.name ?? previous?.name, "name"), status: "submitted", tags: tags([...(target?.value.tags ?? []), ...(input.tags ?? [])]), dependencies, ...(revisedFrom ? { revisedFrom } : {}), ...(previous ? { initialStepReviewConfiguration: target?.value.initialStepReviewConfiguration ?? await this.inheritedReviewConfiguration(runId, previous) } : {}), ...(input.revisedSummary !== undefined ? { revisedSummary: input.revisedSummary } : {}), ...(input.content ? { content: structuredClone(input.content) } : { contentRef: structuredClone(input.contentRef!) }) };
       await this.validateRefs(runId, artifact.dependencies, artifact.id);
       try {
         if (target) await this.update("artifact", runId, target, artifact); else await this.create("artifact", runId, artifact);
@@ -294,6 +470,12 @@ export class ContextControl {
   async readViewArtifact(runId: string, artifactId: string) {
     const run = await this.require<Run>("run", runId, runId);
     if (isGraphRun(run.value)) return this.withGraph(g => g.readArtifact(runId, artifactId));
+    const artifact = (await this.require<Artifact>("artifact", runId, artifactId)).value;
+    if (artifact.status === "draft" && artifact.schemaContract) {
+      const { row } = await this.schemaArtifact(runId, artifact.stepId);
+      if (row.value.id !== artifact.id) throw failure("INVALID_STATE", "The Schema draft belongs to another Artifact");
+      return this.body(row.value);
+    }
     return this.body(await this.complete(runId, artifactId));
   }
   async readArtifact(runId: string, artifactId: string) {

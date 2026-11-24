@@ -1,4 +1,4 @@
-import type { ReviewNodes } from "./review-nodes.js";
+import type { ReviewNodes, reviewNodeProgress } from "./review-nodes.js";
 import { randomUUID } from "node:crypto";
 import {
   authorizeArtifactOperation,
@@ -194,6 +194,8 @@ export type ArtifactReviewRound = {
     }>;
   };
   assignments: ArtifactReviewAssignment[];
+  reviewProgress?: ReturnType<typeof reviewNodeProgress>;
+  runnerOpinion?: ArtifactReviewSubmittedOpinion;
   votes: ArtifactReviewVote[];
   commentDispositions?: ArtifactReviewCommentDisposition[];
   result?: ArtifactReviewRoundResult;

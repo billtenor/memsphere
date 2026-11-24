@@ -11,6 +11,7 @@ import { withModelMaintenance } from "../src/project/model-operation.js";
 
 /** Reconstruct the fixed pre-business-write model before applying older version deltas. */
 function removeGraphBusinessFields(entity: string, model: any) {
+  removeExplorationFields(entity, model);
   if (entity === "run") delete model.properties.businessTargets;
   if (entity === "artifact") delete model.properties.business;
   if (entity === "step") {
@@ -19,6 +20,12 @@ function removeGraphBusinessFields(entity: string, model: any) {
     delete model.definitions.SubmissionFrame.properties.businessReceipt;
     delete model.definitions.SubmissionFrame.properties.businessAttempt;
   }
+}
+
+function removeExplorationFields(entity: string, model: any) {
+  if (entity === "artifact") { delete model.properties.schemaContract; delete model.properties.initialStepReviewConfiguration; }
+  if (entity === "step") delete model.properties.reviewConfiguration;
+  if (entity === "review") delete model.properties.exploration;
 }
 
 test("adding archive metadata upgrades the known Run definition without rewriting Run records", async t => {
@@ -304,4 +311,29 @@ test("explicit graph Store model upgrade accepts the previous shipped definition
   const reopened = (await openContextControl(f.root))!;
   assert.deepEqual(await reopened.snapshot(run.id), before);
   assert.equal((await reopened.readArtifact(run.id, report.artifact.id)).bytes.toString(), "unchanged");
+});
+
+test("exploration model upgrade keeps previous Steps, Artifacts and light Reviews intact", async t => {
+  const { readContextControlModels, definitionHash } = await import("../src/context_control/model-assets.js");
+  const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
+  const run = await service.start("Existing exploration");
+  const { artifact } = await service.report(run.id, { name: "Existing", content: textContent("Keep this content") });
+  await service.review(run.id, artifact.id, "human", ["Existing feedback"]);
+  const before = await service.inspect(run.id);
+  const prior = {
+    artifact: "645f7af89e01f3a1b7b5ffc15754cc86d7dcb9e9118fa09c89db9f17d1e83e20",
+    step: "59cc0df1bb0b87a27c4b0e41a67e1f5b67eb228027705804136f222b7e3854b7",
+    review: "c23e2f33a07c4dcedd0abb878571af6917317c36ccb785698295f37988216a30"
+  };
+  for (const asset of readContextControlModels()) {
+    if (!(asset.entity in prior)) continue;
+    const model = structuredClone(asset.definition);
+    removeExplorationFields(asset.entity, model);
+    assert.equal(definitionHash(model), prior[asset.entity as keyof typeof prior]);
+    await publishFixtureDefinition(f.root, asset.id, JSON.stringify(model));
+  }
+  await assert.rejects(openContextControl(f.root), { code: "MODEL_INCOMPATIBLE" });
+  assert.deepEqual(await upgradeContextControlOutputs(f.root), { changed: true, records: 0 });
+  const reopened = (await openContextControl(f.root))!;
+  assert.deepEqual(await reopened.inspect(run.id), before);
 });

@@ -1,4 +1,4 @@
-import { createContextGraph } from "./context-control.js";
+import { createContextGraph, type InlineReview, type InlineReviewNote } from "./context-control.js";
 import { RunSummaryRequests } from "./summary-requests.js";
 import {
   defineViewPlugin,
@@ -53,6 +53,7 @@ const zh: Readonly<Record<string, string>> = Object.freeze({
   submitted: "已提交", failed: "执行失败", pending: "等待启动",
   materialTitle: "评审材料", reviewTime: "评审时间", myReview: "我的评审", delegatedByRunner: "Runner 受托提交", authorizationNote: "授权说明",
   participationProgress: "评审结果", reviewRecord: "评审记录", submittedOpinions: "已提交意见",
+  nodeProgress: "节点进度", waitingSubmission: "待提交",
   runner: "执行者", decision: "决策票", advisory: "建议票", agent: "Agent",
   pendingVote: "未投票", decisionReady: "决策票已就绪", reviewComplete: "评审已完成", waitingReviews: "仍在等待评审",
   blockingComments: "阻塞意见", unresolved: "未处置", environmentFailures: "环境失败",
@@ -87,6 +88,7 @@ const en: Readonly<Record<string, string>> = Object.freeze({
   submitted: "Submitted", failed: "Failed", pending: "Queued",
   materialTitle: "Review material", reviewTime: "Review time", myReview: "My review", delegatedByRunner: "Runner delegated", authorizationNote: "Authorization note",
   participationProgress: "Review results", reviewRecord: "Review record", submittedOpinions: "Submitted opinions",
+  nodeProgress: "Node progress", waitingSubmission: "Ready to submit",
   runner: "Runner", decision: "Decision", advisory: "Advisory", agent: "Agent",
   pendingVote: "Pending vote", decisionReady: "Decision votes are ready", reviewComplete: "Review completed", waitingReviews: "Waiting for reviews",
   blockingComments: "Blocking comments", unresolved: "Unresolved", environmentFailures: "Environment failures",
@@ -558,14 +560,22 @@ class RunApplication {
   readonly #reviewSession: ArtifactReviewSession;
   #inlineReview?: {key:string;session:ArtifactReviewSession;content:HTMLElement;panel:HTMLElement;timer:number};
   #disposeInlineReview(){if(this.#inlineReview){window.clearInterval(this.#inlineReview.timer);this.#inlineReview.session.dispose();this.#inlineReview=undefined;}}
-  async #mountInlineReview(runId:string,reviewId:string,roundId:string,container:HTMLElement,content:HTMLElement,panel:HTMLElement){
-    const key=JSON.stringify([runId,reviewId,roundId]);
+  async #mountInlineReview(runId: string, container: HTMLElement, content: HTMLElement, panel: HTMLElement, notes: InlineReviewNote[], review?: InlineReview) {
+    if (!review) {
+      this.#disposeInlineReview();
+      const results = reviewResultCard(this.#config);
+      appendReviewNotes(this.#ui, this.#config, results, notes);
+      panel.replaceChildren(results);
+      return;
+    }
+    const { id: reviewId, roundId, history } = review;
+    const key=JSON.stringify([runId,reviewId,roundId,history?.roundIds,notes]);
     if(this.#inlineReview?.key===key){content.append(this.#inlineReview.content);panel.append(this.#inlineReview.panel);this.#inlineReview.session.inline!.container=container;return;}
     this.#disposeInlineReview();
     const body=document.createElement("div"),right=document.createElement("div");right.textContent=tr(this.#config,"loading");content.append(body);panel.append(right);
     const controller=new AbortController();
     const session=new ArtifactReviewSession({config:this.#config,ui:this.#ui,controller,root:container,detail:()=>({id:runId}),route:()=>this.#route,request:async path=>{const response=await fetch(projectApiUrl(this.#config,path),{signal:controller.signal});if(!response.ok)throw new Error(await response.text());return response.json();}});
-    session.inline={container,content:body,panel:right};session.reviewRoundId=roundId;
+    session.inline={container,content:body,panel:right,history,notes};session.reviewRoundId=roundId;
     let busy=false, rendered="";
     const refresh=async()=>{if(busy||controller.signal.aborted||right.closest<HTMLElement>(".cc-pane-review")?.hidden)return;if(session.reviewContext&&(session.reviewRoundId!==session.reviewContext.review.currentRoundId||["passed","cancelled","awaiting_revision"].includes(session.reviewContext.review.status)))return;busy=true;try{await session.reloadReview(runId,reviewId);if(controller.signal.aborted)return;const next=JSON.stringify(session.reviewContext);if(rendered!==next&&!container.querySelector(".inline-comment-editor")&&!container.querySelector("textarea:focus")){session.renderReview(runId,reviewId);rendered=next;}await session.pollActivities();}catch(error){if(!controller.signal.aborted){const message=document.createElement("p");message.textContent=error instanceof Error?error.message:String(error);right.querySelector(".artifact-review-load-error")?.remove();const feedback=document.createElement("div");feedback.className="artifact-review-load-error";feedback.append(message);right.append(feedback);const retry=this.#ui.button({label:{text:tr(this.#config,"retry")},run:refresh});right.querySelector(".artifact-review-load-error")!.append(retry);}}finally{busy=false;}};
     container.addEventListener("cc-review-visible",()=>void refresh(),{signal:controller.signal});
@@ -729,7 +739,8 @@ class RunApplication {
     if (!init?.method && path.startsWith("/api/runs?") && new URLSearchParams(path.split("?")[1]).get("representation") === "summary" && this.#summaries) {
       return this.#summaries.read(projectApiUrl(this.#config, path), this.#controller.signal);
     }
-    const response = await fetch(projectApiUrl(this.#config, path), { ...init, signal: this.#controller.signal });
+    const signal = init?.signal ? AbortSignal.any([this.#controller.signal, init.signal]) : this.#controller.signal;
+    const response = await fetch(projectApiUrl(this.#config, path), { ...init, signal });
     if (!response.ok) throw new Error((await response.text()) || `${response.status}`);
     return response.status === 204 ? null : response.json();
   }
@@ -797,7 +808,7 @@ class RunApplication {
       if (!this.#contextGraph || this.#contextGraphRun !== this.#detail.id) {
         this.#contextGraph?.dispose();
     this.#disposeInlineReview();
-        this.#contextGraph = createContextGraph(this.#ui, path => this.#request(path), this.#config.locale, this.#config.projectApiBase, (runId, reviewId, roundId) => this.#openReview(runId, reviewId, roundId), (runId,reviewId,roundId,container,content,panel)=>this.#mountInlineReview(runId,reviewId,roundId,container,content,panel), ()=>this.#disposeInlineReview());
+        this.#contextGraph = createContextGraph(this.#ui, (path, init) => this.#request(path, init), this.#config.locale, this.#config.projectApiBase, (...args) => this.#mountInlineReview(...args), ()=>this.#disposeInlineReview());
         this.#contextGraphRun = this.#detail.id;
       }
       if (!this.#detailRoot.contains(this.#contextGraph.element)) {
@@ -959,7 +970,7 @@ class ArtifactReviewSession {
   expandedComposers=new Set<string>(); severityByActor=new Map<string,string>(); voteByActor=new Map<string,string>();
   #disposed=false;
   #contextGeneration=0;
-  inline?: {container:HTMLElement;content:HTMLElement;panel:HTMLElement};
+  inline?: {container:HTMLElement;content:HTMLElement;panel:HTMLElement;history?:InlineReview["history"];notes:InlineReviewNote[]};
   constructor(readonly options:{config:Readonly<RunConfig>;ui:ViewUi;controller:AbortController;root:HTMLElement;request:(path:string)=>Promise<Json>;detail:()=>Json|null;route:()=>RouteLocation}){}
   get #config(){return this.options.config;} get #ui(){return this.options.ui;}
   get #controller(){return this.options.controller;} get #root(){return this.options.root;}
@@ -1033,11 +1044,14 @@ class ArtifactReviewSession {
     const name=document.createElement("span");name.className="artifact-review-overview-name";name.textContent=context.review?.artifactName||"—";
     const status=round?.result?.status||round?.status||context.review?.status;
     object.append(name,reviewStateBadge(this.#config,status));scope.append(object);
-    if(!readOnly)scope.append(this.#roundSelector(runId,context));else{const note=textBlock(tr(this.#config,"materialReadOnly"));note.className="artifact-review-overview-note";scope.append(note);}
+    const selector = readOnly ? undefined : this.#roundSelector(runId, context);
+    if (selector) scope.append(selector);
+    if(readOnly){const note=textBlock(tr(this.#config,"materialReadOnly"));note.className="artifact-review-overview-note";scope.append(note);}
     const facts=document.createElement("dl");facts.className="artifact-review-overview-facts";
     const start=round?.createdAt||context.review?.createdAt,end=round?.result?.completedAt;
     const dateText=(value:string)=>new Date(value).toLocaleString(english?"en-GB":"zh-CN",{hour12:false});
     const rows=[
+      ...(!readOnly && !selector && round?.sequence ? [[tr(this.#config, "round"), reviewRoundTitle(round.sequence, english)]] : []),
       [english?"Started":"开始时间",start?dateText(start):"—"],
       [english?"Completed":"结束时间",end?dateText(end):status==="cancelled"?(english?"Cancelled":"已取消"):english?"In progress":"进行中"],
       ...(context.review?.policyId==="artifact_acceptance.unanimous"?[[english?"Approval rule":"通过条件",english?"All decision votes approve":"全部决策票通过"]]:[])
@@ -1045,8 +1059,10 @@ class ArtifactReviewSession {
     for(const [label,value] of rows){const key=document.createElement("dt"),text=document.createElement("dd");key.textContent=label;text.textContent=value;facts.append(key,text);}scope.append(facts);
     const mine=reviewCard("artifact-review-my-panel",tr(this.#config,"myReview"));const assignments=round?.assignments||[];const humans=assignments.filter((a:Json)=>a.actorKind!=="agent");const selectedSubmitted=assignmentSubmitted(context.assignment);if(!readOnly&&(humans.length>1||humans.length===1&&!selectedSubmitted))mine.append(this.#identity(context,humans,runId));
     if(historical){const badge=textBlock(tr(this.#config,"historicalRound"));badge.className="artifact-review-message";const notice=textBlock(tr(this.#config,"historyReadOnly"));notice.className="artifact-review-message warn";mine.append(badge,notice);}else if(!context.assignment)mine.append(textBlock(tr(this.#config,"noReviewRequired")));else if(context.assignment.actorKind!=="agent"){if(selectedSubmitted)mine.append(textBlock(`${tr(this.#config,"voteSummary")} · ${voteLabel(this.#config,context.assignment.submitted?.vote)}`));else mine.append(this.#reviewEditor(context,runId));}
-    const progress=reviewCard("artifact-review-progress-panel",tr(this.#config,"participationProgress"));const progressSummary=document.createElement("div");progressSummary.className="artifact-review-progress-summary";progressSummary.textContent=roundProgress(this.#config,round);progress.append(progressSummary);for(const assignment of assignments){const selected=assignment.actorId===context.assignment?.actorId?{...assignment,draft:context.assignment.draft,submitted:context.assignment.submitted}:assignment;progress.append(this.#participant(context,round,selected));}progress.append(this.#runner(round));
-    const heading=progress.querySelector("h3")!;const resultHeading=document.createElement("div");resultHeading.className="artifact-review-results-heading";heading.before(resultHeading);resultHeading.append(heading,reviewStateBadge(this.#config,round?.result?.status||round?.status));const summary=round?.result?.summary||round?.summary;if(summary){const result=document.createElement("div");result.className="artifact-review-result-summary";result.append(textBlock(summary));progressSummary.after(result);}wrap.append(scope);if(!readOnly)wrap.append(mine);wrap.append(progress);return wrap;
+    const progress=reviewResultCard(this.#config,round?.result?.status||round?.status);const progressSummary=document.createElement("div");progressSummary.className="artifact-review-progress-summary";progressSummary.textContent=roundProgress(this.#config,round);progress.append(progressSummary);for(const assignment of assignments){const selected=assignment.actorId===context.assignment?.actorId?{...assignment,draft:context.assignment.draft,submitted:context.assignment.submitted}:assignment;progress.append(this.#participant(context,round,selected));}progress.append(this.#runner(round));
+    const summary=round?.result?.summary||round?.summary;if(summary){const result=document.createElement("div");result.className="artifact-review-result-summary";result.append(textBlock(summary));progressSummary.after(result);}
+    if (!readOnly && this.inline?.notes.length) appendReviewNotes(this.#ui, this.#config, progress, this.inline.notes);
+    wrap.append(scope);if(!readOnly)wrap.append(mine);wrap.append(progress);return wrap;
   }
   #identity(context:Json,assignments:Json[],runId:string):HTMLElement{
     return chooser(this.#ui,"artifact-review-actor-select",tr(this.#config,"identity"),assignmentName(assignments.find(a=>a.actorId===context.assignment?.actorId))||tr(this.#config,"selectIdentity"),assignments.map(assignment=>({id:assignment.actorId,label:`${assignmentName(assignment)} · ${assignment.binding}` ,selected:assignment.actorId===context.assignment?.actorId})),async actorId=>{
@@ -1070,10 +1086,30 @@ class ArtifactReviewSession {
     const votes=this.#ui.segmentedControl({label:{text:tr(this.#config,"decision")},selectedId:selectedVote||"abstain",items:[["approve",tr(this.#config,"approve")],["request_changes",tr(this.#config,"requestChanges")],["abstain",tr(this.#config,"abstain")]].map(([id,label])=>({id,label:{text:label}})),onSelect:value=>{this.voteByActor.set(actorKey,value);this.renderReview(runId,context.review.id);}});votes.classList.add("artifact-review-vote");const voteGroup=document.createElement("section");voteGroup.className="artifact-review-decision-group";const voteHeading=document.createElement("h4");voteHeading.textContent=this.#config.locale?.startsWith("en")?"Final vote":"投票结论";voteGroup.append(voteHeading,votes);editor.append(voteGroup);
     const submitArea=document.createElement("div");submitArea.className="artifact-review-actions artifact-review-submit-area";submitArea.id="artifact-review-submit-area";const submit=this.#ui.confirmButton({label:{text:tr(this.#config,"submit")},run:()=>this.#submitReview(context,runId)},{title:{text:tr(this.#config,"submit")},confirmLabel:{text:tr(this.#config,"submit")},cancelLabel:{text:tr(this.#config,"cancel")},closeLabel:{text:tr(this.#config,"close")}},{tone:"primary"});submit.classList.add("artifact-review-editor-button");submitArea.append(submit);voteGroup.append(submitArea);return editor;
   }
-  #roundSelector(runId:string,context:Json):HTMLElement{
-    const rounds=context.rounds||[];const current=selectedRound(context,this.reviewRoundId);return chooser(this.#ui,"artifact-review-round-select",tr(this.#config,"round"),`${tr(this.#config,"round")} ${current?.sequence||"—"}`,rounds.map((round:Json)=>({id:round.id,label:this.#config.locale?.startsWith("en")?`Round ${round.sequence}${round.id===context.review.currentRoundId?" (current)":" (history)"}`:`第 ${round.sequence} 轮${round.id===context.review.currentRoundId?"（当前）":"（历史）"}`,selected:round.id===current?.id})),async roundId=>{
-      this.reviewRoundId=roundId;this.#syncReviewUrl();const actor=this.reviewContext?.assignment?.actorId||"";await this.reloadReview(runId,context.review.id,actor);this.renderReview(runId,context.review.id);
-    },"button");
+  #roundSelector(runId: string, context: Json): HTMLElement | undefined {
+    const history = this.inline?.history;
+    const rounds: { id: string; sequence: number }[] = history
+      ? history.roundIds.map((id, index) => ({ id, sequence: index + 1 }))
+      : context.rounds ?? [];
+    if (history && rounds.length < 2) return;
+    const current = selectedRound(context, this.reviewRoundId);
+    const latestId = history?.roundIds.at(-1) ?? context.review.currentRoundId;
+    const english = this.#config.locale?.startsWith("en");
+    const items = rounds.map(round => {
+      const title = reviewRoundTitle(round.sequence, english);
+      const latest = round.id === latestId;
+      const suffix = english ? (latest ? " (current)" : " (history)") : (latest ? "（当前）" : "（历史）");
+      return { id: round.id, label: title + suffix, selected: round.id === current?.id };
+    });
+    const caption = `${tr(this.#config, "round")} ${current?.sequence || "—"}`;
+    return chooser(this.#ui, "artifact-review-round-select", tr(this.#config, "round"), caption, items, async roundId => {
+      if (history) return history.selectRound(roundId);
+      this.reviewRoundId = roundId;
+      this.#syncReviewUrl();
+      const actor = this.reviewContext?.assignment?.actorId ?? "";
+      await this.reloadReview(runId, context.review.id, actor);
+      this.renderReview(runId, context.review.id);
+    }, "button");
   }
   #materialSelector(context:Json,onChange:()=>void):HTMLElement{
     const items=materials(context);const selected=items.find(item=>item.key===this.reviewMaterial)||items[0];return chooser(this.#ui,"artifact-review-material-select",tr(this.#config,"selectMaterial"),materialLabel(this.#config,selected),items.map(item=>({id:item.key,label:materialLabel(this.#config,item),selected:item.key===selected?.key})),async key=>{this.reviewMaterial=key;this.#syncReviewUrl();await this.reloadReview(this.#detail?.id||this.#route.params.runId||"",context.review.id);onChange();});
@@ -1188,11 +1224,31 @@ class ArtifactReviewSession {
     }
     return row;
   }
-  #runner(round:Json):HTMLElement{const runner=round?.runner;const row=document.createElement("article");row.className="artifact-review-participant";const head=document.createElement("div");head.className="artifact-review-participant-head";const main=document.createElement("div");main.className="artifact-review-row-main";const name=document.createElement("b");name.textContent=runner?.actorName||tr(this.#config,"runner");const meta=document.createElement("div");meta.className="artifact-review-participant-meta";meta.append(pill(tr(this.#config,"decision")),pill(voteLabel(this.#config,runner?.vote)));main.append(name,meta);head.append(main);row.append(head);return row;}
-  #opinionBody(opinion:Json):HTMLElement{
+  #runner(round: Json): HTMLElement {
+    const runner = round?.runner;
+    const row = document.createElement("article");
+    row.className = "artifact-review-participant";
+    const head = document.createElement("div");
+    head.className = "artifact-review-participant-head";
+    const main = document.createElement("div");
+    main.className = "artifact-review-row-main";
+    const name = document.createElement("b");
+    name.textContent = runner?.actorName || tr(this.#config, "runner");
+    const meta = document.createElement("div");
+    meta.className = "artifact-review-participant-meta";
+    meta.append(pill(tr(this.#config, "decision")), pill(voteLabel(this.#config, runner?.vote)));
+    main.append(name, meta);
+    head.append(main);
+    row.append(head);
+    if (round?.runnerOpinion) row.append(this.#opinionBody(round.runnerOpinion, false));
+    return row;
+  }
+  #opinionBody(opinion:Json, showVote = true):HTMLElement{
     const english=this.#config.locale?.startsWith("en");
     const wrap=document.createElement("div");wrap.className="artifact-review-opinion";
-    const vote=document.createElement("div");vote.className="artifact-review-opinion-vote";const label=document.createElement("span");label.textContent=english?"Final vote":"最终投票";vote.append(label,pill(voteLabel(this.#config,opinion.vote)));wrap.append(vote);
+    if (showVote) {
+      const vote=document.createElement("div");vote.className="artifact-review-opinion-vote";const label=document.createElement("span");label.textContent=english?"Final vote":"最终投票";vote.append(label,pill(voteLabel(this.#config,opinion.vote)));wrap.append(vote);
+    }
     if(opinion.delegation?.kind==="runner"&&opinion.delegation.authorizationNote){const note=textBlock(`${tr(this.#config,"authorizationNote")}：${opinion.delegation.authorizationNote}`);note.className="artifact-review-message";wrap.append(note);}
     if(opinion.renderedSummary||opinion.summary){
       const section=document.createElement("section");section.className="artifact-review-opinion-section";
@@ -1240,6 +1296,26 @@ function pill(text:string,kind=""):HTMLElement{const span=document.createElement
 function textBlock(value:unknown):HTMLElement{const p=document.createElement("p");p.textContent=typeof value==="string"?value:JSON.stringify(value,null,2);return p;}
 function section(id:string,title:string):HTMLElement{const result=document.createElement("section");result.id=id;result.className="artifact-review-operation-group";const h=document.createElement("h3");h.textContent=title;result.append(h);return result;}
 function reviewCard(id:string,title:string):HTMLElement{const result=document.createElement("section");result.id=id;result.className="artifact-review-card";const h=document.createElement("h3");h.textContent=title;result.append(h);return result;}
+function reviewResultCard(config: Readonly<RunConfig>, status?: string): HTMLElement {
+  const card = reviewCard("artifact-review-progress-panel", tr(config, "participationProgress"));
+  const heading = document.createElement("div");
+  heading.className = "artifact-review-results-heading";
+  heading.append(card.firstElementChild!);
+  if (status) heading.append(reviewStateBadge(config, status));
+  card.append(heading);
+  return card;
+}
+function appendReviewNotes(ui: ViewUi, config: Readonly<RunConfig>, card: HTMLElement, notes: readonly InlineReviewNote[]): void {
+  const locale = config.locale?.startsWith("en") ? "en-GB" : "zh-CN";
+  for (const note of notes) {
+    const name = note.reviewer.source === "human" ? "Human" : tr(config, "agent");
+    const time = new Date(note.createdAt).toLocaleString(locale, { hour12: false });
+    for (const comment of note.comments) card.append(commentCard(ui, comment, `${name} · ${time}`));
+  }
+}
+function reviewRoundTitle(sequence: number, english?: boolean): string {
+  return english ? `Round ${sequence}` : `第 ${sequence} 轮`;
+}
 function cardLabel(label:string):HTMLElement{const result=document.createElement("span");result.className="artifact-review-card-label";result.textContent=label;return result;}
 
 function reviewStatus(config:Readonly<RunConfig>,status:unknown):string{const labels:Record<string,[string,string]>={pending:["待评审","Pending"],in_progress:["评审中","In review"],awaiting_revision:["需修改","Changes requested"],changes_requested:["需修改","Changes requested"],passed:["已通过","Passed"],approved:["已通过","Approved"],completed:["已完成","Completed"],submitted:["已提交","Submitted"],failed:["执行失败","Failed"],queued:["等待启动","Queued"],awaiting_runner_vote:["等待最终决策","Awaiting final decision"],cancelled:["已取消","Cancelled"]};const label=labels[String(status||"")];return label?(config.locale?.startsWith("en")?label[1]:label[0]):String(status||"—");}
@@ -1247,7 +1323,28 @@ function voteLabel(config:Readonly<RunConfig>,vote:unknown):string{const labels:
 function countValue(value:unknown):number{return Array.isArray(value)?value.length:Number(value||0);}
 function roundSubmitted(round:Json):number{return Number(round?.submitted||(round?.assignments||[]).filter((assignment:Json)=>assignment.status==="submitted"||assignment.submitted).length);}
 function roundTotal(round:Json):number{return Number(round?.total||(round?.assignments||[]).length);}
-function roundProgress(config:Readonly<RunConfig>,round:Json):string{const submitted=roundSubmitted(round);const total=roundTotal(round);const status=String(round?.result?.status||round?.status||"");const completed=Boolean(round?.result)||["approved","completed","passed","changes_requested","cancelled"].includes(status);const readiness=completed?tr(config,"reviewComplete"):(round?.decisionReady||(total>0&&submitted>=total)?tr(config,"decisionReady"):tr(config,"waitingReviews"));return `${submitted}/${total} · ${readiness} · ${tr(config,"blockingComments")} ${countValue(round?.blockingComments??round?.severity?.blocking)} · ${tr(config,"unresolved")} ${countValue(round?.unresolvedBlocking)} · ${tr(config,"environmentFailures")} ${countValue(round?.failures)} · ${tr(config,"repeatedAdvisories")} ${countValue(round?.repeatedAdvisories)}`;}
+function roundProgress(config: Readonly<RunConfig>, round: Json): string {
+  if (round?.reviewProgress) {
+    const { processed, total, phase } = round.reviewProgress;
+    const failed = (phase === "reviewing" || phase === "final_review")
+      && round.assignments?.some((assignment: Json) => assignment.status === "failed");
+    const status = failed ? "failed" : phase === "reviewing" ? "in_progress" : phase;
+    const readiness = status === "final_review" ? tr(config, "waitingSubmission") : reviewStatus(config, status);
+    return `${tr(config, "nodeProgress")} ${processed}/${total} · ${readiness}`;
+  }
+  const submitted = roundSubmitted(round), total = roundTotal(round);
+  const status = String(round?.result?.status || round?.status || "");
+  const completed = Boolean(round?.result) || ["approved", "completed", "passed", "changes_requested", "cancelled"].includes(status);
+  const readiness = completed ? tr(config, "reviewComplete")
+    : tr(config, round?.decisionReady || (total > 0 && submitted >= total) ? "decisionReady" : "waitingReviews");
+  return [
+    `${submitted}/${total}`, readiness,
+    `${tr(config, "blockingComments")} ${countValue(round?.blockingComments ?? round?.severity?.blocking)}`,
+    `${tr(config, "unresolved")} ${countValue(round?.unresolvedBlocking)}`,
+    `${tr(config, "environmentFailures")} ${countValue(round?.failures)}`,
+    `${tr(config, "repeatedAdvisories")} ${countValue(round?.repeatedAdvisories)}`
+  ].join(" · ");
+}
 function reviewStateBadge(config:Readonly<RunConfig>,status:unknown):HTMLElement{const badge=pill(reviewStatus(config,status));badge.classList.add("artifact-review-status");badge.dataset.status=String(status||"");return badge;}
 
 function selectedRound(context:Json,roundId:string):Json{const round=(context.rounds||[]).find((round:Json)=>round.id===roundId)||(context.rounds||[]).find((round:Json)=>round.id===context.review?.currentRoundId);if(!round)return context.review?.round||{};const vote=round.votes?.find((vote:Json)=>vote.subject?.kind==="runner");return {...(context.review?.round?.id===round.id?context.review.round:{}),...round,...(vote?{runner:{actorName:"Runner",vote:vote.value,status:"submitted"}}:{})};}

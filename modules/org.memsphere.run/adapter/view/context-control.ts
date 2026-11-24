@@ -8,8 +8,17 @@ import { renderArtifactValue } from "./run-detail.js";
 import { contextControlStyles } from "./context-control-styles.js";
 import { layoutGraph } from "./graph-layout.js";
 
-type Artifact = { writingProgress?: { index: number; items: Array<{ path?: string }>; skipped: string[]; validation?: {issues: Array<{message: string}>}; submitting?: boolean }; id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Array<{ kind: string; id: string }> };
-type Snapshot = { lazy?:boolean; graph?: { procedure: unknown; work: Array<{ writing?: { draftId: string }; id: string; createdAt?: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; action?: { description: string; artifact?: unknown }; inputs?: unknown; reviewHandle?: string }> }; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<{ id: string; artifactId: string; reviewer: { source?: string }; comments: Array<{ id: string; body: string }>; createdAt: string }> };
+type Dependency = { kind: "artifact" | "external"; id: string };
+type Artifact = { schema?: string; writingProgress?: { index: number; items: Array<{ path?: string }>; skipped: string[]; validation?: {issues: Array<{message: string}>}; submitting?: boolean }; id: string; stepId: string; name: string; status: string; tags: string[]; revisedFrom?: string; dependencies: Dependency[] };
+type WorkflowStep = { writing?: { draftId: string }; id: string; createdAt: string; startedAt?: string; endedAt?: string; status: string; artifact?: unknown; source?: { actionId: string }; reviewRounds?: Array<{ id: string; artifactId: string }>; inputs?: Record<string, Dependency[]>; reviewHandle?: string; reviewConfiguration?: unknown };
+type StepSelection = { action: ProcedureAction; stepId?: string; artifactId?: string };
+type RunDetail = Dependency | { kind: "step"; selection: StepSelection };
+type ExplorationReview = { id: string; artifactId: string; roundId: string; reviewer?: string; status: string; createdAt: string; vote?: string };
+export type InlineReviewHistory = { roundIds: readonly string[]; selectRound: (roundId: string) => Promise<void> };
+export type InlineReview = { id: string; roundId: string; history?: InlineReviewHistory };
+export type InlineReviewNote = { reviewer: { source?: string }; comments: { body: string }[]; createdAt: string };
+type RunWorkflow = { procedure: ProcedureDefinition; work: WorkflowStep[] };
+type Snapshot = { lazy?:boolean; graph?: RunWorkflow; workflow?: RunWorkflow; explorationReviews?: ExplorationReview[]; run: { id: string; status: string; frames?: Array<{ type: string; graphFrame?: JoinFrame }> }; outputArtifactIds: string[]; artifacts: Artifact[]; externals?: Array<{ id: string; source: string }>; steps: Array<{ id: string; createdAt: string }>; completeIds: string[]; reviews: Array<InlineReviewNote & { artifactId: string }> };
 const element = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", text?: string): HTMLElementTagNameMap[K] => {
   const node = document.createElement(tag); node.className = className; if (text !== undefined) node.textContent = text; return node;
 };
@@ -42,7 +51,7 @@ export function artifactHistory(records: Artifact[]) {
   return { latest, around, versions: (id: string) => groups.get(family(id))!, family };
 }
 
-export function createContextGraph(ui: ViewUi, request: (path: string) => Promise<any>, locale?: string, projectApiBase?: string, openReview?: (runId: string, reviewId: string, roundId?: string) => Promise<void>, mountReview?: (runId:string,reviewId:string,roundId:string,container:HTMLElement,content:HTMLElement,panel:HTMLElement)=>Promise<void>, disposeReview?:()=>void) {
+export function createContextGraph(ui: ViewUi, request: (path: string, init?: RequestInit) => Promise<any>, locale?: string, projectApiBase?: string, mountReview?: (runId: string, container: HTMLElement, content: HTMLElement, panel: HTMLElement, notes: InlineReviewNote[], review?: InlineReview) => Promise<void>, disposeReview?:()=>void) {
   const english = locale?.startsWith("en");
   const label = (zh: string, en: string) => english ? en : zh;
   const root = element("section", "cc-exploration"); root.dataset.contextControl = "";
@@ -59,11 +68,11 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   let currentKind: "artifact" | "external" = "artifact";
   let dialog: HTMLDialogElement | undefined, origin: HTMLElement | undefined, generation = 0, disposed = false, layoutGeneration = 0;
   let snapshotKey = "", graphKey = "", refreshEpoch = 0;
-  let graphSelection: { action: ProcedureAction; stepId?: string; artifactId?: string } | undefined;
-  const graphNavigation:Array<NonNullable<typeof graphSelection>>=[];
-  const artifactNavigation:Array<{kind:"artifact"|"external";id:string}>=[];
+  let graphSelection: StepSelection | undefined;
+  const navigation: RunDetail[] = [];
   const loadedActions=new Set<string>();
   const actionDefinitions=new Map<string,ProcedureAction>();
+  const selectedReviewRounds = new Map<string, string>();
   let artifactsLoaded=false;
   let graphView: "workflow" | "artifacts" = "workflow";
   const graphViews = element("div", "cc-graph-view-tabs"); root.insertBefore(graphViews, work);
@@ -74,16 +83,23 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   let reviewRatio=(100-(Number(localStorage.getItem("memsphere.artifactReviewSplit.v1"))||70))/100,reviewCollapsed=false;
   const button = (text: string, action: () => void, cls = "cc-button") => { const node = element("button", cls, text); node.type = "button"; node.addEventListener("click", action); return node; };
   const reset = button(label("回到最新", "Latest"), () => { selected = undefined; close(); graph(); }); artifactCanvas.header.append(reset);
-  const close = () => { disposeReview?.(); refreshEpoch++; graphNavigation.length=0;artifactNavigation.length=0;graphSelection = undefined; renderController?.abort(); activePane = "content"; generation++; dialog?.close(); dialog?.remove(); dialog = undefined; currentId = undefined; const node = graphHost.querySelector<HTMLButtonElement>(`[data-artifact-id="${selected ?? origin?.dataset.artifactId ?? ""}"]`); (node ?? origin)?.focus(); };
+  const close = () => { disposeReview?.(); refreshEpoch++; navigation.length=0;graphSelection = undefined; renderController?.abort(); activePane = "content"; generation++; dialog?.close(); dialog?.remove(); dialog = undefined; currentId = undefined; const node = graphHost.querySelector<HTMLButtonElement>(`[data-artifact-id="${selected ?? origin?.dataset.artifactId ?? ""}"]`); (node ?? origin)?.focus(); };
   const stopDrag=artifactCanvas.stopPan;
   const versions = (a: Artifact) => snapshot.graph ? artifactHistory(snapshot.artifacts).versions(a.id) : snapshot.completeIds.includes(a.id) ? history.versions(a.id) : [a];
   const choose = (id: string) => { selected = id; graph(); };
   const select = (id: string) => { choose(id); graphHost.querySelector<HTMLButtonElement>(`[data-artifact-id="${id}"]`)?.focus(); };
+  function openArtifact(id: string) {
+    const a = snapshot.artifacts.find(artifact => artifact.id === id), step = snapshot.graph?.work.find(s => s.id === a?.stepId);
+    const action = snapshot.graph?.procedure.actions.find(definition => definition.id === step?.source?.actionId);
+    if (action) return openGraphAction(action, step?.id, id);
+    graphSelection = undefined;
+    return open(id);
+  }
   async function graph() {
     if(snapshot.graph&&graphView!=="artifacts")return;
     if(snapshot.lazy&&snapshot.graph&&!artifactsLoaded){
       const payload=await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}?representation=artifacts`);
-      if(disposed)return;Object.assign(snapshot,{artifacts:payload.run.context.artifacts,completeIds:payload.run.context.completeIds});
+      if(disposed)return;Object.assign(snapshot,{artifacts:payload.run.context.artifacts,completeIds:payload.run.context.completeIds,externals:payload.run.context.externals});
       history=artifactHistory(snapshot.artifacts);artifactsLoaded=true;
     }
     const projectionKey = JSON.stringify([snapshot, selected]);
@@ -94,8 +110,9 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     const openMenus = new Set([...graphHost.querySelectorAll<HTMLDetailsElement>(".cc-history[open]")].map(d => d.parentElement?.querySelector<HTMLElement>("[data-node-key]")?.dataset.nodeKey));
     try {
       reset.hidden = !selected; reset.textContent = snapshot.run.status === "done" ? label("回到交付视图", "Delivery view") : label("回到当前成果", "Current outputs");
-      const defaultView = () => history.latest(snapshot.graph ? undefined : snapshot.outputArtifactIds);
-      const visible = selected && snapshot.completeIds.includes(selected) ? history.around(selected) : defaultView();
+      const defaultView = () => history.latest(snapshot.graph && !snapshot.workflow ? undefined : snapshot.outputArtifactIds);
+      const tapped = snapshot.artifacts.find(a => a.id === selected);
+      const visible = selected && tapped ? history.around(selected) : [...new Map([...defaultView(), ...snapshot.artifacts.filter(a => snapshot.workflow && a.status === "draft")].map(a => [a.id, a])).values()];
       stopDrag();
       const referenced = new Set(visible.flatMap(a => a.dependencies.filter(d => d.kind === "external").map(d => d.id)));
       const used = new Set(snapshot.artifacts.filter(a => snapshot.completeIds.includes(a.id)).flatMap(a => a.dependencies.filter(d => d.kind === "external").map(d => d.id)));
@@ -115,10 +132,10 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       for (const a of visible) {
         const group = versions(a), index = group.findIndex(v => v.id === a.id);
         const stack = element("div", "cc-node-stack");
-        const node = button("", () => { origin = node; const step=snapshot.graph?.work.find(s=>s.id===a.stepId); const action=(snapshot.graph?.procedure as ProcedureDefinition|undefined)?.actions.find(x=>x.id===step?.source?.actionId); if(action)void openGraphAction(action,step?.id,a.id);else void open(a.id); }, "cc-node"); node.dataset.artifactId = a.id; node.dataset.nodeKey = key("artifact", a.id); node.dataset.selected = String(selected === a.id); node.setAttribute("aria-label", `${a.name} v${index + 1}`);
+        const node = button("", () => { origin = node; void openArtifact(a.id); }, "cc-node"); node.dataset.artifactId = a.id; node.dataset.nodeKey = key("artifact", a.id); node.dataset.selected = String(selected === a.id); node.setAttribute("aria-label", `${a.name} v${index + 1}`);
         const tagRow = element("div", "cc-node-tags"); a.tags.filter(t => t !== "default").forEach(t => tagRow.append(ui.badge({ text: t })));
         const comments = snapshot.reviews.filter(r => r.artifactId === a.id).reduce((n, r) => n + r.comments.length, 0);
-        const footer = element("div", "cc-node-footer"); footer.append(element("span", "", a.status === "draft" ? label("草稿", "Draft") : snapshot.completeIds.includes(a.id) ? label("已提交", "Submitted") : label("提交未完成", "Incomplete submission")));if(!snapshot.lazy)footer.append(element("span","",`${comments} ${label("条评论","comments")}`));
+        const footer = element("div", "cc-node-footer"); footer.append(element("span", "", a.status === "draft" ? label("草稿", "Draft") : snapshot.completeIds.includes(a.id) ? label("已提交", "Submitted") : label("提交未完成", "Incomplete submission")));if(comments)footer.append(element("span","",`${comments} ${label("条评论","comments")}`));
         node.append(element("div", "cc-node-version", `v${index + 1}${index === group.length - 1 ? label(" · 最新", " · Latest") : ""}`), element("strong", "", a.name), tagRow, footer); stack.append(node);
         if (group.length > 1) { const details = element("details", "cc-history"); details.append(element("summary", "", `${label("历史版本", "History")} · ${group.length - 1}`)); const menu = element("div", "cc-history-menu"); [...group].reverse().forEach((v) => menu.append(button(`v${group.indexOf(v) + 1} · ${v.name}`, () => select(v.id), "cc-history-option"))); details.append(menu); stack.append(details); }
         canvas.append(stack);
@@ -163,43 +180,58 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       message.append(button(label("重试", "Retry"), () => { void graph(); })); artifactCanvas.world.replaceChildren(message);
     }
   }
-  async function open(id: string) {
+  async function open(id: string): Promise<void> {
     const a = snapshot.artifacts.find(a => a.id === id); if (!a) return;
     currentKind = "artifact"; currentId = id; const currentGeneration = ++generation;
     renderController?.abort(); renderController = new AbortController();
     if (!dialog) { dialog = element("dialog", "cc-dialog"); dialog.setAttribute("aria-label", label("产物", "Artifact")); dialog.addEventListener("cancel", event => { event.preventDefault(); close(); }); root.append(dialog); }
     dialog.dataset.artifactId = id; delete dialog.dataset.externalId; dialog.setAttribute("aria-label", label("产物", "Artifact"));
     const head = element("header", "cc-modal-head"); head.append(element("h2", "", a.name), button(label("关闭", "Close"), close));
-    if(!graphSelection)artifactBack(head);
+    detailBack(head);
     const columns = element("div", "cc-modal-columns"), content = element("section", "cc-pane cc-pane-content"), reviews = element("section", "cc-pane cc-pane-review");
     content.setAttribute("aria-label", label("产物内容", "Artifact content")); reviews.setAttribute("aria-label", label("评审", "Reviews"));
     const metadata = element("div", "cc-metadata"); metadata.append(element("span", "cc-chip", a.id), ...a.tags.filter(t=>!snapshot.graph||t!=="default").map(t => ui.badge({ text: t }))); if(!snapshot.graph)content.append(metadata);
     const group = versions(a), bar = element("div", "cc-version-bar");
-    const switchTo = (next: string, action: string) => { if (graphSelection) { void openGraphAction(graphSelection.action, graphSelection.stepId, next); } else { choose(next); void open(next); } const control = dialog?.querySelector<HTMLButtonElement | HTMLSelectElement>(`[data-version-action="${action}"]`); (control?.disabled ? dialog?.querySelector<HTMLSelectElement>('[data-version-action="select"]') : control)?.focus(); };
-    const versionField=ui.select({label:{text:label("产物版本","Artifact version")},value:id,options:group.map((version,i)=>({value:version.id,label:{text:`v${i+1} · ${version.name}`}})),onChange:next=>switchTo(next,"select")});versionField.root.classList.add("cc-select-field");const selectVersion=versionField.control;selectVersion.classList.add("cc-version-select");selectVersion.setAttribute("aria-label",label("历史版本","History"));
+    const switchTo = async (next: string) => {
+      await openArtifact(next);
+      if (currentKind === "artifact" && currentId === next) dialog?.querySelector<HTMLSelectElement>('[data-version-action="select"]')?.focus();
+    };
+    const versionField=ui.select({label:{text:label("产物版本","Artifact version")},value:id,options:group.map((version,i)=>({value:version.id,label:{text:`v${i+1} · ${version.name}`}})),onChange:switchTo});versionField.root.classList.add("cc-select-field");const selectVersion=versionField.control;selectVersion.classList.add("cc-version-select");selectVersion.setAttribute("aria-label",label("历史版本","History"));
     selectVersion.dataset.versionAction = "select"; bar.append(versionField.root);
     if(snapshot.graph){
       const header=element("section","cc-artifact-header");header.setAttribute("aria-label",label("产物导航","Artifact navigation"));
       const details=element("details","cc-artifact-info");details.append(element("summary","",label("产物信息","Artifact information")),metadata);
       header.append(bar,details);content.append(header);
     }else content.append(bar);
-    const deps = element("div", "cc-related");if(a.dependencies.length)deps.append(element("span","",label("依赖产物","Dependencies"))); a.dependencies.forEach(r => deps.append(r.kind === "artifact" ? button(snapshot.artifacts.find(a => a.id === r.id)?.name ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});choose(r.id);void open(r.id); }, "cc-text-button") : button(snapshot.externals?.find(e => e.id === r.id)?.source ?? r.id, () => { if(currentId)artifactNavigation.push({kind:currentKind,id:currentId});void openExternal(r.id); }, "cc-text-button"))); if(!graphSelection)content.append(deps);
+    if (!graphSelection) content.append(...dependencyGroups(a.dependencies));
     const body = element("article", "cc-document", a.status === "draft" ? label("未提交", "Not submitted") : label("加载中…", "Loading…")); content.append(body);
     const reviewStep=snapshot.graph?.work.find(step=>step.id===a.stepId);
     const reviewRound=reviewStep?.reviewRounds?.filter(round=>round.artifactId===id).at(-1);
-    const inline=Boolean(mountReview&&reviewStep?.reviewHandle&&reviewRound);
-    if(!inline)disposeReview?.();
-    const entries = snapshot.reviews.filter(r => r.artifactId === id); reviews.append(element("h3", "cc-pane-title", label("评审", "Reviews")));
-    if (!entries.length) reviews.append(element("div", "cc-no-review", label("暂无评审", "No reviews")));
-    for (const r of entries) { const card = element("article", "cc-review-card"); card.append(element("div", "cc-review-head", `${r.reviewer.source === "human" ? "Human" : "Agent"} · ${r.createdAt}`)); for (const c of r.comments) card.append(element("p", "", c.body)); reviews.append(card); }
+    const progressive = (snapshot.explorationReviews ?? []).filter(r => r.artifactId === id);
+    const selectedReview = progressive.find(r => r.roundId === selectedReviewRounds.get(id)) ?? progressive.at(-1);
+    const reviewHistory: InlineReviewHistory | undefined = selectedReview ? {
+      roundIds: progressive.map(review => review.roundId),
+      selectRound: async roundId => {
+        if (currentId !== id) return;
+        selectedReviewRounds.set(id, roundId);
+        await refreshDetail();
+      }
+    } : undefined;
+    const inlineId = selectedReview?.id ?? reviewStep?.reviewHandle, inlineRound = selectedReview?.roundId ?? reviewRound?.id;
+    const review = inlineId && inlineRound ? { id: inlineId, roundId: inlineRound, history: reviewHistory } : undefined;
+    const notes = snapshot.reviews.filter(r => r.artifactId === id);
+    const hasReview = Boolean(mountReview && (review || notes.length));
+    if (!hasReview) disposeReview?.();
     const tabs = element("div", "cc-mobile-tabs"), media = window.matchMedia("(max-width: 760px)");
     const divider=element("div","cc-review-divider");divider.tabIndex=0;divider.setAttribute("role","separator");divider.setAttribute("aria-orientation","vertical");divider.setAttribute("aria-label",label("调整评审栏宽度","Resize review panel"));
     const clampRatio=(ratio:number)=>Math.max(.25,Math.min(.7,ratio));
     const applyWidth=()=>{reviewRatio=clampRatio(reviewRatio);columns.style.setProperty("--cc-review-width",`${reviewRatio*100}%`);divider.setAttribute("aria-valuemin","25");divider.setAttribute("aria-valuemax","70");divider.setAttribute("aria-valuenow",String(Math.round(reviewRatio*100)));divider.setAttribute("aria-valuetext",`${Math.round(reviewRatio*100)}%`);};
     const saveRatio=()=>localStorage.setItem("memsphere.artifactReviewSplit.v1",String(100-reviewRatio*100));
     const reviewToggle=ui.iconButton({label:{text:label("展开评审","Show reviews")},icon:{kind:"system",name:"sidebar-simple"},run:()=>{reviewCollapsed=false;applyPane();dialog?.dispatchEvent(new Event("cc-review-visible"));}});reviewToggle.classList.add("cc-review-toggle");head.insertBefore(reviewToggle,head.lastChild);
-    const reviewClose=ui.iconButton({label:{text:label("收起评审","Hide reviews")},icon:{kind:"system",name:"x"},run:()=>{reviewCollapsed=true;activePane="content";applyPane();}});reviewClose.classList.add("cc-review-close");const reviewHeader=element("header","cc-review-pane-head");reviewHeader.append(reviews.firstElementChild!,reviewClose);reviews.prepend(reviewHeader);
-    const reviewScroll=element("div","cc-review-scroll");reviewScroll.append(...[...reviews.children].filter(child=>child!==reviewHeader));reviews.append(reviewScroll);
+    const reviewClose=ui.iconButton({label:{text:label("收起评审","Hide reviews")},icon:{kind:"system",name:"x"},run:()=>{reviewCollapsed=true;activePane="content";applyPane();}});reviewClose.classList.add("cc-review-close");const reviewHeader=element("header","cc-review-pane-head");reviewHeader.append(element("h3", "cc-pane-title", label("评审", "Reviews")),reviewClose);
+    const reviewScroll = element("div", "cc-review-scroll");
+    reviews.append(reviewHeader, reviewScroll);
+    if (!hasReview) reviewScroll.append(element("div", "cc-no-review", label("暂无评审", "No reviews")));
     const applyPane = () => { content.hidden = media.matches && activePane !== "content"; reviews.hidden = media.matches ? activePane !== "review" : reviewCollapsed;divider.hidden=media.matches||reviewCollapsed;columns.classList.toggle("cc-review-collapsed",!media.matches&&reviewCollapsed);reviewToggle.hidden=!reviewCollapsed||media.matches;reviewToggle.setAttribute("aria-expanded",String(!reviewCollapsed));applyWidth(); };
     tabs.append(button(label("产物内容", "Content"), () => { activePane = "content"; applyPane(); }), button(label("评审", "Reviews"), () => { activePane = "review";reviewCollapsed=false;applyPane();dialog?.dispatchEvent(new Event("cc-review-visible")); })); media.addEventListener("change", applyPane, { signal: renderController.signal });window.addEventListener("resize",applyPane,{signal:renderController.signal});
     let drag:{x:number;ratio:number}|undefined;
@@ -208,38 +240,60 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     for(const name of ["pointerup","pointercancel","lostpointercapture"])divider.addEventListener(name,()=>{if(drag)saveRatio();drag=undefined;});
     divider.addEventListener("keydown",event=>{if(!["ArrowLeft","ArrowRight","Home"].includes(event.key))return;event.preventDefault();reviewRatio=clampRatio(event.key==="Home"?.3:reviewRatio+(event.key==="ArrowLeft"?.02:-.02));applyWidth();saveRatio();});
     columns.append(content,divider,reviews); dialog.replaceChildren(head, tabs, columns); if (!dialog.open) dialog.showModal();applyPane();
-    if(inline){
-      const material=element("div","cc-review-material");content.append(material);
-      material.addEventListener("cc-review-material-ready",()=>{body.hidden=true;},{signal:renderController.signal});
+    if(hasReview){
+      const material=element("div","cc-review-material");
+      if (review) {
+        content.append(material);
+        material.addEventListener("cc-review-material-ready",()=>{body.hidden=true;},{signal:renderController.signal});
+      }
       const panel=element("div","cc-review-session");reviewScroll.append(panel);
-      reviews.querySelectorAll(".cc-review-card,.cc-no-review").forEach(node=>node.remove());
-      void mountReview!(snapshot.run.id,reviewStep!.reviewHandle!,reviewRound!.id,dialog,material,panel).catch(error=>{if(!disposed&&currentId===id)panel.textContent=error instanceof Error?error.message:String(error);});
+      void mountReview!(snapshot.run.id,dialog,material,panel,notes,review).catch(error=>{if(!disposed&&generation===currentGeneration)panel.textContent=error instanceof Error?error.message:String(error);});
       body.hidden=Boolean(material.querySelector(".artifact-review-material-heading"));
     }
-    if (!body.hidden) try {
-      const value = await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}/artifacts/${encodeURIComponent(id)}/content`);
-      if (!disposed && generation === currentGeneration && currentId === id) {
-        if (value.previewable === false) {
-          const link = element("a", "cc-text-button", label("下载产物内容", "Download content"));
-          const path = `/runs/${encodeURIComponent(snapshot.run.id)}/artifacts/${encodeURIComponent(id)}/content?download=1`;
-          link.href = `${projectApiBase ?? "/api"}${path}`; link.download = a.name;
-          body.replaceChildren(element("p", "", value.contentType), link);
-        } else body.replaceChildren(renderArtifactValue(value));
-      }
-    } catch (error) { if (!disposed && generation === currentGeneration) body.textContent = error instanceof Error ? error.message : String(error); }
+    if (!body.hidden) await showContent(body, { kind: "artifact", id }, a.name, currentGeneration);
   }
-  function artifactBack(head:HTMLElement){if(!artifactNavigation.length)return;head.prepend(button(label("← 返回","← Back"),()=>{const previous=artifactNavigation.pop();if(previous)void(previous.kind==="external"?openExternal(previous.id):open(previous.id));},"cc-text-button cc-back-button"));}
-  function graphMember(id:string){
-    const artifact=snapshot.artifacts.find(a=>a.id===id),owner=snapshot.graph!.work.find(s=>s.id===artifact?.stepId),definition=(snapshot.graph!.procedure as ProcedureDefinition).actions.find(a=>a.id===owner?.source?.actionId);
-    const row=button("",()=>{if(definition&&owner){if(graphSelection)graphNavigation.push({...graphSelection});void openGraphAction(definition,owner.id,id);}},"cc-member-row");
-    row.append(element("strong","",artifact?.name??id),element("span","",definition?.description??""),element("span","cc-member-arrow","→"));return row;
+  function openDetail(target: RunDetail) {
+    if (target.kind === "step") {
+      const { action, stepId, artifactId } = target.selection;
+      return openGraphAction(action, stepId, artifactId);
+    }
+    return target.kind === "external" ? openExternal(target.id) : openArtifact(target.id);
   }
-  function graphBack(head:HTMLElement){if(!graphNavigation.length)return;head.prepend(button(label("← 返回","← Back"),()=>{const previous=graphNavigation.pop();if(previous)void openGraphAction(previous.action,previous.stepId,previous.artifactId);},"cc-text-button cc-back-button"));}
-  function upstreamSteps(step:NonNullable<Snapshot["graph"]>["work"][number]){
-    const inputs=[...new Map((Object.values(step.inputs??{}).flat()as Array<{kind:string;id:string}>).filter(input=>input.kind==="artifact").map(input=>[input.id,input])).values()];
-    if(!inputs.length)return undefined;
-    const section=element("section","cc-upstream-steps");section.setAttribute("aria-label",label("上游步骤","Upstream steps"));section.append(element("h3","",label("上游步骤","Upstream steps")));
-    const links=element("div","cc-upstream-links");for(const input of inputs){const link=graphMember(input.id);link.classList.add("cc-upstream-link");link.querySelector(".cc-member-arrow")!.textContent="←";links.append(link);}section.append(links);return section;
+  function detailBack(head: HTMLElement) {
+    if (!navigation.length) return;
+    head.prepend(button(label("← 返回", "← Back"), () => {
+      const previous = navigation.pop();
+      if (previous) void openDetail(previous);
+    }, "cc-text-button cc-back-button"));
+  }
+  function memberLink(ref: Dependency, upstream = false) {
+    const artifact = ref.kind === "artifact" ? snapshot.artifacts.find(value => value.id === ref.id) : undefined;
+    const external = ref.kind === "external" ? snapshot.externals?.find(value => value.id === ref.id) : undefined;
+    const owner = snapshot.graph?.work.find(step => step.id === artifact?.stepId);
+    const action = snapshot.graph?.procedure.actions.find(definition => definition.id === owner?.source?.actionId);
+    const row = button("", () => {
+      if (graphSelection) navigation.push({ kind: "step", selection: { ...graphSelection } });
+      else if (currentId) navigation.push({ kind: currentKind, id: currentId });
+      void openDetail(ref);
+    }, "cc-member-row");
+    if (upstream) row.classList.add("cc-upstream-link");
+    row.disabled = !artifact && !external;
+    row.append(element("strong", "", artifact?.name ?? external?.source ?? ref.id),
+      element("span", "", action?.description ?? ""), element("span", "cc-member-arrow", upstream ? "←" : "→"));
+    return row;
+  }
+  function dependencyGroups(refs: Dependency[]) {
+    const inputs = [...new Map(refs.map(ref => [`${ref.kind}:${ref.id}`, ref])).values()];
+    return ([["artifact", label("上游步骤", "Upstream steps")], ["external", label("外部资料", "External sources")]] as const).flatMap(([kind, title]) => {
+      const matches = inputs.filter(ref => ref.kind === kind);
+      if (!matches.length) return [];
+      const section = element("section", "cc-upstream-steps");
+      section.setAttribute("aria-label", title);
+      const links = element("div", "cc-upstream-links");
+      links.append(...matches.map(ref => memberLink(ref, true)));
+      section.append(element("h3", "", title), links);
+      return [section];
+    });
   }
   function executionInformation(step:NonNullable<Snapshot["graph"]>["work"][number], artifact?: Artifact){
     const statuses:Record<string,string>={pending:label("待执行","Pending"),running:label("执行中","Running"),awaiting_review:label("待评审","Awaiting review"),done:label("已完成","Done"),failed:label("失败","Failed"),cancelled:label("已取消","Cancelled")};
@@ -250,6 +304,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       progress.setAttribute("aria-label", label("Schema 撰写进度", "Schema writing progress"));
       progress.append(element("p", "", `${label("进度", "Progress")} ${writing.index}/${writing.items.length}`));
       const current = writing.items[writing.index]?.path;
+      if (artifact.schema) progress.append(element("p", "", artifact.schema));
       if (current) progress.append(element("p", "", `${label("当前项", "Current field")}: ${current}`));
       else progress.append(element("p", "", writing.submitting ? label("提交处理中", "Submitting") : label("待完整检查与提交", "Ready for final inspection and submission")));
       progress.append(element("p", "", `${label("已跳过", "Skipped")}: ${writing.skipped.length}`));
@@ -260,11 +315,14 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   }
   function actionDefinition(action: ProcedureAction) {
     const details = element("details", "cc-action-definition");
+    details.dataset.disclosureKey = `action-definition:${action.id}`;
     details.append(element("summary", "", label("流程定义", "Procedure definition")), procedureCanvas!.actionBody(action));
     return details;
   }
-  async function openGraphAction(action: ProcedureAction, stepId?: string, chosenArtifactId?: string) {
-    if(snapshot.lazy&&!loadedActions.has(action.id)){
+  async function openGraphAction(action: ProcedureAction, stepId?: string, chosenArtifactId?: string): Promise<void> {
+    const explorationStep = snapshot.workflow?.work.find(step => step.source?.actionId === action.id);
+    const needsDefinition = snapshot.lazy || Boolean(explorationStep && (explorationStep.reviewConfiguration || action.artifact?.model));
+    if(needsDefinition && !loadedActions.has(action.id)){
       disposeReview?.();renderController?.abort();const requestGeneration=++generation;
       if(!dialog){dialog=element("dialog","cc-dialog");dialog.addEventListener("cancel",event=>{event.preventDefault();close();});root.append(dialog);}
       const head=element("header","cc-modal-head");head.append(element("h2","",action.artifact?.name??action.description),button(label("关闭","Close"),close));
@@ -273,13 +331,16 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       try{payload=await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}?representation=action&action=${encodeURIComponent(action.id)}`);}
       catch(error){if(disposed||generation!==requestGeneration)return;loading.removeAttribute("aria-busy");loading.replaceChildren(element("p","",error instanceof Error?error.message:String(error)),button(label("重试","Retry"),()=>void openGraphAction(action,stepId,chosenArtifactId)));return;}
       if(disposed||generation!==requestGeneration)return;const next=payload.run.context as Snapshot;
-      snapshot.graph!.work=next.graph!.work.map(s=>s.source?.actionId===action.id?s:(snapshot.graph!.work.find(old=>old.id===s.id)??s));
+      const workflow = next.graph ?? next.workflow;
+      if (!workflow) return;
+      snapshot.graph!.work=workflow.work.map(s=>s.source?.actionId===action.id?s:(snapshot.graph!.work.find(old=>old.id===s.id)??s));
       snapshot.artifacts=[...new Map([...snapshot.artifacts,...next.artifacts].map(a=>[a.id,a])).values()];
-      action=(next.graph!.procedure as ProcedureDefinition).actions.find(a=>a.id===action.id)??action;
+      snapshot.externals = [...new Map([...(snapshot.externals ?? []), ...(next.externals ?? [])].map(external => [external.id, external])).values()];
+      action=workflow.procedure.actions.find(a=>a.id===action.id)??action;
       actionDefinitions.set(action.id,action);loadedActions.add(action.id);
     }
     action=actionDefinitions.get(action.id)??action;
-    const selection: { action: ProcedureAction; stepId?: string; artifactId?: string } = { action, stepId }; graphSelection = selection;
+    const selection: StepSelection = { action, stepId }; graphSelection = selection;
     const steps = snapshot.graph!.work.filter(step => step.source?.actionId === action.id);
     const step = steps.find(s => s.id === stepId) ?? steps.at(-1);
     if (!step) { close(); graphSelection = selection; procedureCanvas!.show(action.description, procedureCanvas!.actionBody(action)); return; }
@@ -300,28 +361,31 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
       const intro=element("div","cc-step-intro");intro.append(element("p","cc-step-description",action.description),ui.badge({text:stateLabels[step.status]??step.status}));body.append(intro);
       if (!dialog) { dialog = element("dialog", "cc-dialog"); dialog.addEventListener("cancel", event => { event.preventDefault(); close(); }); root.append(dialog); }
       const head = element("header", "cc-modal-head"); head.append(element("h2", "", result?.mode==="collect"?label("收集产物","Collected artifacts"):action.artifact?.name??action.description), button(label("关闭", "Close"), close));
-      const selectors=element("div","cc-version-bar");selectors.append(executionSelect());body.prepend(selectors);const upstream=upstreamSteps(step);if(upstream)selectors.after(upstream);
+      const selectors=element("div","cc-version-bar");selectors.append(executionSelect());body.prepend(selectors, ...dependencyGroups(Object.values(step.inputs ?? {}).flat()));
       if(result?.mode==="collect"){
         const items=Object.entries(result.items??{}),count=items.reduce((total,[,ids])=>total+ids.length,0);
         const heading=element("div","cc-member-heading");heading.append(element("h3","",label("产物成员","Artifact members")),ui.badge({text:String(count)}));body.append(heading);
-        const list=element("div","cc-member-list");for(const [source,ids]of items){if(!ids.length){const definition=(snapshot.graph!.procedure as ProcedureDefinition).actions.find(a=>a.id===source);list.append(element("p","cc-member-empty",`${definition?.artifact?.name??source} · ${label("0 个产物","0 artifacts")}`));}for(const id of ids)list.append(graphMember(id));}body.append(list);
+        const list=element("div","cc-member-list");for(const [source,ids]of items){if(!ids.length){const definition=snapshot.graph!.procedure.actions.find(a=>a.id===source);list.append(element("p","cc-member-empty",`${definition?.artifact?.name??source} · ${label("0 个产物","0 artifacts")}`));}for(const id of ids)list.append(memberLink({kind:"artifact",id}));}body.append(list);
       }else body.append(element("p","cc-step-empty",label("本次执行尚未产生产物。","This execution has no artifact yet.")));
-      body.append(actionDefinition(action), executionInformation(step));graphBack(head);
+      body.append(actionDefinition(action), executionInformation(step));detailBack(head);
       dialog.replaceChildren(head, body); dialog.setAttribute("aria-label",label("运行详情","Run details")); if (!dialog.open) dialog.showModal(); return;
     }
     await open(artifactId);
     if (!dialog || currentId !== artifactId || graphSelection !== selection) return;
-    const head=dialog.querySelector<HTMLElement>(".cc-modal-head")!;dialog.querySelector(".cc-version-bar")?.prepend(executionSelect());graphBack(head);
+    dialog.querySelector(".cc-version-bar")?.prepend(executionSelect());
     const header=dialog.querySelector(".cc-artifact-header");
-    const info=executionInformation(step, snapshot.artifacts.find(a=>a.id===artifactId)),metadata=header?.querySelector(".cc-metadata");
+    const artifact = snapshot.artifacts.find(a => a.id === artifactId);
+    const info=executionInformation(step, artifact),metadata=header?.querySelector(".cc-metadata");
     if(metadata){const facts=info.querySelector("dl")!;facts.append(element("dt","",label("产物 ID","Artifact ID")),element("dd","cc-artifact-id",metadata.textContent??""));}
     header?.querySelector(".cc-artifact-info")?.remove();
-    const upstream=upstreamSteps(step);if(upstream)header?.append(upstream);
+    const externalRefs = artifact?.dependencies.filter(ref => ref.kind === "external") ?? [];
+    header?.append(...dependencyGroups([...Object.values(step.inputs ?? {}).flat(), ...externalRefs]));
     header?.append(actionDefinition(action), info);
 
   }
   async function openExternal(id: string) {
     disposeReview?.();
+    graphSelection = undefined;
     const external = snapshot.externals?.find(e => e.id === id); if (!external) return;
     currentKind = "external"; currentId = id; const currentGeneration = ++generation;
     renderController?.abort(); renderController = new AbortController();
@@ -329,17 +393,23 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
     dialog.dataset.externalId = id; delete dialog.dataset.artifactId;
     dialog.setAttribute("aria-label", label("外部资料", "External"));
     const head = element("header", "cc-modal-head"); head.append(element("h2", "", label("外部资料", "External")), button(label("关闭", "Close"), close));
-    artifactBack(head);
+    detailBack(head);
     const pane = element("section", "cc-pane cc-external-pane");
     pane.append(element("div", "cc-metadata", id), element("p", "cc-external-source", external.source));
     const body = element("article", "cc-document", label("加载中…", "Loading…")); pane.append(body);
     dialog.replaceChildren(head, pane); if (!dialog.open) dialog.showModal();
+    await showContent(body, { kind: "external", id }, id, currentGeneration);
+  }
+  async function showContent(body: HTMLElement, ref: Dependency, filename: string, currentGeneration: number) {
+    const collection = ref.kind === "external" ? "externals" : "artifacts";
+    const path = `/runs/${encodeURIComponent(snapshot.run.id)}/${collection}/${encodeURIComponent(ref.id)}/content`;
     try {
-      const value = await request(`/api/runs/${encodeURIComponent(snapshot.run.id)}/externals/${encodeURIComponent(id)}/content`);
-      if (disposed || generation !== currentGeneration || currentId !== id || currentKind !== "external") return;
+      const value = await request(`/api${path}`, { signal: renderController?.signal });
+      if (disposed || generation !== currentGeneration) return;
       if (value.previewable === false) {
-        const link = element("a", "cc-text-button", label("下载内容", "Download content"));
-        link.href = `${projectApiBase ?? "/api"}/runs/${encodeURIComponent(snapshot.run.id)}/externals/${encodeURIComponent(id)}/content?download=1`; link.download = id;
+        const link = element("a", "cc-text-button", ref.kind === "artifact" ? label("下载产物内容", "Download content") : label("下载内容", "Download content"));
+        link.href = `${projectApiBase ?? "/api"}${path}?download=1`;
+        link.download = filename;
         body.replaceChildren(element("p", "", value.contentType), link);
       } else body.replaceChildren(renderArtifactValue(value));
     } catch (error) { if (!disposed && generation === currentGeneration) body.textContent = error instanceof Error ? error.message : String(error); }
@@ -348,7 +418,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   const detailFingerprint = (value: Snapshot) => JSON.stringify({
     steps: graphSelection ? value.graph?.work.filter(step => step.source?.actionId === graphSelection!.action.id) : undefined,
     artifacts: graphSelection ? value.artifacts.filter(a => value.graph?.work.some(step => step.source?.actionId === graphSelection!.action.id && step.id === a.stepId)) : value.artifacts.find(a => a.id === currentId),
-    reviews: value.reviews.filter(review => review.artifactId === currentId),
+    reviews: [...value.reviews, ...(value.explorationReviews ?? [])].filter(review => review.artifactId === currentId),
     external: currentKind === "external" ? value.externals?.find(item => item.id === currentId) : undefined
   });
   async function refreshDetail() {
@@ -370,12 +440,13 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
   return {
     element: root,
     update(value: Snapshot) {
+      value = { ...value, graph: value.graph ?? value.workflow };
       const nextKey = JSON.stringify(value);
       if (nextKey === snapshotKey) return;
       const detailChanged = !snapshot || detailFingerprint(snapshot) !== detailFingerprint(value);
       if (snapshot && snapshot.run.id !== value.run.id) definitionInfo.open = false;
       if(value.lazy&&snapshot?.run.id===value.run.id){
-        value.artifacts=snapshot.artifacts;artifactsLoaded=false;
+        value.artifacts=snapshot.artifacts;value.externals=snapshot.externals;artifactsLoaded=false;
         if(value.graph&&snapshot.graph)value.graph.work=value.graph.work.map(step=>{
           const old=snapshot.graph!.work.find(s=>s.id===step.id);
           if(old?.status===step.status&&JSON.stringify(old.artifact)===JSON.stringify(step.artifact)&&JSON.stringify(old.writing)===JSON.stringify(step.writing))return {...old,...step};
@@ -427,10 +498,10 @@ export function createContextGraph(ui: ViewUi, request: (path: string) => Promis
           }, onClose:()=>{graphSelection=undefined;}, onAction: action => { void openGraphAction(action); } });
           work.replaceChildren(definitionInfo, procedureCanvas.element);
         } else procedureCanvas.update(definition);
-      } else { procedureCanvas?.dispose(); procedureCanvas = undefined; work.replaceChildren();artifactCanvas.setSummary(label("自由探索","Exploration"),`${label("产物","Artifacts")} ${value.artifacts.length} · ${label("执行","Executions")} ${value.steps.length} · ${label("外部资料","External sources")} ${value.externals?.length??0}`); }
+      } else { procedureCanvas?.dispose(); procedureCanvas = undefined; work.replaceChildren();artifactCanvas.setStatistics(); }
       syncGraphView();
       const times = new Map(value.steps.map(s => [s.id, s.createdAt]));
-      history = artifactHistory(value.artifacts.filter(a => value.graph || value.completeIds.includes(a.id)).sort((a, b) => (times.get(a.stepId) ?? "").localeCompare(times.get(b.stepId) ?? "") || a.id.localeCompare(b.id)));
+      history = artifactHistory(value.artifacts.filter(a => value.graph && !value.workflow || value.completeIds.includes(a.id) || a.status === "draft" && value.workflow?.work.some(s => s.id === a.stepId)).sort((a, b) => (times.get(a.stepId) ?? "").localeCompare(times.get(b.stepId) ?? "") || a.id.localeCompare(b.id)));
       if (selected && !value.artifacts.some(a => a.id === selected)) selected = undefined;
       try { void graph(); if (detailChanged && (graphSelection || currentId)) void refreshDetail(); } catch (error) { graphHost.replaceChildren(element("div", "cc-state", error instanceof Error ? error.message : String(error))); }
     },

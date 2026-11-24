@@ -1,0 +1,28 @@
+Free exploration review
+- review_id: {{reviewId}}
+- review_round_id: {{roundId}}
+- Status: {{status}}
+{{#if actorName}}
+- Reviewer: {{actorName}}
+{{/if}}
+{{#if progress}}
+- Nodes reported: {{progress.processed}}/{{progress.total}}
+{{/if}}
+{{#if opinion}}
+- Reviewer vote: {{opinion.vote}}
+{{#if opinion.summary}}
+- Summary: {{opinion.summary}}
+{{/if}}
+{{#each opinion.comments}}
+- Comment [{{severity}}]: {{body}}
+{{/each}}
+{{/if}}
+{{#if failed}}
+{{#if failed.attemptId}}
+- Attempt: {{failed.attemptId}}
+{{/if}}
+{{#if failed.failure}}
+- Failure stage: {{failed.failure.stage}} [{{failed.failure.code}}] {{failed.failure.message}}
+{{/if}}
+- Retry this round: {{failed.command}}
+{{/if}}

@@ -26,6 +26,7 @@ import { dirname } from "node:path";
 import type { Review } from "../context_control/types.js";
 import { effectiveStep } from "../context_control/graph-rewind.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
+import { ExplorationReviews, explorationReviewHandle, isModelReviewHandle } from "../context_control/exploration-review.js";
 
 type BoundAgentReviewSession = {
   // Reuse only the open Store handle within this binding operation. Each
@@ -65,7 +66,7 @@ export async function agentReviewAssignmentDetailPayload(): Promise<unknown> {
   const context = await readBoundContext(binding);
   const resources = await (await import("./reviewer-resources.js")).reviewerResources();
   return {
-    protocol: binding.reviewId.startsWith("graph-review-") ? "graph" : "flow",
+    protocol: isModelReviewHandle(binding.reviewId) ? "graph" : "flow",
     ...(resources ? {
       artifactId: resources.candidate.id,
       references: [
@@ -129,6 +130,11 @@ export async function boundAgentReviewSession(write = false): Promise<BoundAgent
       if (!effectiveStep(modelRun, artifact.stepId)) throw new Error("review_attempt_not_current");
       return readArtifactReviewForActor({ service, runsRoot: config.runsRoot, reviewId: graphReviewHandle(runId, artifact.stepId), roundId: review.roundId, actorId: review.reviewer.actorId });
     });
+  } else if (modelRun && service) {
+    const repository = new ExplorationReviews(service);
+    const { row, actor, round } = await repository.locate(runId, assignmentId);
+    if (actor === "runner") throw new Error("review_assignment_not_bound");
+    directed = await readArtifactReviewForActor({ service, runsRoot: config.runsRoot, reviewId: explorationReviewHandle(runId, row.value.id), roundId: round.id, actorId: actor });
   }
   const run = directed?.run ?? await readRun(config.runsRoot, runId);
   for (const review of run.artifactReviews ?? []) {

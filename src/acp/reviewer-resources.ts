@@ -1,6 +1,6 @@
 import { reviewerCommand } from "./reviewer-invocation.js";
 import { createHash } from "node:crypto";
-import { graphArtifactDto } from "../context_control/review-repository.js";
+import { explorationArtifactDto, graphArtifactDto } from "../context_control/review-repository.js";
 import { buildReviewContract } from "./review-contract.js";
 import { artifactReviewAssignmentId } from "../artifact-review.js";
 import { dirname, resolve, relative, isAbsolute, basename, join } from "node:path";
@@ -13,6 +13,7 @@ import type { Artifact, External, Review, Step } from "../context_control/types.
 import { emitCommandResult } from "../commands/cli-errors.js";
 import { MEMSPHERE_SCHEMA_MODEL } from "../memory/schema-model.js";
 import { resolvedArtifact } from "../context_control/schema-contract.js";
+import { ExplorationReviews, explorationReviewIdentity } from "../context_control/exploration-review.js";
 
 const denied = (id: string) => failure("REVIEW_RESOURCE_DENIED", `Object is outside this Review's fixed context: ${id}`);
 export async function reviewerResources() {
@@ -21,7 +22,15 @@ export async function reviewerResources() {
   const service = binding.service;
   const runId = process.env.MEMSPHERE_REVIEW_RUN_ID!;
   const run = service && await service.findRun(runId);
-  if (!service || !run?.frames?.some(f => f.type === "graph")) return undefined;
+  if (!service || !run) return undefined;
+  const exploration = explorationReviewIdentity(binding.reviewId);
+  if (exploration) {
+    const repository = new ExplorationReviews(service);
+    const { row, artifact: candidate } = await repository.locate(runId, exploration.recordId);
+    const scope = await repository.materials(runId, row.value);
+    return { binding, config, service, run, own: row.value, candidate, ...scope, confirmations: [] as Review[] };
+  }
+  if (!run.frames?.some(f => f.type === "graph")) return undefined;
   return service.withGraph(async g => {
     const own = (await g.records.require<Review>("review", runId, binding.assignmentId)).value;
     const candidate = (await g.records.require<Artifact>("artifact", runId, own.artifactId)).value;
@@ -44,7 +53,7 @@ export async function reviewerResources() {
         if (row.value.status === "submitted") confirmations.push({ ...row.value, reviewer: { ...row.value.reviewer, ...(actor !== "runner" ? { source: round.reviewConfig.reviewers[actor]!.kind } : {}) } });
       }
     }
-    return { binding, config, service, run, own, candidate, artifacts, steps, externals, confirmations };
+    return { binding, config, service, run, own, candidate, artifacts, steps, externals, confirmations, bodies: undefined };
   });
 }
 
@@ -130,7 +139,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     }
     return false;
   }
-  const { service, run, own, candidate, artifacts, steps, externals, confirmations } = scope;
+  const { service, run, own, candidate, artifacts, steps, externals, confirmations, bodies } = scope;
   if (o.run && o.run !== run.id || o.assignment && o.assignment !== own.id) throw failure("REVIEW_IDENTITY_CONFLICT", "Session identity conflicts with explicit target");
   let result: unknown;
   const selectArtifact = () => {
@@ -142,11 +151,11 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     return matches[0]!;
   };
   if (operation === "artifact-show" && !o.artifact && !o.step && !o.out) {
-    result = { artifactId: candidate.id, artifact: await expanded(candidate), contextArtifacts: await Promise.all(artifacts.filter(a => a.id !== candidate.id).map(async a => ({ artifactId: a.id, stepId: a.stepId, artifact: await expanded(a) }))), contextExternals: externals.map(e => ({ externalId: e.id, source: e.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id) })), confirmations, revisionSummary: candidate.revisedSummary ? { body: candidate.revisedSummary, digest: createHash("sha256").update(candidate.revisedSummary).digest("hex"), createdAt: steps.find(s => s.id === candidate.stepId)!.reviewRounds!.find(r => r.id === own.roundId)!.createdAt, previousSubmissionId: candidate.revisedFrom } : undefined };
+    result = { artifactId: candidate.id, artifact: await expanded(candidate), contextArtifacts: await Promise.all(artifacts.filter(a => a.id !== candidate.id).map(async a => ({ artifactId: a.id, stepId: a.stepId, artifact: await expanded(a) }))), contextExternals: externals.map(e => ({ externalId: e.id, source: e.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === e.id)).map(a => a.id) })), confirmations, revisionSummary: candidate.revisedSummary ? { body: candidate.revisedSummary, digest: createHash("sha256").update(candidate.revisedSummary).digest("hex"), createdAt: own.exploration ? own.createdAt : steps.find(s => s.id === candidate.stepId)!.reviewRounds!.find(r => r.id === own.roundId)!.createdAt, previousSubmissionId: candidate.revisedFrom } : undefined };
   } else if (["artifact-show", "external-show"].includes(operation)) {
     const item = operation === "artifact-show" ? selectArtifact() : externals.find(e => e.id === o.external);
     if (!item) throw denied(String(o.external));
-    const body = await service.body(item);
+    const body = bodies?.get(item.id) ?? await service.body(item);
     const stored = "business" in item ? item.business : undefined;
     const business = stored ? { business: { destination: stored.destination } } : {};
     if (o.out !== undefined) { await exportReviewerBody(o.out, body.bytes); result = { runId: run.id, id: item.id, contentType: body.contentType, ...business, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : {}), out: o.out }; }
@@ -155,11 +164,17 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
       const chars = text ? Array.from(Buffer.from(body.bytes).toString("utf8")) : [];
       const value = stored ? Array.from(stored.valueJson) : [];
       const businessPreview = stored ? { business: { destination: stored.destination, valuePreview: value.slice(0, 200).join(""), valueTruncated: value.length > 200 } } : {};
-      result = { runId: run.id, id: item.id, ...businessPreview, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : { dependencies: item.dependencies }), contentType: body.contentType, ...(text ? { content: chars.slice(0, 200).join("") } : {}), truncated: chars.length > 200, exportCommand: reviewerCommand(`run ${operation === "artifact-show" ? "artifact" : "external"} show --run ${run.id} --${operation === "artifact-show" ? "artifact" : "external"} ${item.id} --out <file>`) };
+      result = { runId: run.id, id: item.id, ...businessPreview, ...("source" in item ? { source: item.source, viaArtifactIds: artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) } : { dependencies: visibleDependencies(item) }), contentType: body.contentType, ...(text ? { content: chars.slice(0, 200).join("") } : {}), truncated: chars.length > 200, exportCommand: reviewerCommand(`run ${operation === "artifact-show" ? "artifact" : "external"} show --run ${run.id} --${operation === "artifact-show" ? "artifact" : "external"} ${item.id} --out <file>`) };
     }
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;
-    result = await service.withGraph(async g => {
+    if (own.exploration) {
+      const dto = await expanded(a);
+      const contract = buildReviewContract({ procedureName: "", procedureRules: [], artifactName: a.name,
+        step: { instruction: a.name, artifact: a.name, type: dto.type, format: dto.format } });
+      contract.artifact.schema = a.schemaContract;
+      result = contract;
+    } else result = await service.withGraph(async g => {
       const action = g.action(run, step), rules = await g.rules(run, action), dto = await expanded(a);
       const contract = buildReviewContract({ procedureName: run.memoryRef!.slice("procedures/".length), procedureRules: [rules.procedure], artifactName: a.name,
         step: { instruction: action.description, artifact: a.name, type: dto.type, format: dto.format,
@@ -186,5 +201,6 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
   } else return false;
   emitCommandResult(result, o.output);
   return true;
-  async function expanded(a: Artifact) { return { ...await graphArtifactDto(service, a), dependencies: a.dependencies }; }
+  function visibleDependencies(a: Artifact) { return bodies ? a.dependencies.filter(ref => bodies.has(ref.id)) : a.dependencies; }
+  async function expanded(a: Artifact) { return { ...(bodies ? explorationArtifactDto(a, bodies.get(a.id)!) : await graphArtifactDto(service, a)), dependencies: visibleDependencies(a) }; }
 }
