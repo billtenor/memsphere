@@ -7,7 +7,7 @@ import { withNativeFileLock } from "../src/file-lock.js";
 
 import test from "node:test";
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 
 import { join } from "node:path";
 
@@ -15,7 +15,7 @@ import { openContextControl } from "../src/project/context-control.js";
 
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 
-import { businessFixture } from "./helpers/business-data.js";
+import { businessFixture, snapshotTree } from "./helpers/business-data.js";
 
 import { textContent } from "../src/context_control/types.js";
 
@@ -27,6 +27,30 @@ function barrier() {
   const released = new Promise<void>(resolve => { release = resolve; });
   return { entered, release, wait: async () => { enter(); await released; } };
 }
+
+test("opening Context Control rejects an incompatible Review Store without changing existing records", async t => {
+  const { root } = await initializedContextFixture(t, {});
+  const service = (await openContextControl(root))!;
+  const run = await service.start("Existing Run");
+  const { artifact } = await service.report(run.id, { name: "Candidate", content: textContent("Candidate") });
+  await service.review(run.id, artifact.id, "human", ["Existing opinion"]);
+  const existing = await service.inspect(run.id);
+
+  const stores = join(root, "data/context_control");
+  const invalid = join(stores, "reviews", "unexpected.txt");
+  await writeFile(invalid, "not a Store record");
+  const beforeOpen = await snapshotTree(stores);
+
+  await assert.rejects(openContextControl(root), {
+    code: "STORE_INCOMPATIBLE",
+    message: "Unknown Store entry: unexpected.txt"
+  });
+  assert.deepEqual(await snapshotTree(stores), beforeOpen);
+
+  await unlink(invalid);
+  const reopened = (await openContextControl(root))!;
+  assert.deepEqual(await reopened.inspect(run.id), existing);
+});
 
 test("lightweight Review historical comment IDs remain readable without rewriting persisted bytes or revision", async t => {
   const { root } = await initializedContextFixture(t), service = (await openContextControl(root))!;
