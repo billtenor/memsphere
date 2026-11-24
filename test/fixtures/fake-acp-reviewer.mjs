@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import { access, writeFile } from "node:fs/promises";
+import { access, appendFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 
@@ -23,7 +23,7 @@ const app = acp
       agentInfo: { name: "memsphere-fake-reviewer", version: "1.0.0" }
     };
   })
-  .onRequest(acp.methods.agent.session.new, ({ params }) => {
+  .onRequest(acp.methods.agent.session.new, async ({ params }) => {
     if (process.env.MEMSPHERE_WORKSPACE_ROOT) {
       assert.equal(realpathSync(params.cwd), realpathSync(process.cwd()));
       assert.equal(params.cwd, process.env.MEMSPHERE_WORKSPACE_ROOT);
@@ -31,6 +31,7 @@ const app = acp
     }
     const sessionId = `fake-${randomUUID()}`;
     sessions.add(sessionId);
+    if (process.env.EXPLORATION_TEST_LAUNCHES) await appendFile(process.env.EXPLORATION_TEST_LAUNCHES, `${sessionId}\n`);
     return { sessionId };
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client, signal }) => {
@@ -131,12 +132,23 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
     const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
     graph = Boolean(detail.reviewProgress);
+    if (process.env.EXPLORATION_TEST_EXTERNAL) {
+      const args = ["run", "external", "show", "--run", process.env.MEMSPHERE_REVIEW_RUN_ID, "--external"];
+      const external = JSON.parse(await invokeReviewCli([...args, process.env.EXPLORATION_TEST_EXTERNAL, "--output", "json"]));
+      assert.equal(external.source, "used");
+      await assert.rejects(invokeReviewCli([...args, process.env.EXPLORATION_TEST_UNATTACHED, "--output", "json"]), /REVIEW_RESOURCE_DENIED|outside this Review/);
+    }
   }
   if (graph) {
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
       view = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
+      const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
+      if (crashMarker) {
+        try { await writeFile(crashMarker, "node saved\n", { flag: "wx" }); process.exit(7); }
+        catch (error) { if (error.code !== "EEXIST") throw error; }
+      }
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;

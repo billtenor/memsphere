@@ -17,7 +17,7 @@ export function installReviewerCommands(program: Command) {
   if (!inReviewerSession()) return;
   const identities: ReviewerIdentityOption[] = [];
   const helpCommands = process.env.MEMSPHERE_REVIEW_HANDLE
-    ? reviewerCapabilities(process.env.MEMSPHERE_REVIEW_HANDLE.startsWith("graph-review-") ? "graph" : "flow").commands
+    ? reviewerCapabilities(isModelReviewHandle(process.env.MEMSPHERE_REVIEW_HANDLE) ? "graph" : "flow").commands
     : reviewerCommands;
   if (!process.env.MEMSPHERE_REVIEW_HANDLE) program.addHelpText("afterAll", "\nSession protocol hint is unavailable. Help lists both protocols; use run review assignment show to inspect the bound protocol. Fixed Artifact/External/confirmation targets require graph; flow supports pinned assignment/step reads.\n");
   const visit = (command: Command) => {
@@ -43,9 +43,10 @@ export function installReviewerCommands(program: Command) {
     validateReviewerIdentities(p, identities, expected, Boolean(process.env.MEMSPHERE_REVIEW_MEMORY_RUN_ID));
     process.env.MEMSPHERE_PROJECT = expected.project;
     const binding = await boundAgentReviewSession();
-    const capabilities = reviewerCapabilities(binding.reviewId.startsWith("graph-review-") ? "graph" : "flow");
+    const capabilities = reviewerCapabilities(isModelReviewHandle(binding.reviewId) ? "graph" : "flow");
     if (p !== "continue" && !capabilities.commands.includes(p as typeof reviewerCommands[number])) throw failure("INVALID_ARGUMENT", `Command is unsupported in this ${capabilities.protocol} Review protocol: ${p}. ${capabilities.targets}`);
     for (const [key, value] of Object.entries(reviewerCommandDefaults(p, action.opts(), expected)))
       action.setOptionValue(key, value);
   });
 }
+import { isModelReviewHandle } from "../context_control/exploration-review.js";

@@ -76,7 +76,7 @@ export function reviewNodeProgress(value: ReviewNodes, status?: string) {
   const nodes = allReviewNodes(value.nodeTree).filter(needsNodeReport), processed = nodes.filter(n => value.nodeStates?.find(s => s.nodeId === n.nodeId)?.reported).length;
   return { phase: status === "submitted" ? "submitted" : status === "cancelled" ? "cancelled" : processed === nodes.length ? "final_review" : "reviewing", processed, total: nodes.length };
 }
-export function reviewNodeView(value: ReviewNodes, comments: readonly NodeComment[], options: { nodeId?: string; all?: boolean; list?: boolean; status?: string } = {}) {
+export function reviewNodeView(value: ReviewNodes, comments: readonly NodeComment[], options: { nodeId?: string; all?: boolean; allFields?: boolean; list?: boolean; status?: string } = {}) {
   if (!value.nodeTree) throw new Error("review_nodes_not_enabled");
   assertReviewNodes(value, comments);
   const nodes = allReviewNodes(value.nodeTree), progress = reviewNodeProgress(value, options.status), current = currentReviewNode(value);
@@ -91,7 +91,7 @@ export function reviewNodeView(value: ReviewNodes, comments: readonly NodeCommen
     const visit = (n: ReviewNode): unknown => { const d = detail(n, false); delete d.ruleResults; delete d.comments; return { ...d, assertCount: n.asserts.length, suggestCount: n.suggests.length, children: n.children.map(visit) }; };
     return { progress, tree: visit(value.nodeTree.root) };
   }
-  if (options.all) return { progress, nodes: nodes.map(n => detail(n, false)) };
+  if (options.all) return { progress, nodes: nodes.map(n => detail(n, options.allFields === true)) };
   const node = options.nodeId ? nodes.find(n => n.nodeId === options.nodeId) : current;
   if (options.nodeId && !node) throw new Error(`review_node_not_found: ${options.nodeId}`);
   return node ? { progress, node: { ...detail(node, true), path: path(node) } } : { progress, nodes: nodes.filter(needsNodeReport).map(n => { const d = detail(n, false); delete d.comments; return d; }), comments };

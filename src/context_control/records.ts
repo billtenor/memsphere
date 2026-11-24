@@ -1,4 +1,5 @@
 import type { ValueStore, StoredValue } from "../data/api/value-store.js";
+import type { Context } from "../data/api/context.js";
 import type { Entity } from "./model-assets.js";
 import { failure } from "./errors.js";
 
@@ -15,8 +16,8 @@ export class Records {
     if (!row) throw failure("NOT_FOUND", `${entity} not found: ${id}`);
     return row;
   }
-  create<T extends { id: string }>(entity: Entity, runId: string, value: T) {
-    return this.stores[entity].create({}, this.key(entity, runId, value.id), value);
+  create<T extends { id: string }>(entity: Entity, runId: string, value: T, context: Context = {}) {
+    return this.stores[entity].create(context, this.key(entity, runId, value.id), value);
   }
   update<T extends { id: string }>(entity: Entity, runId: string, row: StoredValue, value: T) {
     if (row.revision === undefined) throw failure("UNSUPPORTED_CAPABILITY", "Graph execution requires revision CAS");

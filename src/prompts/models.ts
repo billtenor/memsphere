@@ -30,12 +30,23 @@ export type PromptInputMap = {
   "run.review-vote-receipt": RunReviewVoteReceiptPromptModel;
   "run.review-human-submit-receipt": RunReviewHumanSubmitReceiptPromptModel;
   "run.review-summary": ArtifactReviewSummaryPromptModel;
+  "run.exploration-review-result": ExplorationReviewResultPromptModel;
   "run.schema-overview": SchemaOverviewPromptModel;
   "run.review-next-action": ReviewNextActionPromptModel;
   "run.review-configuration-required": ReviewConfigurationRequiredPromptModel;
 };
 
 export type PromptTemplateId = keyof PromptInputMap;
+
+export type ExplorationReviewResultPromptModel = {
+  reviewId: string;
+  roundId: string;
+  actorName?: string;
+  status: string;
+  progress?: { processed: number; total: number };
+  opinion?: { vote: string; summary?: string; comments: Array<{ severity: string; body: string }> };
+  failed?: { attemptId?: string; failure?: { stage: string; code: string; message: string }; command: string };
+};
 
 export type AcpArtifactReviewPromptModel = {
   rolePrompts: string[];

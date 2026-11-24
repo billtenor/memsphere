@@ -92,6 +92,7 @@ type MarkdownToken = {
 };
 
 export class ArtifactValidationFailure extends Error {
+  readonly code = "ARTIFACT_VALIDATION_FAILED";
   readonly result: ArtifactValidationResult;
 
   constructor(result: ArtifactValidationResult) {

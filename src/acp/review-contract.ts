@@ -7,6 +7,7 @@ import {
   type RunSchemaContract
 } from "../run/store.js";
 import { failure } from "../context_control/errors.js";
+import { explorationReviewIdentity } from "../context_control/exploration-review.js";
 import type { EffectiveRuleTree } from "../memory/rules.js";
 import {
   toEffectiveRuleDisplayEntries,
@@ -37,6 +38,13 @@ export type AgentReviewContract = {
 };
 
 export function buildAgentReviewContract(context: ArtifactReviewContext): AgentReviewContract {
+  if (explorationReviewIdentity(context.review.id)) {
+    const { review, round } = context;
+    const artifact = review.submissions.find(item => item.id === round.submissionId)?.artifact;
+    if (!artifact) throw failure("REVIEW_CONTEXT_INVALID", "Frozen Review candidate contract is unavailable");
+    return buildReviewContract({ procedureName: "", procedureRules: [], artifactName: artifact.name,
+      step: { instruction: artifact.name, artifact: artifact.name, type: artifact.type, format: artifact.format } });
+  }
   const step = currentStep(context.run);
   const frame = currentFrame(context.run);
   const scope = (context.round.controlPlane ?? context.review.controlPlane).artifactScope;

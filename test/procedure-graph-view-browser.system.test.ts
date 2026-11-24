@@ -8,13 +8,16 @@ import { readProjectConfig } from "../src/config.js";
 import { createViewServer } from "../src/commands/view.js";
 import { graphMemorySyntax } from "../src/memory/syntax.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
+import { textContent } from "../src/context_control/types.js";
 
 test("graph View renders Markdown and submits a Human inline opinion inside the Graph dialog", { timeout: 60000 }, async t => {
   const f = await businessFixture(t, {}), service = (await openContextControl(f.root, true))!;
   const procedure: GraphProcedureMemory = { tag: "!procedure", syntax: graphMemorySyntax, names: ["browser-graph"], defines: ["Graph review browser contract"], goals: ["Graph goal"], asserts: ["Overall frozen rule"], mode: "graph", actions: [{ tag: "!action", id: "A", description: "Prepare the candidate", asserts: ["Action frozen rule"], dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Candidate", asserts: ["Artifact frozen rule"], model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/markdown" }, review: ["reviewer"] } }] };
+  const start = await service.withGraph(g => g.start({ name: "Graph Human review", procedure, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }, acpProviders: {} }, reviewConfiguration: { reviews: { "browser-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } }, slots: { "browser-graph::reviewer": { actorIds: ["human"] } } } }));
+  const external = await service.addExternal(start.run.id, "Frozen evidence", { content: textContent("Original evidence body") });
   const report = await service.withGraph(async g => {
-    const start = await g.start({ name: "Graph Human review", procedure, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] } }, acpProviders: {} }, reviewConfiguration: { reviews: { "browser-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } }, slots: { "browser-graph::reviewer": { actorIds: ["human"] } } } });
-    await g.enter(start.run.id, start.steps[0].id); return g.report(start.run.id, start.steps[0].id, { text: "# Graph candidate\n\nEvidence is pending." });
+    await g.enter(start.run.id, start.steps[0].id);
+    return g.report(start.run.id, start.steps[0].id, { text: "# Graph candidate\n\nEvidence is pending.", dependencies: [{ kind: "external", id: external.id }] });
   });
   const server = createViewServer(await readProjectConfig("test-project", f.home));
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -55,7 +58,12 @@ test("graph View renders Markdown and submits a Human inline opinion inside the 
 
     await modal.getByRole("button",{name:"关闭",exact:true}).click();
     await page.getByRole("button",{name:"产物视角",exact:true}).click();
+    await page.locator(`.cc-node[data-external-id="${external.id}"]`).waitFor();
     await page.locator(`.cc-node[data-artifact-id="${report.step.artifact?.mode==="produce"?report.step.artifact.id:""}"]`).click();
+    await modal.locator("#artifact-review-my-panel").waitFor();
+    await modal.getByRole("region", { name: "外部资料", exact: true }).getByRole("button", { name: /Frozen evidence/ }).click();
+    await modal.getByText("Original evidence body", { exact: true }).waitFor();
+    await modal.getByRole("button", { name: "← 返回", exact: true }).click();
     await modal.locator("#artifact-review-my-panel").waitFor();
 
     assert.equal(await modal.locator(".cc-review-material h1").innerText(), "Graph candidate");

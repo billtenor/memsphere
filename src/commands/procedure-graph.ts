@@ -188,7 +188,7 @@ export async function graphCommand(operation: string, input: object): Promise<bo
         ...(replacement ? { command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step ${replacement}` } : {}) }, options.output ?? "text");
       return true;
     }
-    if (operation === "enter") { const entered = await g.enter(run.id, needed(options.step, "--step")); await createCommandState(project, run.id, entered.step.id); console.log(await stepPrompt(g, entered.snapshot, entered.step, project)); return true; }
+    if (operation === "enter") { if (options.review) throw failure("INVALID_ARGUMENT", "--review requires a free exploration Run"); const entered = await g.enter(run.id, needed(options.step, "--step")); await createCommandState(project, run.id, entered.step.id); console.log(await stepPrompt(g, entered.snapshot, entered.step, project)); return true; }
     if (operation === "status") { const snapshot = await g.advance(run.id); const prompt = await graphNext(g, snapshot, project, !await currentIdentity()); if (options.output === "json") emitCommandResult({ snapshot: await g.snapshot(run.id), prompt }, "json"); else console.log(prompt); return true; }
     if (["schema-enter", "schema-show", "schema-report", "schema-skip", "schema-repeat", "schema-export"].includes(operation)) {
       const stepId = needed(options.step, "--step");

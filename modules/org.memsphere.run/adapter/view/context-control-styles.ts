@@ -22,7 +22,6 @@ export const contextControlStyles = `
 
 .cc-group { display:flex; align-items:center; gap:10px; }
 .cc-modal-head { display:flex; align-items:center; gap:10px; }
-.cc-review-head { display:flex; align-items:center; gap:10px; }
 
 .cc-modal-head { justify-content:flex-start; }
 
@@ -86,18 +85,12 @@ export const contextControlStyles = `
 .cc-pane-review { border-left:0; background:var(--mem-view-color-canvas); }
 .cc-pane-title { font-size:11px; color:var(--mem-view-color-text-muted); font-weight:600; letter-spacing:.04em; margin:0 0 15px; }
 .cc-metadata { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
-.cc-related { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-bottom:16px; font-size:11px; color:var(--mem-view-color-text-muted); }
 .cc-document { padding-top:16px; border-top:1px solid var(--mem-view-color-border); font-size:14px; line-height:1.9; }
 .cc-document h3 { margin:0 0 14px; font-size:22px; line-height:1.5; font-weight:650; }
 .cc-document h4 { margin:23px 0 8px; font-size:15px; font-weight:650; }
 .cc-document p { margin:8px 0; }
 .cc-document ul { margin:6px 0; padding-left:21px; }
 .cc-document code { padding:2px 5px; background:var(--mem-view-color-subtle); border-radius:4px; font-size:12px; }
-.cc-review-card { padding:15px; border:1px solid var(--mem-view-color-border); border-radius:8px; background:var(--mem-view-color-surface); margin-bottom:12px; }
-.cc-review-head { justify-content:space-between; font-size:11px; margin-bottom:12px; }
-.cc-review-card time { color:var(--mem-view-color-text-muted); font-size:10px; }
-.cc-review-card p { margin:8px 0; font-size:13px; line-height:1.8; }
-.cc-review-card ol { padding-left:19px; font-size:13px; line-height:1.8; margin:8px 0; }
 .cc-review-summary { border-top:1px solid var(--mem-view-color-border); margin-top:12px; padding-top:10px; font-size:11px; color:var(--mem-view-color-text-muted); }
 .cc-no-review { min-height:230px; padding:25px 10px; display:grid; justify-items:center; align-content:center; text-align:center; }
 .cc-no-review h3 { font-size:14px; margin:12px 0 5px; font-weight:600; }
