@@ -52,7 +52,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     if (!context.available) { console.log(`No further transitions (${context.runStatus}). Use ordinary run status/show commands.`); return; }
     console.log(target === router ? context.graph ? "Available: enter-schema, schema show, schema report, skip, repeat, artifact export, report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <command> --help" : context.parameters.review ? "Available: review show, review report, review update, review comment add/update/delete, review submit, review wait, review retry\nUse: memsphere continue <command> --help" : "Available: report, enter-schema, schema show, schema report, skip, repeat, artifact export, step show, step configure, review create/list/start, external add, artifact tag, outputs update, finish, abandon\nUse: memsphere continue <command> --help" : target.helpInformation());
   };
-  const load = async () => {
+  const loadContext = async () => {
     const row = (await currentCommandState(true))!;
     const project = row.value.parameters.project;
     if (!project) throw failure("INVALID_STATE", "CommandState has no project");
@@ -71,7 +71,10 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     if (graph && stepId) requireEffectiveStep(run, stepId);
     return { ...row.value, row, graph, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: graph ? step?.status ?? run.status : run.status, available: row.value.status === "active" && run.status === "running" && (!graph || step?.status !== "done") };
   };
+  let context: ReturnType<typeof loadContext> | undefined;
+  const load = () => context ??= loadContext();
   continuation.action(async () => {
+    context = undefined;
     const tail = continuation.args;
     if (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID) { await reviewerContinue(nativeRun, tail); return; }
     await load();

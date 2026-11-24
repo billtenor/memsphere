@@ -72,26 +72,54 @@ export async function validateBusinessBindings(root: string, project: ProjectCon
   }
   return directories;
 }
-export async function getBusinessBinding(root: string, id: string) {
-  assertBusinessStoreId(id);
+async function readBusinessBindings(root: string) {
   const stamp = await readModelOperationStamp(root);
   const project = await readBusinessProject(root);
   const directories = await validateBusinessBindings(root, project);
+  return { stamp, project, directories };
+}
+
+function selectBusinessBinding({ stamp, project, directories }: Awaited<ReturnType<typeof readBusinessBindings>>, id: string) {
   const binding = project.dataStores && Object.hasOwn(project.dataStores, id) ? project.dataStores[id] : undefined;
   if (!binding) throw serviceError("STORE_NOT_FOUND", `Business Store not found: ${id}`);
-  await assertModelOperationStamp(root, stamp);
   const directory = directories.get(id);
   const location = (binding.factory === "memsphere/tos" || binding.factory === "memsphere/tos-json")
     ? { kind: "tos" as const, bucket: binding.config.bucket, prefix: binding.config.prefix }
     : { kind: "filesystem" as const, directory: directory! };
   return { project, binding, directory, location, stamp };
 }
-export function openBusinessStore(context: Context, root: string, id: string, options: { write?: boolean; runtime?: ModelRuntime } = {}) {
-  return withConsistentModelRead(() => openBusinessStoreOnce(context, root, id, options));
+
+export async function getBusinessBinding(root: string, id: string) {
+  assertBusinessStoreId(id);
+  const snapshot = await readBusinessBindings(root);
+  const state = selectBusinessBinding(snapshot, id);
+  await assertModelOperationStamp(root, state.stamp);
+  return state;
 }
-async function openBusinessStoreOnce(context: Context, root: string, id: string, options: { write?: boolean; runtime?: ModelRuntime }) {
-  const state = await getBusinessBinding(root, id);
-  const runtime = options.runtime ?? await (await createProjectModelHost(context, { root, ...state.project })).runtime(state.binding.model);
+
+export function openBusinessStore(context: Context, root: string, id: string, options: { write?: boolean; runtime?: ModelRuntime } = {}) {
+  return withConsistentModelRead(async () => {
+    const state = await getBusinessBinding(root, id);
+    return openBoundStore(context, root, id, state, options.runtime);
+  });
+}
+
+/** Open related Stores against one validated set of bindings and worktree paths. */
+export function openBusinessStores(context: Context, root: string, runtimes: ReadonlyMap<string, ModelRuntime>) {
+  return withConsistentModelRead(async () => {
+    for (const id of runtimes.keys()) assertBusinessStoreId(id);
+    const snapshot = await readBusinessBindings(root);
+    await assertModelOperationStamp(root, snapshot.stamp);
+    const stores = new Map<string, Awaited<ReturnType<typeof openBoundStore>>>();
+    for (const [id, runtime] of runtimes) {
+      stores.set(id, await openBoundStore(context, root, id, selectBusinessBinding(snapshot, id), runtime));
+    }
+    return stores;
+  });
+}
+
+async function openBoundStore(context: Context, root: string, id: string, state: ReturnType<typeof selectBusinessBinding>, providedRuntime?: ModelRuntime) {
+  const runtime = providedRuntime ?? await (await createProjectModelHost(context, { root, ...state.project })).runtime(state.binding.model);
   if (state.binding.kind === "value") {
     try { assertJsonDescriptor(runtime.descriptor.root); }
     catch (cause) { throw serviceError("STORE_INCOMPATIBLE", "filesystem JSON ValueStore requires a JSON-compatible model", { cause: String(cause) }); }

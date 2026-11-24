@@ -29,8 +29,8 @@ export async function resolveWorkspaceIdentity(cwd = process.cwd()): Promise<Wor
   }
 }
 
-export async function resolveMainWorkspacePath(cwd = process.cwd()): Promise<string> {
-  const workspace = await resolveWorkspaceIdentity(cwd);
+export async function resolveMainWorkspacePath(directory: string | WorkspaceIdentity = process.cwd()): Promise<string> {
+  const workspace = typeof directory === "string" ? await resolveWorkspaceIdentity(directory) : directory;
   if (workspace.kind !== "git") throw new Error("Git main worktree is only available inside a Git repository");
   const output = await gitOutput(["worktree", "list", "--porcelain"], workspace.path);
   const first = output.split(/\r?\n/).find((line) => line.startsWith("worktree "));
