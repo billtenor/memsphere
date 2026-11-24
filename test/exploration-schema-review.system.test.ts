@@ -102,7 +102,17 @@ test("exploration Schema CLI writes files and empty fields and preserves an inco
   await assert.rejects(f.call("continue", "report"), /SCHEMA_INCOMPLETE/);
   assert.deepEqual(await f.service.inspect(R), incomplete);
 
-  await assert.rejects(f.call("continue", "schema", "report", "--position", count.position, "--artifact", ""), /number|finite/i);
+  for (const [args, value] of [
+    [["run", "schema", "report", "--run", R, "--step", S], "invalid number"],
+    [["continue", "schema", "report"], ""]
+  ] as const) {
+    await assert.rejects(f.call(...args, "--position", count.position, "--artifact", value), (error: Error) => {
+      const { error: diagnostic } = JSON.parse(error.message);
+      assert.equal(diagnostic.code, "ARTIFACT_VALIDATION_FAILED");
+      assert.match(diagnostic.message, /artifact\.type\.expected_number at Findings\.Count/);
+      return true;
+    });
+  }
   const restored = await f.call("continue", "schema", "show");
   assert.equal(restored.position, count.position);
   assert.deepEqual(restored.draft, count.draft);

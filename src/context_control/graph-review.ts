@@ -80,17 +80,18 @@ export function graphRoundControlPlane(run: Run, step: Step, round: ReviewRound,
 export function projectGraphRound(run: Run, step: Step, round: ReviewRound, reviews: Review[], artifactDigest = "", materialDigests: ReadonlyMap<string, string> = new Map(), singleReviewerScope?: string): ArtifactReviewRound {
   reviews = reviews.filter(review => review.roundId === round.id).sort((a, b) => a.id.localeCompare(b.id));
   const cp = graphRoundControlPlane(run, step, round, singleReviewerScope);
+  const projectComments = (review: Review | undefined) => (review?.comments ?? []).map(c => {
+    const { anchor, ...fields } = c;
+    const targetId = anchor?.targetRef?.id ?? round.artifactId;
+    return { ...fields, updatedAt: c.createdAt, ...(anchor ? { anchor: { submissionId: targetId, sourceHash: targetId === round.artifactId ? artifactDigest : materialDigests.get(targetId) ?? "",
+      target: anchor.location, location: anchor.location, context: anchor.context, ...(anchor.targetRef ? { targetRef: structuredClone(anchor.targetRef) } : {}) } } : {}) };
+  });
   const assignments: ArtifactReviewAssignment[] = Object.entries(round.reviewConfig.reviewers).map(([actorId, actor]) => {
     const review = reviews.find(r => r.id === graphReviewId(round.id, actorId));
     const last = review?.attempts?.at(-1);
     const failed = review?.status === "running" && last?.completion?.kind === "failed";
     const submitted = review?.status === "submitted" && review.vote?.value;
-    const comments = (review?.comments ?? []).map(c => {
-      const { anchor, ...fields } = c;
-      const targetId = anchor?.targetRef?.id ?? round.artifactId;
-      return { ...fields, updatedAt: c.createdAt, ...(anchor ? { anchor: { submissionId: targetId, sourceHash: targetId === round.artifactId ? artifactDigest : materialDigests.get(targetId) ?? "",
-        target: anchor.location, location: anchor.location, context: anchor.context, ...(anchor.targetRef ? { targetRef: structuredClone(anchor.targetRef) } : {}) } } : {}) };
-    });
+    const comments = projectComments(review);
     const auth = authorizeArtifactOperation({ controlPlane: cp, subject: { kind: "actor", actorId }, permission: actor.permissions.includes("decision.decide") ? "decision.decide" : "decision.assess" });
     return {
       id: graphReviewId(round.id, actorId), actorId, actorName: actor.name, actorKind: actor.kind,
@@ -115,8 +116,16 @@ export function projectGraphRound(run: Run, step: Step, round: ReviewRound, revi
   if (round.resolutions) dto.commentDispositions = round.resolutions.map(r => ({ commentId: r.commentId, disposition: r.value, note: r.note, updatedAt: r.updatedAt, ...(r.validationSummary ? { validationSummary: r.validationSummary } : {}) }));
   for (const a of assignments) if (a.submitted) dto.votes.push({ id: `vote-${a.id}`, subject: { kind: "actor", actorId: a.actorId }, binding: a.binding, value: a.submitted.vote, automatic: false, authorization: a.submitted.authorization, submittedAt: a.submitted.submittedAt });
   const runner = reviews.find(r => r.roundId === round.id && r.reviewer.role === "runner" && r.status === "submitted");
-  if (runner?.vote) dto.votes.push({ id: `vote-${runner.id}`, subject: { kind: "runner" }, binding: "decision", value: runner.vote.value, automatic: false,
-    comment: runner.vote.summary, authorization: authorizeArtifactOperation({ controlPlane: cp, subject: { kind: "runner" }, permission: "decision.decide" }), submittedAt: runner.endedAt! });
+  if (runner?.vote) {
+    const authorization = authorizeArtifactOperation({ controlPlane: cp, subject: { kind: "runner" }, permission: "decision.decide" });
+    const submittedAt = runner.endedAt!;
+    dto.votes.push({ id: `vote-${runner.id}`, subject: { kind: "runner" }, binding: "decision", value: runner.vote.value, automatic: false,
+      comment: runner.vote.summary, authorization, submittedAt });
+    const comments = projectComments(runner);
+    if (runner.vote.summary || comments.length) {
+      dto.runnerOpinion = { comments, vote: runner.vote.value, summary: runner.vote.summary, authorization, submittedAt };
+    }
+  }
   if (singleReviewerScope) {
     const personal = reviews[0];
     if (personal?.status === "submitted" && personal.vote) {

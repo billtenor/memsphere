@@ -1,4 +1,4 @@
-import { reviewCommentId, reviewNodeView, type NodeMutation } from "../review-nodes.js";
+import { reviewCommentId, reviewNodeProgress, reviewNodeView, type NodeMutation } from "../review-nodes.js";
 /** Adapts model-backed graph Reviews to the existing Review application protocol.
  * These DTOs are transient; the graph Run never stores legacy artifactReviews.
  */
@@ -68,6 +68,8 @@ async function projectExploration(repository: ExplorationReviews, runId: string,
   const material = full ? await repository.materials(runId, value) : undefined;
   const frozen = projectGraphRound({ ...run, permissionConfig: permissions }, { ...step, reviewRounds: [round] }, round, [value], hash,
     new Map(refs.map(ref => [ref.id, ref.sha256])), `exploration:${run.id}#${step.id}`);
+  const cancelled = value.status === "cancelled" || run.status !== "running" && value.status !== "submitted";
+  frozen.reviewProgress = reviewNodeProgress(value, cancelled ? "cancelled" : value.status);
   const dto = explorationRun(run);
   dto.controlPlane = createControlPlaneSnapshot({ runner: permissions.runner, actors: Object.fromEntries(Object.entries(permissions.actors).map(([id, actor]) =>
     [id, actor.kind === "agent" ? { ...actor, agent: { ...actor.agent, idleTimeoutMs: actor.agent.idleTimeoutMs ?? null, maxRuntimeMs: actor.agent.maxRuntimeMs ?? null } } : actor])), acpProviders: {} });
@@ -75,7 +77,7 @@ async function projectExploration(repository: ExplorationReviews, runId: string,
     .map(a => ({ artifactId: a.id, stepId: a.stepId, artifact: explorationArtifactDto(a, material.bodies.get(a.id)!) })) ?? [];
   const review: ArtifactReview<legacy.RunEvent["artifact"]> = {
     id: explorationReviewHandle(run.id, value.id), stepId: step.id, artifactName: artifact.name, policyId: round.reviewConfig.policy.id, controlPlane: frozen.controlPlane!,
-    status: value.status === "cancelled" || run.status !== "running" && value.status !== "submitted" ? "cancelled" : frozen.status === "passed" ? "passed" : frozen.status === "changes_requested" ? "awaiting_revision" : "pending",
+    status: cancelled ? "cancelled" : frozen.status === "passed" ? "passed" : frozen.status === "changes_requested" ? "awaiting_revision" : "pending",
     currentRoundId: round.id, createdAt: value.createdAt, updatedAt: value.endedAt ?? value.startedAt ?? value.createdAt,
     rounds: [frozen], submissions: [{ id: artifact.id, digest: hash, createdAt: round.createdAt,
       artifact: material ? explorationArtifactDto(artifact, material.bodies.get(artifact.id)!) : { name: artifact.name, type: "string", format: graphFormat(refs[0].contentType), storage: "inline" },

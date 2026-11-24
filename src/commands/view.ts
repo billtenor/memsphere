@@ -10,8 +10,7 @@ import { detectRunnerAgents } from "../runner/identity.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
-import { ExplorationReviews, explorationReviewIdentity, isModelReviewHandle } from "../context_control/exploration-review.js";
-import { configureExplorationStep, explorationStepConfiguration } from "./context-control.js";
+import { isModelReviewHandle } from "../context_control/exploration-review.js";
 import { openContextControl } from "../project/context-control.js";
 import { contextRunDetailPayload, contextRunPayload, contextRunSummaries, contextRunSummary, assertUniqueRunSources } from "../context_control/view.js";
 import { createContextRunReader } from "../project/context-run-summaries.js";
@@ -118,7 +117,6 @@ import {
   currentArtifactReview,
   ensureCurrentSchemaDraft,
   findArtifactReview,
-  explorationReviewView,
   listRuns,
   listRunSummaries,
   parseRunState,
@@ -1484,58 +1482,6 @@ async function handleRequest(
   // operation chooses a source. A failed/conflicting source never falls back.
   const contextRunPath = url.pathname.match(/^\/api\/runs\/([^/]+)(?:\/|$)/);
   const contextLocation = contextRunPath ? await contextRunForView(config, decodeURIComponent(contextRunPath[1])) : undefined;
-  const explorationMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/exploration\/(steps|reviews)\/([^/]+)$/);
-  if (explorationMatch && (request.method === "GET" || request.method === "POST")) {
-    if (!contextLocation || isGraphRun(contextLocation.run)) { sendJson(response, 404, { error: "Free exploration Run not found" }); return; }
-    const { service, run } = contextLocation, id = decodeURIComponent(explorationMatch[3]);
-    const repository = new ExplorationReviews(service);
-    try {
-      if (explorationMatch[2] === "steps") {
-        if (request.method === "GET") {
-          sendJson(response, 200, await withContextControlViewRead(config.scopeRoot, () => explorationStepConfiguration(service, config, run.id, id))); return;
-        }
-        const body = await readJsonBody<Record<string, unknown>>(request);
-        const keys = Object.keys(body);
-        for (const key of keys) {
-          const value = body[key];
-          if ((key === "asserts" || key === "suggests") && Array.isArray(value) && value.every(x => typeof x === "string")) continue;
-          if (key === "reviewer" && typeof value === "string") continue;
-          if (["clearAsserts", "clearSuggests", "clearReviewer"].includes(key) && value === true) continue;
-          throw new Error(`Invalid Step configuration field: ${key}`);
-        }
-        sendJson(response, 200, await configureExplorationStep(service, config, run.id, id, body)); return;
-      }
-      if (request.method === "GET") {
-        const target = explorationReviewIdentity(id);
-        if (target?.runId !== run.id) throw new Error("Run/Review identity mismatch");
-        const view = await withContextControlViewRead(config.scopeRoot, async () => {
-          const { row } = await repository.locate(run.id, target.recordId);
-          return explorationReviewView(repository, run.id, row.value, { all: true });
-        });
-        sendJson(response, 200, view); return;
-      }
-      const controller = new AbortController();
-      const abort = () => controller.abort();
-      response.once("close", abort);
-      try {
-        if (response.destroyed) abort();
-        const review = await repository.start(config, run.id, id, controller.signal);
-        const view = await explorationReviewView(repository, run.id, review);
-        let warning: string | undefined;
-        if (review.attempts && !controller.signal.aborted) {
-          try {
-            const target = await findArtifactReview({ runsRoot, reviewId: view.reviewId, service });
-            if (!controller.signal.aborted) await dispatchArtifactReviewAgents({ config, run: target.run });
-          }
-          catch (error) { warning = `Review saved. Resume dispatch with run review wait --review ${view.reviewId}: ${error instanceof Error ? error.message : String(error)}`; }
-        }
-        if (!controller.signal.aborted) sendJson(response, 200, { ...view, warning });
-      } finally {
-        response.off("close", abort);
-      }
-    } catch (error) { if (!response.destroyed) sendJson(response, 400, { code: (error as { code?: string }).code, error: error instanceof Error ? error.message : String(error) }); }
-    return;
-  }
   const contextArtifactMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/(artifacts|externals)\/([^/]+)\/content$/);
   if (request.method === "GET" && contextArtifactMatch) {
     if (!contextLocation) { sendJson(response, 404, { error: "Run not found" }); return; }
@@ -1852,7 +1798,8 @@ async function handleRequest(
           sendJson(response,200,{run:{...base,context:{...payload.context,run,lazy:true}}});return;
         }
       }
-      sendJson(response, 200, { run: await withContextControlViewRead(config.scopeRoot, async () => contextRunDetailPayload(await contextLocation.service.inspect(runId))) });
+      const action = representation === "action" ? { surface: "action" as const, actionId: url.searchParams.get("action") ?? undefined } : undefined;
+      sendJson(response, 200, { run: await withContextControlViewRead(config.scopeRoot, async () => contextRunDetailPayload(await contextLocation.service.inspect(runId), false, action, config)) });
       return;
     }
     let located: Awaited<ReturnType<typeof readViewRunById>>;
@@ -2507,6 +2454,7 @@ function artifactReviewSummary(
       status: round.status,
       submitted: round.assignments.filter((assignment) => assignment.status === "submitted").length,
       total: round.assignments.length,
+      reviewProgress: round.reviewProgress,
       decisionReady: round.assignments.every((assignment) => assignment.status === "submitted"),
       bindingSource: round.bindingSource,
       severity,
@@ -2695,6 +2643,7 @@ function publicArtifactReviewRounds(review: ArtifactReviewContext["review"],sele
     revision: round.revision,
     createdAt: round.createdAt,
     bindingSource: round.bindingSource,
+    reviewProgress: round.reviewProgress,
     assignments: round.assignments.map((assignment) => ({
       id: assignment.id,
       actorId: assignment.actorId,
@@ -2709,6 +2658,7 @@ function publicArtifactReviewRounds(review: ArtifactReviewContext["review"],sele
       attempts: assignment.attempts?.map(publicArtifactReviewAttempt)
     })),
     votes: round.votes.map(vote=>selectedRoundId?{subject:vote.subject,binding:vote.binding,value:vote.value,automatic:vote.automatic,submittedAt:vote.submittedAt}:publicArtifactReviewVote(vote)),
+    runnerOpinion: publicArtifactReviewOpinion(round.runnerOpinion),
     result: round.result,
     commentDispositions: structuredClone(round.commentDispositions ?? []),
     revisionSummary: review.submissions.find((submission) => submission.id === round.submissionId)?.revisionSummary
