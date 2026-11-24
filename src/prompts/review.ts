@@ -1,4 +1,4 @@
-import { reviewCommentId } from "../review-nodes.js";
+import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import {
   repeatedArtifactReviewAdvisories,
   artifactReviewAgentsSubmitted,
@@ -10,10 +10,48 @@ import type { RunState } from "../run/store.js";
 import type { PromptLocale } from "./locale.js";
 import type {
   ArtifactReviewSummaryPromptModel,
+  ExplorationReviewResultPromptModel,
   RunReviewHumanSubmitReceiptPromptModel,
   RunReviewVoteReceiptPromptModel,
   ReviewNextActionPromptModel
 } from "./models.js";
+
+export function buildExplorationReviewResultPromptModel(
+  review: ArtifactReview<RunState["events"][number]["artifact"]>,
+  round: ArtifactReviewRound,
+  retryCommand: string,
+  locale: PromptLocale
+): ExplorationReviewResultPromptModel {
+  const assignment = round.assignments[0];
+  const opinion = assignment?.submitted;
+  const attempt = assignment?.attempts?.at(-1);
+  const status = review.status === "cancelled" ? "cancelled" : assignment?.status ?? "pending";
+  const progress = assignment && reviewNodeProgress(assignment);
+  return {
+    reviewId: review.id,
+    roundId: round.id,
+    actorName: assignment?.actorName,
+    status: localize(locale, status),
+    progress: progress && { processed: progress.processed, total: progress.total },
+    opinion: opinion && {
+      vote: localize(locale, opinion.vote),
+      summary: opinion.summary,
+      comments: opinion.comments.map(comment => ({
+        severity: localize(locale, comment.severity ?? "unspecified"),
+        body: comment.body
+      }))
+    },
+    failed: status === "failed" ? {
+      attemptId: attempt?.id,
+      failure: attempt?.failure && {
+        stage: attempt.failure.stage,
+        code: attempt.failure.code,
+        message: attempt.failure.message
+      },
+      command: retryCommand
+    } : undefined
+  };
+}
 
 export function buildRunReviewVoteReceiptPromptModel(
   vote: "approve" | "request_changes",
@@ -95,6 +133,10 @@ function localize(locale: PromptLocale, value: string): string {
   if (locale === "en") return value;
   return {
     pending: "待提交",
+    queued: "排队中",
+    running: "进行中",
+    submitted: "已提交",
+    failed: "未完成（执行失败）",
     awaiting_runner_vote: "等待 Runner 投票",
     awaiting_revision: "等待修改",
     passed: "已通过",

@@ -1,6 +1,7 @@
 import { runGit } from "../src/git.js";
 import { browserScope } from "./helpers/browser.js";
 import assert from "node:assert/strict";
+import { EventEmitter, once } from "node:events";
 import test from "node:test";
 import type { AddressInfo } from "node:net";
 import { businessFixture } from "./helpers/business-data.js";
@@ -256,9 +257,18 @@ test("exploration shares Run perspectives and keeps the selected Review and conf
   await writeFile(statement, withCurrentMemorySyntax("!statement\nnames: [review-fact]\nasserts: [Inspect the updated source]\nsuggests: [Follow the suggested check]\n"));
   await writeFile(join(config.memoryRoot, "statements", "later-fact.yaml"), withCurrentMemorySyntax("!statement\nnames: [later-fact]\nsuggests: [Keep the later edit]\n"));
   await repository.start(config, run.id, artifact.id);
-  const server = createViewServer(config);
+  const browser = await browserScope(), server = createViewServer(config);
+  let closing: Promise<void> | undefined;
+  let resumeResponse!: () => void;
+  const resume = new Promise<void>(resolve => { resumeResponse = resolve; });
+  const close = () => closing ??= (async () => {
+    resumeResponse();
+    try { await browser.close(); }
+    finally { await new Promise<void>(resolve => server.close(() => resolve())); }
+  })();
+  f.beforeCleanup(close);
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`, browser = await browserScope();
+  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
     const runUrl = `${origin}/api/projects/test-project/runs/${run.id}`;
     const failed = await fetch(`${runUrl}/exploration/reviews/${draft.artifactId}`, { method: "POST", body: "{}" });
@@ -294,23 +304,20 @@ test("exploration shares Run perspectives and keeps the selected Review and conf
     assert.equal(await input.inputValue(), "unsaved local configuration");
     assert.equal(await round.inputValue(), id);
     await dialog.getByText("Inspect the source", { exact: true }).waitFor();
-    let responseHeld!: () => void;
-    let resumeResponse!: () => void;
-    const held = new Promise<void>(resolve => { responseHeld = resolve; });
-    const resume = new Promise<void>(resolve => { resumeResponse = resolve; });
+    const gate = new EventEmitter();
     const configPath = `**/exploration/steps/${step.id}`;
     await page.route(configPath, async route => {
       if (route.request().method() !== "POST") { await route.continue(); return; }
-      const response = await route.fetch();
-      responseHeld();
+      const response = await route.fetch({ timeout: 10000 });
+      gate.emit("response");
       await resume;
       await route.fulfill({ response });
     });
     const save = dialog.getByRole("button", { name: "保存配置" });
     try {
       await input.fill("statements/review-fact");
-      await save.click();
-      await held;
+      const held = once(gate, "response", { signal: AbortSignal.any([t.signal, AbortSignal.timeout(10000)]) });
+      await Promise.all([held, save.click()]);
       await input.fill("statements/later-fact");
     } finally { resumeResponse(); }
     await dialog.getByText("仍有未保存的编辑", { exact: true }).waitFor();
@@ -330,7 +337,23 @@ test("exploration shares Run perspectives and keeps the selected Review and conf
     await warning.waitFor();
     assert.match(await warning.innerText(), new RegExp(await round.inputValue()));
     assert.equal((await repository.list(run.id)).some(r => r.exploration?.configuration.suggests?.includes("statements/later-fact")), true);
+    const failedReview = await round.inputValue();
+    await page.route(`**/exploration/reviews/${failedReview}`, async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), status: "running", attempt: {
+        completion: { kind: "failed", failure: { stage: "prompt", code: "provider_exited", message: "Fixture reviewer exited" } }
+      } } });
+    });
+    await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+    await page.locator(`[data-artifact-id="${artifact.id}"]`).click();
+    await round.selectOption(failedReview);
+    const diagnostic = dialog.getByText(/prompt \[provider_exited\] Fixture reviewer exited/);
+    await diagnostic.waitFor({ state: "attached" });
+    const nodes = dialog.getByText("渐进评审节点", { exact: true });
+    if (!await nodes.evaluate(el => (el.parentElement as HTMLDetailsElement).open)) await nodes.click();
+    await diagnostic.waitFor();
+    await dialog.getByText(`memsphere run review retry --review ${failedReview}`, { exact: true }).waitFor();
     await dialog.getByRole("button", { name: "关闭", exact: true }).click();
     assert.equal(await page.locator("dialog.cc-dialog[open]").count(), 0);
-  } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }
+  } finally { await close(); }
 });

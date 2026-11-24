@@ -23,7 +23,7 @@ export async function freezeExplorationSchema(config: MemsphereConfig, name: str
     { kind: "schema", path: ".", memoryRef: descriptor.reference });
 }
 
-export function explorationReviewerOptions(config: MemsphereConfig) {
+export function explorationReviewerOptions(config: Pick<MemsphereConfig, "controlPlane">) {
   const options = [{ value: "runner", name: "Runner" }];
   for (const [id, actor] of Object.entries(config.controlPlane?.actors ?? {})) {
     if (actor.kind === "agent" && actor.permissions.includes("artifact.read") && actor.permissions.some(p => p === "decision.assess" || p === "decision.decide")) {

@@ -421,6 +421,28 @@ const definitions = {
     purpose: "summary",
     schema: reviewSummarySchema
   },
+  "run.exploration-review-result": {
+    path: "run/exploration-review-result.hbs",
+    audience: "runner",
+    purpose: "summary",
+    schema: z.object({
+      reviewId: z.string(),
+      roundId: z.string(),
+      actorName: z.string().optional(),
+      status: z.string(),
+      progress: z.object({ processed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
+      opinion: z.object({
+        vote: z.string(),
+        summary: z.string().optional(),
+        comments: z.array(z.object({ severity: z.string(), body: z.string() }).strict())
+      }).strict().optional(),
+      failed: z.object({
+        attemptId: z.string().optional(),
+        failure: z.object({ stage: z.string(), code: z.string(), message: z.string() }).strict().optional(),
+        command: z.string()
+      }).strict().optional()
+    }).strict()
+  },
   "run.schema-overview": {
     path: "run/schema-overview.hbs",
     audience: "runner",

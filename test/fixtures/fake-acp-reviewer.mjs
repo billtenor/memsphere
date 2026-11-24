@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import { access, writeFile } from "node:fs/promises";
+import { access, appendFile, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 
@@ -35,6 +35,7 @@ const app = acp
   })
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client, signal }) => {
     if (!sessions.has(params.sessionId)) throw new Error(`unknown session: ${params.sessionId}`);
+    if (process.env.EXPLORATION_TEST_LAUNCHES) await appendFile(process.env.EXPLORATION_TEST_LAUNCHES, `${params.sessionId}\n`);
     if (mode === "exit-zero") process.exit(0);
     if (mode === "exit-error") process.exit(7);
     if (mode === "exit-signal") process.kill(process.pid, "SIGTERM");

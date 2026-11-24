@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dispatchArtifactReviewAgents } from "../src/acp/dispatcher.js";
 import { ExplorationReviews, explorationReviewHandle, mutateModelReviewNode } from "../src/context_control/exploration-review.js";
 import * as reviews from "../src/context_control/review-repository.js";
@@ -12,10 +12,21 @@ import { freezeExplorationSchema } from "../src/context_control/exploration-cont
 import { ContextControl } from "../src/context_control/service.js";
 import { openCommandStates } from "../src/home/command-state-store.js";
 import { currentReviewNode, reviewNodeProgress } from "../src/review-nodes.js";
+import type { MemsphereConfig } from "../src/config.js";
 import { inspectReview, renderReviewResult, reviewResumeNotification } from "../src/daemon/review.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 import { captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
 import { stopFixtureJob, untilFixture } from "./helpers/fixture-process.js";
+
+function delegatedReviewConfig(config: MemsphereConfig, env: Record<string, string> = {}): MemsphereConfig {
+  return { ...config, controlPlane: { runner: { permissions: ["artifact.read", "decision.decide"] }, actors: {
+    reader: { kind: "agent", name: "Reader", permissions: ["artifact.read", "decision.assess"], agent: {
+      provider: "test", providerType: "codex", command: process.execPath,
+      args: [fileURLToPath(new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url)), "approve"],
+      env, startupTimeoutMs: 10000, idleTimeoutMs: 20000, maxRuntimeMs: null
+    } }
+  }, acpProviders: {} } };
+}
 
 test("simultaneous Review starts converge and cancellation during preparation creates no Review", { timeout: 30000 }, async t => {
   const f = await fixture(t), R = (await f.service.start("race")).id;
@@ -52,21 +63,22 @@ test("simultaneous Review starts converge and cancellation during preparation cr
   assert.deepEqual((await repository.list(R)).map(r => r.id), [first.id]);
 });
 
-test("delegated exploration Review launches a restricted ACP Session and retries the same assignment", { timeout: 60000 }, async t => {
+test("delegated exploration Review recovers dispatch and retries one restricted assignment with saved nodes", { timeout: 60000 }, async t => {
   const f = await fixture(t), R = (await f.service.start("delegated")).id;
   const attached = await f.service.addExternal(R, "used", { content: textContent("authorized source") });
   const unattached = await f.service.addExternal(R, "not used", { content: textContent("unattached source") });
   const { artifact, step } = await f.service.report(R, { name: "candidate", content: textContent("review this"), dependencies: [{ kind: "external", id: attached.id }] });
   await f.service.configureExplorationStep(R, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
   const repository = new ExplorationReviews(f.service);
-  const cfg = { ...f.config, controlPlane: { runner: { permissions: ["artifact.read" as const] }, actors: {
-    reader: { kind: "agent" as const, name: "Reader", permissions: ["artifact.read" as const, "decision.assess" as const], agent: { provider: "test", providerType: "codex" as const, command: process.execPath,
-      args: [fileURLToPath(new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url)), "approve"],
-      env: { EXPLORATION_TEST_EXTERNAL: attached.id, EXPLORATION_TEST_UNATTACHED: unattached.id, EXPLORATION_TEST_CRASH_MARKER: join(f.directory, "node-saved") }, startupTimeoutMs: 10000, idleTimeoutMs: 20000 } }
-  }, acpProviders: {} } };
+  const launches = join(f.directory, "provider-sessions");
+  const cfg = delegatedReviewConfig(f.config, {
+    EXPLORATION_TEST_EXTERNAL: attached.id, EXPLORATION_TEST_UNATTACHED: unattached.id,
+    EXPLORATION_TEST_CRASH_MARKER: join(f.directory, "node-saved"), EXPLORATION_TEST_LAUNCHES: launches
+  });
   const value = await repository.start(cfg, R, artifact.id), reviewId = explorationReviewHandle(R, value.id);
   const common = { runsRoot: cfg.runsRoot, reviewId, roundId: value.roundId!, actorId: "reader" };
-  let dispatchWork: Promise<number> | undefined;
+  let dispatchWork: Promise<unknown> | undefined;
+  let releaseLaunchGate = () => {};
   const attempts = async () => (await repository.locate(R, value.id)).row.value.attempts ?? [];
   const ownWorkerExited = async (attempt: Awaited<ReturnType<typeof attempts>>[number]) => {
     if (!attempt.workerPid || !attempt.workerIdentity) return true;
@@ -74,6 +86,7 @@ test("delegated exploration Review launches a restricted ACP Session and retries
     return live?.started !== attempt.workerIdentity.started;
   };
   f.beforeCleanup(async () => {
+    releaseLaunchGate();
     await dispatchWork?.catch(() => undefined);
     for (const attempt of await attempts()) {
       if (!attempt.workerPid || await ownWorkerExited(attempt)) continue;
@@ -84,9 +97,33 @@ test("delegated exploration Review launches a restricted ACP Session and retries
   });
   const oldHome = process.env.MEMSPHERE_HOME; process.env.MEMSPHERE_HOME = f.home;
   try {
-    const dispatch = async () => dispatchArtifactReviewAgents({ config: cfg, run: await reviews.readRun(cfg.runsRoot, R),
-      workspaceRoot: f.cwd, runtime: { nodeExecutable: process.execPath, cliEntrypoint: cli } });
-    assert.equal(await (dispatchWork = dispatch()), 1);
+    const run = await reviews.readRun(cfg.runsRoot, R);
+    const dispatch = (readRun?: typeof reviews.readRun) => dispatchArtifactReviewAgents({ config: cfg, run,
+      workspaceRoot: f.cwd, runtime: { nodeExecutable: process.execPath, cliEntrypoint: cli } }, { readRun });
+    const runtime = join(cfg.scopeRoot, ".runtime");
+    await mkdir(runtime, { recursive: true });
+    const blocked = join(runtime, "review-dispatch");
+    await writeFile(blocked, "injected failure before launching a worker");
+    try { await assert.rejects(dispatch(), /EEXIST|ENOTDIR/); }
+    finally { await rm(blocked); }
+    assert.equal((await repository.start(cfg, R, artifact.id)).id, value.id);
+    assert.deepEqual(await attempts(), value.attempts);
+
+    const launchGate = new Promise<void>(resolve => { releaseLaunchGate = resolve; });
+    let snapshots = 0;
+    const concurrentRead: typeof reviews.readRun = async (...args) => {
+      const current = await reviews.readRun(...args);
+      if (++snapshots <= 2) {
+        if (snapshots === 2) releaseLaunchGate();
+        await launchGate;
+      }
+      return current;
+    };
+    const dispatches = [dispatch(concurrentRead), dispatch(concurrentRead)];
+    dispatchWork = Promise.allSettled(dispatches);
+    try {
+      await Promise.all(dispatches);
+    } finally { releaseLaunchGate(); }
     const wait = () => reviews.waitForArtifactReview({ runsRoot: cfg.runsRoot, reviewId, signal: t.signal, pollIntervalMs: 150 });
     await wait();
     const failed = await reviews.readArtifactReviewForActor(common);
@@ -95,6 +132,14 @@ test("delegated exploration Review launches a restricted ACP Session and retries
     assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity);
     await untilFixture(() => ownWorkerExited(first), "first exploration Review worker exit");
     assert.equal(reviewNodeProgress(failed.assignment)?.processed, 1);
+    assert.equal((await attempts()).length, 1);
+    assert.equal((await readFile(launches, "utf8")).trim().split("\n").length, 1);
+    const failure = failed.assignment.attempts![0].failure!;
+    const failedReceipt = (await f.invoke("run", "review", "wait", "--review", reviewId)).stdout;
+    assert.ok(failedReceipt.includes(`${failure.stage} [${failure.code}] ${failure.message}`));
+    assert.ok(failedReceipt.includes(`run review retry --review '${reviewId}'`));
+    assert.match(failedReceipt, /1\/\d+/);
+    assert.doesNotMatch(failedReceipt, /产物已被接受|Run 已推进|Artifact was accepted|advanced to the next step/);
     const attemptId = failed.assignment.attempts![0].id;
     const retried = await reviews.retryArtifactReviewAgentAssignment(common);
     assert.notEqual(retried.attempt.id, attemptId);
@@ -112,15 +157,48 @@ test("delegated exploration Review launches a restricted ACP Session and retries
     await untilFixture(() => ownWorkerExited(second), "retried exploration Review worker exit");
     const before = await f.service.inspect(R);
     const note = reviewResumeNotification("test-project", reviewId);
-    assert.ok(note.includes(reviewId));
-    assert.match(await renderReviewResult(cfg, await inspectReview(cfg, reviewId)), /approve|通过/);
-    assert.match((await f.invoke("run", "review", "wait", "--review", reviewId)).stdout, /approve|通过/);
+    assert.equal(note, `请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`);
+    const rendered = await renderReviewResult(cfg, await inspectReview(cfg, reviewId));
+    const resumed = (await f.invoke("run", "review", "wait", "--review", reviewId)).stdout.trim();
+    assert.equal(resumed, rendered);
+    assert.match(resumed, /评审人投票：通过|Reviewer vote: approve/);
+    assert.match(resumed, /Reader/);
+    assert.doesNotMatch(resumed, /产物已被接受|Run 已推进|Artifact was accepted|advanced to the next step|同轮重试|Retry this round/);
     assert.deepEqual(await home.get({}, session), target);
     assert.equal((await f.call("continue", "schema", "show")).stepId, draft.stepId);
     assert.deepEqual(await f.service.inspect(R), before);
     assert.equal((await repository.list(R)).length, 1);
   } finally {
     if (oldHome === undefined) delete process.env.MEMSPHERE_HOME; else process.env.MEMSPHERE_HOME = oldHome;
+  }
+});
+
+test("waiting for a delegated change request or abstention reports only the Review opinion", { timeout: 30000 }, async t => {
+  const f = await fixture(t), repository = new ExplorationReviews(f.service);
+  const R = (await f.service.start("Delegated opinions", "en")).id;
+  for (const vote of ["request_changes", "abstain"] as const) {
+    const { artifact, step } = await f.service.report(R, { name: vote, content: textContent("Candidate") });
+    await f.service.configureExplorationStep(R, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
+    const pending = await repository.start(delegatedReviewConfig(f.config), R, artifact.id);
+    const reviewId = explorationReviewHandle(R, pending.id);
+    const target = { runsRoot: f.config.runsRoot, reviewId, roundId: pending.roundId!, actorId: "reader", service: f.service };
+    const claimed = await reviews.claimArtifactReviewAgentAssignment(target);
+    assert.ok(claimed);
+    const attempt = { ...target, attemptId: claimed.attempt.id };
+    await reviews.markArtifactReviewAgentCliReady(attempt);
+    let context = claimed;
+    for (let node = currentReviewNode(context.assignment); node; node = currentReviewNode(context.assignment)) {
+      context = await reviews.mutateArtifactReviewNodes({ ...attempt,
+        mutation: { operation: "report", expectedNodeId: node.nodeId, artifact: { applicable: true } } });
+    }
+    await reviews.submitArtifactReviewAgentAssignment({ ...attempt, vote, summary: "Recorded opinion" });
+    const before = await f.service.inspect(R);
+    const output = (await f.invoke("run", "review", "wait", "--review", reviewId)).stdout;
+    assert.ok(output.includes(`Reviewer vote: ${vote}`));
+    assert.match(output, /Status: submitted/);
+    assert.match(output, /Recorded opinion/);
+    assert.doesNotMatch(output, /revise the Artifact|Run advanced|Artifact was accepted|Retry this round/);
+    assert.deepEqual(await f.service.inspect(R), before);
   }
 });
 

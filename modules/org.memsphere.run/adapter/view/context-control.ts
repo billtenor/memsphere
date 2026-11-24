@@ -311,9 +311,15 @@ export function createContextGraph(ui: ViewUi, request: (path: string, init?: Re
       type Node = { nodeId: string; name: string; source?: { memoryRef?: string; path?: string }; requiresReport: boolean; reported: boolean; applicable?: boolean; asserts: { text: string }[]; suggests: { text: string }[]; comments: { body: string }[]; ruleResults: { rulePath: string; result: string }[] };
       const nodes = (value.nodes as Node[]).filter(node => node.requiresReport);
       const status = element("p", "", `${value.progress.processed}/${value.progress.total}`);
-      if (value.attempt?.completion?.failure) status.append(` · ${value.attempt.completion.failure.message}`);
+      const failure = value.attempt?.completion?.failure;
+      if (failure) status.append(` · ${label("失败阶段", "Failure stage")}: ${failure.stage} [${failure.code}] ${failure.message}`);
       if (value.vote?.summary) status.append(` · ${value.vote.summary}`);
       details.append(status);
+      if (value.status !== "cancelled" && value.attempt?.completion?.kind === "failed") {
+        const retry = element("p", "", `${label("同轮重试", "Retry this round")}: `);
+        retry.append(element("code", "", `memsphere run review retry --review ${value.reviewId}`));
+        details.append(retry);
+      }
       if (!nodes.length) return;
       const selected = nodes.find(node => node.nodeId === selectedNodes.get(review.id)) ?? nodes.find(node => !node.reported) ?? nodes[0];
       const body = element("section", "cc-review-card");
