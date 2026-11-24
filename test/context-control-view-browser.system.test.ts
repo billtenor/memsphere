@@ -253,7 +253,8 @@ test("exploration shares Run perspectives and keeps the selected Review and conf
   await service.configureExplorationStep(run.id, step.id, { asserts: ["statements/review-fact"], reviewer: "runner" });
   const repository = new ExplorationReviews(service);
   const original = await repository.start(config, run.id, artifact.id);
-  await writeFile(statement, withCurrentMemorySyntax("!statement\nnames: [review-fact]\nasserts: [Inspect the updated source]\n"));
+  await writeFile(statement, withCurrentMemorySyntax("!statement\nnames: [review-fact]\nasserts: [Inspect the updated source]\nsuggests: [Follow the suggested check]\n"));
+  await writeFile(join(config.memoryRoot, "statements", "later-fact.yaml"), withCurrentMemorySyntax("!statement\nnames: [later-fact]\nsuggests: [Keep the later edit]\n"));
   await repository.start(config, run.id, artifact.id);
   const server = createViewServer(config);
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
@@ -293,6 +294,42 @@ test("exploration shares Run perspectives and keeps the selected Review and conf
     assert.equal(await input.inputValue(), "unsaved local configuration");
     assert.equal(await round.inputValue(), id);
     await dialog.getByText("Inspect the source", { exact: true }).waitFor();
+    let responseHeld!: () => void;
+    let resumeResponse!: () => void;
+    const held = new Promise<void>(resolve => { responseHeld = resolve; });
+    const resume = new Promise<void>(resolve => { resumeResponse = resolve; });
+    const configPath = `**/exploration/steps/${step.id}`;
+    await page.route(configPath, async route => {
+      if (route.request().method() !== "POST") { await route.continue(); return; }
+      const response = await route.fetch();
+      responseHeld();
+      await resume;
+      await route.fulfill({ response });
+    });
+    const save = dialog.getByRole("button", { name: "保存配置" });
+    try {
+      await input.fill("statements/review-fact");
+      await save.click();
+      await held;
+      await input.fill("statements/later-fact");
+    } finally { resumeResponse(); }
+    await dialog.getByText("仍有未保存的编辑", { exact: true }).waitFor();
+    assert.deepEqual((await service.explorationStep(run.id, step.id)).reviewConfiguration?.suggests, ["statements/review-fact"]);
+    assert.equal(await input.inputValue(), "statements/later-fact");
+    await page.unroute(configPath);
+    await save.click();
+    await dialog.getByText("配置已保存", { exact: true }).waitFor();
+    assert.deepEqual((await service.explorationStep(run.id, step.id)).reviewConfiguration?.suggests, ["statements/later-fact"]);
+    await page.route(`**/exploration/reviews/${artifact.id}`, async route => {
+      const response = await route.fetch();
+      const result = await response.json();
+      await route.fulfill({ response, json: { ...result, warning: `Review saved. Resume dispatch with run review wait --review ${result.reviewId}` } });
+    });
+    await dialog.getByRole("button", { name: "发起评审" }).click();
+    const warning = dialog.getByText(/Review saved\. Resume dispatch with run review wait/);
+    await warning.waitFor();
+    assert.match(await warning.innerText(), new RegExp(await round.inputValue()));
+    assert.equal((await repository.list(run.id)).some(r => r.exploration?.configuration.suggests?.includes("statements/later-fact")), true);
     await dialog.getByRole("button", { name: "关闭", exact: true }).click();
     assert.equal(await page.locator("dialog.cc-dialog[open]").count(), 0);
   } finally { await browser.close(); await new Promise<void>(resolve => server.close(() => resolve())); }

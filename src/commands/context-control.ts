@@ -83,8 +83,13 @@ async function explorationSchema(operation: string, s: ContextControl, config: M
     const expected = { row: o.sessionRow ?? await currentCommandState() };
     const contract = o.schemaName ? await freezeExplorationSchema(config, requireOption(o.name, "--name"), o.schemaName, requireOption(o.contentType, "--content-type")) : undefined;
     const result = await s.enterExplorationSchema(runId, { stepId: o.step, revisedFrom: o.revisedFrom, name: o.name, contentType: o.contentType, contract });
-    try { if (result.phase !== "submitted") await createCommandState(project, runId, result.stepId, undefined, expected); }
-    catch { return { ...result, warnings: [`Draft saved. Re-enter with: memsphere run enter-schema --run ${runId} --step ${result.stepId}`] }; }
+    try {
+      if (result.phase === "submitted") await releaseCommandTarget(expected.row, project, runId, { step: result.stepId });
+      else await createCommandState(project, runId, result.stepId, undefined, expected);
+    } catch {
+      const recovery = result.phase === "submitted" ? `run enter --run ${runId}` : `run enter-schema --run ${runId} --step ${result.stepId}`;
+      return { ...result, warnings: [`${result.phase === "submitted" ? "Artifact" : "Draft"} saved. Resume with: memsphere ${recovery}`] };
+    }
     return result;
   }
   const step = requireOption(o.step, "--step");

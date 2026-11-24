@@ -143,6 +143,11 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
       view = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
+      const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
+      if (crashMarker) {
+        try { await writeFile(crashMarker, "node saved\n", { flag: "wx" }); process.exit(7); }
+        catch (error) { if (error.code !== "EEXIST") throw error; }
+      }
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;

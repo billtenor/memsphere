@@ -67,6 +67,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string, init?: Re
   const loadedActions=new Set<string>();
   const actionDefinitions=new Map<string,ProcedureAction>();
   const selectedReviews = new Map<string, string>();
+  const reviewWarnings = new Map<string, string>();
   const selectedNodes = new Map<string, string>();
   const configDrafts = new Map<string, { asserts: string; suggests: string; reviewer: string }>();
   let artifactsLoaded=false;
@@ -228,6 +229,12 @@ export function createContextGraph(ui: ViewUi, request: (path: string, init?: Re
     const reviewToggle=ui.iconButton({label:{text:label("展开评审","Show reviews")},icon:{kind:"system",name:"sidebar-simple"},run:()=>{reviewCollapsed=false;applyPane();dialog?.dispatchEvent(new Event("cc-review-visible"));}});reviewToggle.classList.add("cc-review-toggle");head.insertBefore(reviewToggle,head.lastChild);
     const reviewClose=ui.iconButton({label:{text:label("收起评审","Hide reviews")},icon:{kind:"system",name:"x"},run:()=>{reviewCollapsed=true;activePane="content";applyPane();}});reviewClose.classList.add("cc-review-close");const reviewHeader=element("header","cc-review-pane-head");reviewHeader.append(reviews.firstElementChild!,reviewClose);reviews.prepend(reviewHeader);
     const reviewScroll=element("div","cc-review-scroll");reviewScroll.append(...[...reviews.children].filter(child=>child!==reviewHeader));reviews.append(reviewScroll);
+    const reviewWarning = selectedReview && reviewWarnings.get(selectedReview.id);
+    if (reviewWarning) {
+      const message = element("p", "", reviewWarning);
+      message.setAttribute("role", "alert");
+      reviewScroll.prepend(message);
+    }
     if (progressive.length) {
       const field = ui.select({ label: { text: label("评审轮次", "Review round") }, value: selectedReview!.id,
         options: progressive.map((r, index) => ({ value: r.id, label: { text: `${index + 1} · ${r.reviewer ?? ""} · ${r.vote ?? r.status}` } })),
@@ -336,8 +343,13 @@ export function createContextGraph(ui: ViewUi, request: (path: string, init?: Re
     const errorMessage = (error: unknown) => { const message = error instanceof Error ? error.message : String(error); try { return JSON.parse(message).error ?? message; } catch { return message; } };
     void request(path, { signal }).then(value => {
       if (signal.aborted) return;
-      const before = { asserts: (value.configuration.asserts as string[] | undefined ?? []).join("\n"), suggests: (value.configuration.suggests as string[] | undefined ?? []).join("\n"), reviewer: (value.configuration.reviewer as string | undefined) ?? "" };
+      const fields = ["asserts", "suggests", "reviewer"] as const;
+      const configuredValues = (configuration: { asserts?: string[]; suggests?: string[]; reviewer?: string }) => ({
+        asserts: (configuration.asserts ?? []).join("\n"), suggests: (configuration.suggests ?? []).join("\n"), reviewer: configuration.reviewer ?? ""
+      });
+      let before = configuredValues(value.configuration);
       const state = configDrafts.get(step.id) ?? { ...before };
+      const inputs = new Map<"asserts" | "suggests", HTMLTextAreaElement>();
       const form = element("div", "cc-procedure-definition-body");
       const readonly = snapshot.run.status !== "running";
       const selections = (value.reviewers as { value: string; name: string }[]).map(r => ({ value: r.value, label: { text: r.name } }));
@@ -354,6 +366,7 @@ export function createContextGraph(ui: ViewUi, request: (path: string, init?: Re
       }
       for (const [key, title] of [["asserts", label("必核 Statement（每行一个引用）", "Assertion Statements, one reference per line")], ["suggests", label("建议 Statement（每行一个引用）", "Suggestion Statements, one reference per line")]] as const) {
         const field = element("label", "cc-select-field", title), input = element("textarea");
+        inputs.set(key, input);
         input.value = state[key]; input.rows = 2; input.readOnly = readonly;
         input.addEventListener("input", () => { state[key] = input.value; configDrafts.set(step.id, state); });
         field.append(input); form.append(field);
@@ -365,19 +378,28 @@ export function createContextGraph(ui: ViewUi, request: (path: string, init?: Re
       if (!readonly) {
         const message = element("p", ""); message.setAttribute("role", "status");
         const save = button(label("保存配置", "Save configuration"), () => void perform(async () => {
+          const submitted = { ...state };
           const patch: Record<string, unknown> = {};
-          for (const key of ["asserts", "suggests"] as const) if (state[key] !== before[key]) patch[key] = state[key].split("\n").map(s => s.trim()).filter(Boolean);
-          if (state.reviewer !== before.reviewer) Object.assign(patch, state.reviewer ? { reviewer: state.reviewer } : { clearReviewer: true });
+          for (const key of ["asserts", "suggests"] as const) if (submitted[key] !== before[key]) patch[key] = submitted[key].split("\n").map(s => s.trim()).filter(Boolean);
+          if (submitted.reviewer !== before.reviewer) Object.assign(patch, submitted.reviewer ? { reviewer: submitted.reviewer } : { clearReviewer: true });
           if (!Object.keys(patch).length) return;
           const result = await write(path, patch);
           if (signal.aborted) return;
-          Object.assign(before, state); configDrafts.delete(step.id); readiness(result);
-          message.textContent = label("配置已保存", "Configuration saved");
+          before = configuredValues(result.configuration);
+          for (const [key, input] of inputs) if (state[key] === submitted[key]) input.value = state[key] = before[key];
+          if (state.reviewer === submitted.reviewer) reviewer.control.value = state.reviewer = before.reviewer;
+          const pending = fields.some(key => state[key] !== before[key]);
+          if (pending) configDrafts.set(step.id, state);
+          else configDrafts.delete(step.id);
+          readiness(result);
+          message.textContent = pending ? label("仍有未保存的编辑", "There are unsaved edits") : label("配置已保存", "Configuration saved");
         }));
         const start = button(label("发起评审", "Start review"), () => void perform(async () => {
           const result = await write(`${base}/reviews/${encodeURIComponent(artifact.id)}`, {});
           if (signal.aborted) return;
           const chosen: ExplorationReview = { id: result.reviewId, artifactId: artifact.id, roundId: result.roundId, reviewer: result.reviewer, status: result.status, createdAt: result.createdAt };
+          if (typeof result.warning === "string") reviewWarnings.set(chosen.id, result.warning);
+          else reviewWarnings.delete(chosen.id);
           snapshot.explorationReviews = [...(snapshot.explorationReviews ?? []).filter(r => r.id !== chosen.id), chosen];
           selectedReviews.set(artifact.id, chosen.id);
           await refreshDetail();
