@@ -131,30 +131,44 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
     return invoke(cli, args);
   };
-  let graph = graphAlreadyRead;
+  const checkMaterials = async (first, second) => {
+    if (!crashMarker) { await first(); await second(); return; }
+    // These checks only read the already bound Attempt. Drain both subprocesses
+    // before reporting a node or exiting, including when a check fails.
+    for (const result of await Promise.allSettled([first(), second()])) {
+      if (result.status === "rejected") throw result.reason;
+    }
+  };
+  // Only a successful progressive node write creates the recovery marker.
+  let graph = graphAlreadyRead || resuming === true;
   if (!graphAlreadyRead) {
     if (!resuming) {
-      await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
-      await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
+      await checkMaterials(
+        () => invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]),
+        () => invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"])
+      );
+      const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
+      graph = Boolean(detail.reviewProgress);
     }
-    const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
-    graph = Boolean(detail.reviewProgress);
     if (!resuming && process.env.EXPLORATION_TEST_EXTERNAL) {
       const args = ["run", "external", "show", "--run", process.env.MEMSPHERE_REVIEW_RUN_ID, "--external"];
-      const external = JSON.parse(await invokeReviewCli([...args, process.env.EXPLORATION_TEST_EXTERNAL, "--output", "json"]));
-      assert.equal(external.source, "used");
-      await assert.rejects(invokeReviewCli([...args, process.env.EXPLORATION_TEST_UNATTACHED, "--output", "json"]), /REVIEW_RESOURCE_DENIED|outside this Review/);
+      await checkMaterials(async () => {
+        const external = JSON.parse(await invokeReviewCli([...args, process.env.EXPLORATION_TEST_EXTERNAL, "--output", "json"]));
+        assert.equal(external.source, "used");
+      }, () => assert.rejects(invokeReviewCli([...args, process.env.EXPLORATION_TEST_UNATTACHED, "--output", "json"]), /REVIEW_RESOURCE_DENIED|outside this Review/));
     }
   }
   if (graph) {
+    const reportNode = () => invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]);
+    if (crashMarker && !resuming) {
+      await reportNode();
+      await writeFile(crashMarker, "node saved\n", { flag: "wx" });
+      process.exit(7);
+    }
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
-      view = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
-      if (crashMarker && !resuming) {
-        try { await writeFile(crashMarker, "node saved\n", { flag: "wx" }); process.exit(7); }
-        catch (error) { if (error.code !== "EEXIST") throw error; }
-      }
+      view = JSON.parse(await reportNode());
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;

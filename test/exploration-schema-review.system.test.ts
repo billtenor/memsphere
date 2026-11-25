@@ -11,7 +11,7 @@ import { openCommandStates } from "../src/home/command-state-store.js";
 import { currentReviewNode, reviewNodeProgress } from "../src/review-nodes.js";
 import { inspectReview, renderReviewResult, reviewResumeNotification } from "../src/daemon/review.js";
 import { captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
-import { stopFixtureJob, untilFixture } from "./helpers/fixture-process.js";
+import { createFixtureProcesses, sameProcess, stopFixtureJob, untilFixture } from "./helpers/fixture-process.js";
 import { delegatedReviewConfig, explorationFixture as fixture, explorationTestCli as cli, writeFixtureSchema } from "./helpers/exploration.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
@@ -228,6 +228,18 @@ for (const schema of [false, true]) {
 }
 
 test("delegated exploration Review reads restricted CLI materials and resumes the same review after saving a node", { timeout: 60000 }, async t => {
+  let phase = "fixture setup", phaseStarted = performance.now();
+  const timings: string[] = [];
+  const begin = (next: string) => {
+    const now = performance.now();
+    timings.push(`${phase} ${Math.round(now - phaseStarted)}ms`);
+    phase = next;
+    phaseStarted = now;
+  };
+  t.after(() => {
+    begin("done");
+    t.diagnostic(`Delegated Review phases: ${timings.join(", ")}`);
+  });
   const f = await fixture(t), R = (await f.service.start("delegated")).id;
   const attached = await f.service.addExternal(R, "used", { content: textContent("authorized source") });
   const unattached = await f.service.addExternal(R, "not used", { content: textContent("unattached source") });
@@ -242,33 +254,54 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
   const common = { runsRoot: cfg.runsRoot, reviewId, roundId: value.roundId!, actorId: "reader" };
   let dispatchWork: Promise<unknown> | undefined;
   const attempts = async () => (await repository.locate(R, value.id)).row.value.attempts ?? [];
+  const observer = createFixtureProcesses();
+  const exited = new Set<string>();
   const ownWorkerExited = async (attempt: Awaited<ReturnType<typeof attempts>>[number]) => {
-    if (!attempt.workerPid || !attempt.workerIdentity) return true;
-    const live = await captureProcessIdentity(attempt.workerPid);
-    return live?.started !== attempt.workerIdentity.started;
+    const { workerIdentity } = attempt;
+    if (!workerIdentity || exited.has(attempt.id)) return true;
+    const { pid } = workerIdentity;
+    const alive = await observer.then(async processes => {
+      processes.rememberSnapshot(workerIdentity);
+      return (await processes.alive(pid))[0];
+    }).catch(async () => {
+      // A recycled PID or an unavailable observer still requires a fresh
+      // creation identity to confirm exit and decide whether cleanup is safe.
+      return sameProcess(workerIdentity, await captureProcessIdentity(pid));
+    });
+    if (!alive) exited.add(attempt.id);
+    return !alive;
   };
   f.beforeCleanup(async () => {
-    await dispatchWork?.catch(() => undefined);
-    for (const attempt of await attempts()) {
-      if (!attempt.workerPid || await ownWorkerExited(attempt)) continue;
-      if (attempt.workerJob) await stopFixtureJob(attempt.workerJob);
-      else await stopRewindWorker({ reviewId, attemptId: attempt.id, pid: attempt.workerPid, identity: attempt.workerIdentity, members: attempt.workerMembers });
-      await untilFixture(() => ownWorkerExited(attempt), "owned exploration Review worker exit");
+    try {
+      await dispatchWork?.catch(() => undefined);
+      for (const attempt of await attempts()) {
+        if (!attempt.workerPid || await ownWorkerExited(attempt)) continue;
+        if (attempt.workerJob) await stopFixtureJob(attempt.workerJob);
+        else await stopRewindWorker({ reviewId, attemptId: attempt.id, pid: attempt.workerPid, identity: attempt.workerIdentity, members: attempt.workerMembers });
+        await untilFixture(() => ownWorkerExited(attempt), "owned exploration Review worker exit");
+      }
+    } finally {
+      await (await observer.catch(() => undefined))?.close();
     }
   });
+  await observer;
   const oldHome = process.env.MEMSPHERE_HOME; process.env.MEMSPHERE_HOME = f.home;
   try {
     const run = await reviews.readRun(cfg.runsRoot, R);
     const dispatch = () => dispatchArtifactReviewAgents({ config: cfg, run,
       workspaceRoot: f.cwd, runtime: { nodeExecutable: process.execPath, cliEntrypoint: cli } });
+    begin("first dispatch");
     assert.equal(await (dispatchWork = dispatch()), 1);
+    begin("first Reviewer CLI and failure");
     const wait = () => reviews.waitForArtifactReview({ runsRoot: cfg.runsRoot, reviewId, signal: t.signal, pollIntervalMs: 150 });
     await wait();
     const failed = await reviews.readArtifactReviewForActor(common);
     assert.equal(failed.assignment.status, "failed");
     const first = (await attempts())[0];
     assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity);
+    begin("first Worker exit");
     await untilFixture(() => ownWorkerExited(first), "first exploration Review worker exit");
+    begin("read failed receipt");
     assert.equal(reviewNodeProgress(failed.assignment)?.processed, 1);
     assert.equal((await attempts()).length, 1);
     const failure = failed.assignment.attempts![0].failure!;
@@ -278,9 +311,11 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
     assert.match(failedReceipt, /1\/\d+/);
     assert.doesNotMatch(failedReceipt, /产物已被接受|Run 已推进|Artifact was accepted|advanced to the next step/);
     const attemptId = failed.assignment.attempts![0].id;
+    begin("retry dispatch");
     const retry = f.call("run", "review", "retry", "--review", reviewId);
     dispatchWork = retry;
     const retried = await retry;
+    begin("retried Reviewer CLI and receipt");
     assert.equal(retried.roundId, value.roundId);
     assert.notEqual(retried.attempt.id, attemptId);
     await assert.rejects(reviews.assertArtifactReviewAgentAttemptRunning({ ...common, attemptId }), /no longer current/);
@@ -296,7 +331,9 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
     assert.equal(result.round.assignments[0].submitted?.vote, "approve", JSON.stringify(result.round.assignments[0].attempts));
     const second = (await attempts())[1];
     assert.ok(second.workerPid && second.workerPid !== process.pid && second.workerIdentity);
+    begin("retried Worker exit");
     await untilFixture(() => ownWorkerExited(second), "retried exploration Review worker exit");
+    begin("read final receipt and verify session");
     const before = await f.service.inspect(R);
     const note = reviewResumeNotification("test-project", reviewId);
     assert.equal(note, `请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`);
