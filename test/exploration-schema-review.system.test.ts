@@ -254,20 +254,18 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
   const common = { runsRoot: cfg.runsRoot, reviewId, roundId: value.roundId!, actorId: "reader" };
   let dispatchWork: Promise<unknown> | undefined;
   const attempts = async () => (await repository.locate(R, value.id)).row.value.attempts ?? [];
-  const observer = createFixtureProcesses();
+  const observer = createFixtureProcesses(t.signal);
   const exited = new Set<string>();
-  const ownWorkerExited = async (attempt: Awaited<ReturnType<typeof attempts>>[number]) => {
+  const ownWorkerExited = async (attempt: Awaited<ReturnType<typeof attempts>>[number], signal?: AbortSignal) => {
+    signal?.throwIfAborted();
     const { workerIdentity } = attempt;
     if (!workerIdentity || exited.has(attempt.id)) return true;
-    const { pid } = workerIdentity;
-    const alive = await observer.then(async processes => {
-      processes.rememberSnapshot(workerIdentity);
-      return (await processes.alive(pid))[0];
-    }).catch(async () => {
-      // A recycled PID or an unavailable observer still requires a fresh
-      // creation identity to confirm exit and decide whether cleanup is safe.
-      return sameProcess(workerIdentity, await captureProcessIdentity(pid));
-    });
+    // Cleanup can run after the test signal stops the observer. It uses its own
+    // creation-identity query to verify ownership before stopping a Worker.
+    const alive = signal
+      ? await (await observer).matches(workerIdentity)
+      : sameProcess(workerIdentity, await captureProcessIdentity(workerIdentity.pid));
+    signal?.throwIfAborted();
     if (!alive) exited.add(attempt.id);
     return !alive;
   };
@@ -300,7 +298,7 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
     const first = (await attempts())[0];
     assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity);
     begin("first Worker exit");
-    await untilFixture(() => ownWorkerExited(first), "first exploration Review worker exit");
+    await untilFixture(() => ownWorkerExited(first, t.signal), "first exploration Review worker exit");
     begin("read failed receipt");
     assert.equal(reviewNodeProgress(failed.assignment)?.processed, 1);
     assert.equal((await attempts()).length, 1);
@@ -332,7 +330,7 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
     const second = (await attempts())[1];
     assert.ok(second.workerPid && second.workerPid !== process.pid && second.workerIdentity);
     begin("retried Worker exit");
-    await untilFixture(() => ownWorkerExited(second), "retried exploration Review worker exit");
+    await untilFixture(() => ownWorkerExited(second, t.signal), "retried exploration Review worker exit");
     begin("read final receipt and verify session");
     const before = await f.service.inspect(R);
     const note = reviewResumeNotification("test-project", reviewId);
