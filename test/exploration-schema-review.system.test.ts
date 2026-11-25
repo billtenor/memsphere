@@ -11,6 +11,7 @@ import { openCommandStates } from "../src/home/command-state-store.js";
 import { currentReviewNode, reviewNodeProgress } from "../src/review-nodes.js";
 import { inspectReview, renderReviewResult, reviewResumeNotification } from "../src/daemon/review.js";
 import { captureProcessIdentity, stopRewindWorker } from "../src/context_control/review-process.js";
+import { invokeCliModule } from "./helpers/cli-module.js";
 import { createFixtureProcesses, sameProcess, stopFixtureJob, untilFixture } from "./helpers/fixture-process.js";
 import { delegatedReviewConfig, explorationFixture as fixture, explorationTestCli as cli, writeFixtureSchema } from "./helpers/exploration.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
@@ -227,7 +228,49 @@ for (const schema of [false, true]) {
   });
 }
 
-test("delegated exploration Review reads restricted CLI materials and resumes the same review after saving a node", { timeout: 60000 }, async t => {
+test("a restricted exploration Reviewer CLI reads only the materials bound to its assignment", { timeout: 30000 }, async t => {
+  const f = await fixture(t), run = await f.service.start("Restricted review materials", "en");
+  const attached = await f.service.addExternal(run.id, "used", { content: textContent("authorized source") });
+  const unattached = await f.service.addExternal(run.id, "not used", { content: textContent("unattached source") });
+  const { artifact, step } = await f.service.report(run.id, {
+    name: "candidate", content: textContent("review this"), dependencies: [{ kind: "external", id: attached.id }]
+  });
+  await f.service.configureExplorationStep(run.id, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
+  const pending = await new ExplorationReviews(f.service).start(delegatedReviewConfig(f.config), run.id, artifact.id);
+  const reviewId = explorationReviewHandle(run.id, pending.id);
+  // The CLI reads and enforces the persisted binding. Worker launch and exit
+  // are exercised separately by the retry test.
+  const claim = await reviews.claimArtifactReviewAgentAssignment({
+    service: f.service, runsRoot: f.config.runsRoot, reviewId, roundId: pending.roundId!, actorId: "reader"
+  });
+  assert.ok(claim?.assignment.id);
+  const assignment = claim.assignment.id;
+  const env = {
+    ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_CONFIG_PATH: f.config.configPath,
+    MEMSPHERE_WORKSPACE_ROOT: f.cwd, MEMSPHERE_REVIEW_SOURCE_WORKSPACE: f.root,
+    MEMSPHERE_REVIEW_RUN_ID: run.id, MEMSPHERE_REVIEW_HANDLE: reviewId,
+    MEMSPHERE_REVIEW_ROUND_ID: pending.roundId, MEMSPHERE_REVIEW_MEMORY_RUN_ID: run.id,
+    MEMSPHERE_REVIEW_ASSIGNMENT_ID: assignment, MEMSPHERE_REVIEW_ATTEMPT_ID: claim.attempt.id
+  };
+  let command: Promise<unknown> | undefined;
+  f.beforeCleanup(async () => { await command?.catch(() => undefined); });
+  const read = (...args: string[]) => {
+    const invocation = invokeCliModule([...args, "--output", "json"], f.cwd, env, cli, t.signal);
+    command = invocation;
+    return invocation;
+  };
+  const candidate = await read("run", "artifact", "show", "--assignment", assignment);
+  assert.match(candidate.stdout, /review this/);
+  const contract = await read("run", "artifact", "contract", "show", "--assignment", assignment);
+  assert.equal(JSON.parse(contract.stdout).artifact.name, "candidate");
+  const detail = await read("run", "review", "assignment", "show", "--assignment", assignment);
+  assert.ok(JSON.parse(detail.stdout).reviewProgress);
+  const external = (id: string) => read("run", "external", "show", "--run", run.id, "--external", id);
+  assert.equal(JSON.parse((await external(attached.id)).stdout).source, "used");
+  await assert.rejects(external(unattached.id), /REVIEW_RESOURCE_DENIED|outside this Review/);
+});
+
+test("delegated exploration Review retries in the same round after saving a node and the Worker exits", { timeout: 60000 }, async t => {
   let phase = "fixture setup", phaseStarted = performance.now();
   const timings: string[] = [];
   const begin = (next: string) => {
@@ -241,13 +284,10 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
     t.diagnostic(`Delegated Review phases: ${timings.join(", ")}`);
   });
   const f = await fixture(t), R = (await f.service.start("delegated")).id;
-  const attached = await f.service.addExternal(R, "used", { content: textContent("authorized source") });
-  const unattached = await f.service.addExternal(R, "not used", { content: textContent("unattached source") });
-  const { artifact, step } = await f.service.report(R, { name: "candidate", content: textContent("review this"), dependencies: [{ kind: "external", id: attached.id }] });
+  const { artifact, step } = await f.service.report(R, { name: "candidate", content: textContent("review this") });
   await f.service.configureExplorationStep(R, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
   const repository = new ExplorationReviews(f.service);
   const cfg = delegatedReviewConfig(f.config, {
-    EXPLORATION_TEST_EXTERNAL: attached.id, EXPLORATION_TEST_UNATTACHED: unattached.id,
     EXPLORATION_TEST_CRASH_MARKER: join(f.directory, "node-saved")
   });
   const value = await repository.start(cfg, R, artifact.id), reviewId = explorationReviewHandle(R, value.id);
