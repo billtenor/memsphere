@@ -20,7 +20,7 @@ import { assertReportExecutionCapability } from "../report-execution.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
 import { buildArtifactReviewSummaryPromptModel, buildArtifactReviewNextActionPromptModel, buildRunReviewVoteReceiptPromptModel } from "../prompts/index.js";
 import type { ArtifactReview, ArtifactReviewRound } from "../artifact-review.js";
-import type { Options } from "./context-control.js";
+import type { ContextCommandScope, Options } from "./context-control.js";
 import { appProcedureFileSource } from "../app/run.js";
 import { join } from "node:path";
 import { readRun as readLegacyRun } from "../run/store.js";
@@ -139,11 +139,12 @@ export async function printGraphReviewOutput(review: ArtifactReview<import("../r
   });
   return true;
 }
-export async function graphCommand(operation: string, input: object): Promise<boolean> {
+export async function graphCommand(operation: string, input: object, scope?: ContextCommandScope & { run: Run }): Promise<boolean> {
   const options = input as Options & { position?: string; count?: string; schemaName?: string; force?: boolean; slot?: string; skip?: boolean; dryRun?: boolean; reason?: string; reasonFile?: string };
   if (!options.run) return false;
-  const config = await readConfig(); const service = await openContextControl(config.scopeRoot);
-  const run = service && await service.findRun(options.run);
+  const config = scope?.config ?? await readConfig();
+  const service = scope?.service ?? await openContextControl(config.scopeRoot);
+  const run = scope?.run ?? (service && await service.findRun(options.run));
   if (!run || !isGraphRun(run)) return false;
   for (const root of [config.runsRoot, join(config.archiveRoot, "runs")]) {
     let legacy = false;

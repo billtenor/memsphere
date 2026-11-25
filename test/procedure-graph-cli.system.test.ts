@@ -39,7 +39,7 @@ async function fixture(t: test.TestContext, multiple = false, prepared = true, p
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
   const invokeUsing = (native: boolean, args: string[]) => {
     t.signal.throwIfAborted();
-    const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" };
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
     const result = native
       ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
       : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
@@ -343,7 +343,7 @@ test('rewind JSON argument and superseded errors use the structured stderr contr
     [['run', 'step', 'rewind', '--run', start.runId, '--step', old, '--dry-run'], 'STEP_SUPERSEDED']
   ];
   for (const [args, code] of cases) {
-    await assert.rejects(exec(process.execPath, [cli, '--project', 'test-project', ...args, '--output', 'json'], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: 'graph-session', TRAECLI_THREAD_ID: '' } }), (error: any) => {
+    await assert.rejects(exec(process.execPath, [cli, '--project', 'test-project', ...args, '--output', 'json'], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: 'graph-session', TRAECLI_THREAD_ID: '', CLAUDE_CODE_SESSION_ID: '' } }), (error: any) => {
       assert.equal(error.code, 1); assert.equal(error.stdout, '');
       const result = JSON.parse(error.stderr);
       assert.equal(result.error.code, code);

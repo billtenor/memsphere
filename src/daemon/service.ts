@@ -11,10 +11,12 @@ import { withNativeFileLock } from "../file-lock.js";
 import { spawnCommand } from "../platform-process.js";
 import { readConfigAt, readViewConfig } from "../config.js";
 import { currentCliRuntimeDescriptor } from "../acp/cli-runtime.js";
-import { listTasks, updateTask, taskDiagnostics, type TaskRow } from "./tasks.js";
-import { inspectReview, reviewResumeNotification, reviewReady } from "./review.js";
+import { listTasks, readTask, recordClaudeDelivery, updateTask, taskDiagnostics, type TaskRow } from "./tasks.js";
+import { automaticMessagePrefix, inspectReview, reviewResumeNotification, reviewReady } from "./review.js";
 import { readRunnerAgents } from "../runner/identity.js";
 import { resolveQueueCommand } from "../runner/queue-command.js";
+import { stripRunnerEnvironment } from "../runner/agent-types.js";
+import { ClaudeNotificationError, sendClaudeNotification } from "../runner/claude-notifications.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 
 const stateSchema = z.object({ protocol: z.literal(1), pid: z.number().int().positive(), instanceId: z.string(), token: z.string(), endpoint: z.string() }).strict();
@@ -80,7 +82,7 @@ export async function ensureDaemon(home = resolveMemsphereHome()) {
     if (state && alive(state.pid)) { await request(state, "status"); return state; }
     const runtime = currentCliRuntimeDescriptor();
     const env: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: home };
-    delete env.CODEX_THREAD_ID; delete env.TRAECLI_THREAD_ID;
+    stripRunnerEnvironment(env);
     const child = spawnCommand(runtime.nodeExecutable, [...process.execArgv, runtime.cliEntrypoint, "daemon", "serve"], { cwd: process.cwd(), env, detached: true, stdio: "ignore" });
     let failed: Error | undefined;
     child.once("error", e => { failed = e; });
@@ -93,6 +95,12 @@ export async function ensureDaemon(home = resolveMemsphereHome()) {
     }
     throw new Error("Daemon startup timeout; no task registration acknowledged");
   });
+}
+export async function ensureClaudeNotificationDaemon() {
+  const state = await ensureDaemon();
+  if (!(await request(state, "status")).claudeNotifications) {
+    throw new Error("Restart the Memsphere daemon with this CLI version before registering Claude Code notifications");
+  }
 }
 export async function daemonControl(command: string, home = resolveMemsphereHome()) {
   const state = await readState(home);
@@ -153,12 +161,21 @@ export async function runDaemon(home = resolveMemsphereHome()) {
         } catch (e) { viewError = (e as Error).message; }
       };
       const openView = () => opening ??= doOpenView().finally(() => { opening = undefined; });
-      for (const row of await listTasks(home)) if (row.value.status === "running") await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message: "Daemon exited during task execution; notification may have been sent. Explicit retry required." } }, home);
+      for (const row of await listTasks(home)) {
+        if (row.value.status !== "running") continue;
+        const beforeClaudeSend = row.value.recipient.agentType === "claude" && !row.value.claudeDelivery;
+        const message = beforeClaudeSend
+          ? "Daemon exited before attempting to write the Claude Code notification. Explicit retry required."
+          : "Daemon exited during task execution; notification may have been sent. Explicit retry required.";
+        await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message } }, home);
+      }
       const active = new Map<string, { row: TaskRow; sending: boolean }>();
       const executionErrors = new Map<string, { id: string; error: string }>();
+      const stopNotifications = new AbortController();
       const processTask = async (initial: TaskRow) => {
         let row = initial;
         let stage: "wait" | "render" | "send" = "wait";
+        let deliveryId: string | undefined;
         const save = async (changes: Parameters<typeof updateTask>[1]) => { const updated = await updateTask(row, changes, home); row = { ...updated, value: { ...row.value, ...changes } }; return row; };
         try {
           const claimed = row.value.status === "queued";
@@ -183,11 +200,32 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           if (!enabled?.identity_enabled || !enabled.async_enabled) { await save({ status: "cancelled", error: { stage: "cancel", code: "runner_disabled", message: "Runner disabled before sending" } }); return; }
           stage = "send";
           active.get(row.id)!.sending = true;
-          await sendQueue(row.value.recipient.agentCommand, row.value.recipient.sessionId, body, row.value.input.cwd);
-          await save({ status: "completed", error: undefined });
+          const recipient = row.value.recipient;
+          if (recipient.agentType === "claude") {
+            deliveryId = randomUUID();
+            await save({ claudeDelivery: { id: deliveryId } });
+            const callbackBody = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, `${row.id}:${deliveryId}`);
+            await sendClaudeNotification({
+              command: recipient.agentCommand, sessionId: recipient.sessionId, inbox: recipient.inbox,
+              cwd: row.value.input.cwd, message: `${automaticMessagePrefix}\n${callbackBody}`, signal: stopNotifications.signal
+            });
+            await recordClaudeDelivery(row.id, deliveryId, "sentAt", home);
+          } else {
+            await sendQueue(recipient.agentCommand, recipient.sessionId, body, row.value.input.cwd);
+            await save({ status: "completed", error: undefined });
+          }
         } catch (error) {
           try {
-            await save({ status: "failed", error: { stage, code: "task_failed", message: active.get(row.id)?.sending ? "Queue failed; use explicit retry (outcome may be unknown)" : (error as Error).message.slice(0, 500) } });
+            if (deliveryId && row.value.claudeDelivery?.id === deliveryId) {
+              const current = await readTask(row.id, home);
+              if (current?.value.status !== "running" || current.value.claudeDelivery?.id !== deliveryId) return;
+              row = current;
+            }
+            const sending = active.get(row.id)?.sending;
+            const detail = error instanceof ClaudeNotificationError
+              ? { code: error.code, message: error.message }
+              : { code: "task_failed", message: sending ? "Notification failed; use explicit retry (outcome may be unknown)" : (error as Error).message.slice(0, 500) };
+            await save({ status: "failed", error: { stage, ...detail } });
           } catch {
             // A notification may already have been sent. Never schedule this row again
             // in this instance when even its failure cannot be persisted.
@@ -220,7 +258,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
             else if (request.command === "notify") void tick();
             else if (request.command !== "status" && request.command !== "stop") throw new Error("Unknown daemon command");
             const counts: Record<string, number> = {}; for (const row of await listTasks(home)) counts[row.value.status] = (counts[row.value.status] ?? 0) + 1;
-            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, view: { ...(await readServiceIntent(home)).view, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
+            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, claudeNotifications: true, view: { ...(await readServiceIntent(home)).view, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
             if (request.command === "stop") void shutdown();
           } catch (e) { socket.end(JSON.stringify({ error: (e as Error).message }) + "\n"); }
         });
@@ -234,9 +272,17 @@ export async function runDaemon(home = resolveMemsphereHome()) {
       const timer = setInterval(() => void tick(), 1000);
       const shutdown = async () => {
         if (stopping) return; stopping = true; clearInterval(timer);
+        stopNotifications.abort();
         while (busy) await delay(50);
         await closeView();
-        for (const row of await listTasks(home)) if (!executionErrors.has(row.id) && row.value.status === "running" && row.value.daemonInstanceId === state.instanceId) await updateTask(row, { status: "queued", daemonInstanceId: undefined }, home);
+        for (const row of await listTasks(home)) {
+          if (executionErrors.has(row.id) || row.value.status !== "running" || row.value.daemonInstanceId !== state.instanceId) continue;
+          if (row.value.claudeDelivery) {
+            await updateTask(row, { status: "failed", error: { stage: "recovery", code: "execution_interrupted", message: "Daemon stopped during notification; explicit retry required" } }, home);
+          } else {
+            await updateTask(row, { status: "queued", daemonInstanceId: undefined }, home);
+          }
+        }
         await new Promise<void>(resolve => server.close(() => resolve()));
         await rm(statePath(home), { force: true });
         if (process.platform !== "win32") await rm(state.endpoint, { force: true });
@@ -252,7 +298,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
 export async function sendQueue(command: string, sessionId: string, body: string, cwd: string) {
   const launch = await resolveQueueCommand(command);
   return new Promise<void>((resolve, reject) => {
-    const message = `[Memsphere 自动消息]\n${body}`;
+    const message = `${automaticMessagePrefix}\n${body}`;
     const child = spawnCommand(launch.command, [...launch.args, "queue", "--thread", sessionId, "--message", message], { cwd, stdio: "ignore" });
     const timeout = setTimeout(() => { child.kill(); reject(new Error("Queue timeout; outcome unknown")); }, 15000);
     child.once("error", e => { clearTimeout(timeout); reject(e); });

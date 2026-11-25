@@ -89,6 +89,26 @@ test("a timed out CIM transport closes its owned host and rejects queued queries
   await assert.rejects(observer.query([789]), /Timed out: fresh fixture CIM response/);
 });
 
+test("cancelling the CIM observer stops its owned host and rejects both active and queued queries", async t => {
+  const host = spawn(process.execPath, ["-e", `
+    require('node:readline').createInterface({input:process.stdin}).on('line', line => process.send(line));
+    process.stdout.write('{"ready":true}\\n');
+  `], { stdio: ["pipe", "pipe", "pipe", "ipc"] });
+  t.after(() => stopFixtureChild(host));
+  const controller = new AbortController();
+  const observer = await ownedProcessObserver(host, controller.signal);
+  t.after(() => observer.close());
+  const received = once(host, "message");
+  const outcomes = Promise.allSettled([observer.query([123]), observer.query([456])]);
+  const firstRequest = await bounded(received, "fixture CIM host received the active query");
+  assert.deepEqual(JSON.parse(String(firstRequest[0])), { pids: [123] });
+  const reason = new Error("Fixture cancelled");
+  controller.abort(reason);
+  assert.deepEqual(await outcomes, [{ status: "rejected", reason }, { status: "rejected", reason }]);
+  assert.notEqual(host.signalCode ?? host.exitCode, null);
+  await observer.close();
+});
+
 test("observer initialization failure closes the already-listening rewind gate", async t => {
   const failure = Error("injected observer readiness failure");
   let endpoint = 0;

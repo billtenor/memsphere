@@ -107,7 +107,8 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
       "traex",
       "qwen",
       "kimi",
-      "codex"
+      "codex",
+      "claude"
     ]);
 
     payload.config.acp_providers = { traex: {} };
@@ -128,7 +129,8 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
       "traex",
       "qwen",
       "kimi",
-      "codex"
+      "codex",
+      "claude"
     ]);
     assert(detection.results.every((result) =>
       ["installed", "version_unknown", "missing", "failed"].includes(result.status)

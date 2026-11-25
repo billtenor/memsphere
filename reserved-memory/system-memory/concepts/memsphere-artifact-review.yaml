@@ -10,7 +10,8 @@ defines:
   - "run review assignment show 列出固定对象和可执行读取命令；run artifact show --run R --artifact A --out F、run external show --run R --external E --out F 完整导出原始正文；contract show 支持授权 Artifact ID，当前候选与上游输入均返回同一冻结版本的 Procedure、Action、Artifact 完整契约及适用规则，不把 Action 摘要称为完整契约。Step 查询须唯一定位本轮允许版本；run show 与 step show 在 Session 中仅返回受限摘要。显式 review show/list 只能读取授权上下文的确认记录，无目标仍读本人节点。"
   - "读取和写入都核对 Attempt 生命周期：被重试替换、失败、取消、未启动或经回溯撤销的启动身份拒绝；当前有效 Attempt 可读授权历史依据，本人成功提交后可回读原轮次但不能继续写入。普通只读不握手或推进状态。Session 导出仅可在 Attempt 真实目录中新建工作副本，拒绝目录外、符号链接逃逸及覆盖；完整正文先写入工作目录内的私有临时文件，核对路径与文件身份后以不覆盖方式发布；写入失败不产生部分目标文件，已有或并发替换的目标不得覆盖或删除，无法完成发布或身份核验时明确失败。"
   - "review wait 已就绪时直接返回结果；仍需等待时按 Runner 配置选择异步登记或同步等待，无需命令参数选择。重复异步调用仅复用活动任务，历史终态不阻止新的必要等待。"
-  - "review-wait 任务固定轮次与接收 Agent 会话，queue 成功才 completed；失败和取消通过 status/error 表达，通知仅含来源标记与继续执行的 wait 命令，完整结果由该命令读取，不保存 result 或 delivery。"
+  - "review-wait 任务固定轮次与接收 Agent 会话，发送操作成功后 completed；失败和取消通过 status/error 表达。通知仅含来源标记与继续执行的 wait 命令，完整结果由该命令读取。Claude Code 的收件箱写成功记录发送，合法回读单独记录时间。"
+  - Claude Code ACP Reviewer 使用已验证适配器，以本 Attempt 的受限 launcher 和可验证的工作目录读取权限执行。进程启动时管理会话设置来源、工具清单和权限模式，权限申请按实际工具及参数判断。
   - 流程执行 Run 中针对某次不可变 Artifact Submission 的正式评审，用于让 Human 或 Agent 从不同视角检查产物。
   - Review Slot 是 Procedure 声明的评审视角；Binding 是 Run 中评审视角与实际 Actor 的对应关系。
   - Round 是围绕同一份 Submission 的一轮评审，关联当时的材料、参与者与评审配置；Assignment 是其中分配给单个 Reviewer 的评审任务。

@@ -19,6 +19,7 @@ import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 
 export type Options = { checkpoint?: string; position?: string; count?: string; force?: boolean; authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: string; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string;
   schemaName?: string; asserts?: string[]; suggests?: string[]; clearAsserts?: boolean; clearSuggests?: boolean; clearReviewer?: boolean; progressive?: boolean; node?: string; all?: boolean; commentId?: string; sessionRow?: CommandStateRow };
+export type ContextCommandScope = { config: MemsphereConfig; service: ContextControl };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
 function strictObject(value: unknown, allowed: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("INVALID_ARGUMENT", "Expected an object");
@@ -110,15 +111,15 @@ async function explorationSchema(operation: string, s: ContextControl, config: M
 }
 
 /** Return false only for a proven legacy Run, never for a failed new Store. */
-export async function tryContextCommand(operation: string, options: object): Promise<boolean> {
+export async function tryContextCommand(operation: string, options: object, scope?: ContextCommandScope): Promise<boolean> {
   const o = options as Options;
   if (["artifact-show", "external-show", "review-show", "review-list"].includes(operation) && await tryReviewerResource(operation, o)) return true;
-  if (await graphCommand(operation, o)) return true;
   const newFlags = [o.target, o.for, o.out, o.root, o.revisedFrom, operation === "schema-export" ? undefined : o.file].some(v => v !== undefined) || !!o.dependsOn?.length || !!o.tag?.length || operation === "artifact-show" && o.artifact !== undefined;
   if (!o.run) { if (newFlags) throw failure("INVALID_ARGUMENT", "Free exploration options require --run"); return false; }
-  const config = await readConfig();
-  const service = await openContextControl(config.scopeRoot);
+  const config = scope?.config ?? await readConfig();
+  const service = scope?.service ?? await openContextControl(config.scopeRoot);
   const run = service && await service.findRun(o.run);
+  if (service && run && isGraphRun(run) && await graphCommand(operation, o, { config, service, run })) return true;
   let legacy = false;
   try { await readRun(config.runsRoot, o.run); legacy = true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   if (run && legacy) throw failure("AMBIGUOUS_RUN", "Run ID exists in both storage sources");
@@ -281,8 +282,8 @@ export async function tryContextCommand(operation: string, options: object): Pro
   emitCommandResult(result, o.output); return true;
 }
 
-export async function contextOnlyCommand(operation: string, options: object) {
-  if (!await tryContextCommand(operation, options)) throw failure("NOT_FOUND", "Free exploration Run not found");
+export async function contextOnlyCommand(operation: string, options: object, scope?: ContextCommandScope) {
+  if (!await tryContextCommand(operation, options, scope)) throw failure("NOT_FOUND", "Free exploration Run not found");
 }
 export async function startExploration(options: object) {
   const o = options as Options;

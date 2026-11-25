@@ -1260,11 +1260,17 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
   }
 
   runnersHtml(scope: ScopeState): string {
-    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.runners", "Runner Agent"))}</h3><button class="btn" data-action="detect-runners">${escapeHtml(this.t("settings.autoDetect", "自动检测"))}</button>${["codex", "traex"].map(agent => {
+    const runnerTypes: string[] = scope.data?.runnerAgentTypes ?? ["codex", "traex"];
+    return `<section class="settings-section"><h3>${escapeHtml(this.t("settings.runners", "Runner Agent"))}</h3><button class="btn" data-action="detect-runners">${escapeHtml(this.t("settings.autoDetect", "自动检测"))}</button>${runnerTypes.map(agent => {
       const result = this.#runnerDetection[agent];
       const installed = result?.status === "installed";
       const options = scope.draft?.runner_agents?.[agent] ?? {};
-      return `<div class="settings-participant"><h4>${escapeHtml(agent)}</h4><p>${escapeHtml(result ? result.status : this.t("settings.pendingDetection", "需要检测"))}</p><label><input type="checkbox" data-field="runner.${agent}.identity_enabled"${options.identity_enabled ? " checked" : ""}${installed ? "" : " disabled"}>${escapeHtml(this.t("settings.runnerIdentity", "开启 Agent 身份"))}</label><label><input type="checkbox" data-field="runner.${agent}.async_enabled"${options.async_enabled ? " checked" : ""}${installed && options.identity_enabled ? "" : " disabled"}>${escapeHtml(this.t("settings.runnerAsync", "开启 Agent 异步执行"))}</label></div>`;
+      const asyncAvailable = installed && options.identity_enabled && result.asyncSupported !== false;
+      const status = result?.version ?? result?.status ?? this.t("settings.pendingDetection", "需要检测");
+      const help = agent === "claude" && installed ? (result.asyncSupported
+        ? this.t("settings.runnerClaudeSessionCheck", "异步等待时验证当前会话是否有可用收件箱。")
+        : this.t("settings.runnerClaudeSyncHelp", "此平台或版本未验证异步通知，可关闭异步执行使用同步等待。")) : "";
+      return `<div class="settings-participant"><h4>${escapeHtml(agent === "claude" ? "Claude Code" : agent)}</h4><p>${escapeHtml(status)}</p>${help ? `<p>${escapeHtml(help)}</p>` : ""}<label><input type="checkbox" data-field="runner.${agent}.identity_enabled"${options.identity_enabled ? " checked" : ""}${installed || options.identity_enabled ? "" : " disabled"}>${escapeHtml(this.t("settings.runnerIdentity", "开启 Agent 身份"))}</label><label><input type="checkbox" data-field="runner.${agent}.async_enabled"${options.async_enabled ? " checked" : ""}${asyncAvailable || options.async_enabled ? "" : " disabled"}>${escapeHtml(this.t("settings.runnerAsync", "开启 Agent 异步执行"))}</label></div>`;
     }).join("")}${this.errorsHtml(scope)}</section>`;
   }
   async detectRunners(): Promise<void> {
@@ -1336,6 +1342,7 @@ ${modelRegistrationSetupEnabled ? `<button class="btn" data-action="initialize-m
     else if (provider.type === "qwen") args.push("--model", model, "--approval-mode=auto");
     else if (provider.type === "kimi") args.push("--model", model, "--auto");
     else if (provider.type === "codex") args.unshift(`CODEX_CONFIG={\"model\":\"${model}\"}`, "NO_BROWSER=1", "INITIAL_AGENT_MODE=read-only");
+    else if (provider.type === "claude") args.unshift("CLAUDE_AGENT_ACP_PROTOCOL=v1", "DISABLE_AUTOUPDATER=1");
     args.push(...(provider.args ?? []));
     if (provider.type === "traex") args.push("acp", "serve");
     else if (provider.type === "qwen") args.push("--acp");
