@@ -16,6 +16,32 @@ import { createFixtureProcesses, sameProcess, stopFixtureJob, untilFixture } fro
 import { delegatedReviewConfig, explorationFixture as fixture, explorationTestCli as cli, writeFixtureSchema } from "./helpers/exploration.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
 
+test("exploration reports a broken reviewer only when it is selected or started", { timeout: 30000 }, async t => {
+  const f = await fixture(t);
+  const project = JSON.parse(await readFile(f.config.configPath, "utf8"));
+  const homePath = join(f.home, "config.json");
+  const home = JSON.parse(await readFile(homePath, "utf8"));
+  project.control_plane = {
+    runner: { permissions: ["artifact.read", "decision.decide"] },
+    actors: { reviewer: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "kimi" } } }
+  };
+  await writeFile(f.config.configPath, JSON.stringify(project));
+  const run = await f.call("run", "start", "--name", "Review configuration");
+  const { stepId, artifactId } = await f.call("continue", "report", "--name", "Result", "--artifact", "Candidate");
+  const configure = ["run", "step", "configure", "--run", run.id, "--step", stepId, "--asserts", "fact", "--reviewer"];
+  await f.call(...configure, "project:reviewer");
+
+  await writeFile(homePath, JSON.stringify({ ...home, acp_providers: { kimi: { args: "invalid" } } }));
+  const step = await f.call("run", "step", "show", "--run", run.id, "--step", stepId);
+  assert.deepEqual(step.reviewers.map((reviewer: { value: string }) => reviewer.value), ["runner"]);
+  const start = ["run", "review", "start", "--run", run.id, "--artifact", artifactId];
+  await assert.rejects(f.call(...start), /INVALID_REVIEWER.*acp_providers\.kimi\.args/);
+  await assert.rejects(f.call(...configure, "project:reviewer"), /INVALID_REVIEWER.*acp_providers\.kimi\.args/);
+  assert.deepEqual(await new ExplorationReviews(f.service).list(run.id), []);
+  await f.call(...configure, "runner");
+  assert.ok((await f.call(...start)).reviewId);
+});
+
 test("free exploration Schema and Runner Review use explicit native targets and Continue bindings", { timeout: 60000 }, async t => {
   const f = await fixture(t), R = (await f.call("run", "start", "--name", "Explore")).id;
   await writeFile(f.schema, (await readFile(f.schema, "utf8")) + "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]\n");

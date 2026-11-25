@@ -12,7 +12,7 @@ import { downstream, scopedSnapshot } from "../context_control/graph.js";
 import { emitCommandResult } from "./cli-errors.js";
 import { graphCommand } from "./procedure-graph.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
-import { explorationReviewerOptions, explorationRules, freezeExplorationSchema } from "../context_control/exploration-contract.js";
+import { explorationReviewerConfigError, explorationReviewerOptions, explorationRules, freezeExplorationSchema } from "../context_control/exploration-contract.js";
 import { ExplorationReviews, explorationReviewIdentity } from "../context_control/exploration-review.js";
 import { explorationReviewView, readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
@@ -57,7 +57,9 @@ export async function explorationStepConfiguration(service: ContextControl, conf
 
 export async function configureExplorationStep(service: ContextControl, config: MemsphereConfig, runId: string, stepId: string, options: Options) {
   if ((options.asserts && options.clearAsserts) || (options.suggests && options.clearSuggests) || (options.reviewer !== undefined && options.clearReviewer)) throw failure("INVALID_ARGUMENT", "Choose setting or clearing each field");
-  if (options.reviewer !== undefined && !explorationReviewerOptions(config).some(r => r.value === options.reviewer)) throw failure("INVALID_REVIEWER", "Select an available reviewer from run step show");
+  if (options.reviewer !== undefined && !explorationReviewerOptions(config).some(r => r.value === options.reviewer)) {
+    throw failure("INVALID_REVIEWER", explorationReviewerConfigError(config, options.reviewer) ?? "Select an available reviewer from run step show");
+  }
   const rules = options.asserts || options.suggests ? await explorationRules(config, options) : undefined;
   await service.configureExplorationStep(runId, stepId, {
     ...(options.clearAsserts || options.asserts ? { asserts: rules?.asserts.references ?? [] } : {}),

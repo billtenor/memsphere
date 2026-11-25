@@ -40,7 +40,6 @@ import { requireRunContent } from "../project/run-data.js";
 import { detectAcpProviderInstances } from "../acp/detection.js";
 import {
   defaultAcpProviderInstance,
-  defaultAcpProviderInstances,
   listAcpProviderDefinitions
 } from "../acp/catalog.js";
 import {
@@ -75,7 +74,7 @@ import {
   type ProjectConfigDocument,
   type ProjectConfigReference
 } from "../config-management.js";
-import { authorizeArtifactOperation, controlPlaneConfigSchema, listPermissionDefinitions } from "../control-plane/index.js";
+import { authorizeArtifactOperation, listPermissionDefinitions, resolveAcpProviders, validProjectActorEntries } from "../control-plane/index.js";
 import { listMemoryFiles, readMemoryFile, readMemoryFileSummary } from "../memory/store.js";
 import { memoryKinds, type MemoryKind } from "../memory/kinds.js";
 import { parseMemoryYaml } from "../memory/yaml.js";
@@ -791,17 +790,12 @@ async function handleRequest(
       });
       return;
     }
-    const providers = controlPlaneConfigSchema.parse({
-      runner: { permissions: [] },
-      actors: {},
-      ...(validation.candidate.acp_providers
-        ? { acp_providers: validation.candidate.acp_providers }
-        : {})
-    }).acpProviders ?? defaultAcpProviderInstances();
+    const { providers, errors } = resolveAcpProviders(validation.candidate.acp_providers);
     const detectionResults = await detectAcpProviderInstances(providers);
     sendJson(response, 200, {
       detectedAt: new Date().toISOString(),
-      results: detectionResults.map((result) => localizeAcpProviderDetection(result, config.language))
+      results: detectionResults.map((result) => localizeAcpProviderDetection(result, config.language)),
+      errors: [...errors].map(([id, message]) => ({ path: `acp_providers.${id}`, message }))
     });
     return;
   }
@@ -2044,7 +2038,7 @@ function resolveMemoryChangeActor(config: MemsphereConfig, input: unknown): Memo
   const operator = input as { kind?: unknown; id?: unknown };
   if (operator.kind === "human" && typeof operator.id === "string") {
     const actor = config.controlPlane?.actors?.[operator.id];
-    if (!actor || actor.kind !== "human") throw new Error(`Human Actor not found: ${operator.id}`);
+    if (!actor || actor.kind !== "human") throw new Error(config.controlPlane?.actorErrors?.get(operator.id) ?? `Human Actor not found: ${operator.id}`);
     return { kind: "human", id: operator.id, name: actor.name };
   }
   if (operator.kind === "browser" && typeof operator.id === "string") {
@@ -3001,19 +2995,21 @@ function providerReferenceMap(projects: ProjectConfigReference[]): Record<string
   actorId: string;
   actorName?: string;
 }>> {
-  const references: Record<string, Array<{ projectName: string; actorId: string; actorName?: string }>> = {};
+  const references = new Map<string, Array<{ projectName: string; actorId: string; actorName?: string }>>();
   for (const project of projects) {
-    for (const [actorId, actor] of Object.entries(project.config.control_plane?.actors ?? {})) {
+    for (const [actorId, actor] of Object.entries(validProjectActorEntries(project.config.control_plane?.actors ?? {}))) {
       if (actor.kind !== "agent" || !actor.agent?.provider) continue;
       const reference = {
         projectName: project.name,
         actorId,
         actorName: actor.name?.trim() ? actor.name : actorId
       };
-      (references[actor.agent.provider] ??= []).push(reference);
+      const entries = references.get(actor.agent.provider) ?? [];
+      entries.push(reference);
+      references.set(actor.agent.provider, entries);
     }
   }
-  return references;
+  return Object.fromEntries(references);
 }
 
 function authorizeSettingsRequest(
