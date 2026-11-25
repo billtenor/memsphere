@@ -43,7 +43,7 @@ test("exploration reports a broken reviewer only when it is selected or started"
 
 test("free exploration Schema and Runner Review use explicit native targets and Continue bindings", { timeout: 60000 }, async t => {
   const f = await fixture(t), R = (await f.call("run", "start", "--name", "Explore")).id;
-  await f.writePublishedMemory(f.schema, (await readFile(f.schema, "utf8")) + "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]\n");
+  await writeFile(f.schema, (await readFile(f.schema, "utf8")) + "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]\n");
   const draft = await f.call("continue", "enter-schema", "report", "--name", "Findings", "--content-type", "text/markdown");
   const A = draft.artifactId, S = draft.stepId;
   const repository = new ExplorationReviews(f.service);
@@ -74,7 +74,7 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   assert.deepEqual(first.materials.map((ref: { id: string }) => ref.id), [A, E]);
   assert.ok(!first.materials.some((ref: { id: string }) => ref.id === unused));
   await assert.rejects(f.call("continue", "review", "submit", "--artifact", '{"vote":"approve"}'), /review_node_incomplete/);
-  await f.writePublishedMemory(f.statement, withCurrentMemorySyntax("!statement\nnames: [fact]\nasserts: [Check updated fact]\nsuggests: [Use plain language]\n"));
+  await writeFile(f.statement, withCurrentMemorySyntax("!statement\nnames: [fact]\nasserts: [Check updated fact]\nsuggests: [Use plain language]\n"));
   const frozen = await f.call("run", "review", "show", "--run", R, "--review", V, "--all");
   assert.ok(frozen.nodes.some((n: { asserts: Array<{ text: string }> }) => n.asserts.some(rule => rule.text === "Check original fact")));
   let progress = await f.call("continue", "review", "show");
@@ -285,8 +285,7 @@ test("delegated exploration Review reads restricted CLI materials and resumes th
     const failed = await reviews.readArtifactReviewForActor(common);
     assert.equal(failed.assignment.status, "failed");
     const first = (await attempts())[0];
-    assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity,
-      `Expected an identified delegated worker, attempt failure: ${JSON.stringify(first.failure)}`);
+    assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity);
     await untilFixture(() => ownWorkerExited(first), "first exploration Review worker exit");
     assert.equal(reviewNodeProgress(failed.assignment)?.processed, 1);
     assert.equal((await attempts()).length, 1);

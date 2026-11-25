@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { writeFile } from "node:fs/promises";
 import { ExplorationReviews, mutateModelReviewNode } from "../src/context_control/exploration-review.js";
 import { textContent } from "../src/context_control/types.js";
 import { explorationFixture as fixture, writeFixtureSchema } from "./helpers/exploration.js";
@@ -73,7 +74,7 @@ for (const schema of [false, true]) {
       });
     } finally { store.create = create; }
     await service.configureExplorationStep(R, A1.step.id, { asserts: [], suggests: ["statements/fact"] });
-    if (schema) await f.writePublishedMemory(f.schema, withCurrentMemorySyntax("!schema\nnames: [report]\ntype: boolean\n"));
+    if (schema) await writeFile(f.schema, withCurrentMemorySyntax("!schema\nnames: [report]\ntype: boolean\n"));
     const partial = await service.inspect(R);
     assert.ok(partial.artifacts.some(a => a.id === ids.artifactId));
     assert.ok(!partial.steps.some(step => step.id === ids.stepId));

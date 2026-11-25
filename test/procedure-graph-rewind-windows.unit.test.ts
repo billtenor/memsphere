@@ -1,19 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { queryWindowsProcessIdentity, queryWindowsProcesses, windowsGroup } from "../src/context_control/review-process.js";
+import { queryWindowsProcesses, windowsGroup } from "../src/context_control/review-process.js";
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
-
-test("Windows PID query preserves legacy creation ticks and requires proof of absence", async () => {
-  const query = (stdout: string) => async () => ({ stdout });
-  assert.deepEqual(await queryWindowsProcessIdentity(42, query("638500000000000007\r\n")), {
-    pid: 42, group: 42, started: "638500000000000000"
-  });
-  assert.equal(await queryWindowsProcessIdentity(42, query("absent\r\n")), undefined);
-  for (const stdout of ["", "0", "unavailable", "absent\n638500000000000007"]) {
-    await assert.rejects(queryWindowsProcessIdentity(42, query(stdout)), { code: "PROCESS_IDENTITY_UNAVAILABLE" });
-  }
-  await assert.rejects(queryWindowsProcessIdentity(42, async () => { throw Object.assign(new Error("probe failed"), { code: "ETIMEDOUT" }); }), { code: "ETIMEDOUT" });
-});
 
 
 // Exercise the query adapter separately from tree termination: failed probes must

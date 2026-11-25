@@ -1,4 +1,4 @@
-import { gitOutput, runGit } from "../../src/git.js";
+import { runGit } from "../../src/git.js";
 import assert from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -14,30 +14,18 @@ import { withCurrentMemorySyntax } from "./memory.js";
 export const explorationTestCli = fileURLToPath(new URL("../../dist/cli.js", import.meta.url));
 export async function explorationFixture(t: TestContext) {
   const f = await initializedContextFixture(t);
+  await runGit(["init", "-b", "master"], { cwd: f.root });
+  await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Embedded fixture"], { cwd: f.root });
   const configuration = join(f.root, "config.json");
-  const memoryRoot = join(f.root, "memory");
-  await mkdir(join(memoryRoot, "schemas"), { recursive: true });
-  await mkdir(join(memoryRoot, "statements"), { recursive: true });
-  await runGit(["init", "-b", "master"], { cwd: memoryRoot });
-  const statement = join(memoryRoot, "statements", "fact.yaml");
+  const project = JSON.parse(await readFile(configuration, "utf8"));
+  await writeFile(configuration, JSON.stringify({ ...project, store: { type: "embedded", repository_path: f.root, memory_path: "memory" } }));
+  const config = await readProjectConfig("test-project", f.home);
+  await mkdir(join(config.memoryRoot, "schemas"), { recursive: true });
+  await mkdir(join(config.memoryRoot, "statements"), { recursive: true });
+  const statement = join(config.memoryRoot, "statements", "fact.yaml");
   await writeFile(statement, withCurrentMemorySyntax("!statement\nnames: [fact]\nasserts: [Check original fact]\nsuggests: [Explain the finding]\n"));
-  const schema = join(memoryRoot, "schemas", "report.yaml");
+  const schema = join(config.memoryRoot, "schemas", "report.yaml");
   await writeFile(schema, withCurrentMemorySyntax("!schema\nnames: [report]\ntype: object\nformat: {layout: outline}\nfields:\n  - !schema {name: Notes, optional: true}\n  - !schema {name: Count, type: number}\n"));
-  // These tests exercise exploration with published Memory. Embedded worktree
-  // resolution and binding validation have their own integration coverage.
-  const publishMemory = async () => {
-    await runGit(["add", "--", "schemas", "statements"], { cwd: memoryRoot });
-    await runGit(["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "Publish fixture Memory"], { cwd: memoryRoot });
-    const revision = await gitOutput(["rev-parse", "HEAD"], memoryRoot);
-    const current = JSON.parse(await readFile(configuration, "utf8"));
-    await writeFile(configuration, JSON.stringify({ ...current, store: { type: "managed", branch: "master", published_revision: revision } }));
-    return readProjectConfig("test-project", f.home);
-  };
-  const config = await publishMemory();
-  const writePublishedMemory = async (path: string, content: string) => {
-    await writeFile(path, content);
-    Object.assign(config, await publishMemory());
-  };
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   const service = (await openContextControl(f.root))!;
   let invoking: Promise<unknown> | undefined;
@@ -49,7 +37,7 @@ export async function explorationFixture(t: TestContext) {
     return command;
   };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
-  return { ...f, config, service, invoke, call, statement, schema, writePublishedMemory };
+  return { ...f, config, service, invoke, call, statement, schema };
 }
 
 export function delegatedReviewConfig(config: MemsphereConfig, env: Record<string, string> = {}, mode = "approve"): MemsphereConfig {
