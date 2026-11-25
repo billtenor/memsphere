@@ -103,6 +103,10 @@ export const enViewMessages = {
   "settings.runners": "Runner Agents",
   "settings.runnerIdentity": "Enable Agent identity",
   "settings.runnerAsync": "Enable asynchronous execution",
+  "settings.runnerClaudeSessionCheck": "Asynchronous waits check whether the current session has a usable inbox.",
+  "settings.runnerClaudeSyncHelp": "Asynchronous notification is unverified for this platform or version. Turn it off to wait synchronously.",
+  "settings.provider.installHelp.claude": "Install the verified @agentclientprotocol/claude-agent-acp@0.109.1 adapter and authenticate Claude Code.",
+  "settings.provider.windowsReason.claude": "Claude Reviewer tool and lifecycle validation on native Windows is pending.",
 
   "settings.optionalActorName": "Optional; defaults to ID",
   "settings.registrationMigrationRequired": "Existing model registrations require revalidation and explicit migration confirmation.",

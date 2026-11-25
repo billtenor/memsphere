@@ -7,8 +7,8 @@ import { createCommandState, findCommandStates, requireCommandState, updateComma
 
 test("session keys persist across commands and reads remain isolated when two sessions share a Run", async t => {
   const f = await businessFixture(t, {});
-  const previous = { MEMSPHERE_HOME: process.env.MEMSPHERE_HOME, CODEX_THREAD_ID: process.env.CODEX_THREAD_ID, TRAECLI_THREAD_ID: process.env.TRAECLI_THREAD_ID };
-  Object.assign(process.env, { MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "session-a", TRAECLI_THREAD_ID: "" });
+  const previous = { MEMSPHERE_HOME: process.env.MEMSPHERE_HOME, CODEX_THREAD_ID: process.env.CODEX_THREAD_ID, TRAECLI_THREAD_ID: process.env.TRAECLI_THREAD_ID, CLAUDE_CODE_SESSION_ID: process.env.CLAUDE_CODE_SESSION_ID };
+  Object.assign(process.env, { MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "session-a", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" });
   t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true } } }));
   const a = (await createCommandState("project-a", "run-a"))!;
@@ -39,7 +39,7 @@ async function sessionProcesses(t: import("node:test").TestContext) {
   const run = async (session: string, project = "project-a", runId = "run-a", before = "") => {
     const script = `import {createCommandState,openCommandStates} from ${JSON.stringify(source)}; ${before}; console.log(JSON.stringify(await createCommandState(${JSON.stringify(project)},${JSON.stringify(runId)})));`;
     const result = await exec(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
-      env: { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: session, TRAECLI_THREAD_ID: "" }, timeout: 8000
+      env: { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: session, TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" }, timeout: 8000
     });
     return JSON.parse(result.stdout);
   };

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import test from "node:test";
 import { terminateProcessTree } from "../../../src/platform-process.js";
 import { runAgentReviewAcpSession } from "../../../src/acp/client.js";
+import { claudeAcpVersion } from "../../../src/acp/catalog.js";
 
 for (const invalidAt of [1, 2]) test(`ACP launch fence rejects invalidation at check ${invalidAt} and leaves no provider`, { timeout: 15000 }, async t => {
   let checks = 0;
@@ -86,4 +87,61 @@ test("ACP attributes a launcher error after stdout EOF to the original spawn fai
   prompt:"review",reminder:"submit",workspaceRoot:tmpdir(),isSubmitted:async()=>false,onSession:async()=>assert.fail("failed launcher connected")
  },{spawn:()=>{queueMicrotask(()=>{provider.emit("spawn");provider.stdout.end();});return provider as unknown as ChildProcessWithoutNullStreams;}}),/agent_process_spawn: ENOENT controlled launcher failure/);
  assert.equal(lateErrorObserved,true);
+});
+
+test("Claude ACP checks the adapter and configures the default mode before prompting", { timeout: 30000 }, async () => {
+  const fixture = String.raw`
+const assert = require("node:assert/strict");
+const { createInterface } = require("node:readline");
+const fixtureMode = process.argv[1];
+let permissionMode = "auto";
+createInterface({ input: process.stdin }).on("line", line => {
+  const { id, method, params } = JSON.parse(line);
+  if (id === undefined) return;
+  let result, error;
+  if (method === "initialize") {
+    result = {
+      protocolVersion: 1, agentCapabilities: {}, agentInfo: {
+        name: "@agentclientprotocol/claude-agent-acp",
+        version: fixtureMode === "wrong-version" ? "9.9.9" : process.argv[2]
+      }
+    };
+  } else if (method === "session/new") {
+    assert.deepEqual(params.mcpServers, []);
+    const options = params._meta.claudeCode.options;
+    assert.deepEqual(options.settingSources, []);
+    assert.deepEqual(options.tools, ["Bash", "Read"]);
+    assert.equal(options.model, "fixture-claude-model");
+    assert.equal(options.allowDangerouslySkipPermissions, false);
+    result = { sessionId: "fixture", modes: {
+      currentModeId: permissionMode,
+      availableModes: fixtureMode === "missing-mode" ? [{ id: "auto", name: "Auto" }]
+        : [{ id: "auto", name: "Auto" }, { id: "default", name: "Default" }]
+    } };
+  } else if (method === "session/set_mode") {
+    assert.equal(params.sessionId, "fixture");
+    assert.equal(params.modeId, "default");
+    if (fixtureMode === "mode-rejected") error = { code: -32603, message: "Mode change rejected" };
+    else { permissionMode = "default"; result = {}; }
+  } else if (method === "session/prompt") {
+    assert.equal(fixtureMode, "ready");
+    assert.equal(permissionMode, "default");
+    result = { stopReason: "end_turn" };
+  }
+  process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result, error }) + "\n");
+});
+`;
+  const run = (mode: string) => runAgentReviewAcpSession({
+    launch: {
+      provider: "claude", command: process.execPath, args: ["-e", fixture, mode, claudeAcpVersion], cwd: tmpdir(),
+      env: process.env, startupTimeoutMs: 5000, idleTimeoutMs: 5000, maxRuntimeMs: null,
+      promptVersion: "artifact-review-v1", model: "fixture-claude-model"
+    },
+    prompt: "review", reminder: "submit", workspaceRoot: tmpdir(),
+    isSubmitted: async () => true, onSession: async () => undefined
+  });
+  await assert.rejects(run("wrong-version"), /requires verified claude-agent-acp/);
+  await assert.rejects(run("missing-mode"), /default permission mode is unavailable/);
+  await assert.rejects(run("mode-rejected"));
+  assert.equal((await run("ready")).stopReason, "end_turn");
 });

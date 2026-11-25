@@ -18,7 +18,7 @@ const operations: Array<[string[], string, string[]]> = [
   [["skip"], "schema-skip", ["position", "output"]],
   [["repeat"], "schema-repeat", ["position", "output"]],
   [["artifact", "export"], "schema-export", ["file", "force", "output"]],
-  [["review", "wait"], "review-wait", []],
+  [["review", "wait"], "review-wait", ["callback"]],
   [["review", "vote"], "review-vote", ["vote", "comment", "commentFile"]],
   [["review", "resolve"], "review-resolve", ["comment", "disposition", "note", "noteFile", "validationSummary", "validationSummaryFile", "output"]],
   [["review", "submit-for-human"], "review-submit-for-human", ["assignment", "vote", "commentsFile", "summary", "summaryFile", "authorizationNote", "authorizationNoteFile", "output"]],
@@ -102,7 +102,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     if (operation === "schema-repeat") command.argument("<count>", "Repeat count");
     if (operation === "schema-enter") command.argument("[schema-name]", "Schema for a new free exploration draft");
     command.action(async (...args: unknown[]) => {
-      const options = (operation === "schema-repeat" ? { ...(args[1] as Options), count: args[0] as string } : operation === "schema-enter" ? { ...(args[1] as Options), schemaName: args[0] as string } : args[0]) as Options & { help?: boolean };
+      const options = (operation === "schema-repeat" ? { ...(args[1] as Options), count: args[0] as string } : operation === "schema-enter" ? { ...(args[1] as Options), schemaName: args[0] as string } : args[0]) as Options & { help?: boolean; callback?: string };
       if (options.help) { await help(target); return; }
       const context = await load();
       const reviewId = context.parameters.review;
@@ -111,7 +111,9 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         await contextOnlyCommand(operation, { ...options, run: context.groupId, review: reviewId }, context.scope);
         return;
       }
-      if (!context.available) throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
+      if (!context.available && !(operation === "review-wait" && options.callback !== undefined)) {
+        throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
+      }
       if (reviewId) {
         if (operation === "review-wait") await (await import("./run.js")).runReviewWaitCommand({ review: reviewId, ...options, sessionRow: context.row });
         else if (operation === "review-retry") await (await import("./run.js")).runReviewRetryCommand({ ...options, review: reviewId });

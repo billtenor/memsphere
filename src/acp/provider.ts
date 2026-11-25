@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import type { ControlPlaneActor } from "../control-plane/index.js";
 import type { AcpProviderType } from "./catalog.js";
 import { validateAcpProviderConfiguration } from "./validation.js";
+import { stripRunnerEnvironment } from "../runner/agent-types.js";
 
 type AgentActor = Extract<ControlPlaneActor, { kind: "agent" }>;
 
@@ -47,11 +48,11 @@ function commonLaunch(
   provider: AcpProviderType,
   input: Parameters<AgentReviewProvider["buildLaunch"]>[0],
   args: string[],
-  providerEnv: Record<string, string> = {}
+  providerEnv: NodeJS.ProcessEnv = {}
 ): AgentReviewProviderLaunch {
   const agent = input.actor.agent;
   const sessionEnv = { ...agent.env, ...providerEnv, ...input.sessionEnv };
-  delete sessionEnv.CODEX_THREAD_ID; delete sessionEnv.TRAECLI_THREAD_ID;
+  stripRunnerEnvironment(sessionEnv);
   return {
     provider,
     command: agent.command,
@@ -76,7 +77,8 @@ function configuredArgs(
   return validateAcpProviderConfiguration({
     type: provider,
     command: input.actor.agent.command,
-    args: input.actor.agent.args
+    args: input.actor.agent.args,
+    env: input.actor.agent.env
   });
 }
 
@@ -135,6 +137,24 @@ registerAgentReviewProvider({
       ...(input.actor.agent.model
         ? { CODEX_CONFIG: JSON.stringify({ model: input.actor.agent.model }) }
         : {})
+    });
+  }
+});
+
+registerAgentReviewProvider({
+  id: "claude",
+  buildLaunch(input) {
+    const env: NodeJS.ProcessEnv = {};
+    for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR"] as const) {
+      if (process.env[name]) env[name] = process.env[name];
+    }
+    if (!input.actor.agent.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_BASE_URL) {
+      env.ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL;
+    }
+    return commonLaunch("claude", input, configuredArgs("claude", input), {
+      ...env,
+      CLAUDE_AGENT_ACP_PROTOCOL: "v1",
+      DISABLE_AUTOUPDATER: "1"
     });
   }
 });

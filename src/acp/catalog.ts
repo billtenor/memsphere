@@ -1,4 +1,5 @@
-export const acpProviderTypes = ["traex", "qwen", "kimi", "codex"] as const;
+export const acpProviderTypes = ["traex", "qwen", "kimi", "codex", "claude"] as const;
+export const claudeAcpVersion = "0.109.1";
 
 export type AcpProviderType = typeof acpProviderTypes[number];
 
@@ -67,6 +68,17 @@ const definitions: Record<AcpProviderType, AcpProviderDefinition> = {
     windowsSupport: {
       status: "experimental",
       reason: "The Windows PowerShell launch path requires Memsphere ACP end-to-end validation."
+    }
+  },
+  claude: {
+    type: "claude",
+    name: "Claude Code",
+    defaultCommand: "claude-agent-acp",
+    versionArgs: ["--version"],
+    installHelp: `Install @agentclientprotocol/claude-agent-acp@${claudeAcpVersion} and authenticate Claude Code.`,
+    windowsSupport: {
+      status: "experimental",
+      reason: "Claude Reviewer tool and lifecycle validation on native Windows is pending."
     }
   }
 };
