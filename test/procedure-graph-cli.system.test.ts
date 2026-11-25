@@ -149,7 +149,7 @@ test("CLI isolates invalid ACP Providers and Actors until a Review Slot binds th
     runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
     actors: {
       good: { kind: "agent", permissions, agent: { provider: "kimi" } },
-      unknown: { kind: "agent", permissions, agent: { provider: "claude" } },
+      unknown: { kind: "agent", permissions, agent: { provider: "future-provider" } },
       damaged: { kind: "agent", permissions, agent: { provider: "codex" } },
       malformed: { kind: "human", permissions: "artifact.read" },
       runner: { kind: "human", permissions }
@@ -174,7 +174,7 @@ test("CLI isolates invalid ACP Providers and Actors until a Review Slot binds th
   assert.deepEqual(Object.keys(snapshot.run.permissionConfig.actors), ["good"]);
   assert.equal(snapshot.run.permissionConfig.actors.good.agent.startupTimeoutMs, 1000);
   const beforeFailedStarts = (await f.invoke("run", "status")).stdout;
-  await assert.rejects(start("unknown"), /control_plane\.actors\.unknown\.agent\.provider.*Unknown ACP Provider id: claude/);
+  await assert.rejects(start("unknown"), /control_plane\.actors\.unknown\.agent\.provider.*Unknown ACP Provider id: future-provider/);
   await assert.rejects(start("damaged"), /control_plane\.actors\.damaged\.agent\.provider.*acp_providers\.codex\.startup_timeout_ms/);
   await assert.rejects(start("malformed"), /control_plane\.actors\.malformed\.permissions/);
   await assert.rejects(start("runner"), /Graph Actor id runner conflicts/);

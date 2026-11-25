@@ -47,7 +47,7 @@ flow:
   const agent = (provider: string) => ({ kind: "agent", permissions: reviewerPermissions, agent: { provider } });
   const homeConfig = {
     language: "en",
-    acp_providers: { kimi: { args: ["--fixture-option"], startup_timeout_ms: 1250 }, codex: null, claude: {} }
+    acp_providers: { kimi: { args: ["--fixture-option"], startup_timeout_ms: 1250 }, codex: null, claude: {}, "future-provider": {} }
   };
   const homePath = join(f.home, "config.json");
   await writeFile(homePath, JSON.stringify(homeConfig));
@@ -56,10 +56,11 @@ flow:
     store: { type: "embedded", repository_path: f.root, memory_path: "memory" },
     control_plane: {
       runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
-      actors: { healthy: agent("kimi"), damaged: agent("codex"), unknown: agent("claude"), malformed: 17 }
+      actors: { healthy: agent("kimi"), damaged: agent("codex"), unknown: agent("future-provider"), malformed: 17 }
     }
   }));
   const config = await readProjectConfig(project, f.home);
+  assert.equal(config.controlPlane?.acpProviders?.claude?.command, "claude-agent-acp");
   const { runsRoot } = config;
   const bind = (id: string) => reviewConfiguration({ procedure, slots: { reviewer: [id] } });
   const runCli = (...args: string[]) => {
@@ -94,7 +95,7 @@ flow:
   assert.deepEqual(Object.keys(healthy.controlPlane!.actors), ["healthy"]);
   for (const [actor, diagnostic] of [
     ["damaged", /control_plane\.actors\.damaged\.agent\.provider.*acp_providers\.codex/],
-    ["unknown", /control_plane\.actors\.unknown\.agent\.provider.*Unknown ACP Provider id: claude/],
+    ["unknown", /control_plane\.actors\.unknown\.agent\.provider.*Unknown ACP Provider id: future-provider/],
     ["malformed", /control_plane\.actors\.malformed/]
   ] as const) {
     const attempted = await start(actor);
@@ -107,8 +108,8 @@ flow:
   const frozenActor = historicalControlPlane.actors.healthy;
   assert.equal(frozenActor.kind, "agent");
   frozenActor.systemPrompt = "Historical fixture prompt";
-  frozenActor.agent.provider = "claude";
-  frozenActor.agent.providerType = "claude";
+  frozenActor.agent.provider = "future-provider";
+  frozenActor.agent.providerType = "future-provider";
   const historical = await startRun({
     memoryRoot, runsRoot, projectRoot: f.root, name: "Historical Flow", procedureName: procedure,
     controlPlane: historicalControlPlane, reviewConfiguration: bind("healthy")
@@ -172,7 +173,7 @@ flow:
       } else {
         assert.equal(result.status, "failed");
         assert.equal(result.attempts?.[0].failure?.code, "agent_provider_unsupported");
-        assert.match(result.attempts?.[0].failure?.message ?? "", /claude/);
+        assert.match(result.attempts?.[0].failure?.message ?? "", /future-provider/);
         assert.equal(result.attempts?.[0].sessionId, undefined);
         assert.equal(result.submitted, undefined);
         assert.deepEqual(afterRound.votes, []);

@@ -351,12 +351,12 @@ test("A frozen Actor with an unfamiliar Provider remains readable", () => {
   const snapshot = createControlPlaneSnapshot(parseControlPlaneConfig(rawConfig));
   const actor = snapshot.actors.agent;
   assert.equal(actor.kind, "agent");
-  actor.agent.providerType = "claude";
+  actor.agent.providerType = "future-provider";
 
   const frozen = controlPlaneSnapshotSchema.parse(snapshot).actors.agent;
   assert.equal(frozen.kind, "agent");
-  assert.equal(frozen.agent.providerType, "claude");
-  assert.throws(() => getAgentReviewProvider(frozen.agent.providerType), /agent_provider_unsupported: claude/);
+  assert.equal(frozen.agent.providerType, "future-provider");
+  assert.throws(() => getAgentReviewProvider(frozen.agent.providerType), /agent_provider_unsupported: future-provider/);
 });
 
 

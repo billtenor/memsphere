@@ -169,7 +169,7 @@ test("Settings detects healthy ACP Providers alongside unavailable entries", asy
   await withSettingsServer("127.0.0.1", async ({ origin, configPath, globalConfigPath }) => {
     const home = JSON.parse(await readFile(globalConfigPath, "utf8"));
     const project = JSON.parse(await readFile(configPath, "utf8"));
-    home.acp_providers = { claude: {}, qwen: { args: ["--model=private-argument"] } };
+    home.acp_providers = { claude: { args: ["--private-argument"] }, qwen: { args: ["--model=private-argument"] } };
     project.control_plane.actors.broken = { kind: "agent", permissions: [], agent: { provider: "constructor" } };
     project.control_plane.actors.malformed = null;
     await writeFile(globalConfigPath, JSON.stringify(home));

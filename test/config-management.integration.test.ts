@@ -230,7 +230,10 @@ test("Project Actor references are validated against global ACP Providers", asyn
 test("settings save unrelated edits without exposing or overwriting invalid entries", async () => {
   const f = await fixtureConfig();
   try {
-    const acpProviders = { ...f.globalDocument.raw.acp_providers, claude: {}, qwen: { env: { PRIVATE_TOKEN: "private-provider-value" } }, ["__proto__"]: {} };
+    const acpProviders = {
+      ...f.globalDocument.raw.acp_providers, claude: { args: ["--unsupported"] }, "future-provider": {},
+      qwen: { env: { PRIVATE_TOKEN: "private-provider-value" } }, ["__proto__"]: {}
+    };
     const controlPlane = f.projectDocument.raw.control_plane!;
     const actors = {
       ...controlPlane.actors,
