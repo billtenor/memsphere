@@ -1,9 +1,10 @@
 import { Command } from "commander";
-import { ensureDaemon, daemonStatus, stopDaemon, runDaemon, daemonControl } from "./service.js";
-import { detectRunnerAgents, detectIdentity, currentIdentity } from "../runner/identity.js";
+import { ensureDaemon, ensureClaudeNotificationDaemon, daemonStatus, stopDaemon, runDaemon, daemonControl } from "./service.js";
+import { detectRunnerAgents, detectIdentity, currentIdentity, readRunnerAgents } from "../runner/identity.js";
 import { listTasks, retryFailedTask } from "./tasks.js";
 import { readConfig } from "../config.js";
 import { inspectReview } from "./review.js";
+import { prepareClaudeReviewRecipient } from "./claude-review-callback.js";
 
 export function registerDaemonCommands(program: Command) {
   const daemon = program.command("daemon").description("Manage the Home daemon, View and asynchronous tasks.");
@@ -37,8 +38,15 @@ export function registerWaitTaskCommands(wait: Command) {
     const row = (await listTasks()).filter(r => r.value.input.project === config.project!.name && r.value.input.reviewId === options.review && r.value.input.roundId === options.round && r.value.recipient.agentType === identity.agentType && r.value.recipient.sessionId === identity.sessionId)
       .sort((a, b) => b.value.createdAt.localeCompare(a.value.createdAt))[0];
     if (!row || row.value.status !== "failed") throw new Error("Only a failed task for the current session can be retried");
-    await ensureDaemon();
-    const task = await retryFailedTask(row.id);
+    let claudeRecipient;
+    if (identity.agentType === "claude") {
+      if (!(await readRunnerAgents()).claude?.async_enabled) throw new Error("Claude Code asynchronous execution is disabled");
+      claudeRecipient = await prepareClaudeReviewRecipient(identity.sessionId, row.value.input);
+      await ensureClaudeNotificationDaemon();
+    } else {
+      await ensureDaemon();
+    }
+    const task = await retryFailedTask(row.id, undefined, claudeRecipient);
     await daemonControl("notify");
     console.log(`Task ${task.id} registered for retry; a previous notification may already have been delivered.`);
   });

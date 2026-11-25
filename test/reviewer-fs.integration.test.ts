@@ -5,6 +5,7 @@ import { mkdtemp, mkdir, writeFile, readFile, symlink, rm } from "node:fs/promis
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runAgentReviewAcpSession } from "../src/acp/client.js";
+import { authorizeClaudeTool } from "../src/acp/claude-reviewer.js";
 
 test("actual ACP fs/read_text_file rejects direct and symlink escapes", async t => {
  const root=await mkdtemp(join(tmpdir(),'memsphere-review-fs-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -48,4 +49,26 @@ for (const phase of ['before-open','after-read'] as const) test(`actual ACP read
  const app=acp.agent({name:'race'}).onRequest(acp.methods.agent.initialize,()=>({protocolVersion:acp.PROTOCOL_VERSION,agentCapabilities:{},agentInfo:{name:'race',version:'1'}})).onRequest(acp.methods.agent.session.new,()=>({sessionId:'race'})).onRequest(acp.methods.agent.session.prompt,async({params,client})=>{let result;try{result={value:await client.request(acp.methods.client.fs.readTextFile,{sessionId:params.sessionId,path:${JSON.stringify(target)}})};}catch(e){result={error:e.message};}await fs.writeFile(${JSON.stringify(results)},JSON.stringify(result));return {stopReason:'end_turn'};});app.connect(acp.ndJsonStream(Writable.toWeb(process.stdout),Readable.toWeb(process.stdin)));`);
  await runAgentReviewAcpSession({launch:{provider:'test',command:process.execPath,args:[provider],cwd:workspace,env:{...process.env},startupTimeoutMs:10000,idleTimeoutMs:10000,maxRuntimeMs:null,promptVersion:'artifact-review-v3'},workspaceRoot:workspace,prompt:'Read',reminder:'Complete',isSubmitted:async()=>true,onSession:async()=>{}});
  const result=await readFile(results,'utf8');assert.match(result,/agent_fs_denied/);assert.doesNotMatch(result,/INTERNAL_EVIDENCE|OUTSIDE_SECRET/);assert.equal(JSON.parse(result).value,undefined);
+});
+
+test("Claude native Read authorizes only regular files inside its Attempt", async t => {
+  const root = await mkdtemp(join(tmpdir(), "claude-review-read-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const workspace = join(root, "attempt");
+  await mkdir(workspace);
+  const inside = join(workspace, "inside.txt"), outside = join(root, "outside.txt"), link = join(workspace, "linked.txt");
+  await writeFile(inside, "approved");
+  await writeFile(outside, "outside");
+  await symlink(outside, link);
+  const request = (file_path: string) => ({
+    sessionId: "attempt",
+    options: [{ optionId: "once", name: "Once", kind: "allow_once" as const }],
+    toolCall: { toolCallId: "read", kind: "read" as const, rawInput: { file_path } }
+  });
+  assert.deepEqual(await authorizeClaudeTool(request(inside), workspace, "attempt"), {
+    outcome: { outcome: "selected", optionId: "once" }
+  });
+  for (const path of [outside, link, workspace, "inside.txt"]) {
+    assert.deepEqual(await authorizeClaudeTool(request(path), workspace, "attempt"), { outcome: { outcome: "cancelled" } });
+  }
 });

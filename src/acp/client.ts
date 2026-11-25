@@ -5,6 +5,7 @@ import { Readable, Writable } from "node:stream";
 import type * as acp from "@agentclientprotocol/sdk";
 import type { AgentReviewProviderLaunch } from "./provider.js";
 import { spawnCommand, terminateProcessTree } from "../platform-process.js";
+import { assertClaudeAdapter, authorizeClaudeTool, claudeReviewerSession } from "./claude-reviewer.js";
 
 export type AgentReviewAcpSession = {
   protocolVersion: number;
@@ -119,11 +120,15 @@ export async function runAgentReviewAcpSession(input: {
       Writable.toWeb(process.stdin) as WritableStream<Uint8Array>,
       Readable.toWeb(process.stdout) as ReadableStream<Uint8Array>
     );
+    const claude = input.launch.provider === "claude";
+    let reviewSessionId: string | undefined;
     const result = await acp
       .client({ name: "memsphere" })
       .onRequest(acp.methods.client.session.requestPermission, ({ params }) => {
         markActivity();
-        return approveAgentPermission(params.options);
+        return claude
+          ? authorizeClaudeTool(params, input.workspaceRoot, reviewSessionId)
+          : approveAgentPermission(params.options);
       })
       .onNotification(acp.methods.client.session.update, async ({ params }) => {
         markActivity();
@@ -142,7 +147,23 @@ export async function runAgentReviewAcpSession(input: {
         if (initialized.protocolVersion !== acp.PROTOCOL_VERSION) {
           throw new Error(`acp_protocol_mismatch: expected ${acp.PROTOCOL_VERSION}, received ${initialized.protocolVersion}`);
         }
-        return context.buildSession(resolve(input.launch.cwd)).withSession(async (session) => {
+        const cwd = resolve(input.launch.cwd);
+        if (claude) assertClaudeAdapter(initialized.agentInfo);
+        const builder = claude
+          ? context.buildSession(claudeReviewerSession(cwd, input.launch.model))
+          : context.buildSession(cwd);
+        return builder.withSession(async (session) => {
+          if (claude) {
+            if (!session.modes?.availableModes.some(mode => mode.id === "default")) {
+              throw new Error("agent_provider_unsupported: Claude Reviewer default permission mode is unavailable");
+            }
+            if (session.modes.currentModeId !== "default") {
+              await context.request(acp.methods.agent.session.setMode, {
+                sessionId: session.sessionId, modeId: "default"
+              }, { cancellationSignal: startupSignal });
+            }
+            reviewSessionId = session.sessionId;
+          }
           startupTimeout.dispose();
           idleTimeout = input.launch.idleTimeoutMs === null ? undefined : createTimeoutWatchdog(
             input.launch.idleTimeoutMs,

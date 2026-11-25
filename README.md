@@ -518,7 +518,11 @@ memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex/Traex 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知仅包含 `[Memsphere 自动消息]`、“请执行命令以继续：”和显式定位 Project/Review 的 wait 命令，结果由再次执行命令获取。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
+Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex、Traex 或 Claude Code 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知仅包含 `[Memsphere 自动消息]`、“请执行命令以继续：”和显式定位 Project/Review 的 wait 命令，结果由再次执行命令获取。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
+
+Claude Code Reviewer 通过另行安装和认证的 `@agentclientprotocol/claude-agent-acp@0.109.1` 接入。参与者配置的模型在 ACP 会话中生效。
+
+Linux 上的本地异步通知使用已验证的 Claude Code CLI 2.1.330。会话须有本地收件箱，并按 Claude Code 的 `crossSessionInbound` 策略接收消息。其他版本或缺少收件箱时，可关闭 Claude Code 的异步开关使用同步等待。任务查询分别显示写入收件箱的时间 `sentAt` 和原会话读取评审结果的时间 `readAt`。
 
 `memsphere daemon start/status/stop/restart` 管理 Home 后台进程。View 仍用 `view start/status/stop/restart` 管理；停止 View 不影响等待任务，daemon 重启恢复之前的 View 启停意图。不安装操作系统开机自启服务。
 

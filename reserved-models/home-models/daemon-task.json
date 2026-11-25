@@ -36,6 +36,16 @@
     "recipient": {
       "type": "object"
     },
+    "claudeDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "sentAt": { "type": "string", "minLength": 1 },
+        "readAt": { "type": "string", "minLength": 1 }
+      }
+    },
     "error": {
       "type": "object"
     },

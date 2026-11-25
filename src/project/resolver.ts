@@ -86,18 +86,18 @@ async function resolveEmbeddedWorkspaceMemoryRoot(
   if (workspace.kind !== "git") {
     throw new Error("Embedded Project commands must run inside the Project's Git repository");
   }
-  const repository = await resolveEmbeddedRepository(store.repository_path);
+  const repository = await resolveEmbeddedRepository(store.repository_path, workspace);
   if (repository.key !== workspace.key) {
     throw new Error("Embedded Project can only be used by worktrees of its own Git repository");
   }
   return resolveContainedMemoryRoot(workspace.path, store.memory_path, { mustExist: true });
 }
 
-async function resolveEmbeddedRepository(repositoryPath: string): Promise<{ path: string; key: string }> {
+async function resolveEmbeddedRepository(repositoryPath: string, workspace?: WorkspaceIdentity): Promise<{ path: string; key: string }> {
   const configuredPath = await realpath(repositoryPath);
-  const repository = await resolveWorkspaceIdentity(configuredPath);
+  const repository = workspace?.path === configuredPath ? workspace : await resolveWorkspaceIdentity(configuredPath);
   if (repository.kind !== "git") throw new Error("Embedded repository_path must point to a Git main worktree");
-  const mainPath = await resolveMainWorkspacePath(configuredPath);
+  const mainPath = await resolveMainWorkspacePath(repository);
   if (configuredPath !== mainPath) {
     throw new Error("Embedded repository_path must point to the Git main worktree");
   }

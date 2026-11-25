@@ -514,7 +514,11 @@ memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Continue uses the calling Agent session. Detect Codex/Traex under Settings → Runner Agent and enable identity first; use native `run` commands when no session is recognized. `review wait` returns available results immediately; otherwise Runner settings choose asynchronous registration or synchronous waiting, without a `--sync` option. Queue notifications contain only `[Memsphere 自动消息]`, `请执行命令以继续：`, and a wait command identifying the Project and Review. Run that command to read current results. Repeated calls reuse active tasks; terminal history does not block a new necessary wait. Use `run review wait status --review R` to inspect tasks and `run review wait retry --review R --round ROUND` to retry a failed delivery explicitly.
+Continue uses the calling Agent session. Detect Codex, Traex, or Claude Code under Settings → Runner Agent and enable identity first; use native `run` commands when no session is recognized. `review wait` returns available results immediately; otherwise Runner settings choose asynchronous registration or synchronous waiting, without a `--sync` option. Queue notifications contain only `[Memsphere 自动消息]`, `请执行命令以继续：`, and a wait command identifying the Project and Review. Run that command to read current results. Repeated calls reuse active tasks; terminal history does not block a new necessary wait. Use `run review wait status --review R` to inspect tasks and `run review wait retry --review R --round ROUND` to retry a failed delivery explicitly.
+
+For Claude Code Reviewers, install `@agentclientprotocol/claude-agent-acp@0.109.1` separately, authenticate Claude Code, and choose the optional model on the Agent Actor.
+
+Local asynchronous notifications are verified on Linux with Claude Code CLI 2.1.330. The session needs a local inbox and must accept messages under Claude Code's `crossSessionInbound` policy. Turn off asynchronous execution to wait synchronously when the platform, CLI version, or session inbox is unavailable. Task status records when Memsphere writes to the inbox (`sentAt`) and when the original session reads the review result (`readAt`).
 
 Manage the Home background process with `memsphere daemon start/status/stop/restart`. View retains `view start/status/stop/restart`; stopping View leaves waiting tasks active, and restarting the daemon restores the previous View running/stopped intent. No operating-system boot service is installed.
 

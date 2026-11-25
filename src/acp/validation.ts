@@ -3,7 +3,7 @@ import type { AcpProviderType } from "./catalog.js";
 
 export class AcpProviderConfigurationError extends Error {
   constructor(
-    readonly field: "command" | "args",
+    readonly field: "command" | "args" | "env",
     message: string
   ) {
     super(message);
@@ -14,8 +14,16 @@ export function validateAcpProviderConfiguration(input: {
   type: AcpProviderType;
   command: string;
   args: readonly string[];
+  env?: Record<string, string>;
 }): string[] {
   validateProviderCommand(input.type, input.command);
+  if (input.type === "claude") {
+    for (const name of Object.keys(input.env ?? {})) {
+      if (name !== "ANTHROPIC_BASE_URL") {
+        throw new AcpProviderConfigurationError("env", `Claude Reviewer does not allow configuring ${name}`);
+      }
+    }
+  }
   return normalizeProviderArgs(input.type, input.args);
 }
 
@@ -29,13 +37,18 @@ export function normalizeProviderArgs(type: AcpProviderType, configuredArgs: rea
       return normalizeKimiArgs(configuredArgs);
     case "codex":
       return normalizeCodexArgs(configuredArgs);
+    case "claude":
+      if (configuredArgs.length) throw invalidArgs("Claude Reviewer launch arguments are managed by Memsphere");
+      return [];
   }
 }
 
 function validateProviderCommand(type: AcpProviderType, command: string): void {
-  if (type !== "codex") return;
   const executable = basename(command).toLowerCase().replace(/\.(?:cmd|exe)$/i, "");
-  if (["npx", "npm", "pnpm", "yarn", "bun", "bunx", "corepack"].includes(executable)) {
+  if (type === "claude" && executable !== "claude-agent-acp") {
+    throw new AcpProviderConfigurationError("command", "Claude Provider requires an installed claude-agent-acp executable");
+  }
+  if (type === "codex" && ["npx", "npm", "pnpm", "yarn", "bun", "bunx", "corepack"].includes(executable)) {
     throw new AcpProviderConfigurationError(
       "command",
       "Codex Provider command must resolve to an installed codex-acp executable; package runners are not allowed"

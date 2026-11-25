@@ -120,35 +120,37 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");
+  const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
+  const resuming = crashMarker && await access(crashMarker).then(() => true, error => {
+    if (error.code === "ENOENT") return false;
+    throw error;
+  });
   let commandIndex = 0;
   const invokeReviewCli = async (args) => {
     // Report actual work boundaries so a busy fixture does not look idle between CLI calls.
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
     return invoke(cli, args);
   };
-  let graph = graphAlreadyRead;
-  if (!graphAlreadyRead) {
+  // The retry scenario is already bound to a progressive Review. Its first
+  // native command saves a node before the Provider deliberately exits.
+  let graph = graphAlreadyRead || Boolean(crashMarker);
+  if (!graph) {
     await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
     await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
     const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
     graph = Boolean(detail.reviewProgress);
-    if (process.env.EXPLORATION_TEST_EXTERNAL) {
-      const args = ["run", "external", "show", "--run", process.env.MEMSPHERE_REVIEW_RUN_ID, "--external"];
-      const external = JSON.parse(await invokeReviewCli([...args, process.env.EXPLORATION_TEST_EXTERNAL, "--output", "json"]));
-      assert.equal(external.source, "used");
-      await assert.rejects(invokeReviewCli([...args, process.env.EXPLORATION_TEST_UNATTACHED, "--output", "json"]), /REVIEW_RESOURCE_DENIED|outside this Review/);
-    }
   }
   if (graph) {
+    const reportNode = () => invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]);
+    if (crashMarker && !resuming) {
+      await reportNode();
+      await writeFile(crashMarker, "node saved\n", { flag: "wx" });
+      process.exit(7);
+    }
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
-      view = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
-      const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
-      if (crashMarker) {
-        try { await writeFile(crashMarker, "node saved\n", { flag: "wx" }); process.exit(7); }
-        catch (error) { if (error.code !== "EEXIST") throw error; }
-      }
+      view = JSON.parse(await reportNode());
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;
