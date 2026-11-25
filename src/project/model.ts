@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { isAbsolute, posix } from "node:path";
-import { projectControlPlaneConfigSchema } from "../control-plane/schema.js";
+import { projectControlPlaneFileSchema } from "../control-plane/schema.js";
 import { projectViewConfigSchema } from "../view/package-config.js";
 
 export const projectNamePattern = /^[a-z0-9._-]+$/;
@@ -66,7 +66,7 @@ export const projectConfigSchema = z.object({
   modelsDirectory: z.string().refine(value => value.trim().length > 0 && !value.includes("\0"), "modelsDirectory must be a nonblank path without NUL characters").optional(),
   modelRegistration: modelRegistrationConfigSchema.optional(),
   dataStores: z.record(z.string().min(1).refine(value => value.trim().length > 0 && !value.includes("\0") && value !== "__proto__", "Store ID must be nonblank and cannot be __proto__"), businessStoreBindingSchema).optional(),
-  control_plane: projectControlPlaneConfigSchema.optional(),
+  control_plane: projectControlPlaneFileSchema.optional(),
   view: projectViewConfigSchema.optional()
 }).strict();
 

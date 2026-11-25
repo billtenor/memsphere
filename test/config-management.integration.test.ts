@@ -6,6 +6,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { withNativeFileLock } from "../src/file-lock.js";
 import type { MemsphereConfig } from "../src/config.js";
+import { resolveAvailableProjectControlPlane } from "../src/control-plane/index.js";
 import { ConfigDraftValidationError, ConfigRevisionConflictError, editableGlobalConfigDraft, editableProjectConfigDraft, readGlobalConfigDocument, readProjectConfigDocument, validateGlobalConfigDraft, validateProjectConfigDraft, writeGlobalConfigDraft, writeGlobalOperatorToken, writeProjectConfigDraft } from "../src/config-management.js";
 
 async function fixtureConfig() {
@@ -224,6 +225,85 @@ test("Project Actor references are validated against global ACP Providers", asyn
   } finally {
     await rm(fixture.dir, { recursive: true, force: true });
   }
+});
+
+test("settings save unrelated edits without exposing or overwriting invalid entries", async () => {
+  const f = await fixtureConfig();
+  try {
+    const acpProviders = {
+      ...f.globalDocument.raw.acp_providers, claude: { args: ["--unsupported"] }, "future-provider": {},
+      qwen: { env: { PRIVATE_TOKEN: "private-provider-value" } }, ["__proto__"]: {}
+    };
+    const controlPlane = f.projectDocument.raw.control_plane!;
+    const actors = {
+      ...controlPlane.actors,
+      malformed: { kind: "human", private: "private-actor-value" },
+      ["__proto__"]: { kind: "human", permissions: [] },
+      unavailable: { kind: "agent", permissions: ["artifact.read"], agent: { provider: "claude" } }
+    };
+    await writeFile(f.globalConfigPath, JSON.stringify({ ...f.globalDocument.raw, acp_providers: acpProviders }));
+    await writeFile(f.configPath, JSON.stringify({ ...f.projectDocument.raw, control_plane: { ...controlPlane, actors } }));
+
+    const global = await readGlobalConfigDocument(f.globalConfigPath);
+    const project = await readProjectConfigDocument(f.configPath, f.resolved);
+    const globalDraft = editableGlobalConfigDraft(global);
+    const projectDraft = editableProjectConfigDraft(project);
+    assert.deepEqual(Object.keys(globalDraft.acp_providers ?? {}), ["codex"]);
+    assert.deepEqual(Object.keys(projectDraft.control_plane?.actors ?? {}), ["human", "agent", "unavailable"]);
+    globalDraft.language = "en";
+    projectDraft.control_plane!.actors.human.name = "Updated";
+    const savedGlobal = await writeGlobalConfigDraft({ document: global, expectedRevision: global.revision, draft: globalDraft, projects: [{ name: "demo", config: project.raw }] });
+    const savedProject = await writeProjectConfigDraft({ document: project, expectedRevision: project.revision, draft: projectDraft, globalConfigPath: f.globalConfigPath });
+
+    assert.equal(savedGlobal.raw.language, "en");
+    assert.deepEqual(savedGlobal.raw.acp_providers, acpProviders);
+    assert.deepEqual(savedProject.raw.control_plane?.actors, { ...actors, human: { ...projectDraft.control_plane!.actors.human } });
+
+    for (const [id, invalid] of [
+      ["traex", null], ["codex", { idle_timeout_ms: 0 }], ["qwen", { args: ["--model=unsupported"] }]
+    ] as const) {
+      const draft = editableGlobalConfigDraft(savedGlobal);
+      Object.assign(draft.acp_providers!, { [id]: invalid });
+      await assert.rejects(writeGlobalConfigDraft({ document: savedGlobal, expectedRevision: savedGlobal.revision, draft }), error => {
+        assert.ok(error instanceof ConfigDraftValidationError);
+        assert.ok(error.errors.some(({ path }) => path.startsWith(`acp_providers.${id}`)));
+        return true;
+      });
+      assert.equal(await readFile(f.globalConfigPath, "utf8"), savedGlobal.source);
+      assert.equal((await readGlobalConfigDocument(f.globalConfigPath)).revision, savedGlobal.revision);
+    }
+    for (const [id, invalid] of [
+      ["new", 17], ["human", { kind: "human", permissions: ["unknown"] }],
+      ["malformed", { kind: "human", permissions: null }], ["__proto__", { kind: "human", permissions: [] }]
+    ] as const) {
+      const draft = editableProjectConfigDraft(savedProject);
+      Object.defineProperty(draft.control_plane!.actors, id, { value: invalid, enumerable: true, configurable: true });
+      await assert.rejects(writeProjectConfigDraft({ document: savedProject, expectedRevision: savedProject.revision, draft, globalConfigPath: f.globalConfigPath }), error => {
+        assert.ok(error instanceof ConfigDraftValidationError);
+        assert.ok(error.errors.some(({ path }) => path.includes(`actors.${id}`)));
+        return true;
+      });
+      assert.equal(await readFile(f.configPath, "utf8"), savedProject.source);
+      assert.equal((await readProjectConfigDocument(f.configPath, f.resolved)).revision, savedProject.revision);
+    }
+
+    const replacement = editableGlobalConfigDraft(savedGlobal);
+    replacement.acp_providers!.qwen = { startup_timeout_ms: 1250 };
+    const repairedGlobal = await writeGlobalConfigDraft({
+      document: savedGlobal, expectedRevision: savedGlobal.revision, draft: replacement
+    });
+    const repairedDraft = editableProjectConfigDraft(savedProject);
+    repairedDraft.control_plane!.actors.malformed = { kind: "agent", permissions: ["artifact.read"], agent: { provider: "qwen" } };
+    const repairedProject = await writeProjectConfigDraft({
+      document: savedProject, expectedRevision: savedProject.revision, draft: repairedDraft, globalConfigPath: f.globalConfigPath
+    });
+    const resolved = resolveAvailableProjectControlPlane(repairedProject.raw.control_plane!, repairedGlobal.raw.acp_providers);
+    const recovered = resolved.actors.malformed;
+    assert.equal(recovered.kind, "agent");
+    assert.equal(recovered.agent.provider, "qwen");
+    assert.equal(recovered.agent.startupTimeoutMs, 1250);
+    assert.ok(resolved.actorErrors?.has("unavailable"));
+  } finally { await rm(f.dir, { recursive: true, force: true }); }
 });
 
 test("each config write rejects only its own stale revision", async () => {

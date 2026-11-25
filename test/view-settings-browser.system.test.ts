@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { type Page } from "playwright";
 import type { MemsphereConfig } from "../src/config.js";
@@ -502,6 +502,59 @@ async function saveActorSettings(page: Page): Promise<void> {
   assert.equal((await saved).ok(), true);
   await page.waitForFunction(() => document.querySelector("#settings-status")?.textContent?.includes("已保存"));
 }
+
+test("Settings shows partial ACP detection results and clears the error after repair", async () => {
+  await withActorSettingsBrowser(async (page, config) => {
+    const home = config.homeRoot!;
+    const homeConfigPath = join(home, "config.json");
+    const homeConfig = JSON.parse(await readFile(homeConfigPath, "utf8"));
+    homeConfig.acp_providers = { qwen: { args: ["--model=invalid-fixture-value"] } };
+    await writeFile(homeConfigPath, JSON.stringify(homeConfig));
+    const bin = join(home, "fixture-bin");
+    await mkdir(bin);
+    const windows = process.platform === "win32";
+    for (const provider of ["traex", "qwen", "kimi", "codex-acp"]) {
+      const script = windows ? `@echo ${provider} 1.2.3\r\n` : `#!/bin/sh\nprintf '%s\\n' '${provider} 1.2.3'\n`;
+      await writeFile(join(bin, windows ? `${provider}.cmd` : provider), script, { mode: 0o755 });
+    }
+    const previousPath = process.env.PATH;
+    process.env.PATH = [bin, previousPath].filter(Boolean).join(delimiter);
+    try {
+      await page.reload();
+      const nav = page.locator('[data-view-slot="navigation.secondary"]');
+      await nav.getByRole("button", { name: "ACP 提供方", exact: true }).click();
+      const detect = page.getByRole("button", { name: "自动检测", exact: true });
+      const errors = page.locator(".settings-errors");
+      const traex = page.locator('[data-provider-id="traex"] summary');
+      const qwen = page.locator('[data-provider-id="qwen"]');
+      const complete = page.getByText("ACP 提供方检测完成。", { exact: true });
+      await detect.click();
+      await errors.getByText(/acp_providers\.qwen.*--model/).waitFor();
+      await traex.getByText("已安装", { exact: true }).waitFor();
+      assert.match(await traex.textContent() ?? "", /traex 1\.2\.3/);
+      assert.doesNotMatch(await errors.textContent() ?? "", /invalid-fixture-value/);
+      assert.equal(await complete.isVisible(), false);
+
+      await qwen.locator("summary").click();
+      const timeout = qwen.getByLabel("启动超时（毫秒）", { exact: true });
+      await timeout.fill("45000");
+      await page.getByRole("button", { name: "保存", exact: true }).click();
+      await page.getByRole("heading", { name: "确认配置变更" }).waitFor();
+      const saved = page.waitForResponse(response => response.url().endsWith("/settings/global") && response.request().method() === "PUT");
+      await page.getByRole("button", { name: "确认保存", exact: true }).click();
+      assert.equal((await saved).ok(), true);
+      await detect.click();
+      await complete.waitFor();
+      await qwen.locator("summary").getByText("已安装", { exact: true }).waitFor();
+      assert.match(await qwen.locator("summary").textContent() ?? "", /qwen 1\.2\.3/);
+      assert.equal(await errors.isVisible(), false);
+      assert.equal(JSON.parse(await readFile(homeConfigPath, "utf8")).acp_providers.qwen.startup_timeout_ms, 45000);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+});
 
 test("Settings saves an empty Actor name and shows its ID before and after reload", async () => {
   await withActorSettingsBrowser(async (page, config) => {

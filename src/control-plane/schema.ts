@@ -48,7 +48,6 @@ const providerIdSchema = nonEmptyString.regex(
   idPattern,
   "ACP Provider id must contain only letters, numbers, dots, underscores, or hyphens"
 );
-const providerTypeSchema = z.enum(acpProviderTypes);
 const providerEnvironmentSchema = z.record(z.string()).superRefine((environment, context) => {
   for (const name of Object.keys(environment)) {
     const normalizedName = name.toUpperCase();
@@ -150,6 +149,28 @@ const providerInstancesInputSchema = z.object({
   claude: providerInstanceInputSchema("claude").optional()
 }).strict();
 
+export function resolveAcpProviders(config: Record<string, unknown> = {}) {
+  const providers = defaultAcpProviderInstances();
+  const errors = new Map<string, string>();
+  for (const [id, entry] of Object.entries(config)) {
+    const schema = Object.hasOwn(providerInstancesInputSchema.shape, id)
+      ? providerInstancesInputSchema.shape[id as AcpProviderType]
+      : undefined;
+    if (!schema) {
+      errors.set(id, `Unknown ACP Provider id: ${id} (acp_providers.${id})`);
+      continue;
+    }
+    const result = schema.safeParse(entry);
+    if (result.success && result.data) {
+      providers[id] = result.data;
+    } else if (!result.success) {
+      delete providers[id];
+      errors.set(id, describeConfigIssues(`acp_providers.${id}`, result.error.issues));
+    }
+  }
+  return { providers, errors };
+}
+
 const agentRuntimeInputSchema = z.object({
   provider: providerIdSchema.optional(),
   model: nonEmptyString.optional()
@@ -184,7 +205,7 @@ function resolveActor(
   if (actor.kind === "human") return { kind: "human", ...authority };
   const provider = actor.agent.provider ?? "traex";
   const instance = providers[provider];
-  if (!instance) throw new Error(`Unknown ACP Provider id: ${provider}`);
+  if (!Object.hasOwn(providers, provider)) throw new Error(`Unknown ACP Provider id: ${provider}`);
   return {
     kind: "agent",
     ...authority,
@@ -215,7 +236,8 @@ function recordWithValidatedKeys<T>(
   keySchema: z.ZodTypeAny,
   valueSchema: z.ZodType<T, z.ZodTypeDef, unknown>
 ): z.ZodType<Record<string, T>, z.ZodTypeDef, unknown> {
-  return z.record(valueSchema).superRefine((record, context) => {
+  return z.unknown().superRefine((record, context) => {
+    if (!record || typeof record !== "object" || Array.isArray(record)) return;
     for (const key of Object.keys(record)) {
       const result = keySchema.safeParse(key);
       if (result.success) continue;
@@ -223,13 +245,15 @@ function recordWithValidatedKeys<T>(
         context.addIssue({ ...issue, path: [key, ...issue.path] });
       }
     }
-  });
+  }).pipe(z.record(valueSchema));
 }
+
+const actorsInputSchema = recordWithValidatedKeys(actorIdSchema, actorInputSchema);
 
 const controlPlaneInputSchema = z.object({
   runner: runnerInputSchema,
   acp_providers: providerInstancesInputSchema.optional(),
-  actors: recordWithValidatedKeys(actorIdSchema, actorInputSchema)
+  actors: actorsInputSchema
 }).strict().superRefine((controlPlane, context) => {
   const providers = { ...defaultAcpProviderInstances(), ...(controlPlane.acp_providers ?? {}) };
   for (const [actorId, actor] of Object.entries(controlPlane.actors)) {
@@ -259,10 +283,26 @@ export const controlPlaneConfigSchema: z.ZodType<ControlPlaneConfig, z.ZodTypeDe
 
 export const projectControlPlaneConfigSchema = z.object({
   runner: runnerFileSchema,
-  actors: recordWithValidatedKeys(actorIdSchema, actorInputSchema)
+  actors: actorsInputSchema
 }).strict();
 
+// Keep individual entries intact so other settings can be read and written
+// even when this CLI cannot validate every entry.
+export const controlPlaneEntriesFileSchema = z.custom<Record<string, unknown>>(value =>
+  value !== null && typeof value === "object" && [Object.prototype, null].includes(Object.getPrototypeOf(value)),
+  { message: "Expected a configuration object" }
+);
+
+export const projectControlPlaneFileSchema = projectControlPlaneConfigSchema.extend({
+  actors: controlPlaneEntriesFileSchema
+});
+
+export function validProjectActorEntries(actors: Record<string, unknown>): Record<string, ActorInput> {
+  return Object.fromEntries(parseProjectActorEntries(actors).actors);
+}
+
 export type ProjectControlPlaneConfigFile = z.infer<typeof projectControlPlaneConfigSchema>;
+export type ProjectControlPlaneFile = z.infer<typeof projectControlPlaneFileSchema>;
 export type AcpProviderConfigFile = z.infer<typeof acpProviderConfigSchema>;
 
 export function resolveProjectControlPlane(
@@ -275,9 +315,55 @@ export function resolveProjectControlPlane(
   });
 }
 
+export function resolveAvailableProjectControlPlane(
+  project: ProjectControlPlaneFile,
+  providerConfig?: Record<string, unknown>
+): ControlPlaneConfig {
+  const { providers, errors: providerErrors } = resolveAcpProviders(providerConfig);
+  const { actors: configuredActors, errors: actorErrors } = parseProjectActorEntries(project.actors);
+  const actors = new Map<string, ControlPlaneActor>();
+  for (const [id, actor] of configuredActors) {
+    if (actor.kind === "agent") {
+      const provider = actor.agent.provider ?? "traex";
+      if (!Object.hasOwn(providers, provider)) {
+        const reason = providerErrors.get(provider) ?? `Unknown ACP Provider id: ${provider}`;
+        actorErrors.set(id, `control_plane.actors.${id}.agent.provider: ${reason}`);
+        continue;
+      }
+    }
+    actors.set(id, resolveActor(id, actor, providers));
+  }
+  return {
+    runner: project.runner,
+    acpProviders: providers,
+    actors: Object.fromEntries(actors),
+    ...(actorErrors.size ? { actorErrors } : {})
+  };
+}
+
+function parseProjectActorEntries(entries: Record<string, unknown>) {
+  const actors = new Map<string, ActorInput>();
+  const errors = new Map<string, string>();
+  for (const [id, entry] of Object.entries(entries)) {
+    const key = actorIdSchema.safeParse(id);
+    const actor = actorInputSchema.safeParse(entry);
+    const path = `control_plane.actors.${id}`;
+    if (!key.success) errors.set(id, describeConfigIssues(path, key.error.issues));
+    else if (!actor.success) errors.set(id, describeConfigIssues(path, actor.error.issues));
+    else actors.set(id, actor.data);
+  }
+  return { actors, errors };
+}
+
+function describeConfigIssues(prefix: string, issues: z.ZodIssue[]): string {
+  return issues.map(issue => `${[prefix, ...issue.path].join(".")}: ${issue.message}`).join("; ");
+}
+
 const snapshotAgentRuntimeSchema = z.object({
   provider: nonEmptyString.optional(),
-  providerType: providerTypeSchema.optional(),
+  // A frozen Run may have been written by a CLI that knows more Providers.
+  // The worker resolves the adapter when it uses this Actor.
+  providerType: nonEmptyString.optional(),
   command: nonEmptyString,
   args: z.array(z.string()),
   env: z.record(z.string()).optional(),

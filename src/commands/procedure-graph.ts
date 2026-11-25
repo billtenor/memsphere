@@ -9,7 +9,7 @@ import { parseMemoryYaml } from "../memory/yaml.js";
 import { serializeMemoryYaml } from "../memory/serializer.js";
 import { openContextControl } from "../project/context-control.js";
 import { effectiveStep, supersedingRewind } from "../context_control/graph-rewind.js";
-import { isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.js";
+import { graphRunnerActorConflict, isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.js";
 import { failure } from "../context_control/errors.js";
 import type { Run, Snapshot, Step } from "../context_control/types.js";
 import type { ControlPlaneConfig, RunReviewConfiguration } from "../control-plane/index.js";
@@ -49,8 +49,16 @@ export async function startGraphIfApplicable(input: { catalog: MemoryCatalog; pr
     for (const ref of collectMemoryReferenceTargets(entity)) await freeze(ref);
   };
   await freeze(`procedures/${p.names[0]}`, true);
+  let controlPlane = input.controlPlane;
+  // An Actor can be valid in the Project while its ID is reserved in Graph.
+  if (controlPlane && Object.hasOwn(controlPlane.actors, "runner")) {
+    const { runner: _reserved, ...actors } = controlPlane.actors;
+    const actorErrors = new Map(controlPlane.actorErrors);
+    actorErrors.set("runner", graphRunnerActorConflict);
+    controlPlane = { ...controlPlane, actors, actorErrors };
+  }
   const service = (await openContextControl(input.root, true))!;
-  return service.withGraph(g => g.start({ name: input.name, language: input.language, procedure: p, memorySnapshot: { memories }, controlPlane: input.controlPlane, reviewConfiguration: input.reviewConfiguration, ...(input.memorySource ? { memorySource: input.memorySource } : {}) }));
+  return service.withGraph(g => g.start({ name: input.name, language: input.language, procedure: p, memorySnapshot: { memories }, controlPlane, reviewConfiguration: input.reviewConfiguration, ...(input.memorySource ? { memorySource: input.memorySource } : {}) }));
 }
 async function context(project: string, run: string, step: string) {
   let row; try { row = await currentCommandState(); } catch { return undefined; }

@@ -8,9 +8,13 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rmdir, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { ZodError, type z } from "zod";
-import { globalConfigSchema, type MemsphereConfig } from "./config.js";
+import { globalConfigFileSchema, globalConfigSchema, type MemsphereConfig } from "./config.js";
 import {
-  resolveProjectControlPlane,
+  acpProviderConfigSchema,
+  projectControlPlaneConfigSchema,
+  resolveAcpProviders,
+  resolveAvailableProjectControlPlane,
+  validProjectActorEntries,
   type AcpProviderConfigFile,
   type ProjectControlPlaneConfigFile
 } from "./control-plane/index.js";
@@ -34,7 +38,7 @@ export type ConfigChange = {
   kind: "added" | "removed" | "changed";
 };
 
-type GlobalConfigFile = z.infer<typeof globalConfigSchema>;
+type GlobalConfigFile = z.infer<typeof globalConfigFileSchema>;
 
 export type GlobalConfigDocument = {
   configPath: string;
@@ -137,38 +141,11 @@ export async function readProjectConfigDocument(
 }
 
 export function editableGlobalConfigDraft(document: GlobalConfigDocument): EditableGlobalConfigDraft {
-  return {
-    ...(document.raw.runner_agents === undefined ? {} : { runner_agents: structuredClone(document.raw.runner_agents) }),
-    ...(document.raw.language === undefined ? {} : { language: document.raw.language }),
-    ...(document.raw.view === undefined ? {} : { view: {
-      host: document.raw.view.host,
-      port: document.raw.view.port
-    } }),
-    ...(document.raw.view_packages === undefined
-      ? {}
-      : { view_packages: structuredClone(document.raw.view_packages) }),
-    ...(document.raw.view_theme === undefined
-      ? {}
-      : { view_theme: structuredClone(document.raw.view_theme) }),
-    ...(document.raw.view_composition === undefined
-      ? {}
-      : { view_composition: structuredClone(document.raw.view_composition) }),
-    ...(document.raw.acp_providers === undefined
-      ? {}
-      : { acp_providers: structuredClone(document.raw.acp_providers) })
-  };
+  return normalizeGlobalDraft(document.raw);
 }
 
 export function editableProjectConfigDraft(document: ProjectConfigDocument): EditableProjectConfigDraft {
-  return {
-    ...(document.raw.dataStores === undefined ? {} : { dataStores: structuredClone(document.raw.dataStores) }),
-    ...(document.raw.modelsDirectory === undefined ? {} : { modelsDirectory: document.raw.modelsDirectory }),
-    ...(document.raw.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(document.raw.modelRegistration) }),
-    ...(document.raw.control_plane === undefined
-      ? {}
-      : { control_plane: structuredClone(document.raw.control_plane) }),
-    ...(document.raw.view === undefined ? {} : { view: structuredClone(document.raw.view) })
-  };
+  return normalizeProjectDraft(document.raw);
 }
 
 export function validateGlobalConfigDraft(
@@ -194,7 +171,9 @@ export function validateGlobalConfigDraft(
   };
 
   try {
-    const candidate = globalConfigSchema.parse(candidateInput);
+    const editable = editableGlobalConfigDraft(document);
+    const candidate: GlobalConfigFile = globalConfigSchema.parse(candidateInput);
+    candidate.acp_providers = retainUnavailableEntries(document.raw.acp_providers, editable.acp_providers, candidate.acp_providers);
     const referenceErrors = validateProjectReferences(document.raw, candidate, projects);
     if (referenceErrors.length) return { valid: false, errors: referenceErrors, changes: [] };
     const normalized = normalizeGlobalDraft(candidate);
@@ -203,7 +182,7 @@ export function validateGlobalConfigDraft(
       errors: [],
       candidate,
       normalizedJson: `${JSON.stringify(normalized, null, 2)}\n`,
-      changes: diffConfig(editableGlobalConfigDraft(document), normalized)
+      changes: diffConfig(editable, normalized)
     };
   } catch (error) {
     return { valid: false, errors: configFieldErrors(error), changes: [] };
@@ -251,14 +230,27 @@ export function validateProjectConfigDraft(
       candidate.modelRegistration ??= structuredClone(document.raw.modelRegistration);
       candidate.modelRegistration.excludedDirectories = [...new Set([...(candidate.modelRegistration.excludedDirectories ?? []), ...document.raw.modelRegistration.excludedDirectories])];
     }
-    if (candidate.control_plane) resolveProjectControlPlane(candidate.control_plane, global.acp_providers);
+    const editable = editableProjectConfigDraft(document);
+    if (candidate.control_plane) {
+      const proposed = projectControlPlaneConfigSchema.parse(candidate.control_plane);
+      const changedActors = Object.fromEntries(Object.entries(proposed.actors).filter(([id, actor]) =>
+        !isDeepStrictEqual(editable.control_plane?.actors[id], actor)
+      ));
+      const { actorErrors } = resolveAvailableProjectControlPlane({ ...proposed, actors: changedActors }, global.acp_providers);
+      if (actorErrors?.size) {
+        throw new ConfigDraftValidationError([...actorErrors].map(([id, message]) => ({
+          path: `control_plane.actors.${id}`, message
+        })));
+      }
+      candidate.control_plane.actors = retainUnavailableEntries(document.raw.control_plane?.actors, editable.control_plane?.actors, proposed.actors) ?? {};
+    }
     const normalized = normalizeProjectDraft(candidate);
     return {
       valid: true,
       errors: [],
       candidate,
       normalizedJson: `${JSON.stringify(normalized, null, 2)}\n`,
-      changes: diffConfig(editableProjectConfigDraft(document), normalized),
+      changes: diffConfig(editable, normalized),
       resolvedPaths: {
         modelsDirectory: resolve(document.scopeRoot, candidate.modelsDirectory ?? "models/json-schema/draft-07"),
         memoryRoot: document.resolved.memoryRoot,
@@ -297,7 +289,7 @@ export async function writeGlobalOperatorToken(input: {
     const latest = await readGlobalConfigDocument(input.document.configPath);
     assertExpectedRevision(input.expectedRevision, latest.revision);
     const view = latest.raw.view ?? { host: "127.0.0.1", port: 0 };
-    const candidate = globalConfigSchema.parse({
+    const candidate = globalConfigFileSchema.parse({
       ...structuredClone(latest.raw),
       view: {
         host: view.host,
@@ -402,23 +394,12 @@ function validateProjectReferences(
   candidate: GlobalConfigFile,
   projects: ProjectConfigReference[]
 ): ConfigFieldError[] {
-  const errors = projects.flatMap(({ name, config }) => {
-    if (!config.control_plane) return [];
-    try {
-      resolveProjectControlPlane(config.control_plane, candidate.acp_providers);
-      return [];
-    } catch (error) {
-      return [{
-        path: `projects.${name}.control_plane`,
-        message: `Project "${name}": ${error instanceof Error ? error.message : String(error)}`
-      }];
-    }
-  });
+  const errors: ConfigFieldError[] = [];
   const removed = Object.keys(previous.acp_providers ?? {})
     .filter((provider) => !Object.hasOwn(candidate.acp_providers ?? {}, provider));
   for (const provider of removed) {
     for (const project of projects) {
-      for (const [actorId, actor] of Object.entries(project.config.control_plane?.actors ?? {})) {
+      for (const [actorId, actor] of Object.entries(validProjectActorEntries(project.config.control_plane?.actors ?? {}))) {
         if (actor.kind !== "agent" || actor.agent?.provider !== provider) continue;
         errors.push({
           path: `acp_providers.${provider}`,
@@ -441,7 +422,7 @@ async function readOptionalConfig(path: string): Promise<string> {
 
 function parseGlobalConfigSource(source: string): GlobalConfigFile {
   try {
-    return globalConfigSchema.parse(JSON.parse(source));
+    return globalConfigFileSchema.parse(JSON.parse(source));
   } catch (error) {
     // JSON parser excerpts can contain an encryption key or ciphertext.
     if (error instanceof SyntaxError) throw new ConfigDraftValidationError([{ path: "", message: "Home configuration is not valid JSON" }]);
@@ -458,6 +439,10 @@ export function parseProjectConfigSource(source: string): ProjectConfigFile {
 }
 
 function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDraft {
+  const { errors } = resolveAcpProviders(global.acp_providers);
+  const acpProviders = global.acp_providers === undefined ? undefined : acpProviderConfigSchema.parse(
+    Object.fromEntries(Object.entries(global.acp_providers).filter(([id]) => !errors.has(id)))
+  );
   return {
     ...(global.runner_agents === undefined ? {} : { runner_agents: structuredClone(global.runner_agents) }),
     ...(global.language === undefined ? {} : { language: global.language }),
@@ -467,7 +452,7 @@ function normalizeGlobalDraft(global: GlobalConfigFile): EditableGlobalConfigDra
       : { view_packages: structuredClone(global.view_packages) }),
     ...(global.view_theme === undefined ? {} : { view_theme: structuredClone(global.view_theme) }),
     ...(global.view_composition === undefined ? {} : { view_composition: structuredClone(global.view_composition) }),
-    ...(global.acp_providers === undefined ? {} : { acp_providers: structuredClone(global.acp_providers) })
+    ...(acpProviders === undefined ? {} : { acp_providers: acpProviders })
   };
 }
 
@@ -478,9 +463,23 @@ function normalizeProjectDraft(project: ProjectConfigFile): EditableProjectConfi
     ...(project.modelRegistration === undefined ? {} : { modelRegistration: structuredClone(project.modelRegistration) }),
     ...(project.control_plane === undefined
       ? {}
-      : { control_plane: structuredClone(project.control_plane) }),
+      : { control_plane: {
+        runner: structuredClone(project.control_plane.runner),
+        actors: validProjectActorEntries(project.control_plane.actors)
+      } }),
     ...(project.view === undefined ? {} : { view: structuredClone(project.view) })
   };
+}
+
+// Entries withheld from the settings UI may contain invalid or sensitive fields.
+// Keep them on disk unless the user supplies a valid replacement.
+function retainUnavailableEntries(
+  previous: Record<string, unknown> | undefined,
+  editable: Record<string, unknown> | undefined,
+  proposed: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const unavailable = Object.entries(previous ?? {}).filter(([id]) => !Object.hasOwn(editable ?? {}, id));
+  return unavailable.length ? { ...Object.fromEntries(unavailable), ...proposed } : proposed;
 }
 
 function parseConfigError(error: unknown): Error {

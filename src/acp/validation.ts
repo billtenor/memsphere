@@ -112,8 +112,8 @@ function rejectSubcommands(args: readonly string[], commands: readonly string[],
 }
 
 function rejectManagedArgs(args: readonly string[], managed: readonly string[], label: string): void {
-  const unsafe = args.find((arg) => managed.some((name) => arg === name || arg.startsWith(`${name}=`)));
-  if (unsafe) throw invalidArgs(`${label} does not allow managed argument '${unsafe}'`);
+  const name = args.map(arg => arg.split("=", 1)[0]).find(arg => managed.includes(arg));
+  if (name) throw invalidArgs(`${label} does not allow managed argument '${name}'`);
 }
 
 function invalidArgs(message: string): AcpProviderConfigurationError {
