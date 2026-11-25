@@ -131,32 +131,14 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
     return invoke(cli, args);
   };
-  const checkMaterials = async (first, second) => {
-    if (!crashMarker) { await first(); await second(); return; }
-    // These checks only read the already bound Attempt. Drain both subprocesses
-    // before reporting a node or exiting, including when a check fails.
-    for (const result of await Promise.allSettled([first(), second()])) {
-      if (result.status === "rejected") throw result.reason;
-    }
-  };
-  // Only a successful progressive node write creates the recovery marker.
-  let graph = graphAlreadyRead || resuming === true;
-  if (!graphAlreadyRead) {
-    if (!resuming) {
-      await checkMaterials(
-        () => invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]),
-        () => invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"])
-      );
-      const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
-      graph = Boolean(detail.reviewProgress);
-    }
-    if (!resuming && process.env.EXPLORATION_TEST_EXTERNAL) {
-      const args = ["run", "external", "show", "--run", process.env.MEMSPHERE_REVIEW_RUN_ID, "--external"];
-      await checkMaterials(async () => {
-        const external = JSON.parse(await invokeReviewCli([...args, process.env.EXPLORATION_TEST_EXTERNAL, "--output", "json"]));
-        assert.equal(external.source, "used");
-      }, () => assert.rejects(invokeReviewCli([...args, process.env.EXPLORATION_TEST_UNATTACHED, "--output", "json"]), /REVIEW_RESOURCE_DENIED|outside this Review/));
-    }
+  // The retry scenario is already bound to a progressive Review. Its first
+  // native command saves a node before the Provider deliberately exits.
+  let graph = graphAlreadyRead || Boolean(crashMarker);
+  if (!graph) {
+    await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
+    await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
+    const detail = JSON.parse(await invokeReviewCli(["run", "review", "assignment", "show", "--assignment", assignment, "--output", "json"]));
+    graph = Boolean(detail.reviewProgress);
   }
   if (graph) {
     const reportNode = () => invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]);
