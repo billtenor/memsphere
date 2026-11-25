@@ -19,11 +19,7 @@ export async function captureProcessIdentity(pid: number): Promise<ProcessIdenti
       const boot = (await readFile("/proc/sys/kernel/random/boot_id", "utf8")).trim();
       return { pid, group: Number(fields[2]), started: `${boot}:${fields[19]}` };
     }
-    if (process.platform === "win32") {
-      const [identity] = await queryWindowsProcesses(pid);
-      if (!identity) return undefined;
-      return windowsIdentity(identity);
-    }
+    if (process.platform === "win32") return queryWindowsProcessIdentity(pid);
     const { stdout } = await exec("ps", ["-p", String(pid), "-o", "pgid=", "-o", "lstart="]);
     const match = stdout.trim().match(/^(\d+)\s+(.+)$/);
     return match ? { pid, group: Number(match[1]), started: match[2] } : undefined;
@@ -39,10 +35,30 @@ function windowsIdentity(row: WindowsProcess): ProcessIdentity {
   return { pid: row.pid, group: row.group, started: row.started };
 }
 type ProcessQuery = (script: string) => Promise<{ stdout: string }>;
+const runWindowsProcessQuery: ProcessQuery = script =>
+  exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+
+/** Query one PID without a WMI round trip; only the lookup can prove absence. */
+export async function queryWindowsProcessIdentity(pid: number, query: ProcessQuery = runWindowsProcessQuery): Promise<ProcessIdentity | undefined> {
+  if (!Number.isSafeInteger(pid) || pid < 1 || pid > 0x7fffffff) throw failure("INVALID_ARGUMENT", "Invalid worker PID");
+  const script = [
+    "$ErrorActionPreference='Stop';",
+    `try { $proc=[System.Diagnostics.Process]::GetProcessById(${pid}) } catch {`,
+    "if ($_.Exception -is [System.ArgumentException] -or $_.Exception.InnerException -is [System.ArgumentException]) { [Console]::WriteLine('absent'); exit 0 };",
+    "throw };",
+    "try { [Console]::WriteLine($proc.StartTime.ToUniversalTime().Ticks.ToString([System.Globalization.CultureInfo]::InvariantCulture)) } finally { $proc.Dispose() }"
+  ].join(" ");
+  const { stdout } = await query(script);
+  const result = stdout.trim();
+  if (result === "absent") return undefined;
+  if (!/^[1-9]\d{1,18}$/.test(result)) throw failure("PROCESS_IDENTITY_UNAVAILABLE", "Windows process query returned invalid identity evidence");
+  // CIM uses microseconds. Keep stored identities and group snapshots compatible.
+  const ticks = BigInt(result);
+  return { pid, group: pid, started: (ticks - ticks % 10n).toString() };
+}
+
 /** A successful empty query proves absence; command/transport/shape failures do not. */
-export async function queryWindowsProcesses(pid?: number, query: ProcessQuery = script =>
-  exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], { timeout: 10000, maxBuffer: 8 * 1024 * 1024 })
-): Promise<WindowsProcess[]> {
+export async function queryWindowsProcesses(pid?: number, query: ProcessQuery = runWindowsProcessQuery): Promise<WindowsProcess[]> {
   if (pid !== undefined && (!Number.isSafeInteger(pid) || pid < 1)) throw failure("INVALID_ARGUMENT", "Invalid worker PID");
   const filter = pid === undefined ? "" : ` -Filter 'ProcessId=${pid}'`;
   const script = `$ErrorActionPreference='Stop'; try { $rows=@(Get-CimInstance Win32_Process${filter} -ErrorAction Stop | Select-Object ProcessId,ParentProcessId,@{Name='Started';Expression={if($_.CreationDate){$_.CreationDate.ToUniversalTime().Ticks.ToString()}else{$null}}}); ConvertTo-Json -InputObject @{ok=$true;processes=$rows} -Depth 3 -Compress } catch { [Console]::Error.WriteLine($_.ToString()); exit 2 }`;
