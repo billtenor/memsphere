@@ -1,0 +1,22 @@
+Project: {{project}}
+Run: {{runId}}
+{{#if stepId}}
+Step: {{stepId}}
+{{/if}}
+{{#if reviewId}}
+Review: {{reviewId}}
+{{/if}}
+Status: {{status}}
+{{#if available}}
+{{#if usage}}
+{{usage}}
+{{else}}
+Available commands
+{{#each commands}}
+- {{this}}
+{{/each}}
+Use memsphere continue <command> --help for syntax.
+{{/if}}
+{{else}}
+Use run status or run show to inspect the current state.
+{{/if}}

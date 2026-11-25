@@ -33,16 +33,22 @@ async function changeIds(projectRoot: string): Promise<Set<string>> {
   return new Set(await readdir(join(projectRoot, "changes")));
 }
 
-async function captureProjectRepair(name?: string): Promise<string[]> {
+async function captureProjectRepair(name?: string): Promise<string> {
   const lines: string[] = [];
-  const original = console.log;
+  const original = process.stdout.write;
   try {
-    console.log = (...values: unknown[]) => lines.push(values.join(" "));
+    process.stdout.write = function (chunk: string | Uint8Array, ...args: unknown[]) {
+      if (String(chunk).startsWith("project repair\n")) {
+        lines.push(String(chunk));
+        return true;
+      }
+      return Reflect.apply(original, process.stdout, [chunk, ...args]);
+    } as typeof process.stdout.write;
     await projectRepairCommand(name);
   } finally {
-    console.log = original;
+    process.stdout.write = original;
   }
-  return lines;
+  return lines.join("");
 }
 
 async function publishDirectStoreCommit(projectRoot: string, message: string): Promise<string> {
@@ -174,7 +180,7 @@ flow:
     await publishDirectStoreCommit(projectRoot, "Create mixed System Memory repair fixture");
 
     const mixedOutput = await captureProjectRepair("existing");
-    assert(mixedOutput.includes("System Memory changes: 1 create, 1 update, 0 delete"));
+    assert.match(mixedOutput, /created[:：] ?1\nupdated[:：] ?1\ndeleted[:：] ?0/);
     const mixedChange = await readOnlyNewChange(projectRoot, mixedChangesBefore);
     assert.equal(mixedChange.record.status, "completed");
     assert.deepEqual(

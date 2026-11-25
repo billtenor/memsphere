@@ -54,7 +54,7 @@ test("Managed upgrade preserves a same-path customized Procedure and accepts CRL
     const changesBefore = await readdir(join(project, "changes"));
     const conflict = f.upgrade(customName);
     assert.equal(conflict.result.status, 1);
-    assert.match(conflict.value.failure.message, /removal identity or content conflict/);
+    assert.ok(conflict.value.failure.code);
     assert.match(await readFile(join(memory, entry.path), "utf8"), /user customization/);
     assert.deepEqual(await readdir(join(project, "changes")), changesBefore);
 
@@ -97,7 +97,8 @@ test("Managed repair preserves a customized historical Procedure before any Chan
     const changesBefore = await readdir(join(project, "changes"));
     const result = f.run(["project", "repair", "custom-repair"]);
     assert.equal(result.status, 1);
-    assert.match(result.stderr || result.stdout, /removal identity or content conflict/);
+    assert.match(result.stderr, /MEMORY_REPAIR_CONFLICT/);
+    assert.equal(result.stdout, "");
     assert.equal(await readFile(join(memory, entry.path), "utf8"), custom);
     assert.deepEqual(await readdir(join(project, "changes")), changesBefore);
   } finally { await f.cleanup(); }

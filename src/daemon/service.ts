@@ -16,6 +16,7 @@ import { inspectReview, reviewResumeNotification, reviewReady } from "./review.j
 import { readRunnerAgents } from "../runner/identity.js";
 import { resolveQueueCommand } from "../runner/queue-command.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import { isLoopbackHost } from "../view/service.js";
 
 const stateSchema = z.object({ protocol: z.literal(1), pid: z.number().int().positive(), instanceId: z.string(), token: z.string(), endpoint: z.string() }).strict();
 type State = z.infer<typeof stateSchema>;
@@ -122,7 +123,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
       let view: HttpServer | undefined, viewError: string | undefined;
       let opening: Promise<void> | undefined;
       let stopping = false, busy = false, scanOffset = 0;
-      let viewInfo: { host: string; port: number; settingsToken?: string } | undefined;
+      let viewInfo: { host: string; port: number; settingsAccess: "local" | "configured" | "setup_required" } | undefined;
       const closeView = async () => { await opening; const server = view; view = undefined; viewInfo = undefined; if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
       const doOpenView = async () => {
         if (view) return;
@@ -148,7 +149,11 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(config.view.port, config.view.host, () => { server.removeListener("error", reject); resolve(); }); });
           view = server; viewError = undefined;
           const address = server.address();
-          viewInfo = { settingsToken, host: config.view.host, port: typeof address === "object" && address ? address.port : config.view.port };
+          viewInfo = {
+            host: config.view.host,
+            port: typeof address === "object" && address ? address.port : config.view.port,
+            settingsAccess: isLoopbackHost(config.view.host) ? "local" : config.view.operatorToken ? "configured" : "setup_required"
+          };
           server.on("error", () => { viewError = "View service error"; void closeView(); });
         } catch (e) { viewError = (e as Error).message; }
       };
@@ -220,7 +225,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
             else if (request.command === "notify") void tick();
             else if (request.command !== "status" && request.command !== "stop") throw new Error("Unknown daemon command");
             const counts: Record<string, number> = {}; for (const row of await listTasks(home)) counts[row.value.status] = (counts[row.value.status] ?? 0) + 1;
-            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, view: { ...(await readServiceIntent(home)).view, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
+            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, view: { desiredState: (await readServiceIntent(home)).view.desiredState, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
             if (request.command === "stop") void shutdown();
           } catch (e) { socket.end(JSON.stringify({ error: (e as Error).message }) + "\n"); }
         });
@@ -252,8 +257,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
 export async function sendQueue(command: string, sessionId: string, body: string, cwd: string) {
   const launch = await resolveQueueCommand(command);
   return new Promise<void>((resolve, reject) => {
-    const message = `[Memsphere 自动消息]\n${body}`;
-    const child = spawnCommand(launch.command, [...launch.args, "queue", "--thread", sessionId, "--message", message], { cwd, stdio: "ignore" });
+    const child = spawnCommand(launch.command, [...launch.args, "queue", "--thread", sessionId, "--message", body], { cwd, stdio: "ignore" });
     const timeout = setTimeout(() => { child.kill(); reject(new Error("Queue timeout; outcome unknown")); }, 15000);
     child.once("error", e => { clearTimeout(timeout); reject(e); });
     child.once("close", code => { clearTimeout(timeout); if (code === 0) resolve(); else reject(new Error(`Queue exited ${code}`)); });

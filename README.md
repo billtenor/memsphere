@@ -420,7 +420,7 @@ memsphere data store list --kind value --limit 20 --output json
 memsphere memory list --kind procedures --limit 20 --output json
 ```
 
-新增 model/data（含 data store）命令默认 `--output text`，成功时使用 YAML 的键值、缩进和列表格式展示完整结果，保留嵌套数据及分页的 nextCursor，不是缩进 JSON。`--output json` 面向程序读取，成功的 stdout 只有一个 JSON 值；所有 list 也支持此 JSON 协议。失败时 stdout 为空，text 在 stderr 显示错误说明，json 的 stderr 只有 `{ "error": { "code": "...", "message": "...", "details": ... } }`，退出码 1。details 按需要返回；参数解析失败也遵循所选格式。原始导出正文、帮助与版本保持各自的输出规则。完整参数以各命令 `--help` 为准。
+普通命令默认用文本 Prompt 显示公开事实和下一步动作。`--output json` 从 stdout 返回同样的事实和动作，以单一 JSON 值供 jq 或程序读取。执行失败时以非零状态退出，JSON 错误从 stderr 返回，包含稳定的 `error.code` 和经该错误码批准的可选字段。原始导出、固定材料、帮助及版本按各自协议输出。见 [CLI 输出契约与迁移指南](docs/cli-output-contract.md)。
 
 ## 7. Memsphere 仍在进化
 

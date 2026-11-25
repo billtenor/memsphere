@@ -1,62 +1,54 @@
-import { resolve } from "node:path";
-import { validateMemoryRoot, validateMemoryStore } from "../validation.js";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { z } from "zod";
+import { validateMemoryRoot, validateMemoryStore, type ValidationIssue } from "../validation.js";
+import { nextAction } from "../prompts/cli-output.js";
+import { cliCommand, emitCliResult } from "./output.js";
 
-const memoryChangeValidateCommand = "memsphere memory change validate [--change <id>]";
+export const memoryDiagnostic = z.object({
+  code: z.enum(["INVALID_MEMORY", "MIGRATION_REQUIRED", "INVALID_STORE", "SCHEMA_OPTIONAL_INVALID", "REFERENCE_INVALID",
+    "REFERENCE_KIND_MISMATCH", "REFERENCE_NOT_FOUND", "REFERENCE_RULES_MISSING", "REFERENCE_CYCLE"]),
+  path: z.string().optional(),
+  line: z.number().int().positive().optional(),
+  column: z.number().int().positive().optional()
+}).strict();
 
-export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json" } = {}): Promise<void> {
-  const validationScope = options.memoryRoot ? "memory-root" : "project-store";
+export function summarizeMemoryIssues(issues: ValidationIssue[], ...roots: (string | undefined)[]) {
+  return issues.slice(0, 10).map(issue => {
+    const file = roots.filter((root): root is string => Boolean(root)).map(root => relative(resolve(root), resolve(issue.path)))
+      .find(candidate => candidate && !isAbsolute(candidate) && candidate !== ".." && !candidate.startsWith(".." + sep));
+    const path = file && !isAbsolute(file) && file !== ".." && !file.startsWith(".." + sep)
+      ? file.split(sep).join("/") : undefined;
+    return {
+      code: issue.code ?? (issue.migration ? "MIGRATION_REQUIRED" as const : path ? "INVALID_MEMORY" as const : "INVALID_STORE" as const),
+      path, line: issue.line, column: issue.column
+    };
+  });
+}
+
+const validateResult = z.object({
+  valid: z.boolean(),
+  validationScope: z.enum(["memory-root", "project-store"]),
+  changeSetEffect: z.literal("none"),
+  issueCount: z.number().int().nonnegative(),
+  issues: z.array(memoryDiagnostic).max(10),
+  nextAction
+}).strict();
+
+export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json"; output?: "text" | "json" } = {}): Promise<void> {
   const result = options.memoryRoot
-    ? { configPath: "(stateless)", ...(await validateMemoryRoot(resolve(options.memoryRoot))), runsRoot: undefined }
+    ? await validateMemoryRoot(resolve(options.memoryRoot))
     : await validateMemoryStore();
-
-  if (options.format === "json") {
-    process.stdout.write(`${JSON.stringify({
-      valid: result.issues.length === 0,
-      ...result,
-      validationScope,
-      changeSetEffect: "none",
-      ...(!options.memoryRoot ? { nextCommand: memoryChangeValidateCommand } : {})
-    }, null, 2)}\n`);
-    if (result.issues.length > 0) process.exitCode = 1;
-    return;
-  }
-
-  if (result.issues.length === 0) {
-    console.log("memsphere validation passed");
-    if (!options.memoryRoot) console.log(`config: ${result.configPath}`);
-
-    if (result.memoryRoot) {
-      console.log(`memoryRoot: ${result.memoryRoot}`);
-    }
-
-    if (result.runsRoot) {
-      console.log(`runsRoot: ${result.runsRoot}`);
-    }
-
-    if (options.memoryRoot) {
-      console.log("Validation scope: stateless Memory root.");
-      console.log("ChangeSet: not applicable in --memory-root mode.");
-    } else {
-      console.log("Validation scope: current Project Store.");
-      console.log("ChangeSet: not created or updated.");
-      console.log(`For unpublished Memory changes, run: ${memoryChangeValidateCommand}`);
-    }
-
-    return;
-  }
-
-  console.error("memsphere validation failed");
-
-  for (const issue of result.issues) {
-    console.error(`- ${issue.path}${issue.line ? `:${issue.line}:${issue.column ?? 1}` : ""}: ${issue.message}`);
-  }
-
-  if (result.issues.some((issue) => issue.migration === "syntax")) {
-    console.error("");
-    console.error("Hint: This Memory store contains an older YAML syntax with a registered migration path.");
-    console.error("Check the migration first: memsphere migrate syntax --check");
-    console.error("After reviewing the changes: memsphere migrate syntax --write");
-  }
-
-  process.exitCode = 1;
+  const issueCount = result.issues.length;
+  const canMigrate = !options.memoryRoot && result.issues.some(issue => issue.migration === "syntax");
+  emitCliResult("validate", validateResult, {
+    valid: issueCount === 0,
+    validationScope: options.memoryRoot ? "memory-root" : "project-store",
+    changeSetEffect: "none",
+    issueCount,
+    issues: summarizeMemoryIssues(result.issues, result.memoryRoot),
+    nextAction: canMigrate
+      ? cliCommand(["migrate", "syntax", "--check"])
+      : !options.memoryRoot && issueCount === 0 ? cliCommand(["memory", "change", "validate"]) : undefined
+  }, { format: options.output ?? options.format, itemsField: "issues" });
+  if (issueCount > 0) process.exitCode = 1;
 }

@@ -1,3 +1,4 @@
+import { writeCliChunk } from "../cli-transport.js";
 import { Readable } from "node:stream";
 import { encodeJsonChunks } from "../data/extensions/json-serializer/streaming.js";
 import { assertEtag } from "../data/extensions/tos-datastore/revision.js";
@@ -41,7 +42,7 @@ async function nativeModelRuntime(context: Context, root: string, modelRef: stri
 }
 async function nativeExportBytes(bytes: Uint8Array, out: string): Promise<string | undefined> {
   if (out === "-") {
-    await new Promise<void>((resolveWrite, reject) => process.stdout.write(bytes, error => error ? reject(error) : resolveWrite()));
+    await writeCliChunk(bytes);
     return undefined;
   }
   const destination = resolve(out);
@@ -60,7 +61,7 @@ async function nativeExportContent(context: Context, content: PayloadContent, ou
   if (out === "-") {
     await beforePublish();
     await consumeContent(context, content, async chunk => {
-      await new Promise<void>((done, reject) => process.stdout.write(chunk, error => error ? reject(error) : done()));
+      await writeCliChunk(chunk);
       bytes += chunk.byteLength;
     });
     return { bytes };

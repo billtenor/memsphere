@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { PromptInputMap, PromptTemplateId } from "./models.js";
+import { cliContinueSchema, cliErrorPromptSchema, cliHelpSchema, cliNotificationSchema, cliResultPromptSchema } from "./cli-output.js";
 
 export type PromptAudience = "runner" | "acp_reviewer" | "human" | "shared";
 export type PromptPurpose =
@@ -312,6 +313,11 @@ const schemaOverviewSchema = z.object({
 const reviewNodePromptSchema = z.object({ data: z.string(), open: z.boolean(), hasNode: z.boolean(), rolePrompts: z.array(z.string()), materials: z.string(), permissions: z.array(permissionSchema) }).strict();
 
 const definitions = {
+  "cli.result": { path: "cli/result.hbs", schema: cliResultPromptSchema, audience: "shared", purpose: "receipt" },
+  "cli.continue": { path: "cli/continue.hbs", schema: cliContinueSchema, audience: "shared", purpose: "remediation" },
+  "cli.notification": { path: "cli/notification.hbs", schema: cliNotificationSchema, audience: "shared", purpose: "remediation" },
+  "cli.help": { path: "cli/help.hbs", schema: cliHelpSchema, audience: "shared", purpose: "remediation" },
+  "cli.error": { path: "cli/error.hbs", schema: cliErrorPromptSchema, audience: "shared", purpose: "remediation" },
   "acp.review-v3.initial": { path: "acp-review-v3/initial.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
   "acp.review-v3.node": { path: "acp-review-v3/node.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },
   "acp.review-v3.summary": { path: "acp-review-v3/summary.hbs", schema: reviewNodePromptSchema, audience: "acp_reviewer", purpose: "instruction" },

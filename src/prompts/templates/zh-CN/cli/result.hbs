@@ -1,0 +1,30 @@
+{{command}}
+{{#each facts}}
+{{label}}：{{value}}
+{{/each}}
+{{#each items}}
+- {{this}}
+{{/each}}
+{{#unlessNil content}}
+
+读取内容
+{{content}}
+{{/unlessNil}}
+{{#if action}}
+
+{{#ifEq action.kind "wait"}}
+等待当前操作。
+{{/ifEq}}
+{{#ifEq action.kind "human_confirmation"}}
+请 Human 确认。
+{{/ifEq}}
+{{#ifEq action.kind "choose"}}
+选择一个当前可用的后续操作。
+{{/ifEq}}
+{{#ifEq action.kind "command"}}
+下一步
+{{/ifEq}}
+{{#each action.commands}}
+{{this}}
+{{/each}}
+{{/if}}

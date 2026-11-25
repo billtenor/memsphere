@@ -1,0 +1,21 @@
+错误 {{code}}
+{{#ifEq code "INVALID_ARGUMENT"}}请核对命令用法和参数。{{/ifEq}}
+{{#ifEq code "INVALID_INPUT"}}请核对输入格式。{{/ifEq}}
+{{#ifEq code "CONTROL_PLANE_REQUIRED"}}请为项目配置评审控制面，或跳过本次不需要 Actor 的评审槽。{{/ifEq}}
+{{#ifEq code "ARTIFACT_VALIDATION_FAILED"}}请按校验结果检查产物与字段约束。{{/ifEq}}
+{{#ifEq code "INVALID_CURSOR"}}请沿用相同筛选条件和该命令返回的游标。{{/ifEq}}
+{{#ifEq code "INTERNAL_ERROR"}}命令未能完成。{{/ifEq}}
+{{#ifEq code "SESSION_CONTEXT_CONFLICT"}}请显式进入目标 Run 或 Step 后继续。{{/ifEq}}
+{{#ifEq code "EMBEDDED_CHANGE_AMBIGUOUS"}}请用 --change 指定 ChangeSet。{{/ifEq}}
+{{#ifEq code "OUTPUT_RENDER_FAILED"}}命令结果无法呈现。{{/ifEq}}
+{{#ifEq code "HUMAN_CONFIRMATION_REQUIRED"}}
+请在结束 Run 前取得 Human 对当前输出的明确确认。
+{{/ifEq}}
+{{#each facts}}
+{{label}}：{{value}}
+{{/each}}
+{{#if action}}
+
+下一步
+{{action}}
+{{/if}}

@@ -1,4 +1,8 @@
-import type { MemoryCatalog } from "../memory/catalog.js";
+import { z } from "zod";
+import { cliCommand, cliPageBudget, emitCliResult, previewText, renderCliResult } from "./output.js";
+import { nextAction } from "../prompts/cli-output.js";
+import { memoryDiagnostic, summarizeMemoryIssues } from "./validate.js";
+import type { MemoryCatalog, MemoryDescriptor } from "../memory/catalog.js";
 import type { RulePart, StatementNode } from "../memory/ast.js";
 import { join } from "node:path";
 import { createMemoryCatalog, createMemoryCatalogForConfig } from "../memory/factory.js";
@@ -7,19 +11,13 @@ import {
   serializeMemoryJson,
   serializeEffectiveMemoryReadJson,
   serializeEffectiveMemoryReadYaml,
-  serializeMemoryListJson,
-  serializeMemoryListText,
-  serializeMemoryListYaml,
-  serializeMemoryNodeListJson,
-  serializeMemoryNodeListText,
-  serializeMemoryNodeListYaml,
   serializeMemoryNodeReadJson,
   serializeMemoryNodeReadYaml,
   serializeMemoryYaml,
   toEffectiveRuleDisplayTree
 } from "../memory/serializer.js";
 import { resolveRuleParts } from "../memory/rules.js";
-import { MemoryNavigation, type MemoryIdentity } from "../memory/navigation.js";
+import { MemoryNavigation, type MemoryIdentity, type MemoryNodeDescriptor } from "../memory/navigation.js";
 import {
   claimMemoryChange,
   completeMemoryChange,
@@ -40,7 +38,54 @@ import { RunMemoryProvider } from "../memory/run-provider.js";
 import { readRun } from "../run/store.js";
 import { getViewServiceStatus, viewServiceUrl } from "../view/service.js";
 import { parseListLimit, type PaginationOptions } from "../pagination.js";
-import { EmbeddedChangeAmbiguityError } from "../memory/embedded-bindings.js";
+
+const memoryIdentity = z.object({ reference: z.string(), kind: z.enum(memoryKinds), names: z.array(z.string()).max(10) }).strict();
+const memoryPage = z.object({
+  items: z.array(memoryIdentity.extend({
+    summary: z.string().optional(), project_name: z.string().optional(), revision: z.string().optional(),
+    app: z.object({ id: z.string(), version: z.string(), assetKey: z.string(), enabled: z.boolean() }).strict().optional()
+  }).strict()),
+  nextCursor: z.string().optional()
+}).strict();
+const memoryNodePage = z.object({
+  memory: memoryIdentity,
+  parent_node_ref: z.string().optional(),
+  items: z.array(z.object({
+    node_ref: z.string(), type: z.string(), name: z.string().optional(), field: z.string().optional(),
+    artifact: z.string().optional(), condition_artifact: z.string().optional(), target: z.string().optional(),
+    summary: z.string().optional(), relation: z.string().optional(), has_children: z.boolean()
+  }).strict()),
+  nextCursor: z.string().optional()
+}).strict();
+const changeReceipt = z.object({
+  status: z.enum(["ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"]),
+  changeId: z.string().optional(),
+  storeType: z.enum(["managed", "embedded"]).optional(),
+  candidateRoot: z.string().optional(),
+  reference: z.string().optional(),
+  revision: z.string().optional(),
+  targets: z.array(z.object({
+    reference: z.string(), path: z.string(), operation: z.enum(["create", "update"])
+  }).strict()).optional(),
+  commentCount: z.number().int().nonnegative().optional(),
+  warningCount: z.number().int().nonnegative().optional(),
+  nextAction
+}).strict();
+const changeValidation = z.object({
+  valid: z.boolean(),
+  changeId: z.string(),
+  storeType: z.enum(["managed", "embedded"]),
+  baseRevision: z.string(),
+  checkpointDigest: z.string(),
+  completedChangeIds: z.array(z.string()).max(20),
+  completedChangeCount: z.number().int().nonnegative(),
+  issueCount: z.number().int().nonnegative(),
+  issues: z.array(memoryDiagnostic).max(10),
+  empty: z.boolean(),
+  previewPath: z.string(),
+  previewUrl: z.string().optional(),
+  nextAction
+}).strict();
 
 const listOutputs = ["yaml", "json", "text"] as const;
 const readOutputs = ["yaml", "json"] as const;
@@ -80,8 +125,9 @@ export async function memoryListCommand(
   dependencies: MemoryCommandDependencies = defaultDependencies
 ): Promise<void> {
   const kind = parseKind(options.kind);
-  const output = parseOutput(options.output ?? "yaml", listOutputs, "memory list");
-  const limit = parseListLimit(options.limit);
+  const output = parseOutput(options.output ?? "text", listOutputs, "memory list");
+  parseListLimit(options.limit);
+  const limit = options.limit;
   if (!reference && options.node !== undefined) {
     throw new TypeError("memory list --node requires a memory reference");
   }
@@ -98,22 +144,43 @@ export async function memoryListCommand(
       project: descriptor.project_name,
       run: options.run,
       kind
-    });
-    const value = output === "json"
-      ? serializeMemoryNodeListJson(page)
-      : output === "text"
-        ? serializeMemoryNodeListText(page)
-        : serializeMemoryNodeListYaml(page);
-    dependencies.writeStdout(value);
+    }, cliPageBudget("established", summarizeMemoryNode));
+    dependencies.writeStdout(renderCliResult("memory list", memoryNodePage, {
+      memory: summarizeMemoryIdentity(page.memory),
+      parent_node_ref: page.parent_node_ref,
+      items: page.items.map(summarizeMemoryNode),
+      nextCursor: page.nextCursor
+    }, { format: output }));
     return;
   }
-  const page = await catalog.list({ kind, query: options.query, limit, cursor: options.cursor });
-  const value = output === "json"
-    ? serializeMemoryListJson(page)
-    : output === "text"
-      ? serializeMemoryListText(page)
-      : serializeMemoryListYaml(page);
-  dependencies.writeStdout(value);
+  const page = await catalog.list({ kind, query: options.query, limit, cursor: options.cursor }, cliPageBudget("established", summarizeMemory));
+  dependencies.writeStdout(renderCliResult("memory list", memoryPage, {
+    items: page.items.map(summarizeMemory),
+    nextCursor: page.nextCursor
+  }, { format: output }));
+}
+
+function summarizeMemoryNode({ summary, name, field, artifact, condition_artifact, target, type, relation, node_ref, has_children }: MemoryNodeDescriptor) {
+  const label = (value?: string) => value === undefined ? undefined : previewText(value, 160).text;
+  return { node_ref, type, name: label(name), field: label(field), artifact: label(artifact),
+    condition_artifact: label(condition_artifact), target, relation, has_children,
+    summary: summary === undefined ? undefined : previewText(summary, 256).text };
+}
+
+function summarizeMemory(item: MemoryDescriptor) {
+  return { ...summarizeMemoryIdentity(item),
+    summary: item.defines.length > 0 ? previewText(item.defines[0], 256).text : undefined,
+    project_name: item.project_name, revision: item.revision,
+    app: item.app ? { id: item.app.id, version: item.app.version, assetKey: item.app.assetKey, enabled: item.app.enabled } : undefined
+  };
+}
+
+function summarizeMemoryIdentity(memory: MemoryIdentity) {
+  return {
+    reference: memory.reference,
+    kind: memory.kind,
+    names: memory.names.slice(0, 10).map(name => previewText(name, 160).text)
+  };
 }
 
 export async function memoryReadCommand(
@@ -217,128 +284,97 @@ export async function memoryEditCommand(references: string[], options: { change?
   if (context.primary.config.store.type === "embedded") {
     if (options.change) throw new Error("--change is only available for a Managed Project");
     const result = await editEmbeddedMemories(references);
-    console.log("Store: embedded");
-    console.log(`Repository Root: ${result.repositoryRoot}`);
-    console.log(`Workspace Root: ${result.workspaceRoot}`);
-    console.log(`Memory Root: ${result.memoryRoot}`);
-    for (const target of result.targets) {
-      console.log(`Edit: ${target.reference}\t${target.operation}\t${join(result.memoryRoot, target.path)}`);
-    }
-    console.log("Next: memsphere memory change validate");
-    console.log("Integrate these Memory changes through the repository's normal Git workflow.");
+    emitCliResult("memory edit", changeReceipt, {
+      status: "ready", storeType: "embedded", targets: result.targets.map(({ reference, operation, path }) => ({
+        reference, operation, path: join(result.memoryRoot, path)
+      })),
+      nextAction: cliCommand(["memory", "change", "validate"])
+    });
     return;
   }
   const result = await editMemories({ references, changeId: options.change });
-  console.log(`ChangeSet: ${result.change.id}`);
-  console.log(`Candidate Root: ${result.candidateRoot}`);
-  logMemoryChangeValidateNext(result.change.id);
+  emitCandidate("memory edit", result.change.id, result.candidateRoot);
 }
 
 export async function memoryDeleteCommand(references: string[], options: { change?: string } = {}): Promise<void> {
   const result = await editMemories({ references, changeId: options.change, operation: "delete" });
-  console.log(`ChangeSet: ${result.change.id}`);
-  console.log(`Candidate Root: ${result.candidateRoot}`);
-  logMemoryChangeValidateNext(result.change.id);
+  emitCandidate("memory delete", result.change.id, result.candidateRoot);
 }
 
 export async function memoryRenameCommand(reference: string, newName: string, options: { change?: string } = {}): Promise<void> {
   const result = await renameMemory({ reference, newName, changeId: options.change });
-  console.log(`ChangeSet: ${result.change.id}`);
-  console.log(`Candidate Root: ${result.candidateRoot}`);
-  logMemoryChangeValidateNext(result.change.id);
+  emitCandidate("memory rename", result.change.id, result.candidateRoot);
 }
 
-function logMemoryChangeValidateNext(changeId: string): void {
-  console.log(`Next: memsphere memory change validate --change ${changeId}`);
+function emitCandidate(command: string, changeId: string, candidateRoot: string | undefined, extra: {
+  status?: "ready" | "claimed";
+  commentCount?: number;
+  warningCount?: number;
+} = {}): void {
+  const inspect = cliCommand(["memory", "change", "resume", changeId]);
+  emitCliResult(command, changeReceipt, {
+    changeId, candidateRoot, status: extra.status ?? "ready",
+    commentCount: extra.commentCount, warningCount: extra.warningCount,
+    nextAction: cliCommand(["memory", "change", "validate", "--change", changeId])
+  }, { saved: { id: changeId, inspect } });
 }
 
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
-  if (!options.change) throw new Error("--change <id> is required");
+  if (!options.change) throw new TypeError("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
-  if (change.store_type === "embedded" && change.intent === "market_import") {
-    console.log(`Applied ChangeSet to worktree: ${change.id}`);
-    console.log("Review and commit the Memory changes with Git; the ChangeSet remains active until integration.");
-    return;
-  }
-  console.log(`Completed ChangeSet: ${change.id}`);
-  console.log(`Revision: ${change.published_revision}`);
+  const applied = change.store_type === "embedded" && change.intent === "market_import";
+  emitCliResult("memory publish", changeReceipt, {
+    changeId: change.id, status: applied ? "applied" : "published",
+    storeType: change.store_type, revision: change.published_revision ?? undefined,
+    nextAction: applied ? { kind: "human_confirmation" } : undefined
+  });
 }
 
 export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
-  console.log(`Candidate Root: ${await resumeMemoryChange(changeId)}`);
+  emitCandidate("memory change resume", changeId, await resumeMemoryChange(changeId));
 }
 
 export async function memoryChangeClaimCommand(changeId: string, options: { force?: boolean } = {}): Promise<void> {
   const result = await claimMemoryChange({ changeId, force: options.force });
-  console.log(`Claimed ChangeSet: ${result.change.id}`);
-  console.log(`Candidate Root: ${result.candidateRoot}`);
-  console.log(`Processing Comments: ${result.change.comments.filter((comment) => comment.status === "processing").length}`);
-  for (const warning of result.warnings) console.warn(`Warning: ${warning}`);
+  emitCandidate("memory change claim", result.change.id, result.candidateRoot, {
+    status: "claimed",
+    commentCount: result.change.comments.filter(comment => comment.status === "processing").length,
+    warningCount: result.warnings.length
+  });
 }
 
 export async function memoryChangeFinishCommand(
   changeId: string,
   options: { comment?: string[]; reason?: "fixed" | "rejected" } = {}
 ): Promise<void> {
-  const change = await finishMemoryChange({
-    changeId,
-    commentIds: options.comment,
-    reason: options.reason
+  const change = await finishMemoryChange({ changeId, commentIds: options.comment, reason: options.reason });
+  emitCliResult("memory change finish", changeReceipt, {
+    changeId: change.id, status: "completed", commentCount: (options.comment ?? []).length
   });
-  console.log(`Finished ChangeSet processing: ${change.id}`);
-  console.log(`Completed Comments: ${(options.comment ?? []).length}`);
 }
 
 export async function memoryChangeCompleteCommand(changeId: string): Promise<void> {
   const change = await completeMemoryChange(changeId);
-  console.log(`Completed ChangeSet: ${change.id}`);
+  emitCliResult("memory change complete", changeReceipt, { changeId: change.id, status: "completed" });
 }
 
 export async function memoryChangeValidateCommand(
   changeId: string | undefined,
-  options: { format?: string } = {}
+  options: { format?: string; output?: string } = {}
 ): Promise<void> {
-  const format = parseOutput(options.format ?? "text", ["text", "json"] as const, "memory change validate");
-  let result: Awaited<ReturnType<typeof validateMemoryChange>>;
-  try { result = await validateMemoryChange(changeId); }
-  catch (error) {
-    if (!(error instanceof EmbeddedChangeAmbiguityError)) throw error;
-    if (format === "json") process.stdout.write(`${JSON.stringify({ valid: false, error: { code: error.code, message: error.message, candidates: error.candidates } }, null, 2)}\n`);
-    else {
-      console.error(error.message);
-      for (const candidate of error.candidates) console.error(`${candidate.id}\t${candidate.status}\t${JSON.stringify(candidate.bindings ?? {})}\t${JSON.stringify(candidate.source_worktree ?? {})}\t${candidate.references.join(", ")}`);
-    }
-    process.exitCode = 1;
-    return;
-  }
+  const format = parseOutput(options.output ?? options.format ?? "text", ["text", "json"] as const, "memory change validate");
+  const result = await validateMemoryChange(changeId);
   const preview = await memoryChangePreview(result.changeId);
-  const reviewCommand = `memsphere memory change show ${result.changeId} --checkpoint ${result.checkpointDigest}`;
-  if (format === "json") {
-    process.stdout.write(`${JSON.stringify({ valid: result.issues.length === 0, ...result, previewUrl: preview.url, previewPath: preview.path, reviewCommand }, null, 2)}\n`);
-    if (result.issues.length > 0) process.exitCode = 1;
-    return;
-  }
-  if (result.issues.length === 0) {
-    console.log("ChangeSet validation passed");
-  } else {
-    console.error("ChangeSet validation failed");
-    for (const issue of result.issues) {
-      console.error(`- ${issue.path}${issue.line ? `:${issue.line}:${issue.column ?? 1}` : ""}: ${issue.message}`);
-    }
-    process.exitCode = 1;
-  }
-  console.log(`ChangeSet: ${result.changeId}`);
-  console.log(`Store: ${result.storeType}`);
-  console.log(`Base Revision: ${result.baseRevision}`);
-  console.log(`Checkpoint Digest: ${result.checkpointDigest}`);
-  if (result.bindings) console.log(`Bindings: ${JSON.stringify(result.bindings)}`);
-  if (result.empty) console.log("This round has no net Memory changes; the ChangeSet remains active.");
-  if (result.prDiscovery?.status === "unknown") console.warn(`PR not verified: ${result.prDiscovery.reason}`);
-  console.log(`Review materials: ${reviewCommand} --part summary`);
-  console.log("Use --part diff|validation, or --part memory --reference <reference> --side before|after.");
-  console.log(`memoryRoot: ${result.memoryRoot}`);
-  if (preview.url) console.log(`Preview: ${preview.url}`);
-  else console.log(`Preview: start memsphere View, then open ${preview.path}`);
+  const inspect = cliCommand(["memory", "change", "show", result.changeId, "--checkpoint", result.checkpointDigest,
+    "--part", result.issues.length ? "validation" : "summary"]);
+  emitCliResult("memory change validate", changeValidation, {
+    valid: result.issues.length === 0, changeId: result.changeId, storeType: result.storeType,
+    baseRevision: result.baseRevision, checkpointDigest: result.checkpointDigest,
+    completedChangeIds: result.completedChangeIds.slice(0, 20), completedChangeCount: result.completedChangeIds.length,
+    issueCount: result.issues.length, issues: summarizeMemoryIssues(result.issues, result.memoryRoot, result.candidateRoot),
+    empty: result.empty ?? false, previewPath: preview.path, previewUrl: preview.url, nextAction: inspect
+  }, { format, itemsField: "issues", saved: { id: result.changeId, inspect } });
+  if (result.issues.length > 0) process.exitCode = 1;
 }
 
 async function memoryChangePreview(changeId: string): Promise<{ path: string; url?: string }> {
@@ -358,33 +394,29 @@ export async function memoryRecoverCommand(reference: string, options: { restore
   if (options.restore === options.createChange) throw new Error("choose exactly one of --restore or --create-change");
   const result = await recoverMemory(reference, options.restore ? "restore" : "create-change");
   if (result.change) {
-    console.log(`ChangeSet: ${result.change.id}`);
-    console.log(`Candidate Root: ${result.candidateRoot}`);
+    emitCandidate("memory recover", result.change.id, result.candidateRoot);
   } else {
-    console.log(`Restored Memory: ${reference}`);
+    emitCliResult("memory recover", changeReceipt, { status: "restored", reference });
   }
 }
 
 export async function memoryPushCommand(): Promise<void> {
   await pushMemory();
-  console.log("Pushed Managed Memory branch.");
+  emitCliResult("memory push", changeReceipt, { status: "pushed", storeType: "managed" });
 }
 
 export async function memorySyncCommand(): Promise<void> {
   const result = await syncMemory();
-  if (result.change) {
-    console.log(`Sync ChangeSet: ${result.change.id}`);
-    console.log(`Candidate Root: ${result.candidateRoot}`);
-  } else {
-    console.log(`Synchronized Revision: ${result.revision}`);
-  }
+  if (result.change) emitCandidate("memory sync", result.change.id, result.candidateRoot);
+  else emitCliResult("memory sync", changeReceipt, { status: "synchronized", revision: result.revision });
 }
 
 export async function memorySyncPublishCommand(options: { change?: string; message?: string }): Promise<void> {
-  if (!options.change) throw new Error("--change <id> is required");
+  if (!options.change) throw new TypeError("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "sync" });
-  console.log(`Published Sync ChangeSet: ${change.id}`);
-  console.log(`Revision: ${change.published_revision}`);
+  emitCliResult("memory sync publish", changeReceipt, {
+    changeId: change.id, status: "published", revision: change.published_revision ?? undefined
+  });
 }
 
 function toIdentity(descriptor: { reference: string; kind: MemoryKind; names: string[] }): MemoryIdentity {

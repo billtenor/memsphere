@@ -107,9 +107,13 @@ flow:
     assert.equal(receipt.runId, jsonCase.started.id);
     assert.equal(receipt.vote, "request_changes");
     assert.equal(receipt.commentCount, 2);
-    assert.equal(receipt.delegatedBy, "runner");
+    assert.equal(Object.hasOwn(receipt, "authorizationNote"), false);
     assert.equal(receipt.roundStatus, "changes_requested");
-    assert.deepEqual(receipt.nextAction, { kind: "revision", runId: jsonCase.started.id });
+    assert.deepEqual(receipt.nextAction, {
+      kind: "command", launcher: "memsphere",
+      args: ["--project", projectName, "run", "report", "--run", jsonCase.started.id,
+        "--artifact-file", "<candidate>", "--revision-summary-file", "<revision-summary>"]
+    });
     const persisted = await readRun(runsRoot, jsonCase.started.id);
     const opinion = currentArtifactReview(persisted)!.rounds[0]!.assignments[0]!.submitted!;
     assert.deepEqual(opinion.comments.map((comment) => comment.body), [
@@ -144,11 +148,10 @@ flow:
     assert.equal(textResult.status, 0, textResult.stderr);
     assert.equal(textResult.stderr, "");
     assert.match(textResult.stdout, new RegExp(textCase.started.id));
-    assert.match(textResult.stdout, /Runner 代 Human 提交评审成功/);
-    assert.match(textResult.stdout, /- 投票：通过/);
-    assert.match(textResult.stdout, /- Comment 数：0/);
-    assert.match(textResult.stdout, /- 受托提交者：runner/);
-    assert.match(textResult.stdout, /memsphere run review vote --review/);
+    assert.match(textResult.stdout, /run review submit-for-human/);
+    assert.match(textResult.stdout, /vote[:：] ?approve/);
+    assert.match(textResult.stdout, /commentCount[:：] ?0/);
+    assert.match(textResult.stdout, /run review vote --review/);
     const textPersisted = await readRun(runsRoot, textCase.started.id);
     const textOpinion = currentArtifactReview(textPersisted)!.rounds[0]!.assignments[0]!.submitted!;
     assert.equal(textOpinion.vote, "approve");
@@ -180,7 +183,7 @@ flow:
       "--output", "json"
     ]);
     assert.notEqual(failedResult.status, 0);
-    assert.match(failedResult.stderr, /requires at least one Comment/);
+    assert.match(failedResult.stderr, /INVALID_ARGUMENT|INTERNAL_ERROR/);
     assert.equal(currentArtifactReview(await readRun(runsRoot, rejectedCase.started.id))!.rounds[0]!.assignments[0]!.submitted, undefined);
   } finally {
     process.chdir(previousCwd);

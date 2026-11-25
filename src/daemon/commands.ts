@@ -4,30 +4,73 @@ import { detectRunnerAgents, detectIdentity, currentIdentity } from "../runner/i
 import { listTasks, retryFailedTask } from "./tasks.js";
 import { readConfig } from "../config.js";
 import { inspectReview } from "./review.js";
+import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
+import { addCliOutput, cliCommand, emitCliResult, paginateCliItems, previewText } from "../commands/output.js";
+import { daemonStatusSchema, publicDaemonStatus } from "./public-status.js";
+import { z } from "zod";
+import { nextAction } from "../prompts/cli-output.js";
+
+const runnerSchema = z.object({ identified: z.boolean(), agentType: z.enum(["codex", "traex"]).optional() }).strict();
+const runnerListSchema = z.object({ items: z.array(z.object({
+  type: z.string(), status: z.enum(["installed", "version_unknown", "missing", "failed"]), version: z.string().optional()
+}).strict()) }).strict();
+const taskSchema = z.object({
+  id: z.string(), roundId: z.string(), currentRound: z.boolean(),
+  status: z.enum(["queued", "running", "completed", "failed", "cancelled"]),
+  stage: z.enum(["wait", "render", "send", "cancel", "recovery"]).optional()
+}).strict();
+const taskListSchema = z.object({
+  items: z.array(taskSchema), total: z.number().int().nonnegative(), nextCursor: z.string().optional()
+}).strict();
+const retrySchema = z.object({ taskId: z.string(), roundId: z.string(), status: z.string(), mayRepeatNotification: z.boolean(), nextAction }).strict();
+
+async function showDaemon(command: string) {
+  emitCliResult(command, daemonStatusSchema, publicDaemonStatus(await daemonStatus()));
+}
 
 export function registerDaemonCommands(program: Command) {
   const daemon = program.command("daemon").description("Manage the Home daemon, View and asynchronous tasks.");
-  daemon.command("start").action(async () => { await ensureDaemon(); console.log(JSON.stringify(await daemonStatus())); });
-  daemon.command("status").action(async () => { console.log(JSON.stringify(await daemonStatus())); });
-  daemon.command("stop").action(async () => { await stopDaemon(); console.log("Daemon stopped; View intent and tasks retained."); });
-  daemon.command("restart").action(async () => { await stopDaemon(); await ensureDaemon(); console.log(JSON.stringify(await daemonStatus())); });
+  addCliOutput(daemon.command("start")).action(async () => { await ensureDaemon(); await showDaemon("daemon start"); });
+  addCliOutput(daemon.command("status")).action(() => showDaemon("daemon status"));
+  addCliOutput(daemon.command("stop")).action(async () => { await stopDaemon(); await showDaemon("daemon stop"); });
+  addCliOutput(daemon.command("restart")).action(async () => { await stopDaemon(); await ensureDaemon(); await showDaemon("daemon restart"); });
   daemon.command("serve", { hidden: true }).action(async () => { await runDaemon(); });
   const runner = program.command("runner").description("Inspect installed Runner Agents and the calling session.");
-  runner.command("detect").action(async () => { console.log(JSON.stringify(await detectRunnerAgents(), null, 2)); });
-  runner.command("identity").action(() => { console.log(JSON.stringify(detectIdentity() ?? null)); });
+  addCliOutput(runner.command("detect")).action(async () => {
+    const items = (await detectRunnerAgents()).map(({ type, status, version }) => ({
+      type, status, ...(version ? { version: previewText(version, 160).text } : {})
+    }));
+    emitCliResult("runner detect", runnerListSchema, { items });
+  });
+  addCliOutput(runner.command("identity")).action(() => {
+    const identity = detectIdentity();
+    emitCliResult("runner identity", runnerSchema, { identified: Boolean(identity), agentType: identity?.agentType });
+  });
 }
 
 export function registerWaitTaskCommands(wait: Command) {
-  wait.command("status").action(async (_options, command: Command) => {
+  addCliOutput(wait.command("status").option("--limit <n>", "Page size, 1–100; default 20")
+    .option("--cursor <token>")).action(async (_options, command: Command) => {
     const options = command.optsWithGlobals();
     if (!options.review) throw new Error("--review <id> is required");
     const config = await readConfig();
     const identity = await currentIdentity(true);
     const tasks = (await listTasks()).filter(r => r.value.input.project === config.project!.name && r.value.input.reviewId === options.review && r.value.recipient.agentType === identity!.agentType && r.value.recipient.sessionId === identity!.sessionId);
-    const context = await inspectReview(config, options.review);
-    console.log(JSON.stringify(tasks.map(r => ({ ...r.value, currentRound: r.value.input.roundId === context.round.id })), null, 2));
+    const context = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId: options.review });
+    const items = tasks.map(({ value }) => ({
+      id: value.id, roundId: value.input.roundId, currentRound: value.input.roundId === context.round.id,
+      status: value.status, stage: value.error?.stage
+    })).sort((a, b) => Number(b.currentRound) - Number(a.currentRound) || a.id.localeCompare(b.id));
+    const page = paginateCliItems(items, options, {
+      command: "run.review.wait.status",
+      scope: { project: config.project!.name, reviewId: options.review, identity },
+      filters: { currentRoundId: context.round.id }
+    }, "summary");
+    emitCliResult("run review wait status", taskListSchema, {
+      items: page.items, total: items.length, nextCursor: page.nextCursor
+    });
   });
-  wait.command("retry").requiredOption("--round <id>").action(async (_options, command: Command) => {
+  addCliOutput(wait.command("retry").requiredOption("--round <id>")).action(async (_options, command: Command) => {
     const options = command.optsWithGlobals();
     if (!options.review) throw new Error("--review <id> is required");
     const config = await readConfig();
@@ -40,6 +83,10 @@ export function registerWaitTaskCommands(wait: Command) {
     await ensureDaemon();
     const task = await retryFailedTask(row.id);
     await daemonControl("notify");
-    console.log(`Task ${task.id} registered for retry; a previous notification may already have been delivered.`);
+    const resume = cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", options.review]);
+    emitCliResult("run review wait retry", retrySchema, {
+      taskId: task.id, roundId: task.input.roundId, status: task.status,
+      mayRepeatNotification: true, nextAction: { kind: "wait", resume }
+    }, { saved: { id: task.id, inspect: cliCommand([...resume.args, "status"]) } });
   });
 }

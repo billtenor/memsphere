@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
-import { parse } from "yaml";
 import { writeData } from "../src/project/data-service.js";
 import { mutateModel } from "../src/project/model-service.js";
 import { businessFixture, snapshotTree } from "./helpers/business-data.js";
@@ -24,8 +23,6 @@ function cli(fixture: Fixture, args: string[], format?: Format, input?: string) 
   return result;
 }
 
-/** Compare the real handlers' format variants. Native JSON transport and the
- * model's native YAML/default output retain process/encoding coverage. */
 async function representations(fixture: Fixture, args: string[], input?: string): Promise<any> {
   const results: Array<{ status: number | null; stdout: string; stderr: string }> = [];
   for (const format of ["json", "text", undefined] as const) {
@@ -46,9 +43,12 @@ async function representations(fixture: Fixture, args: string[], input?: string)
   const [json, text, implicit] = results;
   const value = JSON.parse(json.stdout);
   assert.equal(json.stdout, `${JSON.stringify(value)}\n`, "JSON remains one compact value followed by a newline");
-  assert.match(text.stdout, /^project: test-project\n/);
+  assert.match(text.stdout, /\nproject[:：] ?test-project\n/);
   assert.throws(() => JSON.parse(text.stdout), SyntaxError, "text must no longer be pretty-printed JSON");
-  assert.deepEqual(parse(text.stdout), value, "YAML text preserves the complete JSON result");
+  for (const field of ["modelRef", "id", "storeId", "nextCursor"]) {
+    if (value[field] !== undefined) assert.ok(text.stdout.includes(value[field]), field);
+  }
+  for (const item of value.items ?? []) assert.ok(text.stdout.includes(item.id ?? item.storeId));
   assert.equal(implicit.stdout, text.stdout, "default output is text");
   return value;
 }
@@ -77,7 +77,7 @@ async function fixture(t: TestContext) {
   return f;
 }
 
-test("actual model/data/Store reads use YAML text by default and preserve special strings and nested JSON values", { timeout: 60_000 }, async t => {
+test("actual model/data/Store reads use Agent text by default and preserve special strings and nested JSON values", { timeout: 60_000 }, async t => {
   const f = await fixture(t);
   const before = await snapshotTree(f.root);
   const model = await representations(f, ["model", "read", "record.json", "--part", "all"]);
@@ -109,7 +109,7 @@ test("all three list commands expose the same paged receipt in JSON, text and de
 });
 
 for (const domain of ["model", "data", "store"] as const) {
-  test(`${domain} dry-run exposes a YAML plan without changing the Project`, { timeout: 60_000 }, async t => {
+  test(`${domain} dry-run exposes a text plan without changing the Project`, { timeout: 60_000 }, async t => {
     const f = await fixture(t);
     await mutateModel({}, f.root, "create", "planned.json", { source: JSON.stringify(schema) });
     const plans = {
@@ -121,11 +121,10 @@ for (const domain of ["model", "data", "store"] as const) {
     const result = cli(f, plans[domain].args, domain === "data" ? undefined : "text", plans[domain].input);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, "");
-    const plan = parse(result.stdout);
-    assert.equal(plan.project, "test-project");
-    assert.equal(plan.operation, plans[domain].operation);
-    assert.equal(plan.dryRun, true);
-    if (domain === "model") assert.equal(plan.registration.name, "true");
+    assert.match(result.stdout, /project[:：] ?test-project/);
+    assert.ok(result.stdout.includes(plans[domain].operation));
+    assert.match(result.stdout, /dryRun[:：] ?true/);
+    if (domain === "model") assert.match(result.stdout, /"name":"true"/);
     assert.throws(() => JSON.parse(result.stdout), SyntaxError);
     assert.deepEqual(await snapshotTree(f.root), before);
   });
@@ -147,8 +146,7 @@ test("model/data/Store failures keep stdout empty and wire the shared JSON or re
     assert.equal(json.stdout, "");
     const error = JSON.parse(json.stderr);
     assert.equal(error.error.code, code);
-    assert.equal(typeof error.error.message, "string");
-    assert.ok(error.error.message.length);
+    assert.deepEqual(Object.keys(error.error), ["code"]);
     assert.equal(json.stderr, `${JSON.stringify(error)}\n`);
     // The presentation unit tests exhaust text/default combinations; these calls
     // retain real explicit-text and default-text error dispatch at the CLI boundary.
@@ -156,7 +154,7 @@ test("model/data/Store failures keep stdout empty and wire the shared JSON or re
       const readable = cli(f, [...args], index === 0 ? "text" : undefined);
       assert.equal(readable.status, 1);
       assert.equal(readable.stdout, "");
-      assert.equal(readable.stderr, `error: ${error.error.message}\n`);
+      assert.ok(readable.stderr.includes(code));
       assert.throws(() => JSON.parse(readable.stderr), SyntaxError);
     }
   }

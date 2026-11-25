@@ -67,7 +67,7 @@ for(const operation of ["read","validate","export"] as const)for(const failure o
     };
     service.calls.length=0;
     const args=[operation,"item","--store","assets",...(operation === "export" ? ["--as","json","--out",output] : [])];
-    await assert.rejects(command(args),error=>{assert.equal(JSON.parse((error as Error & {stderr:string}).stderr).error.code,failure === "conflict" ? "REVISION_CONFLICT" : "AccessDenied");return true;});
+    await assert.rejects(command(args),error=>{assert.equal(JSON.parse((error as Error & {stderr:string}).stderr).error.code,failure === "conflict" ? "REVISION_CONFLICT" : "PERMISSION_DENIED");return true;});
     assert.equal(injected,true);assert.ok(service.calls.every(call=>!["PUT","DELETE"].includes(call.method)));
     if(failure === "permission")assert.deepEqual(service.objects.get("cli-json/item")!.bytes,original);
     else assert.equal(service.objects.get("cli-json/item")!.bytes.subarray(14).toString(),'{"name":"concurrent","count":1}');

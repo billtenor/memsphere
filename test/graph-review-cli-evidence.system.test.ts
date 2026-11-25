@@ -60,7 +60,7 @@ test('real production CLI loops and rewinds pin each acceptance Session to the c
  const rewound=JSON.parse(f.runner(['run','step','rewind','--run',f.runId,'--step',r1.stepId,'--reason','new confirmed requirements','--output','json']).stdout);
  const r3=await f.produce('requirements','requirements after rewind',[],rewound.replacementStepId),c3=await f.produce('acceptance','after rewind'),s3=await f.claim(c3.stepId);s3.read('artifact',r3.artifactId,'third-r3.txt');s3.read('artifact',r2.artifactId,'deny-v2-after.txt',false);
  s1.read('artifact',r1.artifactId,'revoked.txt',false);
- const history=JSON.parse(f.runner(['run','show','--run',f.runId,'--output','json']).stdout);const original=history.artifacts.find((a:any)=>a.id===c1.artifactId);assert.ok(original.dependencies.some((d:any)=>d.id===r1.artifactId));assert.ok(!original.dependencies.some((d:any)=>d.id===r2.artifactId||d.id===r3.artifactId));
+ const history=await f.service.inspect(f.runId);const original=history.artifacts.find((a:any)=>a.id===c1.artifactId);assert.ok(original.dependencies.some((d:any)=>d.id===r1.artifactId));assert.ok(!original.dependencies.some((d:any)=>d.id===r2.artifactId||d.id===r3.artifactId));
  f.runner(['run','artifact','show','--run',f.runId,'--artifact',r1.artifactId,'--out',join(f.cwd,'historical-requirements.txt'),'--output','json']);assert.equal(await readFile(join(f.cwd,'historical-requirements.txt'),'utf8'),'requirements v1');
  assert.equal((await f.service.readArtifact(f.runId,r1.artifactId)).bytes.toString(),'requirements v1');assert.equal(await readFile(join(f.cwd,'history-r1.txt'),'utf8'),'requirements v1');
 });
@@ -96,6 +96,6 @@ test('a historical restricted Session retains its original candidate and Externa
 test('production CLI rejects an unrelated supplemental Artifact and accepts a causal ancestor',async t=>{
  const f=await fixture(t,[action('R'),action('P','R'),action('U'),action('C','P',true)]),r=await f.seed('R','requirements');await f.seed('P','plan');const u=await f.seed('U','unrelated'),step=(await f.active('C')).id;
  f.runner(['run','step','enter','--run',f.runId,'--step',step]);const before=(await f.service.snapshot(f.runId)).artifacts.length;
- const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/outside this Step/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
+ const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/PERMISSION_DENIED|INVALID_ARGUMENT/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
  await f.produce('C','valid',['--depends-on',`artifact:${r.artifactId}`]);const reader=await f.claim(step);reader.read('artifact',r.artifactId,'ancestor.txt');reader.read('artifact',u.artifactId,'unrelated.txt',false);
 });

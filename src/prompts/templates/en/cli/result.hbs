@@ -1,0 +1,30 @@
+{{command}}
+{{#each facts}}
+{{label}}: {{value}}
+{{/each}}
+{{#each items}}
+- {{this}}
+{{/each}}
+{{#unlessNil content}}
+
+Requested content
+{{content}}
+{{/unlessNil}}
+{{#if action}}
+
+{{#ifEq action.kind "wait"}}
+Wait for the current operation.
+{{/ifEq}}
+{{#ifEq action.kind "human_confirmation"}}
+Ask the Human for confirmation.
+{{/ifEq}}
+{{#ifEq action.kind "choose"}}
+Choose an available next action.
+{{/ifEq}}
+{{#ifEq action.kind "command"}}
+Next step
+{{/ifEq}}
+{{#each action.commands}}
+{{this}}
+{{/each}}
+{{/if}}

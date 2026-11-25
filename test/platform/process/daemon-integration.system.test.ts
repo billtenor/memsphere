@@ -25,28 +25,33 @@ const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行�
 test("daemon survives CLI exit, restores View intent, and isolates separate Homes", { timeout: 60000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), "mem-daemon-"));
   const homes = [join(directory, "deep-".repeat(16)), join(directory, "b")];
-  const call = (home: string, ...args: string[]) => exec(process.execPath, [cli, ...args], { env: { ...process.env, MEMSPHERE_HOME: home } });
+  const call = (home: string, ...args: string[]) => exec(process.execPath, [cli, ...args, "--output", "json"], { env: { ...process.env, MEMSPHERE_HOME: home } });
   t.after(async () => { for (const home of homes) await call(home, "daemon", "stop").catch(() => undefined); await rm(directory, { recursive: true, force: true }); });
   for (const home of homes) await mkdir(home);
   const results = await Promise.all(homes.map(home => call(home, "daemon", "start")));
   const first = JSON.parse(results[0].stdout), second = JSON.parse(results[1].stdout);
-  assert.notEqual(first.pid, second.pid);
+  assert.equal(first.running && second.running, true);
+  assert.equal(Object.hasOwn(first, "pid"), false);
   const firstState = JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8"));
+  const secondState = JSON.parse(await readFile(join(homes[1], ".runtime", "daemon.json"), "utf8"));
+  assert.notEqual(firstState.pid, secondState.pid);
   if (process.platform !== "win32") {
     assert.ok(Buffer.byteLength(firstState.endpoint) < 100);
     assert.equal((await stat(dirname(firstState.endpoint))).mode & 0o777, 0o700);
     assert.equal((await stat(firstState.endpoint)).mode & 0o777, 0o600);
   }
   const repeated = JSON.parse((await call(homes[0], "daemon", "start")).stdout);
-  assert.equal(repeated.instanceId, first.instanceId);
+  assert.equal(repeated.running, true);
+  assert.equal(JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8")).instanceId, firstState.instanceId);
   await writeFile(join(homes[0], ".runtime", "daemon-services.json"), JSON.stringify({ version: 1, view: { desiredState: "running", configPath: join(directory, "missing-config") } }));
   const restarted = JSON.parse((await call(homes[0], "daemon", "restart")).stdout);
-  assert.notEqual(restarted.instanceId, first.instanceId);
+  assert.notEqual(JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8")).instanceId, firstState.instanceId);
   if (process.platform !== "win32") await assert.rejects(stat(dirname(firstState.endpoint)), { code: "ENOENT" });
   assert.equal(restarted.view.desiredState, "running");
   assert.equal(restarted.view.running, false);
-  assert.ok(restarted.view.error);
-  assert.equal(JSON.parse((await call(homes[1], "daemon", "status")).stdout).instanceId, second.instanceId);
+  assert.equal(restarted.view.errorCode, "VIEW_UNAVAILABLE");
+  assert.equal(JSON.parse((await call(homes[1], "daemon", "status")).stdout).running, true);
+  assert.equal(JSON.parse(await readFile(join(homes[1], ".runtime", "daemon.json"), "utf8")).instanceId, secondState.instanceId);
 });
 
 async function writeTestCommand(command: string, source: string) {
@@ -223,7 +228,7 @@ test("asynchronous review wait notifies its original session without waiting for
   const { call, queue } = f;
   await f.startDaemon();
   const wait = await call("continue", "review", "wait");
-  assert.match(wait.stdout, /已登记异步等待/);
+  assert.match(wait.stdout, /taskId[:：]/);
   await f.completeAgent();
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
   await f.waitForTask("completed");
@@ -249,7 +254,7 @@ test("explicit retry delivers the same continuation to the original session", { 
   await updateTask(task, { status: "failed", error: { stage: "send", code: "fixture", message: "Explicit retry fixture" } }, f.home);
   await rm(queue);
   const retry = await call("run", "review", "wait", "retry", "--review", task.value.input.reviewId, "--round", task.value.input.roundId);
-  assert.match(retry.stdout, /registered for retry/);
+  assert.match(retry.stdout, /mayRepeatNotification[:：] ?true/);
   await f.waitForTask("completed");
   const retriedMessage = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(retriedMessage[2], "origin-session");
@@ -290,18 +295,18 @@ test("View desired running/stopped survives daemon restarts while View remains i
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "", TRAECLI_THREAD_ID: "" };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.cwd, env });
   f.beforeCleanup(async () => { await call("daemon", "stop"); });
-  const start = await call("view", "start");
-  const origin = /http:\/\/[^\s]+/.exec(start.stdout)![0];
+  const start = await call("view", "start", "--output", "json");
+  const { url: origin } = JSON.parse(start.stdout).view;
   assert.equal((await fetch(origin)).status, 200);
-  const first = JSON.parse((await call("daemon", "status")).stdout);
+  const first = JSON.parse((await call("daemon", "status", "--output", "json")).stdout);
   assert.equal(first.view.desiredState, "running"); assert.equal(first.view.running, true);
-  const restarted = JSON.parse((await call("daemon", "restart")).stdout);
+  const restarted = JSON.parse((await call("daemon", "restart", "--output", "json")).stdout);
   assert.equal(restarted.view.desiredState, "running"); assert.equal(restarted.view.running, true);
-  assert.notEqual(restarted.instanceId, first.instanceId);
+  assert.equal(Object.hasOwn(restarted, "instanceId"), false);
   await call("view", "stop");
-  const stopped = JSON.parse((await call("daemon", "status")).stdout);
+  const stopped = JSON.parse((await call("daemon", "status", "--output", "json")).stdout);
   assert.equal(stopped.running, true); assert.equal(stopped.view.running, false);
-  const again = JSON.parse((await call("daemon", "restart")).stdout);
+  const again = JSON.parse((await call("daemon", "restart", "--output", "json")).stdout);
   assert.equal(again.view.desiredState, "stopped"); assert.equal(again.view.running, false);
 });
 
@@ -335,7 +340,12 @@ test("a Runner without artifact.read cannot reach asynchronous review registrati
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [denied-test]\ndefines: [Read permission test]\nmode: graph\nactions:\n  - !action\n    id: work\n    description: Produce\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Candidate\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n      review: [approval]\n`);
   const bindings = join(f.directory, "bindings.json");
   await writeFile(bindings, JSON.stringify({ reviews: { "denied-test#actions[work]": { policy: "artifact_acceptance.unanimous" } }, slots: { "denied-test::approval": { actors: ["human"] } } }));
-  await assert.rejects(call("run", "start", "--file", procedure, "--name", "Denied", "--review-config", bindings, "--output", "json"), /artifact.read/);
+  await assert.rejects(call("run", "start", "--file", procedure, "--name", "Denied", "--review-config", bindings, "--output", "json"), (error: unknown) => {
+    const { stdout, stderr } = error as { stdout: string; stderr: string };
+    assert.equal(stdout, "");
+    assert.deepEqual(JSON.parse(stderr), { error: { code: "PERMISSION_DENIED" } });
+    return true;
+  });
   const { listTasks } = await import("../../../src/daemon/tasks.js");
   const { daemonStatus } = await import("../../../src/daemon/service.js");
   assert.deepEqual(await listTasks(f.home), []);
@@ -435,7 +445,7 @@ test("daemon control refuses unauthorized stop requests without changing its ins
   const { stopDaemon, daemonStatus } = await import("../../../src/daemon/service.js");
   f.beforeCleanup(async () => { await stopDaemon(f.home); });
   // Launch through the real entrypoint: ensureDaemon captures its caller's CLI.
-  const started = JSON.parse((await exec(process.execPath, [cli, "daemon", "start"],
+  const started = JSON.parse((await exec(process.execPath, [cli, "daemon", "start", "--output", "json"],
     { env: { ...process.env, MEMSPHERE_HOME: f.home } })).stdout);
   const state = JSON.parse(await readFile(join(f.home, ".runtime", "daemon.json"), "utf8"));
   const { createConnection } = await import("node:net");
@@ -456,7 +466,8 @@ test("daemon control refuses unauthorized stop requests without changing its ins
     });
     assert.match(response.error!, /protocol\/authentication mismatch/);
     const after = await daemonStatus(f.home);
-    assert.equal(after.running, true); assert.equal(after.instanceId, started.instanceId);
+    assert.equal(after.running, true); assert.equal(after.instanceId, state.instanceId);
+    assert.equal(Object.hasOwn(started, "instanceId"), false);
   }
 });
 
@@ -478,13 +489,13 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   await f.startDaemon();
   const first = await f.call("continue", "review", "wait");
   const repeated = await f.call("continue", "review", "wait");
-  assert.equal(/task-[a-f0-9-]+/.exec(first.stdout)![0], /task-[a-f0-9-]+/.exec(repeated.stdout)![0]);
+  assert.equal(/task-[a-zA-Z0-9-]+/.exec(first.stdout)![0], /task-[a-zA-Z0-9-]+/.exec(repeated.stdout)![0]);
   await f.stopDaemon();
   const previous = (await listTasks(f.home))[0];
   await updateTask(previous, { status: "completed", daemonInstanceId: undefined }, f.home);
   await f.startDaemon();
   const outputs = await Promise.all([f.call("continue", "review", "wait"), f.call("continue", "review", "wait")]);
-  const ids = outputs.map(r => /task-[a-f0-9-]+/.exec(r.stdout)![0]);
+  const ids = outputs.map(r => /task-[a-zA-Z0-9-]+/.exec(r.stdout)![0]);
   assert.equal(ids[0], ids[1]);
   assert.notEqual(ids[0], previous.id);
   const rows = await listTasks(f.home);
@@ -497,9 +508,10 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   assert.doesNotMatch(ready.stdout, /已登记/);
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.equal((await listTasks(f.home)).length, 2);
-  const status = JSON.parse((await f.call("run", "review", "wait", "status", "--review", f.reviewId)).stdout);
-  assert.equal(status.length, 2);
-  assert.ok(status.every((task: { status: string }) => task.status === "completed"));
+  const status = JSON.parse((await f.call("run", "review", "wait", "status", "--review", f.reviewId, "--output", "json")).stdout);
+  assert.equal(status.total, 2);
+  assert.equal(status.items.length, 2);
+  assert.ok(status.items.every((task: { status: string }) => task.status === "completed"));
 });
 
 

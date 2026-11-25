@@ -445,9 +445,11 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
     const verifyCheckpoint = async () => {
       const latest = await readChange(context.primary, input.changeId);
       if (!latest.checkpoint || latest.checkpoint.digest !== input.checkpointDigest) {
-        throw new Error(`ChangeSet checkpoint mismatch: ${latest.id}; validate again and update the review reference`);
+        throw Object.assign(new Error(`ChangeSet checkpoint mismatch: ${latest.id}; validate again and update the review reference`),
+          { code: "CHECKPOINT_CONFLICT", details: { changeId: latest.id } });
       }
-      return readCheckpointChange(context.primary, latest, true);
+      try { return await readCheckpointChange(context.primary, latest, true); }
+      catch (error) { throw new MemoryChangeIntegrityError(latest.id, error instanceof Error ? error.message : String(error)); }
     };
     const change = input.checkpointDigest === undefined ? current : await verifyCheckpoint();
     const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));

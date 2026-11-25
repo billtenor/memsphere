@@ -420,6 +420,10 @@ export class RunReviewConfigurationRequired extends Error {
   }
 }
 
+class RunReviewControlPlaneRequired extends Error {
+  readonly code = "CONTROL_PLANE_REQUIRED";
+}
+
 const artifactFormatSpecSchema = z.object({
   name: z.string().min(1),
   options: z.record(z.unknown())
@@ -3665,7 +3669,7 @@ export function validateRunReviewConfiguration(
   }
   if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
   if (!snapshot && actorBoundSlots.length) {
-    throw new Error(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
+    throw new RunReviewControlPlaneRequired(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
   }
   return structuredClone(configuration);
 }
@@ -3862,7 +3866,7 @@ function applyControlPlaneToSteps(
           return binding && "skip" in binding ? [] : [key];
         });
         if (actorBoundSlots.length) {
-          throw new Error(`control_plane config is required for Actor-bound Review Slots in ${artifactScope}:\n- ${actorBoundSlots.join("\n- ")}`);
+          throw new RunReviewControlPlaneRequired(`control_plane config is required for Actor-bound Review Slots in ${artifactScope}:\n- ${actorBoundSlots.join("\n- ")}`);
         }
       }
       if (snapshot && step.reviewSlots?.length) {

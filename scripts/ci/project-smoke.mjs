@@ -25,15 +25,15 @@ try {
     [cli, "project", "list", "--output", "json"],
     { cwd: workspace, env, encoding: "utf8" }
   ));
-  assert.deepEqual(projects.items.map((project) => ({ name: project.name, primary: project.primary })), [
-    { name: "smoke", primary: true }
+  assert.deepEqual(projects.items.map((project) => ({ name: project.name, relation: project.relation })), [
+    { name: "smoke", relation: "primary" }
   ]);
-  const validation = execFileSync(process.execPath, [cli, "validate"], {
+  const validation = JSON.parse(execFileSync(process.execPath, [cli, "validate", "--output", "json"], {
     cwd: workspace,
     env,
     encoding: "utf8"
-  });
-  assert.match(validation, /memsphere validation passed/);
+  }));
+  assert.equal(validation.valid, true);
   console.log(`Project smoke passed on ${process.platform}`);
 } finally {
   rmSync(root, { recursive: true, force: true });

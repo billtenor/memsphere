@@ -1,3 +1,4 @@
+import { cliHelpNote } from "../commands/output.js";
 import type { Command } from "commander";
 import { readConfig } from "../config.js";
 import { boundAgentReviewSession } from "./review-session.js";
@@ -19,7 +20,7 @@ export function installReviewerCommands(program: Command) {
   const helpCommands = process.env.MEMSPHERE_REVIEW_HANDLE
     ? reviewerCapabilities(isModelReviewHandle(process.env.MEMSPHERE_REVIEW_HANDLE) ? "graph" : "flow").commands
     : reviewerCommands;
-  if (!process.env.MEMSPHERE_REVIEW_HANDLE) program.addHelpText("afterAll", "\nSession protocol hint is unavailable. Help lists both protocols; use run review assignment show to inspect the bound protocol. Fixed Artifact/External/confirmation targets require graph; flow supports pinned assignment/step reads.\n");
+  if (!process.env.MEMSPHERE_REVIEW_HANDLE) program.addHelpText("afterAll", () => cliHelpNote("reviewer-protocol"));
   const visit = (command: Command) => {
     for (const option of command.options) {
       const key = option.attributeName();
@@ -44,7 +45,8 @@ export function installReviewerCommands(program: Command) {
     process.env.MEMSPHERE_PROJECT = expected.project;
     const binding = await boundAgentReviewSession();
     const capabilities = reviewerCapabilities(isModelReviewHandle(binding.reviewId) ? "graph" : "flow");
-    if (p !== "continue" && !capabilities.commands.includes(p as typeof reviewerCommands[number])) throw failure("INVALID_ARGUMENT", `Command is unsupported in this ${capabilities.protocol} Review protocol: ${p}. ${capabilities.targets}`);
+    if (p !== "continue" && !capabilities.commands.includes(p as typeof reviewerCommands[number])) throw Object.assign(failure("INVALID_ARGUMENT", `Command is unsupported in this ${capabilities.protocol} Review protocol: ${p}. ${capabilities.targets}`),
+      { details: { protocol: capabilities.protocol } });
     for (const [key, value] of Object.entries(reviewerCommandDefaults(p, action.opts(), expected)))
       action.setOptionValue(key, value);
   });

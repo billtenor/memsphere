@@ -22,7 +22,9 @@ export function reviewReady(context: ReviewContext) {
 }
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
 export function reviewResumeNotification(project: string, reviewId: string) {
-  return `请执行命令以继续：\nmemsphere --project ${quote(project)} run review wait --review ${quote(reviewId)}`;
+  return renderPrompt("cli.notification", "zh-CN", {
+    command: `memsphere --project ${quote(project)} run review wait --review ${quote(reviewId)}`
+  });
 }
 /** No enter, context writes, or graph advancement in the renderer. */
 export async function renderReviewResult(config: MemsphereConfig, context: ReviewContext): Promise<string> {

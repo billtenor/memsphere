@@ -8,16 +8,42 @@ import { readBundledSystemMemories, readReservedMemoryManifest, bundledReservedM
 import { assertSystemUpgradeWorkspace, createSystemUpgradeMemoryChange, validateSystemUpgradeRetry, publishSystemUpgradeMemoryChange, readMemoryChange, type SystemUpgradeMemoryTarget } from "../memory/changeset.js";
 import { upgradeProjectModelRegistrations, withModelRegistrationMaintenance } from "../project/model-registration.js";
 import { readSystemMemoryUpgradeTargets, prepareEmbeddedSystemMemoryRepair, applyEmbeddedSystemMemoryRepair } from "./project.js";
-import { emitCommandResult, errorCode } from "./cli-errors.js";
+import { errorCode } from "./cli-errors.js";
+import { z } from "zod";
+import { cliCommand, emitCliResult } from "./output.js";
+import { nextAction } from "../prompts/cli-output.js";
 
 const require = createRequire(import.meta.url);
 const version: string = (require("../../package.json") as { version: string }).version;
-type PhaseResult = { status: "upgraded" | "unchanged" | "failed" | "not_run"; [key: string]: unknown };
+const phase = z.enum(["upgraded", "unchanged", "failed", "not_run"]);
+const count = z.number().int().nonnegative();
+const upgradeResult = z.object({
+  project: z.string().optional(),
+  storeType: z.enum(["managed", "embedded"]).optional(),
+  cliVersion: z.string(),
+  overall: phase,
+  models: z.object({
+    status: phase, created: count.optional(), updated: count.optional(), retained: count.optional(),
+    system: z.object({ status: z.enum(["installed", "upgraded", "unchanged"]), created: count, updated: count, retained: count }).strict().optional()
+  }).strict(),
+  memory: z.object({
+    status: phase, created: count.optional(), updated: count.optional(), deleted: count.optional(),
+    changeSet: z.object({
+      id: z.string(), status: z.string(), intent: z.literal("system_upgrade"), view: z.string(),
+      validation: z.enum(["not_run", "passed"]), checkpointDigest: z.string().optional()
+    }).strict().optional(),
+    integrationStatus: z.literal("pending").optional(),
+    branch: z.string().optional(), worktree: z.string().optional(), revision: z.string().optional()
+  }).strict(),
+  validation: z.enum(["not_run", "passed", "failed"]),
+  failure: z.object({ stage: z.string(), code: z.string() }).strict().optional(),
+  nextAction
+}).strict();
 
 /** One selected Project, two separately recoverable resource upgrades. */
 export async function projectUpgradeCommand(name?: string, options: { output?: "text" | "json"; change?: string } = {}): Promise<void> {
   const previous = process.env.MEMSPHERE_PROJECT;
-  const result: { project?: string; storeType?: string; cliVersion: string; overall: string; models: PhaseResult; memory: PhaseResult; validation: string; [key: string]: unknown } = {
+  const result: z.input<typeof upgradeResult> = {
     cliVersion: version, overall: "failed", models: { status: "not_run" }, memory: { status: "not_run" }, validation: "not_run"
   };
   let stage = "target";
@@ -56,7 +82,8 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
       const config = projectConfigSchema.parse(JSON.parse(await readFile(context.primary.paths.configPath, "utf8")));
       return upgradeProjectModelRegistrations({}, { root: context.primary.paths.root, memoryRoot: context.primary.memoryRoot, modelsDirectory: config.modelsDirectory, modelRegistration: config.modelRegistration }, { config: { path: context.primary.paths.configPath, value: config } });
     });
-    result.models = { status: models.changed ? "upgraded" : "unchanged", ...models };
+    result.models = { status: models.changed ? "upgraded" : "unchanged",
+      created: models.created, updated: models.updated, retained: models.retained, system: models.system };
     // Settings writes invalidate the prior config; resolve again before publication.
     context = await resolveProjectContext({ project: context.primary.name });
     stage = "memory";
@@ -77,18 +104,21 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
         }
       }
       if (!changeId) throw new Error("System upgrade did not persist its dedicated ChangeSet");
-      result.memory.changeSet = { id: changeId, status: "active", intent: "system_upgrade", view: `/projects/${encodeURIComponent(context.primary.name)}/changes/${encodeURIComponent(changeId)}`, validation: "not_run", evidenceScope: "system_upgrade" };
+      result.memory.changeSet = { id: changeId, status: "active", intent: "system_upgrade", view: `/projects/${encodeURIComponent(context.primary.name)}/changes/${encodeURIComponent(changeId)}`, validation: "not_run" };
       let validated = await validateSystemUpgradeRetry({ context, changeId, targets: plan.targets, sourceDigest });
       if (!validated.checkpoint?.valid) throw new Error("System Memory upgrade validation failed");
       if (context.primary.config.store.type === "managed") validated = await publishSystemUpgradeMemoryChange(changeId, { context, message: "Upgrade Memsphere system Memory" });
-      result.memory.changeSet = { ...result.memory.changeSet as object, status: validated.status, validation: "passed", checkpointDigest: validated.checkpoint?.digest };
+      result.memory.changeSet = { ...result.memory.changeSet, status: validated.status, validation: "passed", checkpointDigest: validated.checkpoint?.digest };
       result.memory.status = "upgraded";
       if (context.primary.config.store.type === "embedded") {
         result.memory.integrationStatus = "pending";
         result.memory.branch = validated.system_upgrade?.branch;
         result.memory.worktree = context.workspace.path;
-        result.memory.next = "Review the dedicated ChangeSet, commit only its System Memory targets, then merge into master.";
-      } else result.memory.revision = validated.published_revision;
+        result.nextAction = { kind: "human_confirmation", resume: cliCommand([
+          "--project", context.primary.name, "memory", "change", "show", changeId,
+          "--checkpoint", validated.checkpoint!.digest
+        ]) };
+      } else result.memory.revision = validated.published_revision ?? undefined;
     } else result.memory.status = "unchanged";
     stage = "validation";
     context = await resolveProjectContext({ project: context.primary.name });
@@ -98,7 +128,10 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
     result.validation = "passed";
     result.overall = result.models.status === "upgraded" || result.memory.status === "upgraded" ? "upgraded" : "unchanged";
   } catch (error) {
-    result.failure = { stage, code: errorCode(error), message: error instanceof Error ? error.message : String(error) };
+    result.failure = { stage, code: errorCode(error) };
+    if (result.memory.changeSet && result.project) result.nextAction = cliCommand([
+      "--project", result.project, "project", "upgrade", result.project, "--change", result.memory.changeSet.id
+    ]);
     if (stage === "models") result.models.status = "failed";
     if (stage === "memory" || stage === "validation") result.memory.status = "failed";
     if (stage === "validation") result.validation = "failed";
@@ -107,5 +140,5 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
     if (previous === undefined) delete process.env.MEMSPHERE_PROJECT;
     else process.env.MEMSPHERE_PROJECT = previous;
   }
-  emitCommandResult(result, options.output ?? "text");
+  emitCliResult("project upgrade", upgradeResult, result, { format: options.output });
 }

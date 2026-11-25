@@ -1,4 +1,4 @@
-import { reviewerContinue, reviewNodeCommand, type ReviewNodeOptions } from "./review-nodes.js";
+import { createReviewerContinueRouter, reviewNodeCommand, type ReviewNodeOptions } from "./review-nodes.js";
 import { Command, Option } from "commander";
 import { currentCommandState } from "../home/command-state-store.js";
 import { readConfig } from "../config.js";
@@ -8,6 +8,9 @@ import { contextOnlyCommand, type Options } from "./context-control.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
 import { requireEffectiveStep } from "../context_control/graph-rewind.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
+import { parseCli, registerCliOutputRouter } from "./cli-errors.js";
+import { cliLocale } from "./output.js";
+import { renderPrompt } from "../prompts/renderer.js";
 
 const operations: Array<[string[], string, string[]]> = [
   [["enter-schema"], "schema-enter", ["output", "step", "name", "contentType", "revisedFrom"]],
@@ -18,8 +21,8 @@ const operations: Array<[string[], string, string[]]> = [
   [["skip"], "schema-skip", ["position", "output"]],
   [["repeat"], "schema-repeat", ["position", "output"]],
   [["artifact", "export"], "schema-export", ["file", "force", "output"]],
-  [["review", "wait"], "review-wait", []],
-  [["review", "vote"], "review-vote", ["vote", "comment", "commentFile"]],
+  [["review", "wait"], "review-wait", ["output"]],
+  [["review", "vote"], "review-vote", ["vote", "comment", "commentFile", "output"]],
   [["review", "resolve"], "review-resolve", ["comment", "disposition", "note", "noteFile", "validationSummary", "validationSummaryFile", "output"]],
   [["review", "submit-for-human"], "review-submit-for-human", ["assignment", "vote", "commentsFile", "summary", "summaryFile", "authorizationNote", "authorizationNoteFile", "output"]],
   [["review", "retry"], "review-retry", ["assignment", "output"]],
@@ -44,13 +47,26 @@ const operations: Array<[string[], string, string[]]> = [
 export function registerContinueCommand(program: Command, nativeRun: Command) {
   const continuation = program.command("continue [command...]").description("Continue production in an existing free exploration Run or graph Step; use native run commands to read it.").helpOption(false).allowUnknownOption();
   const router = new Command("continue").helpOption(false);
+  const reviewerRouter = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID ? createReviewerContinueRouter(nativeRun) : undefined;
+  registerCliOutputRouter(continuation, reviewerRouter ?? router);
   const help = async (target: Command) => {
     const context = await load();
-    console.log(`sessionId: ${context.sessionId}\ncommandGroup: ${context.commandGroup}\nproject: ${context.parameters.project}\nrun: ${context.groupId}`);
-    if (context.parameters.step) console.log(`step: ${context.parameters.step}`);
-    if (context.parameters.review) console.log(`review: ${context.parameters.review}`);
-    if (!context.available) { console.log(`No further transitions (${context.runStatus}). Use ordinary run status/show commands.`); return; }
-    console.log(target === router ? context.graph ? "Available: enter-schema, schema show, schema report, skip, repeat, artifact export, report, review wait, review vote, review retry, review resolve, review submit-for-human\nThis context remains bound to its Step through submission and review.\nUse: memsphere continue <command> --help" : context.parameters.review ? "Available: review show, review report, review update, review comment add/update/delete, review submit, review wait, review retry\nUse: memsphere continue <command> --help" : "Available: report, enter-schema, schema show, schema report, skip, repeat, artifact export, step show, step configure, review create/list/start, external add, artifact tag, outputs update, finish, abandon\nUse: memsphere continue <command> --help" : target.helpInformation());
+    const commands = operations.filter(([path, operation]) => {
+      if (context.graph) return /^(schema-|review-(wait|vote|retry|resolve|submit-for-human)$)/.test(operation) || path.join(" ") === "report";
+      return context.parameters.review
+        ? /^review-(show|report|update|comment-|submit|wait|retry)/.test(operation)
+        : !/^review-(wait|vote|resolve|submit|retry|show|report|update|comment)/.test(operation);
+    }).map(([path]) => path.join(" "));
+    process.stdout.write(renderPrompt("cli.continue", cliLocale(), {
+      project: context.parameters.project,
+      runId: context.groupId,
+      stepId: context.parameters.step,
+      reviewId: context.parameters.review,
+      status: context.runStatus ?? "unavailable",
+      available: context.available,
+      commands: target === router ? commands : [],
+      usage: target === router ? undefined : target.helpInformation().trimEnd()
+    }) + "\n");
   };
   const load = async () => {
     const row = (await currentCommandState(true))!;
@@ -73,7 +89,10 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
   };
   continuation.action(async () => {
     const tail = continuation.args;
-    if (process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID) { await reviewerContinue(nativeRun, tail); return; }
+    if (reviewerRouter) {
+      await parseCli(reviewerRouter, [process.execPath, "continue", ...(tail.length ? tail : ["--help"])], { rethrow: true });
+      return;
+    }
     await load();
     if (!tail.length || tail[0] === "--help" || tail[0] === "-h") { await help(router); return; }
     const configure = (command: Command) => { command.exitOverride(); command.configureOutput({ outputError() {} }); command.commands.forEach(configure); };

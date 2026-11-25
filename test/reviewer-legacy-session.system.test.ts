@@ -41,7 +41,7 @@ test('legacy fixed Step reads reject targets outside the pinned submission',asyn
 
 test('legacy sessions without a node tree reject the progressive node protocol',async t=>{
  const {state,env,cli,...f}=await legacyFixture(t);
- const node=cli(['continue','report','--artifact','{"applicable":true}','--output','json']);assert.equal(node.status,1);assert.equal(node.stdout,'');assert.match(node.stderr,/review_nodes_not_enabled/);
+ const node=cli(['continue','report','--artifact','{"applicable":true}','--output','json']);assert.equal(node.status,1);assert.equal(node.stdout,'');assert.match(node.stderr,/REVIEW_PROTOCOL_UNSUPPORTED/);
 
 });
 
@@ -110,5 +110,5 @@ for(const completed of [false,true])test(`legacy accepted contract remains pinne
 
 test('legacy context contract targets fail explicitly instead of reading the current Run contract',async t=>{
  const f=await legacyFixture(t,true),context=JSON.parse(f.cli(['run','artifact','show','--output','json']).stdout).contextArtifacts[0];
- const r=f.cli(['run','artifact','contract','show','--run',f.runId,'--step',context.stepId,'--output','json']);assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/INVALID_ARGUMENT/);assert.match(r.stderr,/pinned candidate contract only/);
+ const r=f.cli(['run','artifact','contract','show','--run',f.runId,'--step',context.stepId,'--output','json']);assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/INVALID_ARGUMENT/);assert.match(r.stderr,/"protocol":"flow"/);
 });

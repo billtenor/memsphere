@@ -15,7 +15,7 @@ import type {
   WhileNode
 } from "./ast.js";
 import type { MemoryKind } from "./kinds.js";
-import { paginateItems, type Page, type PaginationOptions } from "../pagination.js";
+import { paginateItems, type Page, type PaginationOptions, type PaginationBudget } from "../pagination.js";
 
 export const memoryNodeTypes = ["Statement", "String", "Schema", "Ref", "Action", "If", "While", "Call", "Dependency", "Artifact"] as const;
 export type MemoryNodeType = (typeof memoryNodeTypes)[number];
@@ -88,7 +88,7 @@ export class MemoryNavigation {
     this.#index = indexNodes(this.#nodes);
   }
 
-  listChildren(nodeRef?: string, options: PaginationOptions = {}, scope: unknown = this.#identity): MemoryNodeListPage {
+  listChildren(nodeRef?: string, options: PaginationOptions = {}, scope: unknown = this.#identity, budget?: PaginationBudget<MemoryNodeDescriptor>): MemoryNodeListPage {
     const nodes = nodeRef === undefined ? this.#nodes : this.#resolve(nodeRef).children;
     return {
       memory: cloneIdentity(this.#identity),
@@ -96,7 +96,7 @@ export class MemoryNavigation {
       ...paginateItems(nodes.map(toDescriptor), options, {
         command: "memory list",
         scope: { source: scope, memory: this.#identity.reference, parent: nodeRef ?? null, mode: "children" }
-      })
+      }, budget)
     };
   }
 

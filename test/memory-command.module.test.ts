@@ -51,11 +51,13 @@ function fixture() {
   return { catalog, dependencies, entity, page, stdout: () => stdout };
 }
 
-test("memory list defaults to YAML and forwards filters", async () => {
+test("memory list defaults to an Agent prompt and forwards filters", async () => {
   const state = fixture();
   await memoryListCommand(undefined, { kind: "concepts", query: "记忆" }, state.dependencies);
-  assert.deepEqual(parse(state.stdout()), state.page);
-  assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆", limit: 100, cursor: undefined }]);
+  assert.match(state.stdout(), /^memory list\n/);
+  assert.match(state.stdout(), /reference=concepts\/Memory/);
+  assert.match(state.stdout(), /summary="A memory\."/);
+  assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆", limit: undefined, cursor: undefined }]);
 });
 
 test("memory list and read select the frozen catalog for a Run", async () => {
@@ -72,14 +74,21 @@ test("memory list and read select the frozen catalog for a Run", async () => {
   assert.deepEqual(requestedRuns, ["run-frozen", "run-frozen"]);
 });
 
-test("memory list supports JSON and text", async () => {
+test("memory list exposes the same public summary in JSON, YAML and text", async () => {
+  const expected = {
+    items: [{ reference: "concepts/Memory", kind: "concepts", names: ["Memory", "记忆"], summary: "A memory." }]
+  };
   const json = fixture();
   await memoryListCommand(undefined, { output: "json" }, json.dependencies);
-  assert.deepEqual(JSON.parse(json.stdout()), json.page);
+  assert.deepEqual(JSON.parse(json.stdout()), expected);
+
+  const yaml = fixture();
+  await memoryListCommand(undefined, { output: "yaml" }, yaml.dependencies);
+  assert.deepEqual(parse(yaml.stdout()), expected);
 
   const text = fixture();
   await memoryListCommand(undefined, { output: "text" }, text.dependencies);
-  assert.equal(text.stdout(), "concepts/Memory (记忆)\n");
+  assert.match(text.stdout(), /names=\["Memory","记忆"\]/);
 });
 
 test("memory read defaults to tagged YAML and supports JSON", async () => {

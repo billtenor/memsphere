@@ -1,3 +1,6 @@
+import { graphArtifactCollection, graphBindingResult, graphContractDetail, graphRewindResult, graphStepDetail, publicBindings } from "./graph-output.js";
+import { emitSchemaExport, emitSchemaWriting } from "./schema-output.js";
+import { reviewReceipt } from "./review-output.js";
 import { exportArtifactBytes } from "./run.js";
 import { currentIdentity } from "../runner/identity.js";
 import { readFile } from "node:fs/promises";
@@ -13,12 +16,13 @@ import { isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.
 import { failure } from "../context_control/errors.js";
 import type { Run, Snapshot, Step } from "../context_control/types.js";
 import type { ControlPlaneConfig, RunReviewConfiguration } from "../control-plane/index.js";
-import { renderPrompt } from "../prompts/renderer.js";
-import { emitCommandResult } from "./cli-errors.js";
+import { CliOutputError, cliCommand, emitCliResult, paginateCliItems, previewText } from "./output.js";
+import { runEvidenceSchema, runOverviewSchema, runProgressSchema, type RunProgress } from "./run-result.js";
+import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
+import { z } from "zod";
 import { assertSessionTarget, currentCommandState, createCommandState, findCommandStates, updateCommandState } from "../home/command-state-store.js";
 import { assertReportExecutionCapability } from "../report-execution.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
-import { buildArtifactReviewSummaryPromptModel, buildArtifactReviewNextActionPromptModel, buildRunReviewVoteReceiptPromptModel } from "../prompts/index.js";
 import type { ArtifactReview, ArtifactReviewRound } from "../artifact-review.js";
 import type { Options } from "./context-control.js";
 import { appProcedureFileSource } from "../app/run.js";
@@ -27,7 +31,6 @@ import { readRun as readLegacyRun } from "../run/store.js";
 import { flattenEffectiveRules } from "../memory/rules.js";
 
 const needed = (v: string | undefined, key: string) => { if (!v?.trim()) throw failure("INVALID_ARGUMENT", `${key} is required`); return v; };
-const quote = (v: string) => "'" + v.replaceAll("'", "'\\''") + "'";
 export async function startGraphIfApplicable(input: { catalog: MemoryCatalog; projectCatalogs?: Record<string, MemoryCatalog>; memoryRoot: string; procedure?: string; file?: string; root: string; name: string; language: Run["language"]; controlPlane?: ControlPlaneConfig; reviewConfiguration?: RunReviewConfiguration; memorySource?: Run["memorySource"] }): Promise<Snapshot | undefined> {
   let p = input.file ? parseMemoryEntity("procedures", parseMemoryYaml(await readFile(input.file, "utf8"))) : await input.catalog.read(input.procedure!, { kind: "procedures" });
   if (p.tag !== "!procedure" || p.mode !== "graph") return undefined;
@@ -63,71 +66,129 @@ async function closeStep(project: string, run: string, step: string) {
       await updateCommandState(row, { ...row.value, status: "closed" });
   } catch { /* Auxiliary state cannot fail a completed Step. */ }
 }
-async function stepPrompt(g: GraphRuntime, snapshot: Snapshot, step: Step, project: string) {
-  const run = snapshot.run, a = g.action(run, step), c = await context(project, run.id, step.id);
+function progress(run: Run): RunProgress {
+  return { runId: run.id, name: previewText(run.name ?? run.id, 160).text, status: run.status };
+}
+
+function forRun(project: string, ...args: string[]) {
+  return cliCommand(["--project", project, "run", ...args]);
+}
+
+function printProgress(command: string, result: RunProgress, run: Run, format?: "text" | "json", savedId?: string, publicProject?: string) {
+  emitCliResult(command, runProgressSchema, result, {
+    format, locale: run.language, maximumBytes: 8192, itemsField: "materials",
+    ...(savedId && publicProject ? { saved: { id: savedId, inspect: forRun(publicProject, "show", "--run", run.id) } } : {})
+  });
+}
+
+async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, project: string): Promise<RunProgress> {
+  const run = snapshot.run;
+  const action = g.action(run, step);
+  const bound = await context(project, run.id, step.id);
+  const target = ["--run", run.id, "--step", step.id];
+  const base = { ...progress(run), stepId: step.id, stepStatus: step.status };
   if (step.status === "awaiting_review") {
     const round = step.reviewRounds!.at(-1)!;
-    return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.language === "en" ? `Step ${step.id} is awaiting review (${round.id}). Execute review wait and wait for the result; do not invent additional work while waiting.` : `Step ${step.id} 正在等待评审（${round.id}）。执行 review wait 并等待结果，不要在等待期间自行增加工作。`, command: c ? `memsphere continue review wait` : `memsphere --project ${quote(project)} run review wait --review ${graphReviewHandle(run.id, step.id)}` });
+    const reviewId = graphReviewHandle(run.id, step.id);
+    return { ...base, reviewId, roundId: round.id, nextAction: { kind: "wait", resume: bound
+      ? cliCommand(["continue", "review", "wait"])
+      : forRun(project, "review", "wait", "--review", reviewId) } };
   }
-  const rules = await g.rules(run, a);
-  const labels = run.language === "en" ? { procedure: "Procedure rules", asserts: "Step rules", suggests: "Step suggestions", artifactAsserts: "Artifact rules", artifactSuggests: "Artifact suggestions" } : { procedure: "流程规则", asserts: "Step 规则", suggests: "Step 建议", artifactAsserts: "产物规则", artifactSuggests: "产物建议" };
-  const ruleText = (Object.keys(rules) as Array<keyof typeof rules>).flatMap(key => {
-    const entries = flattenEffectiveRules(rules[key]);
-    return entries.length ? [`${labels[key]}：`, ...entries.map(entry => `- ${entry.text}`)] : [];
-  }).join("\n");
-  const materials = Object.entries(step.inputs ?? {}).map(([key, refs]) => refs.length
-    ? `${key}:\n${refs.map(r => `- ${r.kind}:${r.id}\n  memsphere --project ${quote(project)} run artifact show --run ${quote(run.id)} --artifact ${quote(r.id)}`).join("\n")}`
-    : `${key}: []`).join("\n");
-  const prompt = renderPrompt("run.graph-step", run.language, { runId: run.id, stepId: step.id, instruction: a.description, human: a.actor === "human", rules: ruleText || (run.language === "en" ? "None" : "无"), materials: materials || "[]", artifact: JSON.stringify({ name: a.artifact!.name, model: a.artifact!.model, payload: a.artifact!.payload, ...(a.artifact!.store ? { store: a.artifact!.store } : {}) }, null, 2), command: c ? `memsphere continue report --artifact-file <file>` : `memsphere --project ${quote(project)} run report --run ${run.id} --step ${step.id} --artifact-file <file>` });
-  if (a.artifact?.model.definedBy === "memsphere/schema.json" && step.status === "running") {
-    const state = await g.schemaShow(run.id, step.id);
-    const command = c ? `memsphere continue enter-schema` : `memsphere --project ${quote(project)} run enter-schema --run ${run.id} --step ${step.id}`;
-    return `${prompt}\n\nSchema requirements:\n${JSON.stringify(state.requirements, null, 2)}\n\nSchema writing: ${state.phase}\nNext: ${command}`;
+
+  const artifact = action.artifact;
+  if (!artifact) return base;
+  const details = forRun(project, "step", "show", ...target);
+  const rules = await g.rules(run, action);
+  const rulePreview = Object.entries(rules).flatMap(([scope, tree]) =>
+    flattenEffectiveRules(tree).map(entry => ({ scope, text: previewText(entry.text, 128).text }))).slice(0, 5);
+  const materials = Object.values(step.inputs ?? {}).flat().slice(0, 4).map(ref => ({
+    kind: ref.kind, id: ref.id, read: forRun(project, ref.kind, "show", "--run", run.id, "--" + ref.kind, ref.id)
+  }));
+  const instruction = previewText(action.description, 256).text;
+  const current = {
+    ...base, actor: action.actor ?? "agent" as const, instruction,
+    artifactName: previewText(artifact.name, 160).text, contentType: artifact.payload.contentType,
+    model: artifact.model.definedBy, details,
+    ...(rulePreview.length ? { rules: rulePreview } : {}),
+    ...(materials.length ? { materials } : {})
+  };
+
+  if (artifact.model.definedBy === "memsphere/schema.json" && step.status === "running") {
+    const writing = await g.schemaShow(run.id, step.id);
+    const cmd = writing.phase === "not_started" ? ["enter-schema"] : ["schema", "show"];
+    const resume = bound ? cliCommand(["continue", ...cmd]) : forRun(project, ...cmd, ...target);
+    return { ...current, schemaPhase: writing.phase, nextAction: action.actor === "human"
+      ? { kind: "human_confirmation", resume } : resume };
   }
-  return prompt;
+
+  const report = bound ? cliCommand(["continue", "report", "--artifact-file", "<file>"])
+    : forRun(project, "report", ...target, "--artifact-file", "<file>");
+  return { ...current, nextAction: action.actor === "human" ? { kind: "human_confirmation", resume: report } : report };
 }
-export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: string, enter = true): Promise<string> {
+
+export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: string, enter = true): Promise<RunProgress> {
   const run = snapshot.run;
-  if (run.status !== "running") return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: run.status, command: `memsphere run show --run ${run.id}` });
+  const base = progress(run);
+  if (run.status !== "running") return base;
   const ready = g.ready(snapshot);
   const explicitReplacement = ready.length === 1 && ready[0].status === "pending" &&
     run.frames?.[0].graphFrame.rewinds?.some(r => r.replacementStepId === ready[0].id);
+  const show = forRun(project, "show", "--run", run.id);
+  const status = forRun(project, "status", "--run", run.id);
+  const enterStep = (step: Step) => forRun(project, "step", "enter", "--run", run.id, "--step", step.id);
   if (ready.length === 1 && enter && !explicitReplacement) {
     let entered: Awaited<ReturnType<GraphRuntime["enter"]>>;
     try { entered = await g.enter(run.id, ready[0].id); }
     catch (error) {
       if ((error as { code?: string }).code !== "STEP_FINISHED") throw error;
-      // The report is already durable. Another process can finish this target
-      // after our snapshot; ask for fresh status instead of failing the report.
-      return renderPrompt("run.graph-waiting", run.language, { runId: run.id,
-        message: run.language === "en" ? "The next Step completed concurrently; read the current Run status." : "下一 Step 已由其他进程完成，请读取当前 Run 状态。",
-        command: `memsphere --project ${quote(project)} run status --run ${run.id}` });
+      return { ...base, reason: "step_completed_concurrently", nextAction: status };
     }
     await createCommandState(project, run.id, entered.step.id).catch(() => undefined);
-    return stepPrompt(g, entered.snapshot, entered.step, project);
+    return stepResult(g, entered.snapshot, entered.step, project);
   }
-  if (ready.length > 0) return renderPrompt("run.graph-selection", run.language, { runId: run.id, steps: ready.map(s => { const a = g.action(run, s); return { id: s.id, description: a.description, actor: a.actor ?? "agent", artifact: a.artifact!.name }; }), command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step ${ready.length === 1 ? ready[0].id : "<step-id>"}` });
+  if (ready.length === 1) return { ...base, eligibleSteps: 1, stepId: ready[0].id, stepStatus: ready[0].status, nextAction: enterStep(ready[0]) };
+  if (ready.length > 1) return { ...base, eligibleSteps: ready.length, nextAction: {
+    kind: "choose", choices: ready.slice(0, 10).map(enterStep), ...(ready.length > 10 ? { more: show } : {})
+  } };
   const reviewing = snapshot.steps.filter(s => effectiveStep(run, s.id) && s.status === "awaiting_review");
-  const partial = run.frames![0].graphFrame.joins.filter(j => Object.keys(j.arrivals).length);
+  if (reviewing.length === 1) return stepResult(g, snapshot, reviewing[0], project);
+  const joins = run.frames![0].graphFrame.joins.some(j => Object.keys(j.arrivals).length);
   const deferred = run.frames![0].graphFrame.deferredCollects?.length ?? 0;
-  const complete = !reviewing.length && !partial.length && !deferred;
-  return renderPrompt("run.graph-waiting", run.language, { runId: run.id, message: complete ? (run.language === "en" ? "All Steps completed; finish the Run." : "全部 Step 已完成，可以结束 Run。") : (run.language === "en" ? `${reviewing.length} Steps awaiting review; ${partial.length} incomplete joins; ${deferred} collect replays waiting for replacement producers.` : `${reviewing.length} 个 Step 等待评审；${partial.length} 个 Join 尚未凑齐；${deferred} 个聚合等待替代成员。`), command: complete ? `memsphere --project ${quote(project)} run finish --run ${run.id}` : `memsphere --project ${quote(project)} run status --run ${run.id}` });
+  if (reviewing.length || joins || deferred) return { ...base, waitingReviews: reviewing.length,
+    nextAction: { kind: "wait", resume: status } };
+  return { ...base, nextAction: forRun(project, "finish", "--run", run.id) };
 }
+
 export async function printGraphStart(snapshot: Snapshot, output?: "text" | "json") {
-  const config = await readConfig(); const service = (await openContextControl(config.scopeRoot))!;
-  const prompt = await service.withGraph(g => graphNext(g, snapshot, config.project!.name));
-  if (output === "json") emitCommandResult({ runId: snapshot.run.id, prompt }, "json"); else console.log(prompt);
+  const config = await readConfig();
+  const project = config.project!.name;
+  const service = (await openContextControl(config.scopeRoot))!;
+  const result = await service.withGraph(g => graphNext(g, snapshot, project));
+  printProgress("run start", result, snapshot.run, output, snapshot.run.id, project);
 }
-export async function printGraphReviewOutput(review: ArtifactReview<import("../run/store.js").RunEvent["artifact"]>, round: ArtifactReviewRound, runId: string, vote?: "approve" | "request_changes") {
+export async function printGraphReviewOutput(
+  command: string,
+  review: ArtifactReview<import("../run/store.js").RunEvent["artifact"]>,
+  round: ArtifactReviewRound,
+  runId: string,
+  options: { vote?: string; assignmentId?: string; output?: "text" | "json"; enter?: boolean } = {}
+) {
   if (!review.id.startsWith("graph-review-")) return false;
-  const config = await readConfig(); const service = (await openContextControl(config.scopeRoot))!;
+  const config = await readConfig();
+  const project = config.project!.name;
+  const service = (await openContextControl(config.scopeRoot))!;
   await service.withGraph(async g => {
     const snapshot = await g.advance(runId);
-    console.log(vote ? renderPrompt("run.review-vote-receipt", snapshot.run.language, buildRunReviewVoteReceiptPromptModel(vote, snapshot.run.language)) : renderPrompt("run.review-summary", snapshot.run.language, buildArtifactReviewSummaryPromptModel(review, round, snapshot.run.language)));
     const step = snapshot.steps.find(s => s.id === review.stepId)!;
-    if (step.status === "done") { await closeStep(config.project!.name, runId, step.id); console.log(await graphNext(g, snapshot, config.project!.name)); }
-    else if (step.status === "running") console.log(await stepPrompt(g, snapshot, step, config.project!.name));
-    else console.log(renderPrompt("run.review-next-action", snapshot.run.language, buildArtifactReviewNextActionPromptModel(review, round, runId)));
+    let progress: RunProgress | undefined;
+    if (step.status === "done") {
+      if (options.enter !== false) await closeStep(project, runId, step.id);
+      progress = await graphNext(g, snapshot, project, options.enter);
+    } else if (step.status === "running") {
+      progress = await stepResult(g, snapshot, step, project);
+    }
+    reviewReceipt(command, { project, run: snapshot.run, review, round, progress,
+      vote: options.vote, assignmentId: options.assignmentId, format: options.output });
   });
   return true;
 }
@@ -145,25 +206,75 @@ export async function graphCommand(operation: string, input: object): Promise<bo
   }
   const project = config.project!.name;
   return service!.withGraph(async g => {
+    const display = { format: options.output, locale: run.language };
     if (operation === "binding-show" || operation === "binding-update") {
       const actors = Array.isArray(options.actor) ? options.actor as string[] : options.actor ? [options.actor] : [];
       if (operation === "binding-update" && options.skip && actors.length) throw failure("INVALID_ARGUMENT", "Choose Actors or skip");
       const result = operation === "binding-show" ? await g.bindingSnapshot(run.id) : await g.updateBinding(run.id, needed(options.slot, "--slot"), options.skip ? { skip: true } : { actorIds: actors });
-      emitCommandResult(result, options.output ?? "text"); return true;
+      emitCliResult(operation.replace("binding-", "run binding "), graphBindingResult, {
+        runId: run.id, nextRound: publicBindings(result.bindings),
+        rounds: result.rounds.map(({ stepId, roundId, bindings }) => ({ stepId, roundId, bindings: publicBindings(bindings) }))
+      }, display);
+      return true;
     }
-    if (operation === "show" || operation === "step-show") {
+    if (operation === "show") {
+      const snapshot = await g.snapshot(run.id);
+      const page = paginateCliItems(snapshot.steps.map(step => ({
+        id: step.id, actionId: step.source?.actionId, status: step.status,
+        artifactId: step.artifact?.mode === "produce" ? step.artifact.id : undefined,
+        effective: effectiveStep(run, step.id)
+      })), { limit: options.limit, cursor: options.cursor }, { command: "run.show", scope: { project, runId: run.id } }, "summary");
+      emitCliResult("run show", runOverviewSchema, {
+        run: { id: run.id, name: previewText(run.name ?? run.id, 160).text, status: run.status },
+        steps: page.items, stepCount: snapshot.steps.length,
+        outputArtifactIds: snapshot.outputArtifactIds.slice(0, 20),
+        outputArtifactCount: snapshot.outputArtifactIds.length, nextCursor: page.nextCursor
+      }, { format: options.output, locale: run.language, itemsField: "steps", maximumBytes: options.limit === undefined ? 32768 : 131072 });
+      return true;
+    }
+    if (operation === "step-show") {
       const snapshot = await g.snapshot(run.id);
       const step = options.step && snapshot.steps.find(s => s.id === options.step);
       if (options.step && !step) throw failure("NOT_FOUND", `Step not found: ${options.step}`);
-      const projectStep = (s: Step) => ({ ...s, effective: effectiveStep(snapshot.run, s.id), ...(supersedingRewind(snapshot.run, s.id) ? { supersededBy: supersedingRewind(snapshot.run, s.id) } : {}) });
-      emitCommandResult(step ? { runId: run.id, step: projectStep(step), action: g.action(run, step) } : { ...snapshot, steps: snapshot.steps.map(projectStep) }, options.output ?? "text"); return true;
+      if (!step) throw failure("INVALID_ARGUMENT", "--step is required");
+      const action = g.action(run, step);
+      const rules = Object.entries(await g.rules(run, action)).flatMap(([scope, tree]) =>
+        flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
+      emitCliResult("run step show", graphStepDetail, {
+        runId: run.id, step: {
+          id: step.id, actionId: step.source?.actionId, status: step.status, effective: effectiveStep(snapshot.run, step.id),
+          supersedingRewindId: supersedingRewind(snapshot.run, step.id)?.id, inputGroups: step.inputs,
+          artifactId: step.artifact?.mode === "produce" ? step.artifact.id : undefined
+        },
+        instruction: action.description, actor: action.actor ?? "agent",
+        artifactName: action.artifact?.name, model: action.artifact?.model.definedBy,
+        contentType: action.artifact?.payload.contentType, rules
+      }, display);
+      return true;
     }
     if (operation === "contract-show" || operation === "artifact-show" && options.step) {
       const stepId = needed(options.step, "--step"), snapshot = await g.snapshot(run.id);
       const step = snapshot.steps.find(s => s.id === stepId);
       if (!step) throw failure("NOT_FOUND", "Step not found");
-      if (operation === "contract-show") emitCommandResult({ runId: run.id, stepId, action: g.action(run, step), schema: snapshot.run.schemaContracts?.[step.source!.actionId] }, options.output ?? "text");
-      else emitCommandResult({ runId: run.id, stepId, artifacts: snapshot.artifacts.filter(a => a.stepId === stepId), schemaWriting: await g.schemaShow(run.id, stepId) }, options.output ?? "text");
+      if (operation === "contract-show") {
+        const action = g.action(run, step);
+        const schema = snapshot.run.schemaContracts?.[step.source!.actionId];
+        const rules = Object.entries(await g.rules(run, action)).flatMap(([scope, tree]) =>
+          flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
+        emitCliResult("run artifact contract show", graphContractDetail, {
+          runId: run.id, stepId, name: action.artifact?.name, contentType: action.artifact?.payload.contentType,
+          model: action.artifact?.model.definedBy, definition: action.artifact?.model.definition,
+          memoryReference: action.artifact?.model.ref,
+          schema: schema && { definition: schema.definition, source: schema.sources.source }, rules
+        }, display);
+      } else {
+        emitCliResult("run artifact show", graphArtifactCollection, { runId: run.id, stepId,
+          items: snapshot.artifacts.filter(a => a.stepId === stepId).map(a => ({
+            artifactId: a.id, name: previewText(a.name, 160).text, status: a.status,
+            contentType: a.content?.payload.contentType, dependencies: a.dependencies
+          }))
+        }, display);
+      }
       return true;
     }
     if (operation === "store-retry") {
@@ -172,7 +283,13 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       await assertReportExecutionCapability();
       const snapshot = await g.retryBusinessStore(run.id, stepId);
       await closeStep(project, run.id, stepId);
-      emitCommandResult({ runId: run.id, stepId, step: snapshot.steps.find(step => step.id === stepId), prompt: await graphNext(g, snapshot, project) }, options.output ?? "text");
+      const progress = await graphNext(g, snapshot, project);
+      const target = snapshot.steps.find(step => step.id === stepId);
+      const submitted = target?.artifact?.mode === "produce" ? snapshot.artifacts.find(a => a.id === (target.artifact as { id: string }).id) : undefined;
+      emitCliResult("run step store retry", graphReceiptSchema, {
+        runId: run.id, stepId, status: target?.status ?? "done", artifactId: submitted?.id,
+        ...graphStoreReceipt(submitted), nextAction: progress.nextAction
+      }, { format: options.output, locale: run.language, saved: { id: stepId, inspect: forRun(project, "step", "show", "--run", run.id, "--step", stepId) } });
       return true;
     }
     if (operation === "rewind") {
@@ -181,15 +298,31 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const reason = options.reasonFile ? await readFile(options.reasonFile, "utf8") : options.reason;
       if (!options.dryRun && !reason?.trim()) throw failure("INVALID_ARGUMENT", "Rewind reason is required");
       const result = options.dryRun ? await g.rewindPreview(run.id, stepId) : await g.rewind(run.id, stepId, reason!);
-      const { snapshot: _snapshot, ...plan } = result as typeof result & { snapshot?: Snapshot };
-      const replacement = "replacementStepId" in plan ? String(plan.replacementStepId) : undefined;
-      emitCommandResult({ runId: run.id, dryRun: Boolean(options.dryRun), ...plan,
-        message: run.language === "en" ? "History is retained. Existing code, commits, PRs and external side effects require coordination; they are not rolled back." : "旧步骤、产物和依赖持续保留。已有代码、commit、PR 及外部副作用需自行协调，回溯不会自动撤销它们。",
-        ...(replacement ? { command: `memsphere --project ${quote(project)} run step enter --run ${run.id} --step ${replacement}` } : {}) }, options.output ?? "text");
+      const replacementStepId = "replacementStepId" in result ? String(result.replacementStepId) : undefined;
+      const rewindId = "rewindId" in result ? String(result.rewindId) : undefined;
+      const inspect = forRun(project, "status", "--run", run.id);
+      emitCliResult("run step rewind", graphRewindResult, {
+        runId: run.id, dryRun: Boolean(options.dryRun), targetStepId: result.targetStepId, actionId: result.actionId,
+        affectedStepIds: result.affectedStepIds, affectedArtifactIds: result.affectedArtifactIds, retainedStepIds: result.retainedStepIds,
+        rewindId, replacementStepId,
+        nextAction: replacementStepId ? forRun(project, "step", "enter", "--run", run.id, "--step", replacementStepId) : undefined
+      }, { ...display, saved: rewindId ? { id: rewindId, inspect } : undefined });
       return true;
     }
-    if (operation === "enter") { if (options.review) throw failure("INVALID_ARGUMENT", "--review requires a free exploration Run"); const entered = await g.enter(run.id, needed(options.step, "--step")); await createCommandState(project, run.id, entered.step.id); console.log(await stepPrompt(g, entered.snapshot, entered.step, project)); return true; }
-    if (operation === "status") { const snapshot = await g.advance(run.id); const prompt = await graphNext(g, snapshot, project, !await currentIdentity()); if (options.output === "json") emitCommandResult({ snapshot: await g.snapshot(run.id), prompt }, "json"); else console.log(prompt); return true; }
+    if (operation === "enter") {
+      if (options.review) throw failure("INVALID_ARGUMENT", "--review requires a free exploration Run");
+      const entered = await g.enter(run.id, needed(options.step, "--step"));
+      await createCommandState(project, run.id, entered.step.id);
+      printProgress("run step enter", await stepResult(g, entered.snapshot, entered.step, project), run,
+        options.output, entered.step.id, project);
+      return true;
+    }
+    if (operation === "status") {
+      const snapshot = await g.advance(run.id);
+      const result = await graphNext(g, snapshot, project, !await currentIdentity());
+      printProgress("run status", result, run, options.output);
+      return true;
+    }
     if (["schema-enter", "schema-show", "schema-report", "schema-skip", "schema-repeat", "schema-export"].includes(operation)) {
       const stepId = needed(options.step, "--step");
       if (operation !== "schema-show" && operation !== "schema-export") { await assertSessionTarget(project, run.id, stepId); await assertReportExecutionCapability(); }
@@ -202,7 +335,10 @@ export async function graphCommand(operation: string, input: object): Promise<bo
         if (!id) throw failure("NOT_FOUND", "No Artifact to export");
         const content = await g.readArtifact(run.id, id);
         await exportArtifactBytes(content.bytes, needed(options.file, "--file"), Boolean(options.force), [config.runsRoot, join(config.archiveRoot, "runs"), join(config.scopeRoot, "data", "context_control")]);
-        emitCommandResult({ runId: run.id, stepId, exported: options.file, artifactId: id }, options.output ?? "text"); return true;
+        emitSchemaExport({ runId: run.id, stepId, exported: options.file!, artifactId: id }, {
+          project, phase: state.phase, format: options.output, locale: run.language
+        });
+        return true;
       }
       let result;
       if (operation === "schema-enter") { result = await g.enterSchema(run.id, stepId); await createCommandState(project, run.id, stepId); }
@@ -218,9 +354,10 @@ export async function graphCommand(operation: string, input: object): Promise<bo
         }
         result = await g.schemaWrite(run.id, stepId, operation === "schema-report" ? "report" : operation === "schema-repeat" ? "repeat" : "skip", options.position, value);
       }
-      const prefix = `memsphere --project ${quote(project)} run`;
-      const nextCommand = result.phase === "awaiting_finalization" ? `${prefix} artifact export --run ${run.id} --step ${stepId} --file <local-copy>` : result.position ? `${prefix} ${result.current?.kind === "repeat" ? "repeat <count>" : "schema report"} --run ${run.id} --step ${stepId} --position ${result.position}${result.current?.kind === "repeat" ? "" : " --artifact-file <field-content>"}` : `${prefix} status --run ${run.id}`;
-      emitCommandResult({ ...result, nextCommand }, options.output ?? "text"); return true;
+      const command = operation.replace("schema-enter", "enter-schema").replace("schema-skip", "skip")
+        .replace("schema-repeat", "repeat").replace("schema-", "schema ");
+      emitSchemaWriting(`run ${command}`, result, { project, format: options.output, locale: run.language });
+      return true;
     }
     if (operation !== "report") return false;
     const stepId = needed(options.step, "--step");
@@ -243,10 +380,36 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       catch { throw failure("INVALID_ARGUMENT", "--write-options must be inline JSON"); }
     }
     const result = await g.report(run.id, stepId, { writeOptions, ...(value ?? { text: typeof options.artifact === "string" ? options.artifact : await readFile(options.artifactFile!, "utf8") }), ...(dependencies ? { dependencies } : {}), ...((options.revisionSummary !== undefined || options.revisionSummaryFile) ? { revisionSummary: options.revisionSummary ?? await readFile(options.revisionSummaryFile!, "utf8") } : {}) });
-    let prompt: string;
-    if (result.step.status === "done") { await closeStep(project, run.id, stepId); prompt = await graphNext(g, result.snapshot, project); }
-    else prompt = await stepPrompt(g, result.snapshot, result.step, project);
-    emitCommandResult({ runId: run.id, stepId, artifactId: result.artifact.id, dependencies: result.artifact.dependencies, mandatoryInputs: result.step.inputs, status: result.step.status, prompt }, options.output ?? "text");
+    if (result.step.status === "done") await closeStep(project, run.id, stepId);
+    const saved = { id: result.artifact.id, inspect: forRun(project, "artifact", "show", "--run", run.id, "--artifact", result.artifact.id) };
+    const next = await (result.step.status === "done" ? graphNext(g, result.snapshot, project)
+      : stepResult(g, result.snapshot, result.step, project)).catch(error => { throw new CliOutputError(saved, error); });
+    const reviewing = result.step.status === "awaiting_review";
+    emitCliResult("run report", graphReceiptSchema, {
+      runId: run.id, stepId, artifactId: result.artifact.id, status: result.step.status,
+      reviewId: reviewing ? next.reviewId : undefined, roundId: reviewing ? next.roundId : undefined,
+      ...graphStoreReceipt(result.artifact), nextAction: next.nextAction,
+      dependencies: result.artifact.dependencies.slice(0, 20), dependencyCount: result.artifact.dependencies.length,
+      nextStep: next.stepId, nextInstruction: next.instruction, nextActor: next.actor, nextDetails: next.details,
+      nextMaterials: next.materials, nextRules: next.rules
+    }, { format: options.output, locale: run.language, saved, maximumBytes: 8192, itemsField: "nextMaterials" });
     return true;
   });
+}
+
+const graphReceiptSchema = z.object({
+  runId: z.string(), stepId: z.string(), artifactId: z.string().optional(), status: z.string(),
+  reviewId: z.string().optional(), roundId: z.string().optional(),
+  storeId: z.string().optional(), modelRef: z.string().optional(), dataId: z.string().optional(),
+  dependencies: z.array(runEvidenceSchema.omit({ read: true })).max(20).optional(),
+  dependencyCount: z.number().int().nonnegative().optional(),
+  nextMaterials: z.array(runEvidenceSchema).max(4).optional(),
+  nextRules: z.array(z.object({ scope: z.string(), text: z.string() }).strict()).max(5).optional(),
+  nextStep: z.string().optional(), nextInstruction: z.string().optional(),
+  nextActor: z.enum(["agent", "human"]).optional(), nextDetails: cliCommandSchema.optional(), nextAction
+}).strict();
+
+function graphStoreReceipt(artifact?: Snapshot["artifacts"][number]) {
+  const address = artifact?.business?.destination;
+  return address ? { storeId: address.storeId, modelRef: address.modelRef, dataId: address.dataId } : {};
 }

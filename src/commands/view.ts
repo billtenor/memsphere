@@ -7,6 +7,8 @@ import { resolveProjectContext } from "../project/resolver.js";
 import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
 import { detectRunnerAgents } from "../runner/identity.js";
+import { emitCliResult } from "./output.js";
+import { daemonStatusSchema, publicDaemonStatus } from "../daemon/public-status.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
@@ -201,32 +203,24 @@ export async function viewStartCommand(): Promise<void> {
   await writeViewIntent("running", config.configPath);
   await ensureDaemon();
   const result = await daemonControl("view-start");
-  if (result.view.error) throw new Error(result.view.error);
-  printDaemonView(result);
+  if (result.view.error) throw Object.assign(new Error("View could not start."), { code: "VIEW_UNAVAILABLE" });
+  emitCliResult("view start", daemonStatusSchema, publicDaemonStatus(result));
 }
 export async function viewStopCommand(): Promise<void> {
   await writeViewIntent("stopped");
   await daemonControl("view-stop");
-  console.log("memsphere view stopped; daemon tasks continue");
+  emitCliResult("view stop", daemonStatusSchema, publicDaemonStatus(await daemonStatus()));
 }
 export async function viewRestartCommand(): Promise<void> {
   const config = await readViewStartupConfig();
   await writeViewIntent("running", config.configPath);
   await ensureDaemon();
   const result = await daemonControl("view-restart");
-  if (result.view.error) throw new Error(result.view.error);
-  printDaemonView(result);
+  if (result.view.error) throw Object.assign(new Error("View could not restart."), { code: "VIEW_UNAVAILABLE" });
+  emitCliResult("view restart", daemonStatusSchema, publicDaemonStatus(result));
 }
 export async function viewStatusCommand(): Promise<void> {
-  printDaemonView(await daemonStatus());
-}
-
-function printDaemonView(result: { running: boolean; pid?: number; view: { running?: boolean; desiredState: string; host?: string; port?: number; error?: string; settingsToken?: string } }) {
-  console.log(result.view.running ? `memsphere view running at http://${result.view.host}:${result.view.port}` : "memsphere view stopped");
-  console.log(`daemon: ${result.running ? "running" : "stopped"}; View desired: ${result.view.desiredState}`);
-  if (result.pid) console.log(`pid: ${result.pid}`);
-  if (result.view.settingsToken) console.log(`settings token: ${result.view.settingsToken}`);
-  if (result.view.error) console.log(`View error: ${result.view.error}`);
+  emitCliResult("view status", daemonStatusSchema, publicDaemonStatus(await daemonStatus()));
 }
 
 export async function viewServeCommand(options: ViewServeOptions): Promise<void> {

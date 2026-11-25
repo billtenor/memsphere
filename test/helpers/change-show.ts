@@ -18,7 +18,7 @@ export function assertChangeShowRejected(result: SpawnSyncReturns<string>, statu
   assert.equal(result.signal, null, "CLI rejection must not be a signal termination");
   assert.equal(result.status, status, result.stderr);
   assert.equal(result.stdout, "", "rejected reads must not emit material");
-  assert.match(result.stderr, /^error: /, "failure must be a handled CLI rejection");
+  assert.match(result.stderr, /^(Error|错误) [A-Z_]+/, "failure must be a handled CLI rejection");
   assert.match(result.stderr, diagnostic);
 }
 

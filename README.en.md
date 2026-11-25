@@ -416,7 +416,7 @@ memsphere data store list --kind value --limit 20 --output json
 memsphere memory list --kind procedures --limit 20 --output json
 ```
 
-New model/data commands, including data store, default to `--output text`: successful results use YAML keys, indentation and lists, preserving nested data and pagination cursors rather than rendering indented JSON. `--output json` emits exactly one JSON value on stdout for programs; all lists also support this JSON protocol. Failures leave stdout empty and exit with status 1. Text mode shows an error message on stderr; JSON mode emits only `{ "error": { "code": "...", "message": "...", "details": ... } }`, with optional details. Argument parsing failures follow the selected format. Raw export content, help and version retain their own output rules. See each command's `--help` for the full options.
+Ordinary commands display public facts and next actions as a text prompt by default. Use `--output json` to read the same facts and actions from stdout as one JSON value with jq or another program. Failures exit with a nonzero status and emit JSON errors to stderr, with a stable `error.code` and optional fields approved for that code. Raw exports, pinned materials, help, and version have their own output protocols. See the [CLI output contract and migration guide](docs/cli-output-contract.md).
 
 ## 7. Memsphere Is Still Evolving
 

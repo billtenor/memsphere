@@ -78,7 +78,15 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
         });
         syncBuiltinESMExports();
       }
-      t.mock.method(console, "log", (text: string) => { receipt = JSON.parse(text); });
+      const stdout = process.stdout.write.bind(process.stdout);
+      t.mock.method(process.stdout, "write", (text: string | Uint8Array, ...args: unknown[]) => {
+        const line = typeof text === "string" ? text : Buffer.from(text).toString("utf8");
+        if (line.startsWith('{"operation":')) {
+          receipt = JSON.parse(line);
+          return true;
+        }
+        return Reflect.apply(stdout, process.stdout, [text, ...args]);
+      });
       const body = scenario === "rule"
         ? { rulePath: node.asserts[0].rulePath, result: "undetermined", body: "Need evidence", severity: "risk" }
         : { body: "Outside role", severity: "suggestion" };

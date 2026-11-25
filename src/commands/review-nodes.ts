@@ -1,15 +1,17 @@
+import { artifactReviewRoundControlPlane } from "../artifact-review.js";
+import { reviewReceipt } from "./review-output.js";
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { Command, Option } from "commander";
 import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { boundReviewNodeContext, boundReviewNodeView, mutateBoundReviewNode, submitBoundReviewNodes } from "../acp/review-session.js";
 import { currentReviewNode, nodeCommentInputSchema, nodeCommentUpdateSchema, nodeReportSchema, nodeSubmitSchema, nodeUpdateSchema, type NodeMutation } from "../review-nodes.js";
-import { renderReviewNodeOutput } from "../prompts/review-nodes.js";
+import { emitReviewNodeResult } from "./review-node-output.js";
 import { contextOnlyCommand, type Options } from "./context-control.js";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { ExplorationReviews, explorationReviewIdentity, mutateModelReviewNode } from "../context_control/exploration-review.js";
-import { explorationReviewView } from "../context_control/review-repository.js";
+import { explorationReviewView, readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { failure } from "../context_control/errors.js";
 import { currentCommandState, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 
@@ -28,6 +30,8 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
   } else if ((options.artifact !== undefined) === (options.artifactFile !== undefined)) throw new Error("review_artifact_source_required_exclusive");
   const input = reading || operation === "comment-delete" ? undefined : JSON.parse(options.artifact ?? await readFile(options.artifactFile!, "utf8"));
   if (!binding) { await explorationReviewNodes(operation, options, input); return; }
+  const context = await boundReviewNodeContext();
+  if (!context.assignment.nodeTree) throw failure("REVIEW_PROTOCOL_UNSUPPORTED", "This Assignment uses the historical Review protocol");
   let result: unknown;
   if (reading) result = await boundReviewNodeView({ nodeId: options.node, all: options.all, list: operation === "list" });
   else if (operation === "submit") result = await submitBoundReviewNodes(input);
@@ -40,8 +44,7 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
     if (!options.comment) throw new Error("review_comment_required");
     result = operation === "comment-delete" ? await mutateBoundReviewNode({ operation, commentId: options.comment }) : await mutateBoundReviewNode({ operation, commentId: options.comment, artifact: nodeCommentUpdateSchema.parse(input) });
   } else throw new Error("review_operation_invalid");
-  if (options.output === "json") console.log(JSON.stringify(result));
-  else { const context = await boundReviewNodeContext(); console.log(renderReviewNodeOutput(operation, result, context.run.language ?? "zh-CN")); }
+  emitReviewNodeResult(operation, result, { format: options.output, locale: context.run.language, reviewer: true });
 }
 
 async function explorationReviewNodes(operation: string, options: ReviewNodeOptions, input: unknown) {
@@ -79,9 +82,8 @@ async function explorationReviewNodes(operation: string, options: ReviewNodeOpti
     catch { warning = `Review submitted. Return to the Run with memsphere run enter --run ${run.id}`; }
   }
   const current = (await repository.locate(run.id, row.value.id)).row.value;
-  const result = { ...await explorationReviewView(repository, run.id, current), ...(warning ? { warnings: [warning] } : {}) };
-  if (options.output === "json") console.log(JSON.stringify(result));
-  else console.log(renderReviewNodeOutput(operation, result, run.language));
+  const result = await explorationReviewView(repository, run.id, current);
+  emitReviewNodeResult(operation, result, { format: options.output, locale: run.language, project: config.project?.name });
 }
 // Commander can consume shared flags on a parent command. Prefer explicitly
 // supplied options over child defaults, so native and Continue agree.
@@ -120,12 +122,25 @@ export function registerReviewNodeCommands(run: Command) {
         if (await tryReviewerResource(`review-${op}`, o)) return;
         if (o.review || o.artifact) throw new Error("review_query_target_conflict");
         await reviewNodeCommand(op, o);
+      } else if (op === "show" && o.review && (!o.run || o.review.startsWith("graph-review-"))) {
+        const config = await readConfig();
+        const context = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId: o.review });
+        if (o.run && o.run !== context.run.id) throw failure("NOT_FOUND", "Review is outside the requested Run");
+        const round = o.round ? context.review.rounds.find(round => round.id === o.round) : context.round;
+        if (!round) throw failure("NOT_FOUND", "Review Round not found");
+        if (!artifactReviewRoundControlPlane(context.review, round).permissions.runner.effective.includes("artifact.read")) {
+          throw failure("PERMISSION_DENIED", "Runner requires artifact.read");
+        }
+        reviewReceipt("run review show", {
+          ...context, round, project: config.project?.name, format: o.output,
+          fullComments: Boolean(o.all), statusOnly: round.id !== context.review.currentRoundId
+        });
       } else await contextOnlyCommand(`review-${op}`, o as Options);
     });
   }
 }
 /** Continue reuses native option definitions and handlers, without Runner CommandState. */
-export async function reviewerContinue(nativeRun: Command, tail: string[]) {
+export function createReviewerContinueRouter(nativeRun: Command): Command {
   const review = nativeRun.commands.find(c => c.name() === "review")!, router = new Command("continue");
   for (const path of [["report"], ["update"], ["comment", "add"], ["comment", "update"], ["comment", "delete"], ["list"], ["show"], ["submit"]]) {
     let native = review, route = router;
@@ -135,5 +150,11 @@ export async function reviewerContinue(nativeRun: Command, tail: string[]) {
     }
     route.action(o => reviewNodeCommand(path.join("-"), o));
   }
-  await (await import("./cli-errors.js")).parseCli(router, [process.execPath, "continue", ...(tail.length ? tail : ["--help"])], { rethrow: true });
+  return router;
+}
+
+export async function reviewerContinue(nativeRun: Command, args: string[]): Promise<void> {
+  const { parseCli } = await import("./cli-errors.js");
+  await parseCli(createReviewerContinueRouter(nativeRun),
+    [process.execPath, "continue", ...(args.length ? args : ["--help"])], { rethrow: true });
 }

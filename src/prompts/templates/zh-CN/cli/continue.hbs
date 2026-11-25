@@ -1,0 +1,22 @@
+项目: {{project}}
+Run: {{runId}}
+{{#if stepId}}
+步骤: {{stepId}}
+{{/if}}
+{{#if reviewId}}
+评审: {{reviewId}}
+{{/if}}
+状态: {{status}}
+{{#if available}}
+{{#if usage}}
+{{usage}}
+{{else}}
+可用命令
+{{#each commands}}
+- {{this}}
+{{/each}}
+用 memsphere continue <command> --help 查询用法。
+{{/if}}
+{{else}}
+可用 run status 或 run show 查阅当前状态。
+{{/if}}

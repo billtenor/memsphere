@@ -34,11 +34,72 @@ import { isMemoryKind, memoryKinds, memoryKindTags, type MemoryKind } from "../m
 import { parseMemoryYaml } from "../memory/yaml.js";
 import { listMemoryFiles } from "../memory/store.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
-import { compareStrings, paginateItems, parseListLimit, type PaginationOptions } from "../pagination.js";
-import { emitCommandResult } from "./cli-errors.js";
+import { compareStrings, parseListLimit, type PaginationOptions } from "../pagination.js";
+import { z } from "zod";
+import { cliCommand, emitCliResult, paginateCliItems } from "./output.js";
+import { nextAction } from "../prompts/cli-output.js";
 
 type BindOption = { bind?: boolean };
 type OutputOption = { output?: "text" | "json" };
+
+const projectStoreType = z.enum(["managed", "embedded"]);
+const count = z.number().int().nonnegative();
+const projectReceipt = z.object({
+  project: z.string(),
+  root: z.string(),
+  storeType: projectStoreType,
+  bound: z.boolean(),
+  nextAction
+}).strict();
+
+const projectBindingReceipt = z.object({
+  project: z.string(),
+  relation: z.enum(["primary", "mounted", "unbound"]),
+  nextAction
+}).strict();
+
+const projectListResult = z.object({
+  items: z.array(z.object({
+    name: z.string(), root: z.string(), missing: z.boolean(),
+    relation: z.enum(["primary", "mounted", "unbound"])
+  }).strict()),
+  nextCursor: z.string().optional()
+}).strict();
+
+const projectHealthSchema = z.object({
+  status: z.enum(["ok", "unhealthy"]),
+  reason: z.enum(["memory_missing", "wrong_branch", "revision_mismatch", "dirty", "unavailable"]).optional()
+}).strict();
+
+const projectDetails = z.object({
+  name: z.string(),
+  root: z.string(),
+  storeType: projectStoreType,
+  canonicalMemoryRoot: z.string(),
+  effectiveMemoryRoot: z.string().optional(),
+  branch: z.string().optional(),
+  revision: z.string().optional(),
+  health: projectHealthSchema
+}).strict();
+
+const projectRepairResult = z.object({
+  project: z.string(), storeType: projectStoreType, created: count, updated: count, deleted: count,
+  revision: z.string().optional(), worktree: z.string().optional(), nextAction
+}).strict();
+
+const projectModelsResult = z.object({
+  project: z.string(), created: count, retained: count, diagnosticCount: count,
+  system: z.object({ status: z.enum(["installed", "unchanged"]), created: count, retained: count }).strict(),
+  contextControl: z.object({ changed: z.boolean(), records: count }).strict().optional()
+}).strict();
+
+function emitProjectReceipt(operation: "create" | "clone" | "register", project: string, root: string,
+  storeType: "managed" | "embedded", bound = false): void {
+  const inspect = cliCommand(["project", "show", project]);
+  emitCliResult(`project ${operation}`, projectReceipt, {
+    project, root, storeType, bound, nextAction: inspect
+  }, { saved: { id: project, inspect } });
+}
 
 export async function projectCreateCommand(
   nameInput: string,
@@ -60,8 +121,7 @@ export async function projectCreateCommand(
     else await bootstrapManagedSystemMemory(name);
     await registerCreatedProject(home, name, root, options.bind);
   });
-  console.log(`Created Project: ${name}`);
-  console.log(`Project Root: ${root}`);
+  emitProjectReceipt("create", name, root, options.embedded ? "embedded" : "managed", options.bind);
 }
 
 async function bootstrapManagedSystemMemory(projectName: string): Promise<void> {
@@ -268,9 +328,9 @@ async function buildSystemMemoryReconcilePlan(input: {
     const digest = systemMemoryRemovalDigest(await readFile(join(input.memoryRoot, current.id)));
     const match = tombstone.matches.find(item => item.reference === reference && (!item.sha256 || item.sha256 === digest));
     if (!match) {
-      throw new Error(
+      throw Object.assign(new Error(
         `System Memory removal identity or content conflict at ${tombstone.path}: found ${reference}`
-      );
+      ), { code: "MEMORY_REPAIR_CONFLICT" });
     }
     if (!installReferences.has(reference)) deletes.push({ ...current, approvedContentDigest: match.sha256 });
   }
@@ -349,7 +409,8 @@ async function prepareSelectedEmbeddedSystemMemoryRepair(
     }
     if (target.operation === "delete" && target.approvedContentDigest && snapshot.exists
       && systemMemoryRemovalDigest(snapshot.content) !== target.approvedContentDigest) {
-      throw new Error(`Embedded System Memory removal content conflict: ${target.reference}`);
+      throw Object.assign(new Error(`Embedded System Memory removal content conflict: ${target.reference}`),
+        { code: "MEMORY_REPAIR_CONFLICT" });
     }
     targets.push({ ...target, snapshot });
   }
@@ -502,14 +563,12 @@ export async function projectRepairCommand(nameInput?: string): Promise<void> {
       ? runManagedSystemMemoryRepair(context.primary.name, "Repair Memsphere system Memory")
       : runEmbeddedSystemMemoryRepair(context.primary.name);
   });
-  console.log(`Project: ${result.project}`);
-  console.log(`Store: ${result.storeType === "managed" ? "Managed" : "Embedded"}`);
-  console.log(`System Memory changes: ${result.created} create, ${result.updated} update, ${result.deleted} delete`);
-  if (result.revision) console.log(`Revision: ${result.revision}`);
-  if (result.worktree) {
-    console.log(`Worktree: ${result.worktree}`);
-    console.log("Validation: passed");
-  }
+  emitCliResult("project repair", projectRepairResult, {
+    project: result.project, storeType: result.storeType,
+    created: result.created, updated: result.updated, deleted: result.deleted,
+    revision: result.revision, worktree: result.worktree,
+    nextAction: result.worktree ? cliCommand(["--project", result.project, "memory", "change", "validate"]) : undefined
+  });
 }
 
 async function runManagedSystemMemoryRepair(
@@ -840,15 +899,14 @@ export async function projectCloneCommand(
     });
     await registerCreatedProject(home, name, root, options.bind);
   });
-  console.log(`Cloned Project: ${name}`);
-  console.log(`Project Root: ${root}`);
+  emitProjectReceipt("clone", name, root, "managed", options.bind);
 }
 
 export async function projectRegisterCommand(rootInput: string, options: BindOption = {}): Promise<void> {
   const root = await realpath(resolve(rootInput));
   const paths = projectPaths(root);
   const manifest = projectManifestSchema.parse(JSON.parse(await readFile(paths.manifestPath, "utf8")));
-  projectConfigSchema.parse(JSON.parse(await readFile(paths.configPath, "utf8")));
+  const config = projectConfigSchema.parse(JSON.parse(await readFile(paths.configPath, "utf8")));
   const home = resolveMemsphereHome();
   const workspace = options.bind ? await resolveWorkspaceIdentity() : undefined;
   await updateProjectRegistry(home, async registry => {
@@ -863,8 +921,7 @@ export async function projectRegisterCommand(rootInput: string, options: BindOpt
     registry.projects[manifest.name] = { root };
     if (workspace) registry.workspaces[workspace.key] = { primary: manifest.name, mounted: [] };
   });
-  console.log(`Registered Project: ${manifest.name}`);
-  console.log(`Project Root: ${root}`);
+  emitProjectReceipt("register", manifest.name, root, config.store.type, options.bind);
 }
 
 /** Repair and publication share admission for the actual worktree/Memory directory. */
@@ -879,26 +936,13 @@ export async function projectListCommand(options: OutputOption & PaginationOptio
   const projects = await listRegisteredProjects(home);
   const workspace = await resolveWorkspaceIdentity();
   const binding = registry.workspaces[workspace.key];
-  const result = paginateItems(projects.map((project) => ({
-    ...project,
-    primary: binding?.primary === project.name,
-    mounted: binding?.mounted.includes(project.name) ?? false
+  const result = paginateCliItems(projects.map(({ name, root, missing }) => ({
+    name, root, missing,
+    relation: binding?.primary === name ? "primary" as const : binding?.mounted.includes(name) ? "mounted" as const : "unbound" as const
   })).sort((a, b) => compareStrings(a.name, b.name)), options, {
     command: "project list", scope: { home: resolve(home), workspace: workspace.key }
-  });
-  if (options.output === "json") {
-    emitCommandResult(result, "json");
-    return;
-  }
-  if (result.items.length === 0) {
-    console.log("No registered Projects.");
-    return;
-  }
-  for (const item of result.items) {
-    const relation = item.primary ? "primary" : item.mounted ? "mounted" : "unbound";
-    console.log(`${item.name}\t${item.missing ? "missing" : "available"}\t${relation}\t${item.root}`);
-  }
-  if (result.nextCursor) console.log(`nextCursor: ${result.nextCursor}`);
+  }, "established");
+  emitCliResult("project list", projectListResult, result, { format: options.output });
 }
 
 export async function projectShowCommand(nameInput: string | undefined, options: OutputOption = {}): Promise<void> {
@@ -910,23 +954,13 @@ export async function projectShowCommand(nameInput: string | undefined, options:
   const project = await resolveRegisteredProject(name, registry.projects);
   const health = await projectHealth(project.memoryRoot, project.config);
   const effective = await resolveRegisteredProject(name, registry.projects, { workspace }).catch(() => undefined);
-  const result = {
-    name,
-    root: project.paths.root,
-    store: project.config.store,
-    canonical_memory_root: project.memoryRoot,
-    ...(effective ? { effective_memory_root: effective.memoryRoot } : {}),
-    health
-  };
-  if (options.output === "json") process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  else {
-    console.log(`Project: ${name}`);
-    console.log(`Root: ${project.paths.root}`);
-    console.log(`Store: ${project.config.store.type}`);
-    console.log(`Canonical Memory Root: ${project.memoryRoot}`);
-    if (effective) console.log(`Effective Memory Root: ${effective.memoryRoot}`);
-    console.log(`Health: ${health.status}${health.detail ? ` (${health.detail})` : ""}`);
-  }
+  const store = project.config.store;
+  emitCliResult("project show", projectDetails, {
+    name, root: project.paths.root, storeType: store.type,
+    canonicalMemoryRoot: project.memoryRoot, effectiveMemoryRoot: effective?.memoryRoot,
+    branch: store.type === "managed" ? store.branch : undefined,
+    revision: store.type === "managed" ? store.published_revision : undefined, health
+  }, { format: options.output });
 }
 
 export async function projectBindCommand(nameInput: string): Promise<void> {
@@ -944,17 +978,20 @@ export async function projectBindCommand(nameInput: string): Promise<void> {
     }
     registry.workspaces[workspace.key] = { primary: name, mounted: [] };
   });
-  console.log(`Bound Workspace to Primary Project: ${name}`);
+  emitCliResult("project bind", projectBindingReceipt, { project: name, relation: "primary" });
 }
 
 export async function projectUnbindCommand(): Promise<void> {
   const home = resolveMemsphereHome();
   const workspace = await resolveWorkspaceIdentity();
+  let project = "";
   await updateProjectRegistry(home, (registry) => {
-    if (!registry.workspaces[workspace.key]) throw new Error("current Workspace is not bound");
+    const binding = registry.workspaces[workspace.key];
+    if (!binding) throw new Error("current Workspace is not bound");
     delete registry.workspaces[workspace.key];
+    project = binding.primary;
   });
-  console.log("Unbound current Workspace.");
+  emitCliResult("project unbind", projectBindingReceipt, { project, relation: "unbound" });
 }
 
 export async function projectMountCommand(nameInput: string): Promise<void> {
@@ -970,7 +1007,7 @@ export async function projectMountCommand(nameInput: string): Promise<void> {
     if (binding.mounted.includes(name)) throw new Error(`Project "${name}" is already mounted`);
     binding.mounted.push(name);
   });
-  console.log(`Mounted read-only Project: ${name}`);
+  emitCliResult("project mount", projectBindingReceipt, { project: name, relation: "mounted" });
 }
 
 async function assertProjectWorkspaceCompatible(
@@ -997,7 +1034,7 @@ export async function projectUnmountCommand(nameInput: string): Promise<void> {
     if (index < 0) throw new Error(`Project "${name}" is not mounted`);
     binding.mounted.splice(index, 1);
   });
-  console.log(`Unmounted Project: ${name}`);
+  emitCliResult("project unmount", projectBindingReceipt, { project: name, relation: "unbound" });
 }
 
 export async function projectPruneCommand(): Promise<void> {
@@ -1013,7 +1050,7 @@ export async function projectPruneCommand(): Promise<void> {
       binding.mounted = binding.mounted.filter((name) => !missing.has(name));
     }
   });
-  console.log(`Pruned missing Projects: ${missing.size}`);
+  emitCliResult("project prune", z.object({ removedCount: count }).strict(), { removedCount: missing.size });
 }
 
 async function preflightNewProject(input: { home: string; name: string; root: string; bind?: boolean }): Promise<void> {
@@ -1093,20 +1130,22 @@ async function assertGitIdentity(): Promise<void> {
   }
 }
 
-async function projectHealth(memoryRoot: string, config: ProjectConfigFile): Promise<{ status: "ok" | "unhealthy"; detail?: string }> {
-  if (config.store.type === "embedded") return { status: await pathExists(memoryRoot) ? "ok" : "unhealthy", ...(!await pathExists(memoryRoot) ? { detail: "Memory path is missing" } : {}) };
+async function projectHealth(memoryRoot: string, config: ProjectConfigFile): Promise<z.infer<typeof projectHealthSchema>> {
+  if (config.store.type === "embedded") {
+    return await pathExists(memoryRoot) ? { status: "ok" } : { status: "unhealthy", reason: "memory_missing" };
+  }
   try {
     const [branch, revision, porcelain] = await Promise.all([
       gitOutput(["branch", "--show-current"], memoryRoot),
       gitOutput(["rev-parse", "HEAD"], memoryRoot),
       gitOutput(["status", "--porcelain"], memoryRoot)
     ]);
-    if (branch !== config.store.branch) return { status: "unhealthy", detail: `expected branch ${config.store.branch}; found ${branch}` };
-    if (revision !== config.store.published_revision) return { status: "unhealthy", detail: "HEAD differs from published revision" };
-    if (porcelain) return { status: "unhealthy", detail: "Memory working tree is dirty" };
+    if (branch !== config.store.branch) return { status: "unhealthy", reason: "wrong_branch" };
+    if (revision !== config.store.published_revision) return { status: "unhealthy", reason: "revision_mismatch" };
+    if (porcelain) return { status: "unhealthy", reason: "dirty" };
     return { status: "ok" };
-  } catch (error) {
-    return { status: "unhealthy", detail: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { status: "unhealthy", reason: "unavailable" };
   }
 }
 
@@ -1120,11 +1159,13 @@ export async function projectModelsInitializeCommand(nameInput?: string, options
       const initialized = await initializeProjectModelRegistrations({}, { root: context.primary.paths.root, modelsDirectory: current.modelsDirectory, modelRegistration: current.modelRegistration }, { config: { path: context.primary.paths.configPath, value: current } });
       const { upgradeContextControlOutputs } = await import("../project/context-control-upgrade.js");
       const contextControl = await upgradeContextControlOutputs(context.primary.paths.root);
-      return { ...initialized, ...(contextControl ? { contextControl } : {}) };
+      return {
+        project: context.primary.name, created: initialized.created, retained: initialized.retained,
+        diagnosticCount: initialized.diagnostics.length, system: initialized.system, contextControl
+      };
     });
   });
-  if (options.output === "json") console.log(JSON.stringify(result, null, 2));
-  else console.log(`Model registrations initialized: ${JSON.stringify(result)}`);
+  emitCliResult("project models initialize", projectModelsResult, result, { format: options.output });
 }
 
 /** Return only bundled System Memory differences, without writing a candidate. */

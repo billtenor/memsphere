@@ -15,6 +15,7 @@ CLI 需要 Node.js 22+；原生 Windows 还需 Git for Windows，支持 PowerShe
 
 - 列表查询：结果有 `nextCursor` 时，沿同一筛选条件继续翻页；需要完整列表时，直到没有下一页才结束，不能把第一页当作全部。
 - 文件输入：只有参数明确支持时，`-` 才表示从 stdin 读取，不能把这一约定套用到所有文件参数。
+- 普通命令的默认文本与 `--output json` 提供同一组业务事实和当前动作。需要脚本取值时使用 JSON，按实际返回的 `nextAction`、状态、业务标识和游标继续；保留有用的详情入口。完整 Memory、固定 ChangeSet 材料及原始导出按命令声明读取。细则见 `memsphere-cli-output-rules`。
 
 ## 进入项目
 

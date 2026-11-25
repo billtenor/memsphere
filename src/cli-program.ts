@@ -7,8 +7,10 @@ import { registerExplorationCommands } from "./commands/context-control.js";
 import { projectUpgradeCommand } from "./commands/project-upgrade.js";
 import { createRequire } from "node:module";
 import { Command, Option } from "commander";
+import { z } from "zod";
 import { registerAppCommands } from "./commands/app.js";
 import { parseCli } from "./commands/cli-errors.js";
+import { addCliOutput, cliHelpNote, emitCliResult } from "./commands/output.js";
 import { registerModelCommands } from "./commands/model.js";
 import { registerDataCommands } from "./commands/data.js";
 import { memoryChangeShowCommand } from "./commands/memory-change-show.js";
@@ -100,6 +102,10 @@ export async function runCli(argv = process.argv): Promise<void> {
 }
 
 async function executeCli(argv: string[]): Promise<void> {
+  await parseCli(createCliProgram(), argv);
+}
+
+export function createCliProgram(): Command {
 const program = new Command();
 
 program
@@ -117,17 +123,12 @@ registerDaemonCommands(program);
 registerModelCommands(program);
 registerDataCommands(program);
 
-program
-  .command("debug-thread-id")
-  .description("Print the Codex thread ID inherited from the calling environment.")
+addCliOutput(program.command("debug-thread-id"))
+  .description("Check whether this process was started in a Codex session.")
   .action(() => {
-    const threadId = process.env.CODEX_THREAD_ID?.trim();
-    if (!threadId) {
-      console.error("CODEX_THREAD_ID is not set; no Codex thread is associated with this process.");
-      process.exitCode = 1;
-      return;
-    }
-    console.log(threadId);
+    const identified = Boolean(process.env.CODEX_THREAD_ID?.trim());
+    emitCliResult("debug-thread-id", z.object({ identified: z.boolean() }).strict(), { identified });
+    if (!identified) process.exitCode = 1;
   });
 
 const project = program
@@ -142,23 +143,23 @@ project.command("models").description("Manage model registrations.")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectModelsInitializeCommand);
 
-project.command("create")
+addCliOutput(project.command("create")
   .argument("<name>", "globally unique Project name")
   .option("--embedded <memory-path>", "use Memory inside the current Git repository")
-  .option("--bind", "bind the current Workspace after creation")
+  .option("--bind", "bind the current Workspace after creation"))
   .action(projectCreateCommand);
 
-project.command("clone")
+addCliOutput(project.command("clone")
   .argument("<repository>", "Git URL or local repository")
   .requiredOption("--name <name>", "globally unique Project name")
   .option("--branch <branch>", "controlled local branch")
   .option("--upstream <remote-branch>", "organization upstream, for example origin/master")
-  .option("--bind", "bind the current Workspace after cloning")
+  .option("--bind", "bind the current Workspace after cloning"))
   .action(projectCloneCommand);
 
-project.command("register")
+addCliOutput(project.command("register")
   .argument("<project-root>", "existing complete Project Root")
-  .option("--bind", "bind the current Workspace after registration")
+  .option("--bind", "bind the current Workspace after registration"))
   .action(projectRegisterCommand);
 
 project.command("list")
@@ -179,47 +180,28 @@ project.command("upgrade")
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(projectUpgradeCommand);
 
-project.command("repair")
+addCliOutput(project.command("repair")
   .description("Restore or update bundled System Memory in a Managed or Embedded Project.")
   .argument("[name]", "Project name; defaults to --project or the current Primary")
-  .addHelpText("after", `
-Safety and behavior:
-  Repairs only bundled System Memory in the selected Project; user Memory is not
-  modified, and Mounted Projects remain read-only catalog sources.
-  Deprecated bundled entries are deleted only when a manifest tombstone matches
-  their historical path, canonical identity, and (for v5) issued content digest.
-  Managed repair validates and publishes through a controlled ChangeSet. Embedded
-  repair validates the complete candidate, then writes only the System Memory diff
-  to the current Git worktree without committing or pushing it. Dirty repair targets
-  are never overwritten. If there are no differences, nothing is written.
-
-Project selection:
-  Explicit [name], then global --project, then the current Primary Project.
-`)
+  .addHelpText("after", () => cliHelpNote("project-repair")))
   .action(projectRepairCommand);
 
-project.command("bind")
-  .argument("<name>", "Project name")
+addCliOutput(project.command("bind")
+  .argument("<name>", "Project name"))
   .action(projectBindCommand);
 
-project.command("unbind").action(projectUnbindCommand);
-project.command("mount").argument("<name>", "read-only Project name").action(projectMountCommand);
-project.command("unmount").argument("<name>", "mounted Project name").action(projectUnmountCommand);
-project.command("prune").description("Remove missing registrations and their bindings.").action(projectPruneCommand);
+addCliOutput(project.command("unbind")).action(projectUnbindCommand);
+addCliOutput(project.command("mount").argument("<name>", "read-only Project name")).action(projectMountCommand);
+addCliOutput(project.command("unmount").argument("<name>", "mounted Project name")).action(projectUnmountCommand);
+addCliOutput(project.command("prune").description("Remove missing registrations and their bindings.")).action(projectPruneCommand);
 
 program
   .command("validate")
   .description("Validate the current Project Store or one stateless Memory root.")
   .option("--memory-root <path>", "validate one Memory root without Home, Registry or Binding")
   .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
-  .addHelpText("after", `
-This command validates Store/config health and Memory entities. It never creates
-or updates a ChangeSet. To capture and validate unpublished Memory changes in a
-bound Project, run:
-  memsphere memory change validate [--change <id>]
-
-The stateless --memory-root mode has no Project or ChangeSet context.
-`)
+  .addHelpText("after", () => cliHelpNote("validate"))
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]))
   .action(validateCommand);
 
 const memory = program
@@ -236,7 +218,7 @@ memory
   .option("--run <run-id>", "read from a Run's frozen Memory snapshot")
   .option("--limit <n>", "maximum entries per page (1–1000; default 100)")
   .option("--cursor <token>", "continue with the previous page's nextCursor")
-  .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("yaml"))
+  .addOption(new Option("--output <format>", "output format").choices(["yaml", "json", "text"]).default("text"))
   .action((reference, options) => memoryListCommand(reference, options));
 
 memory
@@ -250,41 +232,41 @@ memory
   .addOption(new Option("--output <format>", "output format").choices(["yaml", "json"]).default("yaml"))
   .action((reference, options) => memoryReadCommand(reference, options));
 
-memory.command("edit")
+addCliOutput(memory.command("edit")
   .description("Create or edit Memory in the current Embedded worktree or a Managed ChangeSet.")
   .argument("<references...>", "existing selectors, or new canonical <kind>/<name> references to create Memory")
-  .option("--change <id>", "append targets to an existing ChangeSet")
+  .option("--change <id>", "append targets to an existing ChangeSet"))
   .action(memoryEditCommand);
 
-memory.command("delete")
+addCliOutput(memory.command("delete")
   .description("Delete existing Memory through a Managed ChangeSet.")
   .argument("<references...>", "existing Memory references")
-  .option("--change <id>", "append targets to an existing ChangeSet")
+  .option("--change <id>", "append targets to an existing ChangeSet"))
   .action(memoryDeleteCommand);
 
-memory.command("rename")
+addCliOutput(memory.command("rename")
   .description("Rename a Memory canonical name through a Managed ChangeSet; retain its file path.")
   .argument("<reference>", "existing Memory reference")
   .argument("<new-name>", "new lowercase ASCII kebab-case canonical name")
-  .option("--change <id>", "append target to an existing ChangeSet")
+  .option("--change <id>", "append target to an existing ChangeSet"))
   .action(memoryRenameCommand);
 
-memory.command("publish")
+addCliOutput(memory.command("publish")
   .requiredOption("--change <id>", "ChangeSet id")
-  .option("--message <text>", "Git commit message")
+  .option("--message <text>", "Git commit message"))
   .action(memoryPublishCommand);
 
-memory.command("recover")
+addCliOutput(memory.command("recover")
   .argument("<reference>", "frozen Memory reference")
   .option("--restore", "discard the external modification")
-  .option("--create-change", "save the external modification as a ChangeSet candidate, then restore")
+  .option("--create-change", "save the external modification as a ChangeSet candidate, then restore"))
   .action(memoryRecoverCommand);
 
-memory.command("push").description("Push the controlled Managed Memory branch without force.").action(memoryPushCommand);
-const memorySync = memory.command("sync").description("Merge the configured organization upstream.").action(memorySyncCommand);
-memorySync.command("publish")
+addCliOutput(memory.command("push").description("Push the controlled Managed Memory branch without force.")).action(memoryPushCommand);
+const memorySync = addCliOutput(memory.command("sync").description("Merge the configured organization upstream.")).action(memorySyncCommand);
+addCliOutput(memorySync.command("publish")
   .requiredOption("--change <id>", "Sync ChangeSet id")
-  .option("--message <text>", "merge commit message")
+  .option("--message <text>", "merge commit message"))
   .action(memorySyncPublishCommand);
 
 const memoryChange = memory.command("change").description("Manage Memory ChangeSet candidates.");
@@ -297,57 +279,53 @@ memoryChange.command("show")
   .addOption(new Option("--side <side>", "Memory version to read").choices(["before", "after"]).default("after"))
   .action(memoryChangeShowCommand);
 
-memoryChange.command("resume")
-  .argument("<change-id>", "ChangeSet id")
+addCliOutput(memoryChange.command("resume")
+  .argument("<change-id>", "ChangeSet id"))
   .action(memoryChangeResumeCommand);
 
-memoryChange.command("claim")
+addCliOutput(memoryChange.command("claim")
   .description("Claim a ChangeSet for processing in the current Workspace.")
   .argument("<change-id>", "ChangeSet id")
-  .option("--force", "replace another Workspace claim")
+  .option("--force", "replace another Workspace claim"))
   .action(memoryChangeClaimCommand);
 
-memoryChange.command("finish")
+addCliOutput(memoryChange.command("finish")
   .description("Complete every processing Comment in one batch and release the current claim.")
   .argument("<change-id>", "ChangeSet id")
   .option("--comment <ids...>", "all processing Comment ids; partial completion is rejected")
-  .addOption(new Option("--reason <reason>", "one completion reason for this entire batch").choices(["fixed", "rejected"]))
+  .addOption(new Option("--reason <reason>", "one completion reason for this entire batch").choices(["fixed", "rejected"])))
   .action(memoryChangeFinishCommand);
 
-memoryChange.command("complete")
+addCliOutput(memoryChange.command("complete")
   .description("Complete an active ChangeSet that has no actual Memory differences or unfinished Comments.")
-  .argument("<change-id>", "ChangeSet id")
+  .argument("<change-id>", "ChangeSet id"))
   .action(memoryChangeCompleteCommand);
 
 memoryChange.command("validate")
   .description("Capture and validate the current Managed or Embedded Working Change.")
   .allowExcessArguments(false)
-  .showHelpAfterError("Use 'memsphere memory change validate --help' for --change <id>.")
   .option("--change <id>", "ChangeSet id; inferred when the current Working Change is unambiguous")
   .addOption(new Option("--format <format>", "diagnostic output format").choices(["text", "json"]).default("text"))
+  .addOption(new Option("--output <format>", "output format").choices(["text", "json"]))
   .action(options => memoryChangeValidateCommand(options.change, options));
 
 const view = program
   .command("view")
   .description("Manage the local memory browser and review UI.");
 
-view
-  .command("start")
+addCliOutput(view.command("start"))
   .description("Start the View service in the background.")
   .action(viewStartCommand);
 
-view
-  .command("stop")
+addCliOutput(view.command("stop"))
   .description("Stop the managed View service.")
   .action(viewStopCommand);
 
-view
-  .command("restart")
+addCliOutput(view.command("restart"))
   .description("Restart the managed View service.")
   .action(viewRestartCommand);
 
-view
-  .command("status")
+addCliOutput(view.command("status"))
   .description("Show the managed View service status.")
   .action(viewStatusCommand);
 
@@ -362,18 +340,18 @@ const skill = program
   .command("skill")
   .description("Manage memsphere Agent skills.");
 
-skill
+addCliOutput(skill
   .command("init")
   .description("Install memsphere Agent skills.")
   .option("--global", "install into ~/.agents/skills")
   .option("--directory <path>", "skills directory")
-  .option("--force", "overwrite the existing skill")
+  .option("--force", "overwrite the existing skill"))
   .action(skillInitCommand);
 
-skill.command("upgrade")
+addCliOutput(skill.command("upgrade")
   .description("Update the selected memsphere Skill installation (equivalent to init --force).")
   .option("--global", "install into ~/.agents/skills")
-  .option("--directory <path>", "skills directory")
+  .option("--directory <path>", "skills directory"))
   .action(skillUpgradeCommand);
 
 const run = program
@@ -439,20 +417,20 @@ runBinding
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text"))
   .action(runBindingUpdateCommand);
 
-run
+addCliOutput(run
   .command("try-run")
   .description("Generate Agent Review launch and Prompt evidence without starting ACP Agents.")
-  .requiredOption("--run <id>", "run id")
+  .requiredOption("--run <id>", "run id"))
   .action(runTryRunCommand);
 
 const runStep = run
   .command("step")
   .description("Inspect one Run step.");
 
-runStep.command("enter")
+addCliOutput(runStep.command("enter")
   .description("Enter a graph Step instance and return its execution prompt.")
   .requiredOption("--run <id>", "run id")
-  .requiredOption("--step <id>", "Step instance id")
+  .requiredOption("--step <id>", "Step instance id"))
   .action(async options => { const { graphCommand } = await import("./commands/procedure-graph.js"); if (!await graphCommand("enter", options)) throw new Error("enter requires a graph Run"); });
 
 runStep.command("store")
@@ -545,21 +523,21 @@ const runReview = run
   .command("review")
   .description("Manage Procedure Review, progressive exploration Review, or light feedback.");
 
-const reviewWait = runReview
+const reviewWait = addCliOutput(runReview
   .command("wait")
   .description("Wait until assigned reviews are submitted or the current round is decided.")
-  .option("--review <id>", "artifact review id")
+  .option("--review <id>", "artifact review id"))
   .action(runReviewWaitCommand);
 registerWaitTaskCommands(reviewWait);
 
-runReview
+addCliOutput(runReview
   .command("vote")
   .description("Cast the Runner decision vote for the current Artifact Review round.")
   .requiredOption("--review <id>", "artifact review id")
   .requiredOption("--round <id>", "artifact review round id")
   .addOption(new Option("--vote <vote>", "Runner vote").choices(["approve", "request_changes"]).makeOptionMandatory())
   .option("--comment <text>", "Runner decision comment")
-  .option("--comment-file <path>", "read the Runner decision comment from a file")
+  .option("--comment-file <path>", "read the Runner decision comment from a file"))
   .action(runReviewVoteCommand);
 
 runReview
@@ -700,26 +678,26 @@ const migrate = program
   .command("migrate")
   .description("Migrate persisted memsphere data between contract versions.");
 
-migrate
+addCliOutput(migrate
   .command("syntax")
   .description("Migrate Memory YAML to a registered syntax version.")
   .option("--check", "scan and print a read-only migration manifest")
   .option("--write", "stage, validate, back up, and apply the migration")
-  .option("--to <syntax>", "target syntax; defaults to the current stable syntax")
+  .option("--to <syntax>", "target syntax; defaults to the current stable syntax"))
   .action(migrateMemorySyntaxCommand);
 
-migrate
+addCliOutput(migrate
   .command("artifact-contract-v2")
   .description("Migrate Memory Artifact contracts to type, format, and schema v2.")
   .option("--check", "scan and print a read-only migration manifest")
-  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--write", "stage, validate, back up, and apply the migration"))
   .action(migrateArtifactContractV2Command);
 
-migrate
+addCliOutput(migrate
   .command("schema-contract-v2")
   .description("Migrate Schema contracts to inferred types and inherited formats v2.")
   .option("--check", "scan and print a read-only migration manifest")
-  .option("--write", "stage, validate, back up, and apply the migration")
+  .option("--write", "stage, validate, back up, and apply the migration"))
   .action(migrateSchemaContractV2Command);
 
 const archive = program
@@ -735,22 +713,22 @@ archive
   .addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"))
   .action(archiveListCommand);
 
-archive
+addCliOutput(archive
   .command("run")
   .description("Archive a done or abandoned run.")
-  .argument("<id>", "run id")
+  .argument("<id>", "run id"))
   .action(archiveRunCommand);
 
 const restore = archive
   .command("restore")
   .description("Restore an archived run.");
 
-restore
+addCliOutput(restore
   .command("run")
   .description("Restore an archived run.")
-  .argument("<id>", "run id")
+  .argument("<id>", "run id"))
   .action(archiveRestoreRunCommand);
 
 installReviewerCommands(program);
-await parseCli(program, argv);
+return program;
 }

@@ -23,13 +23,23 @@ type Detail = Parameters<Parameters<typeof withMemoryChangeDetailSnapshot>[0]["u
 export async function memoryChangePart({ change, files }: Pick<Detail, "change" | "files">, options: { part: string; reference?: string; side: string }) {
       const identity = { changeId: change.id, project: change.project, checkpointDigest: change.checkpoint!.digest };
       const selected = options.reference ? files.filter(file => file.reference === options.reference) : files;
-      if (options.reference && selected.length !== 1) throw new Error(`ChangeSet Memory reference not found or ambiguous: ${options.reference}`);
+      if (options.reference && selected.length !== 1) throw Object.assign(new Error("ChangeSet Memory reference not found or ambiguous"), { code: "NOT_FOUND" });
       switch (options.part) {
         case "summary": return { ...identity, status: change.status, baseRevision: change.checkpoint!.base_revision,
           files: selected.map(file => ({ reference: file.reference, path: file.label, operation: file.operation })) };
-        case "validation": return { ...identity, validation: change.checkpoint };
+        case "validation": {
+          const checkpoint = change.checkpoint!;
+          return { ...identity, validation: {
+            valid: checkpoint.valid, baseRevision: checkpoint.base_revision, createdAt: checkpoint.created_at,
+            issueCount: checkpoint.issues.length,
+            issues: checkpoint.issues.map(({ path, line, column, migration }) => ({
+              path: path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) ? undefined : path,
+              code: migration === "syntax" ? "MIGRATION_REQUIRED" : "INVALID_MEMORY", line, column
+            }))
+          } };
+        }
         case "memory": {
-          if (!options.reference) throw new Error("memory change show --part memory requires --reference");
+          if (!options.reference) throw new TypeError("memory change show --part memory requires --reference");
           const file = selected[0]!;
           const path = options.side === "before" ? file.basePath : file.candidatePath;
           return { ...identity, reference: file.reference, side: options.side, operation: file.operation,
@@ -40,7 +50,7 @@ export async function memoryChangePart({ change, files }: Pick<Detail, "change" 
           diff: await unifiedDiff(file.basePath ? await readFile(file.basePath, "utf8") : "",
             file.candidatePath ? await readFile(file.candidatePath, "utf8") : "")
         }))) };
-        default: throw new Error(`Unknown ChangeSet material: ${options.part}`);
+        default: throw new TypeError("Unknown ChangeSet material");
       }
 }
 

@@ -1,3 +1,4 @@
+import { formatCliCommand } from "../src/prompts/cli-command.js";
 import { graphReviewId } from "../src/context_control/graph-review.js";
 import { buildArtifactReviewerPrompt } from "../src/acp/prompt.js";
 import { createHash } from "node:crypto";
@@ -151,8 +152,8 @@ test('Run summaries exclude unrelated data and peer Review details', async t => 
 
 test('original Human confirmations are readable while current peer drafts are denied', async t => {
   const { f, service, runId, a, u, e, eRef, outside, c, input, first, attempt, runtime, env, cli, bytes, opened } = await evidenceFixture(t);
-  const confirmation=await cli(["run","review","show","--review",graphReviewId(a.step.reviewRounds![0].id,"owner"),"--output","json"]);assert.equal(confirmation.status,0,confirmation.stderr);assert.equal(JSON.parse(confirmation.stdout).artifactId,a.artifact.id);assert.equal(JSON.parse(confirmation.stdout).vote.value,"approve");assert.equal(JSON.parse(confirmation.stdout).reviewer.source,"human");
-  const confirmations=await cli(["run","review","list","--artifact",a.artifact.id,"--output","json"]);assert.equal(confirmations.status,0,confirmations.stderr);assert.equal(JSON.parse(confirmations.stdout).length,2);
+  const confirmation=await cli(["run","review","show","--review",graphReviewId(a.step.reviewRounds![0].id,"owner"),"--output","json"]);assert.equal(confirmation.status,0,confirmation.stderr);assert.equal(JSON.parse(confirmation.stdout).artifactId,a.artifact.id);assert.equal(JSON.parse(confirmation.stdout).vote.value,"approve");assert.equal(JSON.parse(confirmation.stdout).kind,"human");
+  const confirmations=await cli(["run","review","list","--artifact",a.artifact.id,"--output","json"]);assert.equal(confirmations.status,0,confirmations.stderr);assert.equal(JSON.parse(confirmations.stdout).items.length,2);
   const peer=await cli(["run","review","show","--review",graphReviewId(c.step.reviewRounds![0].id,"owner"),"--output","json"]);assert.equal(peer.status,1);assert.equal(peer.stdout,"");assert.match(peer.stderr,/REVIEW_RESOURCE_DENIED/);
 
 });
@@ -356,9 +357,14 @@ test('graph sessions without a HANDLE hint discover External help and retain act
 test('assignment references, preview export and node commands stay bound after shell PATH replacement',async t=>{
  const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);
  for(const reference of JSON.parse(detail.stdout).references){const r=run(reference.readCommand);assert.equal(r.status,0,reference.readCommand+': '+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
- const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const exported=run(JSON.parse(preview.stdout).exportCommand.replace('<file>','preview-body.txt'));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
+ const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const action=JSON.parse(preview.stdout).nextAction;assert.equal(action.launcher,'reviewer');action.args[action.args.indexOf('<file>')]='preview-body.txt';const exported=run(formatCliCommand(action));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
  await reviews.markArtifactReviewAgentCliReady({...f.input,attemptId:f.first.attempt.id});
- const node=await f.cli(['run','review','show']);assert.equal(node.status,0,node.stderr);const command=/^"\$MEMSPHERE_CLI" continue report --artifact .+$/m.exec(node.stdout)?.[0];assert.ok(command,node.stdout);const reported=run(command);assert.equal(reported.status,0,reported.stderr);assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
+ const node=await f.cli(['run','review','show','--output','json']);assert.equal(node.status,0,node.stderr);
+ const next=JSON.parse(node.stdout).nextAction;assert.equal(next.launcher,'reviewer');
+ await writeFile(join(f.attempt,'node-report.json'),JSON.stringify({applicable:true}));
+ next.args[next.args.indexOf('<node-result>')]='node-report.json';
+ const reported=run(formatCliCommand(next));assert.equal(reported.status,0,reported.stderr);
+ assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
 });
 
 test("scoped Reviewer reads bound Artifact previews and exports its original body", async t => {

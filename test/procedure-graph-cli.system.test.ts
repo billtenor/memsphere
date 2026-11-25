@@ -11,6 +11,7 @@ import { businessFixture } from "./helpers/business-data.js";
 import { serializeMemoryYaml } from "../src/memory/serializer.js";
 import type { GraphProcedureMemory } from "../src/memory/ast.js";
 
+import { openContextControl } from "../src/project/context-control.js";
 import { requireCommandState } from "../src/home/command-state-store.js";
 import { ownTestProcess } from "./helpers/owned-process.js";
 
@@ -51,7 +52,8 @@ async function fixture(t: test.TestContext, multiple = false, prepared = true, p
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   const invokeInProcess = (...args: string[]) => invokeUsing(false, args);
   const callInProcess = async (...args: string[]) => JSON.parse((await invokeInProcess(...args, "--output", "json")).stdout);
-  return { ...f, procedure, invoke, call, invokeInProcess, callInProcess };
+  const inspect = async (runId: string) => (await openContextControl(f.root))!.inspect(runId);
+  return { ...f, procedure, invoke, call, invokeInProcess, callInProcess, inspect };
 }
 
 for (const language of ["zh-CN", "en"] as const) test(`graph CLI module ${language} Step prompts provide executable fixed-material reads for direct and collected inputs`, { timeout: 90000 }, async t => {
@@ -67,26 +69,26 @@ for (const language of ["zh-CN", "en"] as const) test(`graph CLI module ${langua
   await writeFile(f.procedure, serializeMemoryYaml(p));
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "Read closed inputs");
   const first = await f.call("continue", "report", "--artifact", "seed body");
-  const read = (id: string) => `memsphere --project 'test-project' run artifact show --run '${start.runId}' --artifact '${id}'`;
-  assert.ok(first.prompt.includes(read(first.artifactId)), first.prompt);
-  assert.match(first.prompt, language === "en" ? /read commands/ : /读取命令/);
+  const read = (id: string) => ["--project", "test-project", "run", "artifact", "show", "--run", start.runId, "--artifact", id];
+  assert.deepEqual(first.nextMaterials[0].read.args, read(first.artifactId));
   const second = await f.call("continue", "report", "--artifact", "again");
   const third = await f.call("continue", "report", "--artifact", "seed second body");
   const last = await f.call("continue", "report", "--artifact", "stop");
-  const final = (await f.call("run", "show", "--run", start.runId)).steps.find((s: any) => s.source?.actionId === "final");
-  assert.deepEqual(final.inputs, { seed: [{ kind: "artifact", id: first.artifactId }, { kind: "artifact", id: third.artifactId }], b: [{ kind: "artifact", id: second.artifactId }, { kind: "artifact", id: last.artifactId }] });
+  const final = (await f.call("run", "show", "--run", start.runId)).steps.find((s: any) => s.actionId === "final");
+  const detail = await f.call("run", "step", "show", "--run", start.runId, "--step", final.id);
+  assert.deepEqual(detail.step.inputGroups, { seed: [{ kind: "artifact", id: first.artifactId }, { kind: "artifact", id: third.artifactId }], b: [{ kind: "artifact", id: second.artifactId }, { kind: "artifact", id: last.artifactId }] });
   for (const [id, text] of [[first.artifactId, "seed body"], [second.artifactId, "again"], [third.artifactId, "seed second body"], [last.artifactId, "stop"]]) {
-    assert.ok(last.prompt.includes(read(id)), last.prompt);
-    // Execute the exact printed argument vector using the fixture's CLI entrypoint.
-    const args = read(id).slice("memsphere ".length).match(/'[^']*'|\S+/g)!.map(s => s.replace(/^'|'$/g, ""));
-    const result = await f.invoke(...args); assert.match(result.stdout, new RegExp(text));
+    const material = last.nextMaterials.find((material: any) => material.id === id);
+    assert.deepEqual(material.read.args, read(id));
+    const result = await f.invoke(...material.read.args);
+    assert.match(result.stdout, new RegExp(text));
   }
 });
 
 test("graph CLI auto-enters one Step, binds Continue and leaves show read-only", { timeout: 60000 }, async t => {
   const f = await fixture(t, false, false, true, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "CLI graph");
-  assert.doesNotMatch(start.prompt, /context-/);
+  assert.equal(Object.hasOwn(start, "prompt"), false);
   const snapshot = await f.call("run", "show", "--run", start.runId);
   const step = snapshot.steps[0]; assert.equal(step.status, "running");
   const before = await readFile(join(f.root, "data/context_control/steps", start.runId, `${step.id}.json`), "utf8");
@@ -95,23 +97,25 @@ test("graph CLI auto-enters one Step, binds Continue and leaves show read-only",
   const help = await f.invoke("continue", "--help"); assert.match(help.stdout, new RegExp(step.id));
   const result = await f.call("continue", "report", "--artifact", "done");
   assert.equal(result.stepId, step.id); assert.equal(result.status, "done");
-  assert.match(result.prompt, /finish/);
-  await assert.rejects(f.invoke("continue", "report", "--artifact", "duplicate"), /No transitions/);
+  assert.ok(result.nextAction.args.includes("finish"));
+  await assert.rejects(f.invoke("continue", "report", "--artifact", "duplicate"), /RUN_FINISHED/);
   await f.call("run", "finish", "--run", start.runId);
 });
 
 test("CLI module multiple pending Steps require explicit enter; repeated enter returns the same Continue binding", { timeout: 60000 }, async t => {
   const f = await fixture(t, true);
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "Choose");
-  assert.match(start.prompt, /step enter/); assert.doesNotMatch(start.prompt, /Action/);
+  assert.equal(start.nextAction.kind, "choose");
+  assert.ok(start.nextAction.choices.every((action: any) => action.args.includes("enter")));
+  assert.equal(start.instruction, undefined);
   const snapshot = await f.call("run", "show", "--run", start.runId);
   assert.deepEqual(snapshot.steps.map((s: any) => s.status), ["pending", "pending"]);
   const id = snapshot.steps[0].id;
   const first = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", id);
   const second = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", id);
   assert.equal(first.stdout, second.stdout);
-  await assert.rejects(f.call("run", "report", "--run", start.runId, "--artifact", "missing step"), /--step is required/);
-  await assert.rejects(f.call("run", "finish", "--run", start.runId), /unfinished work/);
+  await assert.rejects(f.call("run", "report", "--run", start.runId, "--artifact", "missing step"), /INVALID_ARGUMENT/);
+  await assert.rejects(f.call("run", "finish", "--run", start.runId), /GRAPH_INCOMPLETE/);
 });
 
 test("independent CLI processes enter idempotently and complete different Steps with unique completion sequence", { timeout: 60000 }, async t => {
@@ -128,11 +132,11 @@ test("independent CLI processes enter idempotently and complete different Steps 
     const error = JSON.parse(line).error;
     assert.ok(["REVISION_CONFLICT", "ALREADY_EXISTS"].includes(error.code), JSON.stringify(error));
     assert.equal(error.details.runId, start.runId); assert.ok(error.details.artifactId);
-    assert.equal(error.details.recoveryCommand, `memsphere run status --run ${start.runId}`);
+    assert.deepEqual(error.nextAction.args.slice(-4), ["run", "status", "--run", start.runId]);
   }
   // A saved submission remains durable even when concurrent automatic recovery conflicts.
   await f.call("run", "status", "--run", start.runId);
-  const result = await f.call("run", "show", "--run", start.runId);
+  const result = await f.inspect(start.runId);
   assert.equal(result.steps.length, 2); assert.equal(result.artifacts.length, 2);
   assert.deepEqual(result.steps.map((s: any) => s.status), ["done", "done"]);
   assert.equal(new Set(result.steps.map((s: any) => s.completionSequence)).size, 2);
@@ -148,43 +152,43 @@ test("CLI module Continue binds Human authorization and advisory resolution to i
   const binding = join(f.directory, "review.json");
   await writeFile(binding, JSON.stringify({ reviews: { "cli-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } }, slots: { "cli-graph::approval": { actors: ["reviewer", "advisor"] } } }));
   const start = await f.call("run", "start", "--file", f.procedure, "--review-config", binding, "--name", "review context");
-  assert.doesNotMatch(start.prompt, /context-/);
+  assert.equal(Object.hasOwn(start, "prompt"), false);
   const report = await f.call("continue", "report", "--artifact", "candidate");
-  assert.equal(report.status, "awaiting_review"); assert.match(report.prompt, /memsphere continue review wait/);
-  const snapshot = await f.call("run", "show", "--run", start.runId), step = snapshot.steps[0], round = step.reviewRounds[0];
+  assert.equal(report.status, "awaiting_review"); assert.deepEqual(report.nextAction.resume.args, ["continue", "review", "wait"]);
+  const snapshot = await f.inspect(start.runId), step = snapshot.steps[0], round = step.reviewRounds![0];
   const comments = join(f.directory, "comments.json"); await writeFile(comments, "[]");
   const handle = `graph-review-${start.runId}__${step.id}`;
   const vote = ["review", "submit-for-human", "--assignment", "reviewer", "--vote", "approve", "--comments-file", comments];
-  await assert.rejects(f.call("continue", ...vote), /authorization-note/);
-  await assert.rejects(f.call("continue", ...vote, "--authorization-note", ""), /authorization/);
-  await assert.rejects(f.call("continue", ...vote, "--round", "other-round", "--authorization-note", "fixture authorization"), /unknown option/);
-  await assert.rejects(f.call("continue", ...vote, "--run", "other-run", "--authorization-note", "fixture authorization"), /unknown option/);
+  await assert.rejects(f.call("continue", ...vote), /INTERNAL_ERROR/);
+  await assert.rejects(f.call("continue", ...vote, "--authorization-note", ""), /PERMISSION_DENIED/);
+  await assert.rejects(f.call("continue", ...vote, "--round", "other-round", "--authorization-note", "fixture authorization"), /INVALID_ARGUMENT/);
+  await assert.rejects(f.call("continue", ...vote, "--run", "other-run", "--authorization-note", "fixture authorization"), /INVALID_ARGUMENT/);
   await f.call("continue", ...vote, "--authorization-note", "Simulated authorized vote in an isolated test fixture");
   const note = join(f.directory, "advice.json"); await writeFile(note, JSON.stringify([{ body: "Clarify purpose", severity: "blocking" }]));
   await f.call("continue", "review", "submit-for-human", "--assignment", "advisor", "--vote", "approve", "--comments-file", note, "--authorization-note", "Isolated fixture advisor authorization");
-  const reviewed = await f.call("run", "show", "--run", start.runId);
+  const reviewed = await f.inspect(start.runId);
   const personal = reviewed.reviews.find((r: any) => r.reviewer.actorId === "advisor");
   assert.equal(personal.roundId, round.id); assert.match(personal.vote.delegationNote, /fixture advisor authorization/);
   const commentId = personal.comments[0].commentId;
   assert.equal(typeof commentId, "string"); assert.ok(commentId.length > 0);
   assert.equal(personal.comments[0].id, undefined);
   const resolve = ["review", "resolve", "--comment", commentId, "--disposition", "accepted-fixed", "--note", "Clarified in candidate"];
-  await assert.rejects(f.call("continue", ...resolve), /validation/);
+  await assert.rejects(f.call("continue", ...resolve), /INVALID_ARGUMENT/);
   const runPath = join(f.root, "data/context_control/runs", `${start.runId}.json`);
   const saved = await readFile(runPath, "utf8"), restricted = JSON.parse(saved);
   restricted.value.permissionConfig.runner.permissions = ["artifact.read", "artifact.submit"];
   await writeFile(runPath, JSON.stringify(restricted));
-  await assert.rejects(f.call("continue", ...resolve, "--validation-summary", "Checked candidate"), /decision.decide/);
+  await assert.rejects(f.call("continue", ...resolve, "--validation-summary", "Checked candidate"), /PERMISSION_DENIED/);
   await writeFile(runPath, saved);
   await f.call("continue", ...resolve, "--validation-summary", "Checked candidate");
-  const resolved = await f.call("run", "show", "--run", start.runId);
+  const resolved = await f.inspect(start.runId);
   assert.equal(resolved.steps[0].reviewRounds[0].resolutions[0].commentId, commentId);
   assert.equal(resolved.steps[0].reviewRounds[0].id, round.id);
   assert.equal(resolved.steps[0].id, step.id);
   const wait = await f.invoke("continue", "review", "wait"); assert.match(wait.stdout, /approve/);
   const accepted = await f.invoke("continue", "review", "vote", "--vote", "approve"); assert.match(accepted.stdout, /finish/);
   assert.equal((await f.call("run", "show", "--run", start.runId)).steps[0].id, step.id);
-  assert.match((await f.invoke("continue", "--help")).stdout, /No further transitions/);
+  assert.match((await f.invoke("continue", "--help")).stdout, /done/);
 });
 
 
@@ -193,7 +197,7 @@ test("CLI module failed auxiliary Continue store preserves the running Step and 
   await mkdir(join(f.home, "data"), { recursive: true });
   const invalid = join(f.home, "data", "runner-sessions"); await writeFile(invalid, "not a directory");
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "context recovery");
-  assert.match(start.prompt, new RegExp(`run report --run ${start.runId} --step`));
+  assert.deepEqual(start.nextAction.args.slice(2, 7), ["run", "report", "--run", start.runId, "--step"]);
   const before = await f.call("run", "show", "--run", start.runId); assert.equal(before.steps.length, 1); assert.equal(before.steps[0].status, "running");
   await rm(invalid);
   const recovered = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", before.steps[0].id);
@@ -213,18 +217,18 @@ test('CLI rewind preview is read only, preserves Continue, and requires explicit
  const before=await snapshotTree(f.root);
  const preview=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--dry-run');
  assert.equal(preview.dryRun,true); assert.deepEqual(await snapshotTree(f.root),before);
- await assert.rejects(f.invokeInProcess('run','step','rewind','--run',start.runId,'--step',target,'--reason',' '),/reason is required/);
+ await assert.rejects(f.invokeInProcess('run','step','rewind','--run',start.runId,'--step',target,'--reason',' '),/INVALID_ARGUMENT/);
  const reason=join(f.directory,'reason.md');await writeFile(reason,'Product needs revision');
- await assert.rejects(f.invokeInProcess('run','step','rewind','--run',start.runId,'--step',target,'--reason','x','--reason-file',reason),/Choose/);
+ await assert.rejects(f.invokeInProcess('run','step','rewind','--run',start.runId,'--step',target,'--reason','x','--reason-file',reason),/INVALID_ARGUMENT/);
  const result=await f.call('run','step','rewind','--run',start.runId,'--step',target,'--reason-file',reason);
- assert.match(result.command,/run step enter/);
+ assert.deepEqual(result.nextAction.args.slice(2, 5), ["run", "step", "enter"]);
  const next=await f.callInProcess('run','show','--run',start.runId);
  assert.equal(next.steps.find((s:any)=>s.id===result.replacementStepId).status,'pending');
  assert.equal(next.steps.find((s:any)=>s.id===target).effective,false);
- await assert.rejects(f.invoke('continue','report','--artifact','late body'),/superseded/);
+ await assert.rejects(f.invoke('continue','report','--artifact','late body'),/STEP_SUPERSEDED/);
  await f.invoke('run','step','enter','--run',start.runId,'--step',result.replacementStepId);
  const fresh=await f.call('continue','report','--artifact','new body');
- const final=await f.callInProcess('run','show','--run',start.runId);
+ const final=await f.inspect(start.runId);
  assert.equal(final.artifacts.find((a:any)=>a.id===fresh.artifactId).revisedFrom,completed.artifactId);
 });
 
@@ -240,7 +244,7 @@ for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI modul
   }
   const start = await f.call('run', 'start', '--file', f.procedure, '--name', 'explicit replacement', ...(path === 'branch-review' ? ['--review-config', binding] : []));
   const initial = await f.call('run', 'show', '--run', start.runId);
-  const a = initial.steps.find((s: any) => s.source.actionId === 'A');
+  const a = initial.steps.find((s: any) => s.actionId === 'A');
   await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', a.id);
   const originalBinding = await requireCommandState('codex-graph-session', f.home);
   const rewind = await f.call('run', 'step', 'rewind', '--run', start.runId, '--step', a.id, '--reason', 'revise A');
@@ -248,13 +252,13 @@ for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI modul
   let prompt: string;
   if (path === 'status') {
     await writeFile(join(f.home, 'config.json'), JSON.stringify({}));
-    prompt = (await f.call('run', 'status', '--run', start.runId)).prompt;
+    prompt = (await f.invoke('run', 'status', '--run', start.runId)).stdout;
     await writeFile(join(f.home, 'config.json'), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   } else {
-    const b = initial.steps.find((s: any) => s.source.actionId === 'B');
+    const b = initial.steps.find((s: any) => s.actionId === 'B');
     await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', b.id);
     const report = await f.call('continue', 'report', '--artifact', 'B candidate');
-    prompt = report.prompt;
+    prompt = (report.nextAction?.args ?? []).join(" ");
     if (path === 'branch-review') {
       assert.equal(report.status, 'awaiting_review');
       const comments = join(f.directory, 'replacement-comments.json'); await writeFile(comments, '[]');
@@ -268,9 +272,9 @@ for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI modul
   if (path === 'status') {
     assert.deepEqual(await requireCommandState('codex-graph-session', f.home), originalBinding);
     await assert.rejects(f.invoke('continue', '--help'), error => {
-      const message = String(error); return message.includes(a.id) && message.includes('superseded') && !message.includes(target);
+      const message = String(error); return message.includes(a.id) && message.includes('STEP_SUPERSEDED') && !message.includes(target);
     });
-    await assert.rejects(f.invoke('continue', 'report', '--artifact', 'obsolete'), /superseded/);
+    await assert.rejects(f.invoke('continue', 'report', '--artifact', 'obsolete'), /STEP_SUPERSEDED/);
   } else {
     const help = (await f.invoke('continue', '--help')).stdout;
     assert.ok(!help.includes(target), help);
@@ -299,7 +303,7 @@ test('rewind JSON argument and superseded errors use the structured stderr contr
       assert.equal(error.code, 1); assert.equal(error.stdout, '');
       const result = JSON.parse(error.stderr);
       assert.equal(result.error.code, code);
-      assert.equal(typeof result.error.message, 'string');
+      assert.equal(Object.hasOwn(result.error, 'message'), false);
       assert.equal(error.stderr, `${JSON.stringify(result)}\n`);
       return true;
     });
@@ -326,7 +330,7 @@ test("graph native and Continue reports validate business options before writing
   const step = (await f.call("run", "show", "--run", first.runId)).steps[0].id;
   await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", "{}", "--write-options", '{"data_id":"native"}'));
   for (const data_id of ["parent/child", "a".repeat(251)])
-    await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", JSON.stringify({ data_id })), /filename/);
+    await assert.rejects(f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", JSON.stringify({ data_id })), /INVALID_ARGUMENT/);
   assert.deepEqual((await store.list({}, {})).items, []);
   await f.call("run", "report", "--run", first.runId, "--step", step, "--artifact", '{"name":"native"}', "--write-options", '{"data_id":"native"}');
   const second = await f.call("run", "start", "--file", f.procedure, "--name", "Continue");
@@ -363,8 +367,8 @@ test("graph Store retry closes the terminal Step's Continue binding and preserve
   const { runId } = await f.call("run", "start", "--file", f.procedure, "--name", "Retry");
   const { steps: [step] } = await f.call("run", "show", "--run", runId);
   const body = '{ "name": "candidate" }\n';
-  await assert.rejects(f.call("continue", "report", "--artifact", body, "--write-options", '{"data_id":"retry.json"}'), /exists/i);
-  const failed = await f.call("run", "show", "--run", runId);
+  await assert.rejects(f.call("continue", "report", "--artifact", body, "--write-options", '{"data_id":"retry.json"}'), /ALREADY_EXISTS/);
+  const failed = await f.inspect(runId);
   assert.equal(failed.steps[0].businessReceipt, undefined);
   assert.equal((await requireCommandState("codex-graph-session", f.home)).value.status, "active");
   const { openContextControl } = await import("../src/project/context-control.js");
@@ -380,30 +384,30 @@ test("graph Store retry closes the terminal Step's Continue binding and preserve
     await g.records.update("run", runId, row, run);
   });
   await setPermissions(restricted);
-  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /Runner requires artifact.submit/);
-  const rejected = await f.call("run", "show", "--run", runId);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /PERMISSION_DENIED/);
+  const rejected = await f.inspect(runId);
   assert.deepEqual(rejected.steps, failed.steps);
   assert.deepEqual(rejected.artifacts, failed.artifacts);
   assert.deepEqual((await store.list({}, {})).items.map(item => item.id), [dataId]);
   await setPermissions();
   const other = await f.call("run", "start", "--file", f.procedure, "--name", "Other session target");
-  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /bound to another target/);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /SESSION_CONTEXT_CONFLICT/);
   const existing = await store.get({}, dataId);
   assert(existing && !existing.deleted);
   assert.equal(Buffer.from(await readAll({}, existing.data.payload.content)).toString(), previous);
-  assert.deepEqual((await f.call("run", "show", "--run", runId)).steps, failed.steps);
+  assert.deepEqual((await f.inspect(runId)).steps, failed.steps);
   const otherStep = (await f.call("run", "show", "--run", other.runId)).steps[0].id;
-  await assert.rejects(f.call("run", "step", "store", "retry", "--run", other.runId, "--step", otherStep), /No unsuccessful/);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", other.runId, "--step", otherStep), /INVALID_STATE|NOT_FOUND/);
   await f.invoke("run", "step", "enter", "--run", runId, "--step", step.id);
   assert.equal(await store.delete({}, dataId), true);
   const result = await f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id);
-  assert.equal(result.step.status, "done");
-  assert.equal(result.step.businessReceipt.artifactId, failed.artifacts[0].id);
+  assert.equal(result.status, "done");
+  assert.equal(result.artifactId, failed.artifacts[0].id);
   assert.equal((await requireCommandState("codex-graph-session", f.home)).value.status, "closed");
   const saved = await store.get({}, dataId);
   assert(saved && !saved.deleted);
   assert.equal(Buffer.from(await readAll({}, saved.data.payload.content)).toString(), body);
-  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /No unsuccessful/);
+  await assert.rejects(f.call("run", "step", "store", "retry", "--run", runId, "--step", step.id), /INVALID_STATE|NOT_FOUND/);
 });
 
 test("Graph report and Continue accept nested file Store IDs and reject traversal", { timeout: 90000 }, async t => {
@@ -427,20 +431,20 @@ test("Graph report and Continue accept nested file Store IDs and reject traversa
   assert.equal(store.kind, "DataStore");
   for (const entry of ["native", "continue"] as const) {
     const { runId } = await f.call("run", "start", "--file", f.procedure, "--name", entry);
-    const before = await f.call("run", "show", "--run", runId);
+    const before = await f.inspect(runId);
     const stepId = before.steps[0].id;
     const args = entry === "native" ? ["run", "report", "--run", runId, "--step", stepId] : ["continue", "report"];
     const body = '{ "name": "report" }\n';
     const report = (data_id: string) => f.call(...args, "--artifact", body, "--write-options", JSON.stringify({ data_id }));
     const existing = (await store.list({}, {})).items;
-    await assert.rejects(report("reports/../../escape.json"), /not portable/);
-    const rejected = await f.call("run", "show", "--run", runId);
+    await assert.rejects(report("reports/../../escape.json"), /INVALID_ARGUMENT/);
+    const rejected = await f.inspect(runId);
     assert.deepEqual(rejected.artifacts, []);
     assert.deepEqual(rejected.steps, before.steps);
     assert.deepEqual((await store.list({}, {})).items, existing);
     const dataId = `reports/${entry}.json`;
     const done = await report(dataId);
-    const after = await f.call("run", "show", "--run", runId);
+    const after = await f.inspect(runId);
     assert.equal(after.steps[0].businessReceipt.artifactId, done.artifactId);
     assert.equal(after.artifacts[0].business.destination.dataId, dataId);
     const row = await store.get({}, dataId);

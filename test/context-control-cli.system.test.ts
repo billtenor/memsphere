@@ -34,28 +34,31 @@ async function boundExplorationFixture(t:test.TestContext,name:string){
 
 test("native CLI finishes current outputs and lists/restores archived exploration records", { timeout: 60000 }, async t => {
   const f = await fixture(t, true), run = await f.call("run", "start", "--name", "结束归档");
-  await assert.rejects(f.invoke("archive", "run", run.id), /Finish or abandon/);
-  const a = await f.call("run", "report", "--run", run.id, "--name", "A", "--artifact", "A");
-  await f.call("run", "finish", "--run", run.id, "--authorization", "用户检查 A 后明确确认结束");
-  const snapshot = await f.call("run", "status", "--run", run.id);
-  assert.equal(snapshot.run.status, "done"); assert.deepEqual(snapshot.outputArtifactIds, [a.artifactId]);
-  assert.equal(snapshot.commandStates[0].status, "closed");
-  await f.invoke("archive", "run", run.id);
-  assert.equal((await f.call("run", "status")).runs.some((r: any) => r.id === run.id), false);
-  assert.ok((await f.call("archive", "list", "runs")).items.some((r: any) => r.id === run.id));
-  await f.invoke("archive", "restore", "run", run.id);
-  assert.equal((await f.call("run", "status", "--run", run.id)).run.status, "done");
-  assert.ok((await f.call("run", "status")).runs.some((r: any) => r.id === run.id));
+  await assert.rejects(f.invoke("archive", "run", run.runId), /RUN_RUNNING/);
+  const a = await f.call("run", "report", "--run", run.runId, "--name", "A", "--artifact", "A");
+  await f.call("run", "finish", "--run", run.runId, "--authorization", "用户检查 A 后明确确认结束");
+  const snapshot = await f.call("run", "status", "--run", run.runId);
+  assert.equal(snapshot.status, "done"); assert.deepEqual((await f.call("run", "outputs", "list", "--run", run.runId)).items.map((item: any) => item.id), [a.artifactId]);
+  assert.equal((await findCommandStates("test-project", run.runId, f.home))[0].value.status, "closed");
+  await f.invoke("archive", "run", run.runId);
+  assert.equal((await f.call("run", "status")).runs.some((r: any) => r.runId === run.runId), false);
+  assert.ok((await f.call("archive", "list", "runs")).items.some((r: any) => r.id === run.runId));
+  await f.invoke("archive", "restore", "run", run.runId);
+  assert.equal((await f.call("run", "status", "--run", run.runId)).status, "done");
+  assert.ok((await f.call("run", "status")).runs.some((r: any) => r.runId === run.runId));
 });
 
 test("CLI start binds Continue to the current session", {timeout:30000}, async t=>{
  const f=await fixture(t),run=await f.call("run","start","--name","binding");
- assert.equal(run.sessionId,"cli-test-session");assert.equal(run.contextId,undefined);
+ assert.equal(Object.hasOwn(run, "sessionId"), false);
+ assert.equal(Object.hasOwn(run, "contextId"), false);
+ const binding = await findCommandStates("test-project", run.runId, f.home);
+ assert.equal(binding[0].value.sessionId, "cli-test-session");
 });
 test("Continue command tree exposes valid operations and rejects unknown help targets",{timeout:30000},async t=>{
  const f=await boundExplorationFixture(t,"command tree");
- assert.match((await f.invoke("continue","--help")).stdout,/report.*review create/);
- await assert.rejects(f.invoke("continue","missing","--help"),/unknown command/);
+ assert.match((await f.invoke("continue","--help")).stdout,/- report\n- review create/);
+ await assert.rejects(f.invoke("continue","missing","--help"),/INVALID_ARGUMENT/);
 });
 
 async function artifactFixture(t:test.TestContext){
@@ -75,10 +78,10 @@ test("CLI report resolves tag dependencies to the actual source Artifact",{timeo
  await f.call("run","artifact","show","--run",run.id,"--artifact",source.id);
  const result=await f.call("continue","report","--name","dependent","--artifact","方案","--depends-on","tag:requirements");
  assert.deepEqual(result.candidates,[]);
- const snapshot=await f.call("run","show","--run",run.id);
+ const snapshot=await service.inspect(run.id);
  assert.ok(snapshot.steps.find((s:any)=>s.id===result.stepId)!.reads[`artifact:${source.id}`]);
  assert.equal((await findCommandStates("test-project",run.id,f.home))[0].value.sessionId,"cli-test-session");
- assert.ok((await f.call("run","status")).runs.some((r:any)=>r.id===run.id));
+ assert.ok((await f.call("run","status")).runs.some((r:any)=>r.runId===run.id));
 });
 test("CLI review create retains multiple feedback comments",{timeout:30000},async t=>{
  const f=await artifactFixture(t);
@@ -114,7 +117,8 @@ for (const entry of ["native", "continue"] as const) {
       await assert.rejects(f.call(...finish, ...options), (error: any) => {
         const result = JSON.parse(error.stderr);
         assert.equal(result.error.code, "HUMAN_CONFIRMATION_REQUIRED");
-        assert.match(result.error.message, /--authorization/);
+        assert.equal(result.error.nextAction.kind, "human_confirmation");
+        assert.ok(result.error.nextAction.resume.args.includes("--authorization"));
         return true;
       });
       await assertOpen();
@@ -132,8 +136,8 @@ for (const entry of ["native", "continue"] as const) {
     assert.equal(ended.reviews[0].comments[0].body, "补充结论边界");
     assert.equal(ended.artifacts.find(a => a.id === revised.artifactId)!.revisedFrom, original.id);
     assert.equal((await findCommandStates("test-project", run.id, f.home))[0].value.status, "closed");
-    assert.match((await f.invoke("continue", "--help")).stdout, /No further transitions/);
-    await assert.rejects(f.call("continue", "report", "--name", "late", "--artifact", "no"), /No transitions/);
+    assert.match((await f.invoke("continue", "--help")).stdout, /状态: done/);
+    await assert.rejects(f.call("continue", "report", "--name", "late", "--artifact", "no"), /RUN_FINISHED/);
   });
 }
 
@@ -141,16 +145,17 @@ for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201
   test(`${length === 201 ? "CLI" : "CLI module"} ${kind} previews ${length} Unicode chars and exports original bytes`, { timeout: 30000 }, async t => {
     const f = await fixture(t, length === 201); const run = await f.call("run", "start", "--name", "preview");
     const content = "中a😀".repeat(67).slice(0); const value = Array.from(content).slice(0, length).join("");
-    const saved = kind === "artifact" ? await f.call("run", "report", "--run", run.id, "--name", "正文", "--artifact", value) : await f.call("run", "external", "add", "--run", run.id, "--source", "来源", "--content", value);
+    const saved = kind === "artifact" ? await f.call("run", "report", "--run", run.runId, "--name", "正文", "--artifact", value) : await f.call("run", "external", "add", "--run", run.runId, "--source", "来源", "--content", value);
     const id = saved.artifactId ?? saved.externalId;
-    if (kind === "external") assert.deepEqual(Object.keys(saved).sort(), ["externalId", "runId"]);
-    const args = ["run", kind, "show", "--run", run.id, `--${kind}`, id];
+    if (kind === "external") assert.deepEqual(Object.keys(saved).sort(), ["externalId", "runId", "source"]);
+    const args = ["run", kind, "show", "--run", run.runId, `--${kind}`, id];
     const result = await f.call(...args);
-    assert.equal(result.content, Array.from(value).slice(0, 200).join("") + (length > 200 ? "..." : ""));
+    assert.equal(result.content, Array.from(value).slice(0, 200).join(""));
     assert.equal(result.truncated, length > 200);
-    assert.equal(!!result.exportCommand, length > 200);
-    const text = await f.invoke(...args); assert.equal(text.stdout, result.content);
-    assert.equal(text.stderr.includes("Export full content"), length > 200);
+    assert.equal(!!result.nextAction, length > 200);
+    const text = await f.invoke(...args); assert.ok(text.stdout.includes(result.content));
+    assert.equal(text.stderr, "");
+    assert.equal(text.stdout.includes("--out"), length > 200);
     const out = join(f.directory, "original.txt"); await f.call(...args, "--out", out);
     assert.equal(await readFile(out, "utf8"), value);
     await assert.rejects(f.call(...args, "--out", out), (error: any) => JSON.parse(error.stderr).error.code === "ALREADY_EXISTS");
@@ -162,7 +167,7 @@ test("CLI output selection preserves manual removals after later production", { 
   const a = await f.call("continue", "report", "--name", "A", "--artifact", "A");
   await f.call("continue", "outputs", "update", "--remove", a.artifactId);
   const b = await f.call("continue", "report", "--name", "B", "--artifact", "B");
-  const outputs = await f.call("run", "outputs", "list", "--run", r.id); assert.deepEqual(outputs.items.map((a: any) => a.id), [b.artifactId]);
+  const outputs = await f.call("run", "outputs", "list", "--run", r.runId); assert.deepEqual(outputs.items.map((a: any) => a.id), [b.artifactId]);
   await f.call("continue", "outputs", "update", "--remove", b.artifactId, "--add", a.artifactId);
   await assert.rejects(f.call("continue", "outputs", "update", "--remove", a.artifactId, "--add", a.artifactId));
  });

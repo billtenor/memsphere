@@ -30,20 +30,23 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const snapshot = await call("run", "show", "--run", run); const step = snapshot.steps[0].id;
   const initial = await call("continue", "enter-schema");
   const saved = await call("continue", "schema", "report", "--position", initial.position, "--artifact", '{"summary":"draft"}');
-  assert.equal(saved.draft.id, initial.draft.id); assert.equal(saved.phase, "awaiting_finalization");
-  await assert.rejects(call("run", "schema", "report", "--run", run, "--step", step, "--position", initial.position, "--artifact", '{"summary":"late"}'), /Writing position changed/);
+  assert.equal(saved.artifactId, initial.artifactId); assert.equal(saved.phase, "awaiting_finalization");
+  await assert.rejects(call("run", "schema", "report", "--run", run, "--step", step, "--position", initial.position, "--artifact", '{"summary":"late"}'), /SCHEMA_POSITION_CHANGED/);
   const reference = join(f.directory, "invalid-reference.json");
-  await writeFile(reference, JSON.stringify({ contentRef: { storeId: "context_control/artifacts", dataId: `${run}/${initial.draft.id}`, sha256: "0".repeat(64) } }));
-  await assert.rejects(call("continue", "report", "--file", reference), /SHA-256 mismatch/);
+  await writeFile(reference, JSON.stringify({ contentRef: { storeId: "context_control/artifacts", dataId: `${run}/${initial.artifactId}`, sha256: "0".repeat(64) } }));
+  await assert.rejects(call("continue", "report", "--file", reference), /(CONTENT_CHANGED|RECOVERY_REQUIRED|INVALID_ARGUMENT)/);
   const failed = await call("continue", "schema", "show");
-  assert.match(failed.validation.issues[0].message, /SHA-256 mismatch/); assert.equal(failed.validation.sha256, undefined);
-  assert.equal(failed.draft.content.payload.content, saved.draft.content.payload.content);
+  assert.equal(failed.validation.status, "failed");
+  assert.equal(failed.validation.issueCount, 1);
+  assert.equal(Object.hasOwn(failed, "draft"), false);
   const copy = join(f.directory, "copy.json");
-  await call("continue", "artifact", "export", "--file", copy);
+  const exported = await call("continue", "artifact", "export", "--file", copy);
+  assert.deepEqual(exported.nextAction.args, ["--project", "test-project", "run", "report", "--run", run,
+    "--step", step, "--artifact-file", copy]);
   assert.deepEqual(JSON.parse(await readFile(copy, "utf8")), { summary: "draft" });
   await writeFile(copy, '{"summary":"final"}');
-  const submitted = await call("continue", "report", "--artifact-file", copy);
-  assert.equal(submitted.artifactId, initial.draft.id); assert.equal(submitted.status, "done");
+  const submitted = await call(...exported.nextAction.args.slice(2));
+  assert.equal(submitted.artifactId, initial.artifactId); assert.equal(submitted.status, "done");
 });
 
 test("Schema native entry and Continue retain all rule scopes, input links and Human responsibility", { timeout: 90000 }, async t => {
@@ -57,11 +60,17 @@ test("Schema native entry and Continue retain all rule scopes, input links and H
   const started = await call("run", "start", "--file", file, "--name", "Context");
   const delivered = await call("continue", "report", "--artifact", "Upstream source");
   const snapshot = await call("run", "show", "--run", started.runId);
-  const step = snapshot.steps.find((s: any) => s.source.actionId === "report").id;
+  const step = snapshot.steps.find((s: any) => s.actionId === "report").id;
   const native = await raw("run", "step", "enter", "--run", started.runId, "--step", step);
-  for (const prompt of [delivered.prompt, native]) {
-    for (const requirement of ["Workflow rule", "Action rule", "Artifact rule", delivered.artifactId, "run artifact show", "summary", "Human", "enter-schema"]) assert.ok(prompt.includes(requirement), requirement);
+  assert.equal(delivered.nextStep, step);
+  assert.equal(delivered.nextActor, "human");
+  assert.equal(delivered.nextAction.kind, "human_confirmation");
+  assert.ok(delivered.nextAction.resume.args.includes("enter-schema"));
+  for (const requirement of ["Workflow rule", "Action rule", "Artifact rule", delivered.artifactId, "run artifact show", "human", "enter-schema"]) {
+    assert.ok(native.includes(requirement), requirement);
   }
+  const details = await call("run", "step", "show", "--run", started.runId, "--step", step);
+  assert.ok(Object.values(details.step.inputGroups).flat().some((input: any) => input.id === delivered.artifactId));
 });
 
 async function parallelDraftFixture(t: test.TestContext, content?: { a: string; b: string }) {
@@ -86,7 +95,7 @@ async function parallelDraftFixture(t: test.TestContext, content?: { a: string; 
 test("native Schema writes reject a Step outside the current Continue binding without mutating either draft", { timeout: 90000 }, async t => {
   const { call, raw, service, run, a, b, first, second } = await parallelDraftFixture(t);
   await raw("run", "step", "enter", "--run", run, "--step", b);
-  await assert.rejects(call("run", "schema", "report", "--run", run, "--step", a, "--position", first.position!, "--artifact", '{"summary":"wrong target"}'), /bound to another target/);
+  await assert.rejects(call("run", "schema", "report", "--run", run, "--step", a, "--position", first.position!, "--artifact", '{"summary":"wrong target"}'), /SESSION_CONTEXT_CONFLICT/);
   await service.withGraph(async g => {
     const unchangedA = await g.schemaShow(run, a), unchangedB = await g.schemaShow(run, b);
     assert.equal(unchangedA.position, first.position); assert.equal(unchangedB.position, second.position);
@@ -99,12 +108,12 @@ test("Continue saves preserve independent concurrent draft identities content an
   assert.notEqual(first.draft!.id, second.draft!.id);
   await raw("run", "step", "enter", "--run", run, "--step", b);
   const savedB = await call("continue", "schema", "report", "--position", second.position!, "--artifact", '{"summary":"B"}');
-  assert.equal(savedB.draft.id, second.draft!.id);
+  assert.equal(savedB.artifactId, second.draft!.id);
   await raw("run", "step", "enter", "--run", run, "--step", a);
   const resumed = await call("continue", "schema", "show");
-  assert.equal(resumed.draft.id, first.draft!.id); assert.equal(resumed.position, first.position); assert.equal(resumed.draft.content.payload.content, "");
+  assert.equal(resumed.artifactId, first.draft!.id); assert.equal(resumed.position, first.position); assert.equal(Object.hasOwn(resumed, "draft"), false);
   const savedA = await call("continue", "schema", "report", "--position", first.position!, "--artifact", '{"summary":"A"}');
-  assert.equal(savedA.draft.id, first.draft!.id);
+  assert.equal(savedA.artifactId, first.draft!.id);
   const untouched = await service.withGraph(g => g.schemaShow(run, b));
   assert.equal(untouched.draft!.id, second.draft!.id); assert.equal(untouched.draft!.content!.payload.content, '{"summary":"B"}');
 });
@@ -113,10 +122,10 @@ test("Continue submits each concurrent Schema draft once and preserves both comp
   const { call, raw, run, a, first, second } = await parallelDraftFixture(t, { a: "A", b: "B" });
   await raw("run", "step", "enter", "--run", run, "--step", a);
   const aDone = await call("continue", "report", "--artifact", '{"summary":"A"}'); assert.equal(aDone.artifactId, first.draft!.id);
-  const bDraft = await call("continue", "schema", "show"); assert.equal(bDraft.draft.id, second.draft!.id);
+  const bDraft = await call("continue", "schema", "show"); assert.equal(bDraft.artifactId, second.draft!.id);
   const bDone = await call("continue", "report", "--artifact", '{"summary":"B"}'); assert.equal(bDone.artifactId, second.draft!.id);
   const completed = await call("run", "show", "--run", run);
-  assert.deepEqual(new Set(completed.completeIds), new Set([first.draft!.id, second.draft!.id]));
+  assert.deepEqual(new Set(completed.steps.filter((step: any) => step.status === "done").map((step: any) => step.artifactId)), new Set([first.draft!.id, second.draft!.id]));
 });
 
 test("CLI status recovery replaces a previous failed diagnostic with the sealed submission hash", { timeout: 90000 }, async t => {
@@ -144,7 +153,10 @@ test("CLI status recovery replaces a previous failed diagnostic with the sealed 
   await call("run", "status", "--run", identity.run);
   const state = await call("run", "schema", "show", "--run", identity.run, "--step", identity.step);
   assert.equal(state.phase, "submitted");
-  assert.equal(state.validation.status, "passed"); assert.equal(state.validation.artifactId, identity.artifactId);
-  assert.equal(state.validation.sha256, createHash("sha256").update(final).digest("hex"));
-  assert.deepEqual(state.validation.issues, []);
+  assert.equal(state.validation.status, "passed");
+  assert.equal(state.validation.issueCount, 0);
+  const verified = await service.withGraph(g => g.schemaShow(identity.run, identity.step));
+  assert.equal(verified.validation?.artifactId, identity.artifactId);
+  assert.equal(verified.validation?.sha256, createHash("sha256").update(final).digest("hex"));
+  assert.deepEqual(verified.validation?.issues, []);
 });
