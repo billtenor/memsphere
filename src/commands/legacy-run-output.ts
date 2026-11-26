@@ -21,13 +21,14 @@ export function emitLegacyRun(
   const result: RunProgress = {
     runId: run.id, name: previewText(runDisplayName(run), 160).text, status: run.status, warningCount
   };
+  const overview = command === "run status" || command === "run start";
   const receipt = report ? buildRunReportReceiptPromptModel(run) : undefined;
   if (receipt) result.receipt = { artifactName: previewText(receipt.artifactName, 160).text, dataId: receipt.dataId };
   if (run.memorySource && run.memorySnapshot && ["run report", "run enter-schema", "run repeat", "run skip"].includes(command)) {
     result.memoryRun = run.id;
   }
   const review = currentArtifactReview(run);
-  if (review && ["pending", "awaiting_runner_vote"].includes(review.status)) {
+  if (run.status === "running" && review && ["pending", "awaiting_runner_vote"].includes(review.status)) {
     result.stepId = review.stepId;
     result.reviewId = review.id;
     result.roundId = review.currentRoundId;
@@ -50,6 +51,7 @@ export function emitLegacyRun(
         result.nextAction = makeCommand("repeat", "<count>", ...target);
       } else if (step.kind === "schema_finalization") {
         const final = currentSchemaFinalization(run)!;
+        result.stepId = final.parentStep.id;
         result.artifactName = previewText(step.artifactName, 160).text;
         result.schemaPhase = "awaiting_finalization";
         result.completedFields = step.completed;
@@ -57,13 +59,14 @@ export function emitLegacyRun(
         result.nextAction = makeCommand("artifact", "export", ...target, "--step",
           `${final.parentFrame.memoryName}#${final.parentStep.id}`, "--file", "<local-file>");
       } else {
-        result.actor = step.actor;
+        const schemaOverview = overview && step.kind === "schema_current_field";
+        if (!schemaOverview) result.actor = step.actor;
         result.instruction = previewText(step.instruction, 256).text;
         result.artifactName = previewText(step.artifact.name, 160).text;
-        result.artifactFormat = previewText(step.artifact.format, 160).text;
-        if ("modelTarget" in step.artifact) {
+        if (!schemaOverview) result.artifactFormat = previewText(step.artifact.format, 160).text;
+        if (!schemaOverview && "modelTarget" in step.artifact) {
           result.model = step.artifact.modelTarget?.modelRef;
-          result.dataId = step.artifact.modelTarget?.dataId;
+          if (!overview) result.dataId = step.artifact.modelTarget?.dataId;
         }
         rules.push(...step.asserts.map(text => ({ scope: "step", text })),
           ...step.suggests.map(text => ({ scope: "suggestion", text })));
@@ -85,7 +88,7 @@ export function emitLegacyRun(
         else if (next.optional) result.nextAction = { kind: "choose", choices: [submit, makeCommand("skip", ...target)] };
         else result.nextAction = submit;
       }
-      if (rules.length) {
+      if (rules.length && (!overview || result.actor !== undefined)) {
         result.rules = rules.slice(0, 5).map(rule => ({ scope: rule.scope, text: previewText(rule.text, 128).text }));
         result.ruleCount = rules.length;
       }

@@ -1,47 +1,64 @@
-import { cliProtocol } from "../src/prompts/contracts/dispatch.js";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-test("all reviewed schemas require their declared facts and reject extra facts at publication", async () => {
-  const { commandContracts } = await import("../src/prompts/contracts/registry.js");
-  const t = await import("../src/prompts/contracts/types.js");
-  const { renderCliResult } = await import("../src/commands/output.js");
-  const { z } = await import("zod");
-  function sample(type: import("zod").ZodTypeAny): unknown {
-    if (type === t.command || type === t.action) return { kind: "command", launcher: "memsphere", args: ["run", "status"] };
-    if (type === t.content) return { businessValue: null };
-    if (type instanceof z.ZodOptional) return undefined;
-    if (type instanceof z.ZodEffects) return sample(type.innerType());
-    if (type instanceof z.ZodLazy) return sample(type.schema);
-    if (type instanceof z.ZodObject) return Object.fromEntries(Object.entries(type.shape)
-      .filter(([, field]) => !(field as import("zod").ZodTypeAny).isOptional())
-      .map(([key, field]) => [key, sample(field as import("zod").ZodTypeAny)]));
-    if (type instanceof z.ZodUnion) return sample(type.options[0]);
-    if (type instanceof z.ZodEnum) return type.options[0];
-    if (type instanceof z.ZodLiteral) return type.value;
-    if (type instanceof z.ZodArray) return [];
-    if (type instanceof z.ZodRecord) return {};
-    if (type instanceof z.ZodBoolean) return false;
-    if (type instanceof z.ZodNull) return null;
-    if (type instanceof z.ZodNumber) return 0;
-    if (type instanceof z.ZodString) return "public";
-    throw new Error("No independent fixture for " + type.constructor.name);
+import { createCliProgram } from "../src/cli-program.js";
+import { formatCliCommand, renderCliResult } from "../src/commands/output.js";
+import { createReviewerContinueRouter } from "../src/commands/review-nodes.js";
+import { cliCommandSchema } from "../src/prompts/cli-output.js";
+import { withActionScope } from "../src/prompts/contracts/actions.js";
+import { cliProtocol, commandCases, selectReceipt, type CliRole, type ReceiptContext } from "../src/prompts/contracts/dispatch.js";
+
+type Example = { value: Record<string, unknown>; options?: Record<string, unknown>; context?: ReceiptContext };
+type Row = { id: string } & (Example | { like: string });
+
+function assertFacts(text: string, value: unknown, id: string) {
+  const command = cliCommandSchema.safeParse(value);
+  if (command.success) {
+    assert.ok(text.includes(formatCliCommand(command.data)) || text.includes(JSON.stringify(command.data)), id);
+  } else if (value && typeof value === "object") {
+    for (const item of Object.values(value)) assertFacts(text, item, id);
+  } else {
+    assert.ok(text.includes(String(value)), id + " missing " + String(value));
   }
-  for (const routes of Object.values(commandContracts)) {
-    for (const [route, entries] of Object.entries(routes)) for (const entry of entries) {
-      const value = sample(entry.schema) as Record<string, unknown>;
-      assert.deepEqual(entry.schema.parse(value), value, entry.id);
-      assert.equal(entry.schema.safeParse({ ...value, privateState: "private-sentinel" }).success, false, entry.id);
-      for (const key of Object.keys(value)) {
+}
+
+test("reviewed examples select exactly their authorized case and preserve every displayed fact", () => {
+  const program = createCliProgram();
+  const reviewerProgram = createReviewerContinueRouter(program.commands.find(c => c.name() === "run")!);
+  const approved = JSON.parse(readFileSync(new URL("./fixtures/cli-output-signatures.json", import.meta.url), "utf8"));
+  const lines = readFileSync(new URL("./fixtures/cli-output-scenarios.jsonl", import.meta.url), "utf8").trimEnd().split("\n");
+  const examples = new Map<string, Example>();
+  for (const line of lines) {
+    const row: Row = JSON.parse(line);
+    assert.ok(!examples.has(row.id), row.id);
+    const example = "like" in row ? examples.get(row.like) : row;
+    assert.ok(example, row.id);
+    examples.set(row.id, example);
+    const [role, route, signature]: [CliRole, string, string] = approved.cases[row.id];
+    const scope = { role, route, options: example.options ?? {}, args: [] };
+    const reviewer = role.startsWith("reviewer");
+    withActionScope({ program: reviewer ? reviewerProgram : program, reviewer, protocol: "graph" }, () => {
+      const select = (value: unknown) => selectReceipt(scope, value, true, example.context);
+      const { value } = example;
+      let selected;
+      try { selected = select(value); } catch (cause) { throw new Error(row.id, { cause }); }
+      assert.deepEqual(selected, { id: row.id, data: value }, row.id);
+      assert.throws(() => select({ ...value, privateState: "sentinel" }), /contract mismatch/, row.id);
+      const entry = commandCases(role, route)!.find(caseEntry => caseEntry.id === row.id)!;
+      for (const key of Object.keys(approved.fields[signature]).filter(k => !k.endsWith("?"))) {
         const incomplete = { ...value };
         delete incomplete[key];
-        assert.equal(entry.schema.safeParse(incomplete).success, false, entry.id + "." + key);
+        assert.equal(entry.schema.safeParse(incomplete).success, false, row.id + "." + key);
       }
-      if (cliProtocol(route) === "result" && route !== "data read") {
-        assert.deepEqual(JSON.parse(renderCliResult(route, entry.schema, value, { format: "json" })), value, entry.id);
-        for (const locale of ["en", "zh-CN"] as const) {
-          assert.ok(renderCliResult(route, entry.schema, value, { format: "text", locale }).includes(route), entry.id);
-        }
+      const nativeRoute = route.replace(/^continue /, role === "reviewerContinue" ? "run review " : "run ");
+      if (cliProtocol(nativeRoute) !== "result" || nativeRoute === "data read" || example.options?.out === "-") return;
+      assert.deepEqual(JSON.parse(renderCliResult(route, entry.schema, value, { format: "json" })), value, row.id);
+      for (const locale of ["en", "zh-CN"] as const) {
+        const text = renderCliResult(route, entry.schema, value, { format: "text", locale });
+        assert.ok(text.includes(route), row.id);
+        assertFacts(text, value, row.id);
       }
-    }
+    });
   }
+  assert.deepEqual([...examples.keys()].sort(), Object.keys(approved.cases).sort());
 });

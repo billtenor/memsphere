@@ -1,6 +1,6 @@
 import { withActionScope } from "../prompts/contracts/actions.js";
 import { acceptsPublicError } from "../prompts/contracts/errors.js";
-import { publicReceipt, commandCases, type OutputScope, cliProtocol } from "../prompts/contracts/dispatch.js";
+import { publicReceipt, commandCases, type OutputScope, type ReceiptContext, cliProtocol } from "../prompts/contracts/dispatch.js";
 import { writeCliChunk } from "../cli-transport.js";
 import { paginateItems, type CursorScope, type PaginationOptions } from "../pagination.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -161,6 +161,7 @@ function presentAction(action: CliAction): NonNullable<CliResultPrompt["action"]
 }
 
 type ResultOptions = {
+  receiptContext?: ReceiptContext;
   format?: CliFormat;
   locale?: PromptLocale;
   contentField?: string;
@@ -191,15 +192,15 @@ export function publishResult(command: string, value: unknown, options: ResultOp
   state.pending.push(pending);
 }
 
-export function validateCommandResult(command: string, value: unknown, saved?: ResultOptions["saved"]) {
+export function validateCommandResult(command: string, value: unknown, saved?: ResultOptions["saved"], receiptContext?: ReceiptContext) {
   const state = invocation.getStore();
   const scope = state?.scope;
   try {
     if (scope && state.program) {
       return withActionScope({ program: state.program, reviewer: scope.role.startsWith("reviewer"),
-        protocol: state.reviewerProtocol, project: process.env.MEMSPHERE_PROJECT }, () => publicReceipt(scope, value));
+        protocol: state.reviewerProtocol, project: process.env.MEMSPHERE_PROJECT }, () => publicReceipt(scope, value, true, receiptContext));
     }
-    return publicReceipt(scope ?? { route: command, role: "native", options: {}, args: [] }, value, scope !== undefined);
+    return publicReceipt(scope ?? { route: command, role: "native", options: {}, args: [] }, value, scope !== undefined, receiptContext);
   } catch (error) {
     throw new CliOutputError(saved, error);
   }
@@ -207,7 +208,7 @@ export function validateCommandResult(command: string, value: unknown, saved?: R
 
 export function renderCommandResult(command: string, value: unknown, options: ResultOptions = {}): string {
   try {
-    const selected = validateCommandResult(command, typeof value === "function" ? value() : value, options.saved);
+    const selected = validateCommandResult(command, typeof value === "function" ? value() : value, options.saved, options.receiptContext);
     const scope = invocation.getStore()?.scope;
     const route = scope?.route ?? command;
     const fullContent = options.contentField || command === "run artifact contract show"

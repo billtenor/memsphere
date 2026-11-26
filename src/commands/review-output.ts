@@ -71,7 +71,7 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
       if (input.taskId) {
         return publishResult(command, () => registeredWait.parse({ ...summary, taskId: input.taskId, nextAction: { kind: "wait", resume } }), options);
       }
-      return publishResult(command, () => reviewReceipts[command].parse(receipt), options);
+      return publishResult(command, () => reviewReceipts[command].parse(receipt), { ...options, receiptContext: input.statusOnly ? "historical-round" : undefined });
     case "run review vote":
       return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, vote: input.vote! }), options);
     case "run review retry":

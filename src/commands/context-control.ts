@@ -227,9 +227,9 @@ export async function tryContextCommand(operation: string, options: object, scop
       publishResult("run status", () => runProgressSchema.parse({
         runId, name: previewText(run.name, 160).text, status: snapshot.run.status,
         completedSteps: snapshot.steps.filter(step => step.status === "done").length,
-        stepId: open?.id, stepStatus: open?.status, details: cliCommand(["--project", project, "run", "show", "--run", runId]),
+        stepId: run.status === "running" ? open?.id : undefined, stepStatus: run.status === "running" ? open?.status : undefined, details: cliCommand(["--project", project, "run", "show", "--run", runId]),
         ...(snapshot.run.status === "running" && available ? { nextAction: cliCommand(["continue", "--help"]) } : {})
-      }), { format: o.output, locale: run.language, maximumBytes: 8192 });
+      }), { format: o.output, locale: run.language, maximumBytes: 8192, receiptContext: "exploration-run" });
       return true;
     }
     const inspected = await s.inspect(runId);
@@ -412,7 +412,7 @@ export async function startExploration(options: object) {
     publishResult("run start", () => runProgressSchema.parse({
       runId: run.id, name: previewText(run.name, 160).text, status: run.status,
       nextAction: context ? cliCommand(["continue", "--help"]) : inspect
-    }), { format: o.output, locale: run.language, saved: { id: run.id, inspect } });
+    }), { receiptContext: "exploration-run", format: o.output, locale: run.language, saved: { id: run.id, inspect } });
   } catch (error) {
     if (error instanceof CliOutputError) throw error;
     throw new CliOutputError({ id: run.id, inspect }, error);

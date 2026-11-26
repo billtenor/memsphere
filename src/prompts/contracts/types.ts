@@ -36,7 +36,7 @@ export function object(shape: z.ZodRawShape) {
 }
 
 export function receipt(id: string, scenario: string, fields: z.ZodRawShape) {
-  return { id, scenario, fields, schema: object(fields) };
+  return { id, sourceId: id, scenario, fields, schema: object(fields) };
 }
 export type ReceiptCase = ReturnType<typeof receipt>;
 

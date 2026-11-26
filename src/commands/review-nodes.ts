@@ -46,7 +46,7 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
     if (!options.comment) throw new Error("review_comment_required");
     result = operation === "comment-delete" ? await mutateBoundReviewNode({ operation, commentId: options.comment }) : await mutateBoundReviewNode({ operation, commentId: options.comment, artifact: nodeCommentUpdateSchema.parse(input) });
   } else throw new Error("review_operation_invalid");
-  emitReviewNodeResult(operation, result, { format: options.output, locale: context.run.language, reviewer: true });
+  emitReviewNodeResult(operation, result, { format: options.output, locale: context.run.language, reviewer: true, boundReviewId: context.review.id });
 }
 
 async function explorationReviewNodes(operation: string, options: ReviewNodeOptions, input: unknown, scope?: ContextCommandScope) {

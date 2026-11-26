@@ -1,6 +1,8 @@
 import { invokeCliModule } from "./helpers/cli-module.js";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
 import { writeData } from "../src/project/data-service.js";
@@ -179,4 +181,84 @@ test("reading a null record preserves null in both formats and excludes it in me
   assert.match(text.stdout, /(?:正文：|Content:)\nnull\n$/);
   const { value, ...expectedMetadata } = JSON.parse(json.stdout);
   assert.deepEqual(JSON.parse(metadata.stdout), expectedMetadata);
+});
+
+test("Runner and debug commands keep session identifiers private in both representations", async t => {
+  const fixture = await businessFixture(t);
+  const clean: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: fixture.home };
+  for (const name of Object.keys(clean)) {
+    if (/^(?:path|codex_thread_id|traecli_thread_id|claude_code_session_id|memsphere_review_.+)$/i.test(name)) delete clean[name];
+  }
+  clean.PATH = fixture.cwd; // A real lookup in an empty directory gives a deterministic missing result.
+  const session = "private-session-sentinel";
+  const execute = (args: string[], env: NodeJS.ProcessEnv, json: boolean) => {
+    const r = spawnSync(process.execPath, [entry, ...args, ...(json ? ["--output", "json"] : [])], {
+      cwd: fixture.cwd, env: { ...clean, ...env }, encoding: "utf8", timeout: 15000
+    });
+    assert.ifError(r.error);
+    assert.doesNotMatch(r.stdout + r.stderr, /private-session-sentinel|sessionId|installHelp|detectedAt/);
+    return r;
+  };
+  for (const json of [true, false]) {
+    const detection = execute(["runner", "detect"], {}, json);
+    assert.equal(detection.status, 0, detection.stderr);
+    assert.equal(detection.stderr, "");
+    const items = ["codex", "traex", "claude"].map(type => ({ type, status: "missing" }));
+    if (json) assert.deepEqual(JSON.parse(detection.stdout), { items });
+    else for (const { type } of items) assert.ok(detection.stdout.includes(type) && detection.stdout.includes("missing"));
+    for (const identified of [true, false]) {
+      const env = identified ? { CODEX_THREAD_ID: session } : {};
+      for (const args of [["runner", "identity"], ["debug-thread-id"]]) {
+        const reply = execute(args, env, json);
+        const runner = args.length === 2;
+        assert.equal(reply.status, runner || identified ? 0 : 1, reply.stderr);
+        assert.equal(reply.stderr, "");
+        if (json) assert.deepEqual(JSON.parse(reply.stdout), runner && identified ? { identified, agentType: "codex" } : { identified });
+        else {
+          assert.match(reply.stdout, new RegExp("identified[：:] ?" + identified));
+          if (runner && identified) assert.match(reply.stdout, /agentType[：:] ?codex/);
+        }
+      }
+    }
+    const conflict = execute(["runner", "identity"], { CODEX_THREAD_ID: session, TRAECLI_THREAD_ID: session }, json);
+    assert.equal(conflict.status, 1);
+    assert.equal(conflict.stdout, "");
+    assert.match(conflict.stderr, /INTERNAL_ERROR/);
+  }
+});
+
+test("CLI registry commands publish only public registration fields in text and JSON", async t => {
+  const id = "example.inspection";
+  for (const format of [undefined, "json"] as const) {
+    const f = await businessFixture(t);
+    const descriptor = join(f.cwd, "private-descriptor.json");
+    const binding = join(f.cwd, "private-binding.json");
+    await writeFile(descriptor, JSON.stringify({ schemaVersion: 1, id, name: "Inspection", description: "Test tool",
+      command: [process.execPath], versionProbe: { args: ["--version"], format: "semver" } }));
+    await writeFile(binding, JSON.stringify({ schemaVersion: 1, args: ["private-bound-argument"] }));
+    const invoke = (args: string[], allowed: string[]) => {
+      const result = cli(f, ["cli", ...args], format);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, "");
+      assert.ok(result.stdout.includes(id));
+      assert.ok(!result.stdout.includes(process.execPath));
+      assert.doesNotMatch(result.stdout, /private-|invocation|descriptorPath|envFrom/);
+      if (format === "json") {
+        const value = JSON.parse(result.stdout);
+        assert.deepEqual(Object.keys(value).filter(key => !allowed.includes(key)), []);
+        return value;
+      }
+    };
+    invoke(["register", descriptor], ["id", "status"]);
+    invoke(["bind", id, "--binding", binding], ["id", "status", "project", "app"]);
+    const page = invoke(["list"], ["items", "nextCursor"]);
+    const detail = invoke(["show", id], ["id", "status", "project", "app", "apps"]);
+    const checked = invoke(["check", id], ["id", "status", "app", "items", "total"]);
+    if (format === "json") {
+      assert.equal(page.items.find((item: { id: string }) => item.id === id).id, id);
+      assert.equal(detail.id, id);
+      assert.equal(checked.status, "available");
+      for (const item of checked.items) assert.deepEqual(Object.keys(item).sort(), ["name", "status"]);
+    }
+  }
 });

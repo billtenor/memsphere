@@ -233,7 +233,7 @@
     "cli-debug-thread-id-1": [
       "native",
       "debug-thread-id",
-      "cli-runner-identity-2"
+      "cli-debug-thread-id-1"
     ],
     "cli-project-models-initialize-1": [
       "native",
@@ -1635,11 +1635,11 @@
       "items": "[{status:\"failed\"|\"installed\"|\"missing\"|\"version_unknown\",type:string,version?:string}]"
     },
     "cli-runner-identity-1": {
-      "identified": "boolean",
+      "identified": "true",
       "agentType": "\"claude\"|\"codex\"|\"traex\""
     },
     "cli-runner-identity-2": {
-      "identified": "boolean"
+      "identified": "false"
     },
     "cli-model-list-1": {
       "items": "[{errorCode?:string,id:string,name?:string,origin?:string,status:string,title?:string}]",
@@ -3027,6 +3027,9 @@
       "rules?": "[{scope:string,text:string}]≤8",
       "ruleCount?": "int",
       "nextAction?": "Action"
+    },
+    "cli-debug-thread-id-1": {
+      "identified": "boolean"
     }
   }
 }

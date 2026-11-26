@@ -66,6 +66,7 @@ function publicReviewView(raw: unknown): ReviewView {
 
 export function emitReviewNodeResult(operation: string, raw: unknown, options: ReceiptOptions & {
   warnings?: ReviewView["warnings"];
+  boundReviewId?: string;
 }): void {
   const result = publicReviewView(raw);
   const launcher = options.reviewer ? "reviewer" : "memsphere";
@@ -104,8 +105,9 @@ export function emitReviewNodeResult(operation: string, raw: unknown, options: R
       vote: result.vote, summary: result.summary, nextAction: result.comments ? undefined : nextAction }; break;
     default: throw new Error("Unknown review node operation");
   }
+  const savedId = options.reviewer ? receipt.savedNodeId ?? receipt.commentId ?? options.boundReviewId : result.reviewId;
   publishResult(`run review ${command}`, () => nodeResult.parse(receipt), { ...options, itemsField: "nodes",
-    saved: changed && result.reviewId ? { id: result.reviewId, inspect: action(["show"]) } : undefined
+    saved: changed && savedId ? { id: savedId, inspect: action(options.reviewer ? ["show", "--all"] : ["show"]) } : undefined
   });
 }
 

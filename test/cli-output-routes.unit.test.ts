@@ -121,3 +121,46 @@ test("every reviewed scenario preserves its public field types and visibility", 
   }
   assert.deepEqual([...seen].sort(), Object.keys(approved.cases).sort());
 });
+
+test("terminal Run receipts and Runner identity select exactly their own public state", async () => {
+  const { selectReceipt } = await import("../src/prompts/contracts/dispatch.js");
+  const read = (route: string, value: unknown) => selectReceipt({ route, role: "native", options: {}, args: [] }, value);
+  for (const route of ["run start", "run status"]) {
+    for (const status of ["done", "abandoned"]) {
+      const terminal = { runId: "run-1", name: "Finished", status };
+      assert.equal(read(route, terminal).id, "cli-" + route.replace(" ", "-") + "-6");
+      const nextAction = { kind: "command", launcher: "memsphere", args: ["run", "report", "--run", "run-1", "--artifact", "again"] };
+      assert.throws(() => read(route, { ...terminal, nextAction }), /contract mismatch/);
+      assert.throws(() => read(route, { ...terminal, details: nextAction }), /contract mismatch/);
+    }
+  }
+  assert.equal(read("runner identity", { identified: false }).id, "cli-runner-identity-2");
+  assert.equal(read("runner identity", { identified: true, agentType: "codex" }).id, "cli-runner-identity-1");
+  assert.throws(() => read("runner identity", { identified: true }), /contract mismatch/);
+  assert.throws(() => read("runner identity", { identified: false, agentType: "codex" }), /contract mismatch/);
+});
+
+
+test("historical wait links can only inspect the pinned round", async () => {
+  const { selectReceipt } = await import("../src/prompts/contracts/dispatch.js");
+  const scope = { role: "native" as const, route: "run review wait", args: [], options: {} };
+  const receipt = { runId: "r", stepId: "s", reviewId: "review", roundId: "old", candidateId: "a",
+    scope: "decision", status: "passed", roundStatus: "passed", assignmentCount: 1, commentCount: 0 };
+  const check = (args: string[]) => {
+    const details = { kind: "command", launcher: "memsphere", args };
+    return selectReceipt(scope, { ...receipt, details, nextAction: details }, true, "historical-round");
+  };
+  assert.equal(check(["run", "review", "show", "--review", "review", "--round", "old", "--all"]).id, "cli-run-review-wait-3");
+  assert.throws(() => check(["run", "review", "show", "--review", "review", "--round", "new", "--all"]), /contract mismatch/);
+  assert.throws(() => check(["run", "report", "--run", "r", "--artifact", "again"]), /contract mismatch/);
+});
+
+test("duplicate eligible contract cases fail closed", async () => {
+  const { selectReceipt } = await import("../src/prompts/contracts/dispatch.js");
+  const cases = commandCases("native", "runner detect")!;
+  cases.push({ ...cases[0], id: "duplicate-test-case" });
+  try {
+    assert.throws(() => selectReceipt({ role: "native", route: "runner detect", args: [], options: {} },
+      { items: [] }), /Ambiguous CLI contract/);
+  } finally { cases.pop(); }
+});

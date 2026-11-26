@@ -395,3 +395,38 @@ test("scoped Reviewer reads bound Artifact previews and exports its original bod
   assert.deepEqual((await store.get({}, projected.destination.dataId))?.value, body);
   assert.equal((await store.get({}, projected.destination.dataId))?.revision, "1");
 });
+
+test("restricted Reviewer can verify persisted nodes and comments through its own launcher after stdout fails", async t => {
+  const f = await evidenceFixture(t);
+  await reviews.markArtifactReviewAgentCliReady({ ...f.input, attemptId: f.first.attempt.id });
+  const before = await reviews.readArtifactReviewForActor(f.input);
+  const nodeId = currentReviewNode(before.assignment)!.nodeId;
+  const preload = join(f.f.directory, "receipt-channel.mjs");
+  await writeFile(preload, 'process.stdout.write = (_chunk, callback) => { setImmediate(() => callback(new Error("private-write-error"))); return false; };');
+  const { pathToFileURL } = await import("node:url");
+  const failed = await f.cli(["continue", "report", "--artifact", '{"applicable":true}', "--output", "json"],
+    { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+  assert.equal(failed.status, 1);
+  assert.equal(failed.stdout, "");
+  const inspect = { kind: "command", launcher: "reviewer", args: ["continue", "show", "--all"] };
+  assert.deepEqual(JSON.parse(failed.stderr), { error: { code: "OUTPUT_RENDER_FAILED", details: { savedId: nodeId }, nextAction: inspect } });
+  const verified = await f.cli([...inspect.args, "--output", "json"]);
+  assert.equal(verified.status, 0, verified.stderr);
+  const saved = JSON.parse(verified.stdout);
+  assert.equal(saved.progress.processed, 1);
+  assert.ok(saved.nodes.find((node: { nodeId: string; reported: boolean }) => node.nodeId === nodeId && node.reported));
+  const openNode = saved.nodes.find((node: { kind?: string }) => node.kind === "open_review");
+  assert.ok(openNode);
+  const commentFailure = await f.cli(["continue", "comment", "add", "--node", openNode.nodeId,
+    "--artifact", JSON.stringify({ body: "Verify persisted comment", severity: "suggestion" }), "--output", "json"],
+    { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+  assert.equal(commentFailure.status, 1);
+  assert.equal(commentFailure.stdout, "");
+  const persisted = (await reviews.readArtifactReviewForActor(f.input)).assignment.draft.comments
+    .filter(comment => comment.body === "Verify persisted comment");
+  assert.equal(persisted.length, 1);
+  assert.ok(persisted[0].commentId);
+  assert.deepEqual(JSON.parse(commentFailure.stderr), { error: {
+    code: "OUTPUT_RENDER_FAILED", details: { savedId: persisted[0].commentId }, nextAction: inspect
+  } });
+});
