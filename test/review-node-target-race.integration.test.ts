@@ -4,9 +4,9 @@ import test from "node:test";
 import fsPromises from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
-import { Command } from "commander";
+import { createCliProgram } from "../src/cli-program.js";
+import { parseCli } from "../src/commands/cli-errors.js";
 import { GraphRuntime } from "../src/context_control/graph-runtime.js";
-import { registerReviewNodeCommands, reviewerContinue } from "../src/commands/review-nodes.js";
 import { reviewNodeFixture } from "./helpers/review-nodes.js";
 import * as reviews from "../src/context_control/review-repository.js";
 import { currentReviewNode, reviewCommentId, reviewNodeProgress } from "../src/review-nodes.js";
@@ -14,16 +14,6 @@ import { currentReviewNode, reviewCommentId, reviewNodeProgress } from "../src/r
 // Use the actual native and Continue routers with the bound Session and stores.
 // The controlled barrier inserts another valid report at the personal save
 // boundary, after the Session has already resolved its default target.
-function nativeRouter() {
-  const run = new Command("run"), review = run.command("review");
-  review.command("comment");
-  review.command("submit").option("--vote <value>");
-  review.command("list");
-  review.command("show");
-  registerReviewNodeCommands(run);
-  return run;
-}
-
 for (const graph of [true, false]) for (const route of ["native", "continue"]) {
   for (const scenario of ["rule", "reason", "conflict"] as const) {
     test(`${graph ? "graph" : "flow"} ${route}: default comment target survives concurrent report (${scenario})`, async t => {
@@ -36,7 +26,7 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
         MEMSPHERE_REVIEW_ASSIGNMENT_ID: f.claimed.assignment.id!,
         MEMSPHERE_REVIEW_ATTEMPT_ID: f.bound.attemptId
       };
-      const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+      const previous = Object.fromEntries([...Object.keys(env), "MEMSPHERE_PROJECT"].map(key => [key, process.env[key]]));
       Object.assign(process.env, env);
       t.after(() => {
         for (const [key, value] of Object.entries(previous)) {
@@ -93,10 +83,9 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
         ? { rulePath: node.asserts[0].rulePath, result: "undetermined", body: "Need evidence", severity: "risk" }
         : { body: "Outside role", severity: "suggestion" };
       const args = ["comment", "add", "--artifact", JSON.stringify(body), "--output", "json"];
-      const router = nativeRouter();
-      const execute = () => route === "continue"
-        ? reviewerContinue(router, args)
-        : router.parseAsync(["review", ...args], { from: "user" });
+      const execute = () => parseCli(createCliProgram(), [
+        process.execPath, "memsphere", ...(route === "continue" ? ["continue"] : ["run", "review"]), ...args
+      ], { rethrow: true });
       if (scenario === "conflict") await assert.rejects(execute(), /review_reason_already_exists/);
       else await execute();
       assert.equal(inserted, true, "the concurrent report ran at the repository boundary");

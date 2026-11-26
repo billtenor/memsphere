@@ -394,6 +394,7 @@ export function paginate(ids: readonly string[], options: ListOptions | undefine
   const limit = options?.limit === undefined ? 100 : options.limit;
   requirePositiveInteger(limit, "limit");
   if (limit > 1000) throw new RangeError("limit must not exceed 1000");
+  const scopeHash = createHash("sha256").update(scope).digest("hex");
   let after: string | undefined;
   if (options?.cursor !== undefined) {
     requireString(options.cursor, "cursor");
@@ -401,8 +402,8 @@ export function paginate(ids: readonly string[], options: ListOptions | undefine
       const decoded = Buffer.from(options.cursor, "base64url");
       if (decoded.toString("base64url") !== options.cursor) throw new Error();
       const cursor = JSON.parse(decoded.toString("utf8")) as unknown;
-      if (typeof cursor !== "object" || cursor === null || !("scope" in cursor) || cursor.scope !== scope || !("after" in cursor) || typeof cursor.after !== "string" || !("check" in cursor)) throw new Error();
-      const check = createHash("sha256").update(JSON.stringify([scope, cursor.after])).digest("hex");
+      if (typeof cursor !== "object" || cursor === null || !("scope" in cursor) || (cursor.scope !== scopeHash && cursor.scope !== scope) || !("after" in cursor) || typeof cursor.after !== "string" || !("check" in cursor)) throw new Error();
+      const check = createHash("sha256").update(JSON.stringify([cursor.scope, cursor.after])).digest("hex");
       if (cursor.check !== check) throw new Error();
       after = cursor.after;
     } catch {
@@ -415,8 +416,8 @@ export function paginate(ids: readonly string[], options: ListOptions | undefine
   const result: ListResult = { items: selected.map((id) => ({ id })) };
   if (start !== -1 && start + selected.length < sorted.length) {
     const last = selected[selected.length - 1];
-    const check = createHash("sha256").update(JSON.stringify([scope, last])).digest("hex");
-    result.nextCursor = Buffer.from(JSON.stringify({ scope, after: last, check }), "utf8").toString("base64url");
+    const check = createHash("sha256").update(JSON.stringify([scopeHash, last])).digest("hex");
+    result.nextCursor = Buffer.from(JSON.stringify({ scope: scopeHash, after: last, check }), "utf8").toString("base64url");
   }
   return result;
 }

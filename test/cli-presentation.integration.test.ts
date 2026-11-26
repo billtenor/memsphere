@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
 import { publicCommandError } from "../src/commands/cli-errors.js";
-import { cliCommand, renderCliError, renderCliResult } from "../src/commands/output.js";
+import { cliCommand, renderCommandResult, renderCliError, renderCliResult } from "../src/commands/output.js";
 import { nextAction } from "../src/prompts/cli-output.js";
 
 const resultSchema = z.object({
@@ -75,7 +75,7 @@ test("localized errors omit the lines for unrelated error codes", async () => {
   }
 });
 
-test("schema mutation previews direct readers to the complete current instruction and rules", async (t) => {
+test("schema mutation previews direct readers to the complete current instruction and rules", async () => {
   const { emitSchemaWriting } = await import("../src/commands/schema-output.js");
   const instruction = "x".repeat(500) + "REQUIRED_END";
   const entries = Array.from({ length: 9 }, (_, index) => ({
@@ -83,11 +83,13 @@ test("schema mutation previews direct readers to the complete current instructio
   }));
   const step = { runId: "run-123", stepId: "step-123", phase: "writing", position: "pos",
     current: { id: "field", instruction }, rules: { asserts: { channel: "asserts" as const, entries, sections: [] } } };
-  let output = "";
-  t.mock.method(process.stdout, "write", (chunk: string) => { output = chunk; return true; });
+  const options = { project: "test", locale: "en" as const };
   for (const format of ["json", "text"] as const) {
-    const options = { project: "test", locale: "en" as const, format };
-    emitSchemaWriting("run enter-schema", step, options);
+    const present = (route: string) => {
+      const result = emitSchemaWriting(route, step, options);
+      return renderCommandResult(route, result.facts, { format, locale: result.locale });
+    };
+    let output = present("run enter-schema");
     assert.doesNotMatch(output, /REQUIRED_END|RULE_END_8|internal-path/);
     if (format === "json") {
       const preview = JSON.parse(output);
@@ -95,7 +97,7 @@ test("schema mutation previews direct readers to the complete current instructio
       assert.equal(preview.ruleCount, 9);
       assert.deepEqual(preview.nextAction.args, ["--project", "test", "run", "schema", "show", "--run", "run-123", "--step", "step-123"]);
     } else assert.match(output, /run schema show/);
-    emitSchemaWriting("run schema show", step, options);
+    output = present("run schema show");
     assert.match(output, /REQUIRED_END/);
     assert.match(output, /RULE_END_8/);
     assert.doesNotMatch(output, /internal-path/);
