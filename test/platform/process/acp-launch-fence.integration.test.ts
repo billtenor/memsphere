@@ -109,7 +109,7 @@ createInterface({ input: process.stdin }).on("line", line => {
   } else if (method === "session/new") {
     assert.deepEqual(params.mcpServers, []);
     const options = params._meta.claudeCode.options;
-    assert.deepEqual(options.settingSources, []);
+    assert.equal(Object.hasOwn(options, "settingSources"), false);
     assert.deepEqual(options.tools, ["Bash", "Read"]);
     assert.equal(options.model, "fixture-claude-model");
     assert.equal(options.allowDangerouslySkipPermissions, false);

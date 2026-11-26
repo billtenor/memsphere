@@ -19,7 +19,7 @@ export function validateAcpProviderConfiguration(input: {
   validateProviderCommand(input.type, input.command);
   if (input.type === "claude") {
     for (const name of Object.keys(input.env ?? {})) {
-      if (name !== "ANTHROPIC_BASE_URL") {
+      if (name !== "ANTHROPIC_BASE_URL" && name !== "CLAUDE_CONFIG_DIR") {
         throw new AcpProviderConfigurationError("env", `Claude Reviewer does not allow configuring ${name}`);
       }
     }
