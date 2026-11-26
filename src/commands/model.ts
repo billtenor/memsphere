@@ -4,7 +4,7 @@ import { readConfig } from "../config.js";
 import { listModels, readModel, mutateModel, validateModel, assertWritableModelRef, type ModelManagementFields } from "../project/model-service.js";
 import { assertModelRef } from "../project/model-registration-contract.js";
 import { serviceError } from "../project/business-stores.js";
-import { addCliOutput, cliPageBudget, publishResult } from "./output.js";
+import { savedResult, addCliOutput, cliPageBudget, publishResult } from "./output.js";
 import { modelLabel, modelListResult, modelReadResult, modelValidationResult, modelWriteResult, publicRegistration } from "./business-output.js";
 import { readInputText } from "./input.js";
 
@@ -61,7 +61,7 @@ export function registerModelCommands(program: Command) {
       publishResult("model " + operation, () => modelWriteResult.parse({
         project: config.project?.name, operation: result.operation, modelRef: result.modelRef,
         registration: result.registration && publicRegistration(result.registration), dryRun: result.dryRun ? true : undefined
-      }), { format: options.output });
+      }), { format: options.output, saved: options.dryRun ? undefined : savedResult(ref, ["model", "read", ref, "--part", "registration"], config.project?.name) });
     });
   }
   output(model.command("delete <model-ref>").description("Delete an unused writable model").option("--dry-run"))
@@ -71,7 +71,7 @@ export function registerModelCommands(program: Command) {
       publishResult("model delete", () => modelWriteResult.parse({
         project: config.project?.name, operation: result.operation, modelRef: result.modelRef,
         dryRun: result.dryRun ? true : undefined
-      }), { format: options.output });
+      }), { format: options.output, saved: options.dryRun ? undefined : savedResult(ref, ["model", "list", "--query", ref], config.project?.name) });
     });
   output(model.command("validate <model-ref>").description("Validate saved or candidate definition without saving")
     .option("--definition-file <path|->", "Candidate definition JSON; - reads stdin")

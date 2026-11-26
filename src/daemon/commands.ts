@@ -7,7 +7,7 @@ import { readConfig } from "../config.js";
 import { inspectReview } from "./review.js";
 import { prepareClaudeReviewRecipient } from "./claude-review-callback.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
-import { addCliOutput, cliCommand, publishResult, paginateCliItems, previewText } from "../commands/output.js";
+import { addCliOutput, cliCommand, savedResult, publishResult, paginateCliItems, previewText } from "../commands/output.js";
 import { daemonStatusSchema, publicDaemonStatus } from "./public-status.js";
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
@@ -28,7 +28,9 @@ const retrySchema = z.object({ taskId: z.string(), roundId: z.string(), status: 
 
 async function showDaemon(command: string) {
   const status = await daemonStatus();
-  publishResult(command, () => daemonStatusSchema.parse(publicDaemonStatus(status)));
+  publishResult(command, () => daemonStatusSchema.parse(publicDaemonStatus(status)), {
+    saved: command === "daemon status" ? undefined : savedResult("daemon", ["daemon", "status"])
+  });
 }
 
 export function registerDaemonCommands(program: Command) {

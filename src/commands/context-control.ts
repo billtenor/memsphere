@@ -151,7 +151,7 @@ export async function tryContextCommand(operation: string, options: object, scop
     if (!context) throw failure("AGENT_SESSION_REQUIRED", "Enable Agent identity to bind this Run");
     publishResult("run enter", () => runReference.parse({ runId, reviewId: o.review,
       nextAction: cliCommand(o.review ? ["continue", "review", "show"] : ["continue", "--help"])
-    }), display);
+    }), { ...display, saved: { id: runId, inspect: invoke("show") } });
     return true;
   }
   if (schemaOperations.has(operation)) {
@@ -267,7 +267,7 @@ export async function tryContextCommand(operation: string, options: object, scop
     throw failure("INVALID_ARGUMENT", "Prepare the content and report it directly; artifact create is not supported");
   } else if (operation === "artifact-tag") {
     const artifact = await s.tag(runId, requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"), o.tag ?? []);
-    publishResult("run artifact tag", () => explorationReceipt.parse({ runId, artifactId: artifact.id, tags: artifact.tags }), display);
+    publishResult("run artifact tag", () => explorationReceipt.parse({ runId, artifactId: artifact.id, tags: artifact.tags }), { ...display, saved: { id: artifact.id, inspect: invoke("artifact", "show", "--artifact", artifact.id) } });
     return true;
   } else if (operation === "artifact-impact") {
     const id = requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact");
@@ -284,7 +284,7 @@ export async function tryContextCommand(operation: string, options: object, scop
       const external = await s.addExternal(runId, `memsphere:changeset:${o.change}@${o.checkpoint}`, { content: textContent(JSON.stringify(captured), "application/json") });
       publishResult("run external add", () => explorationReceipt.parse({
         runId, externalId: external.id, source: external.source, checkpointDigest: o.checkpoint
-      }), display);
+      }), { ...display, saved: { id: external.id, inspect: invoke("external", "show", "--external", external.id) } });
       return true;
     }
     if (o.file && (o.source !== undefined || o.content !== undefined || o.contentType !== undefined)) throw failure("INVALID_ARGUMENT", "Use file or source/content");
@@ -292,14 +292,14 @@ export async function tryContextCommand(operation: string, options: object, scop
     const external = await s.addExternal(runId, requireOption(input.source as string, "--source"), input as Body);
     publishResult("run external add", () => explorationReceipt.parse({
       runId, externalId: external.id, source: previewText(external.source, 256).text
-    }), display);
+    }), { ...display, saved: { id: external.id, inspect: invoke("external", "show", "--external", external.id) } });
     return true;
   } else if (operation === "review-create") {
     if (o.commentFile && o.comment?.length) throw failure("INVALID_ARGUMENT", "Use --comment or --comment-file");
     const comments = o.commentFile ? [await readFile(o.commentFile, "utf8")] : o.comment ?? [];
     if (o.reviewer !== "human" && o.reviewer !== "agent") throw failure("INVALID_ARGUMENT", "Light feedback requires --reviewer human or agent");
     const review = await s.review(runId, requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"), o.reviewer, comments);
-    publishResult("run review create", () => lightReviewDetail.parse({ runId, ...publicLightReview(review) }), display);
+    publishResult("run review create", () => lightReviewDetail.parse({ runId, ...publicLightReview(review) }), { ...display, saved: { id: review.id, inspect: invoke("review", "show", "--review", review.id) } });
     return true;
   } else if (operation === "outputs-list" || operation === "outputs-update") {
     if (operation === "outputs-update") await s.updateOutputs(runId, o.add ?? [], o.remove ?? []);
@@ -310,7 +310,7 @@ export async function tryContextCommand(operation: string, options: object, scop
         const artifact = snapshot.artifacts.find(a => a.id === id)!;
         return { id, name: previewText(artifact.name, 160).text, status: artifact.status };
       })
-    }), display);
+    }), { ...display, saved: operation === "outputs-update" ? { id: runId, inspect: invoke("show") } : undefined });
     return true;
   } else if (operation === "review-start") {
     const expected = { row: o.sessionRow ?? await currentCommandState() };
@@ -383,7 +383,7 @@ export async function tryContextCommand(operation: string, options: object, scop
     const warnings = await closeRunCommandStates(project, runId, config.homeRoot);
     publishResult("run finish", () => runProgressSchema.parse({
       runId, name: previewText(finished.name, 160).text, status: finished.status, warningCount: warnings.length
-    }), display);
+    }), { ...display, saved: { id: runId, inspect: invoke("show") } });
     return true;
   } else if (operation === "abandon") {
     if (o.reason !== undefined && o.reasonFile) throw failure("INVALID_ARGUMENT", "Use reason or reason-file");
@@ -391,7 +391,7 @@ export async function tryContextCommand(operation: string, options: object, scop
     const warnings = await closeRunCommandStates(project, runId, config.homeRoot);
     publishResult("run abandon", () => runProgressSchema.parse({
       runId, name: previewText(abandoned.name, 160).text, status: abandoned.status, warningCount: warnings.length
-    }), display);
+    }), { ...display, saved: { id: runId, inspect: invoke("show") } });
     return true;
   } else throw failure("INVALID_ARGUMENT", `Unknown context control operation: ${operation}`);
   return true;

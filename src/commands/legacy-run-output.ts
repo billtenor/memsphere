@@ -93,7 +93,7 @@ export function emitLegacyRun(
   }
   publishResult(command, () => runProgressSchema.parse(result), {
     locale: run.language, format, maximumBytes: 8192,
-    ...(report || command === "run start" ? { saved: { id: run.id, inspect } } : {})
+    ...(command !== "run status" ? { saved: { id: run.id, inspect } } : {})
   });
 }
 

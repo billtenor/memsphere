@@ -51,7 +51,7 @@ function readOnlyRecovery(command: CliCommand): boolean {
   const words: string[] = [];
   const flags = new Set<string>();
   const valued = new Set(["--project", "--store", "--output", "--run", "--step", "--review",
-    "--round", "--artifact", "--assignment", "--checkpoint", "--part", "--memory-root"]);
+    "--round", "--artifact", "--assignment", "--checkpoint", "--part", "--memory-root", "--query", "--app", "--external", "--comment"]);
   for (let i = 0; i < command.args.length; i++) {
     const arg = command.args[i];
     if (!arg.startsWith("-")) { words.push(arg); continue; }
@@ -63,7 +63,10 @@ function readOnlyRecovery(command: CliCommand): boolean {
   if (!validPublicCommand(command)) return false;
   const route = words.join(" ");
   if (["run show", "run step show", "run review show", "run artifact show", "run schema show", "run review wait status",
-    "continue show", "continue schema show", "continue review show", "continue step show"].includes(route)) return true;
+    "run external show", "run binding show", "run review assignment show", "continue show", "continue schema show", "continue review show", "continue step show"].includes(route)) return true;
+  if (["daemon status", "view status", "archive list", "data store list", "model list", "project list"].includes(route)) return true;
+  if (words.length === 4 && words.slice(0, 3).join(" ") === "data store read") return true;
+  if (words.length === 3 && ["cli show", "model read"].includes(words.slice(0, 2).join(" "))) return true;
   if (route === "validate") return flags.has("--memory-root");
   if (words.length === 3 && ["project show", "app show", "data has"].includes(words.slice(0, 2).join(" "))) return true;
   if (words.length === 3 && words[0] === "data" && words[1] === "read") return flags.has("--metadata-only");
@@ -77,7 +80,7 @@ export function acceptsPublicError(input: { code: string; details?: unknown; nex
   if (!input.details) return false;
   if (input.code === "HUMAN_CONFIRMATION_REQUIRED") {
     const checked = nextAction.safeParse(input.nextAction);
-    return checked.success && checked.data?.kind === "human_confirmation";
+    return checked.success && checked.data?.kind === "human_confirmation" && (!checked.data.resume || validPublicCommand(checked.data.resume));
   }
   const command = cliCommandSchema.safeParse(input.nextAction);
   if (!recoveryCodes.has(input.code) || !command.success || !validPublicCommand(command.data)) return false;

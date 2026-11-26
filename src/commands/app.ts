@@ -8,7 +8,7 @@ import { appConfigurationRevision, readAppState, requireApp } from "../app/state
 import { AppMemoryProvider } from "../app/memory-provider.js";
 import { DefaultMemoryCatalog } from "../memory/catalog.js";
 import { bindCli, checkCli, cliCheckNameSchema, listClis, registerCli, showCli } from "../tools/registry.js";
-import { addCliOutput, cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
+import { savedResult, addCliOutput, cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
 import { type PaginationOptions } from "../pagination.js";
 
@@ -108,15 +108,17 @@ export function registerAppCommands(program: Command): void {
     }));
   });
   command(app, "configure").argument("<id>").requiredOption("--config <file>").action(async (id, options: { config: string }) => {
-    const { status, revision, restartRequired } = await configureApp(await context(), id, await readJson(options.config));
-    publishResult("app configure", () => configureResult.parse({ id, status, revision, restartRequired, nextAction: restartAction(restartRequired) }));
+    const target = await context();
+    const { status, revision, restartRequired } = await configureApp(target, id, await readJson(options.config));
+    publishResult("app configure", () => configureResult.parse({ id, status, revision, restartRequired, nextAction: restartAction(restartRequired) }), { saved: savedResult(id, ["app", "show", id], target.primary.name) });
   });
   for (const enabled of [true, false]) {
     const operation = enabled ? "enable" : "disable";
     command(app, operation).argument("<id>").action(async (id) => {
-      const result = await setAppEnabled(await context(), id, enabled);
+      const target = await context();
+      const result = await setAppEnabled(target, id, enabled);
       publishResult("app " + operation, () => enableResult.parse({ id, enabled: result.enabled, restartRequired: result.restartRequired,
-        nextAction: restartAction(result.restartRequired) }));
+        nextAction: restartAction(result.restartRequired) }), { saved: savedResult(id, ["app", "show", id], target.primary.name) });
     });
   }
   command(app, "check").argument("<id>").action(async (id) => {
@@ -128,12 +130,14 @@ export function registerAppCommands(program: Command): void {
 
   const cli = program.command("cli").description("Discover external tools and their Project/App invocation bindings.");
   command(cli, "register").argument("<descriptor-file>").action(async (file) => {
-    const { id, status } = await registerCli(await context(), file);
-    publishResult("cli register", () => registrationResult.parse({ id, status }));
+    const target = await context();
+    const { id, status } = await registerCli(target, file);
+    publishResult("cli register", () => registrationResult.parse({ id, status }), { saved: savedResult(id, ["cli", "show", id], target.primary.name) });
   });
   command(cli, "bind").argument("<id>").requiredOption("--binding <file>").option("--app <id>").action(async (id, options: { app?: string; binding: string }) => {
     const result = await bindCli(await context(), id, options.binding, options.app);
-    publishResult("cli bind", () => registrationResult.parse({ id: result.id, project: result.project, app: result.app, status: result.status }));
+    publishResult("cli bind", () => registrationResult.parse({ id: result.id, project: result.project, app: result.app, status: result.status }),
+      { saved: savedResult(result.id, ["cli", "show", result.id, ...(result.app ? ["--app", result.app] : [])], result.project) });
   });
   listOptions(command(cli, "list").option("--app <id>")).action(async (options: PaginationOptions & { app?: string }) => {
     const { primary } = await context();

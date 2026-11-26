@@ -2778,11 +2778,12 @@ async function recoverMemoryLocked(
   return result ?? {};
 }
 
-export async function pushMemory(): Promise<void> {
+export async function pushMemory(): Promise<string> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(context.primary);
   await assertManagedHealthy(context.primary);
   await runGit(["push", "origin", context.primary.config.store.branch], { cwd: context.primary.memoryRoot });
+  return context.primary.name;
 }
 
 export async function syncMemory(

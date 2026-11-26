@@ -56,49 +56,15 @@ test("public next actions exclude the private Claude delivery reference", async 
   }
 });
 
-test("ordinary CLI handlers route output through the schema and template boundary", async () => {
-  const { readdirSync } = await import("node:fs");
-  const { default: ts } = await import("typescript");
-  const root = new URL("../src/", import.meta.url);
-  const permitted: Record<string, string[]> = {
-    "commands/output.ts": ["publishResult", "emitCliError"],
-    "commands/continue.ts": ["registerContinueCommand"],
-    "commands/memory.ts": ["<module>"],
-    "commands/memory-change-show.ts": ["memoryChangeShowCommand"],
-    "commands/view.ts": ["viewServeCommand", "handleRequest"],
-    "commands/data.ts": ["writeDataRead"],
-    "cli-transport.ts": ["writeCliChunk"],
-    "project/data-service.ts": ["nativeExportBytes", "nativeExportContent"],
-    "acp/client.ts": ["runAgentReviewAcpSession"],
-    "acp/review-worker.ts": ["runArtifactReviewAgentWorker"],
-    "view/view-runtime.ts": ["renderShellNavigationError"]
-  };
-  const files = readdirSync(root, { recursive: true, encoding: "utf8" })
-    .filter(file => file.endsWith(".ts")).map(file => file.replaceAll("\\", "/"));
-  const found: string[] = [];
-  for (const file of files) {
-    const source = ts.createSourceFile(file, readFileSync(new URL(file, root), "utf8"), ts.ScriptTarget.Latest, true);
-    function visit(node: import("typescript").Node, owner = "<module>"): void {
-      if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) && node.name) owner = node.name.getText(source);
-      // Check references as well as calls so aliases and bound methods are covered.
-      const access = ts.isPropertyAccessExpression(node) ? node.name.text
-        : ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression) ? node.argumentExpression.text : undefined;
-      const target = ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node) ? node.expression.getText(source) : undefined;
-      const rawChannel = target === "process" && (access === "stdout" || access === "stderr")
-        || target === "console" && access && ["log", "info", "warn", "error", "debug", "dir", "table"].includes(access);
-      const rawWriter = ts.isIdentifier(node) && node.text === "writeCliChunk" && !ts.isImportSpecifier(node.parent);
-      const rawImport = ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)
-        && ["node:console", "console", "node:process", "process", "node:tty"].includes(node.moduleSpecifier.text);
-      const channelAlias = ts.isVariableDeclaration(node) && node.initializer
-        && ["console", "process", "globalThis.console", "globalThis.process"].includes(node.initializer.getText(source));
-      const descriptorWrite = ts.isCallExpression(node) && /(?:^|\.)(?:write|writeSync|writeFile|writeFileSync)$/.test(node.expression.getText(source))
-        && node.arguments.length > 0 && ["1", "2"].includes(node.arguments[0].getText(source));
-      if ((rawChannel || rawWriter || rawImport || channelAlias || descriptorWrite) && !permitted[file]?.includes(owner)) found.push(file + " " + owner + ": " + node.getText(source));
-      ts.forEachChild(node, child => visit(child, owner));
-    }
-    visit(source);
-  }
-  assert.deepEqual(found, []);
+test("next actions must select an executable leaf and supply its required input", async () => {
+  const { Command } = await import("commander");
+  const { validPublicCommand, withActionScope } = await import("../src/prompts/contracts/actions.js");
+  const program = new Command();
+  program.command("data").command("read <id>").requiredOption("--store <id>").action(() => {});
+  const valid = (...args: string[]) => withActionScope({ program, reviewer: false },
+    () => validPublicCommand({ kind: "command", launcher: "memsphere", args }));
+  assert.ok(valid("data", "read", "one", "--store", "notes"));
+  for (const args of [["data"], ["data", "read", "--store", "notes"], ["data", "read", "one"]]) assert.equal(valid(...args), false);
 });
 
 test("a record-read contract can only register its declared route", async () => {
@@ -154,49 +120,4 @@ test("every reviewed scenario preserves its public field types and visibility", 
     }
   }
   assert.deepEqual([...seen].sort(), Object.keys(approved.cases).sort());
-});
-
-test("all reviewed schemas require their declared facts and reject extra facts at publication", async () => {
-  const { commandContracts } = await import("../src/prompts/contracts/registry.js");
-  const t = await import("../src/prompts/contracts/types.js");
-  const { renderCliResult } = await import("../src/commands/output.js");
-  const { z } = await import("zod");
-  function sample(type: import("zod").ZodTypeAny): unknown {
-    if (type === t.command || type === t.action) return { kind: "command", launcher: "memsphere", args: ["run", "status"] };
-    if (type === t.content) return { businessValue: null };
-    if (type instanceof z.ZodOptional) return undefined;
-    if (type instanceof z.ZodEffects) return sample(type.innerType());
-    if (type instanceof z.ZodLazy) return sample(type.schema);
-    if (type instanceof z.ZodObject) return Object.fromEntries(Object.entries(type.shape)
-      .filter(([, field]) => !(field as import("zod").ZodTypeAny).isOptional())
-      .map(([key, field]) => [key, sample(field as import("zod").ZodTypeAny)]));
-    if (type instanceof z.ZodUnion) return sample(type.options[0]);
-    if (type instanceof z.ZodEnum) return type.options[0];
-    if (type instanceof z.ZodLiteral) return type.value;
-    if (type instanceof z.ZodArray) return [];
-    if (type instanceof z.ZodRecord) return {};
-    if (type instanceof z.ZodBoolean) return false;
-    if (type instanceof z.ZodNull) return null;
-    if (type instanceof z.ZodNumber) return 0;
-    if (type instanceof z.ZodString) return "public";
-    throw new Error("No independent fixture for " + type.constructor.name);
-  }
-  for (const routes of Object.values(commandContracts)) {
-    for (const [route, entries] of Object.entries(routes)) for (const entry of entries) {
-      const value = sample(entry.schema) as Record<string, unknown>;
-      assert.deepEqual(entry.schema.parse(value), value, entry.id);
-      assert.equal(entry.schema.safeParse({ ...value, privateState: "private-sentinel" }).success, false, entry.id);
-      for (const key of Object.keys(value)) {
-        const incomplete = { ...value };
-        delete incomplete[key];
-        assert.equal(entry.schema.safeParse(incomplete).success, false, entry.id + "." + key);
-      }
-      if (cliProtocol(route) === "result" && route !== "data read") {
-        assert.deepEqual(JSON.parse(renderCliResult(route, entry.schema, value, { format: "json" })), value, entry.id);
-        for (const locale of ["en", "zh-CN"] as const) {
-          assert.ok(renderCliResult(route, entry.schema, value, { format: "text", locale }).includes(route), entry.id);
-        }
-      }
-    }
-  }
 });

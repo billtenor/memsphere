@@ -8,7 +8,7 @@ import { parseFilesystemDataStoreConfig } from "../data/extensions/filesystem-da
 import { Config } from "../data/api/config.js";
 import { assertJsonDescriptor } from "../data/extensions/json-serializer/index.js";
 import { compareStrings } from "../pagination.js";
-import { addCliOutput, publishResult, paginateCliItems } from "./output.js";
+import { savedResult, addCliOutput, publishResult, paginateCliItems } from "./output.js";
 import { businessStoreListResult, businessStoreReadResult, businessStoreWriteResult } from "./business-output.js";
 import { readInputText, parseJsonInput } from "./input.js";
 import type { BusinessStoreBinding } from "../project/model.js";
@@ -86,7 +86,7 @@ export function registerDataStoreCommands(data: Command) {
         project: config.project?.name, storeId: id, operation: result.operation, model, kind, factory,
         pendingCleanup: "pendingCleanup" in result && result.pendingCleanup === true ? true : undefined,
         dryRun: "dryRun" in result && result.dryRun === true ? true : undefined
-      }), { format: options.output });
+      }), { format: options.output, saved: options.dryRun ? undefined : savedResult(id, ["data", "store", "read", id], config.project?.name) });
     });
   output(store.command("remove <store-id>").option("--dry-run"))
     .action(async (id, options) => {
@@ -95,6 +95,6 @@ export function registerDataStoreCommands(data: Command) {
       publishResult("data store remove", () => businessStoreWriteResult.parse({
         project: config.project?.name, storeId: id, operation: result.operation,
         dataRetained: result.dataRetained, dryRun: result.dryRun
-      }), { format: options.output });
+      }), { format: options.output, saved: options.dryRun ? undefined : savedResult(id, ["data", "store", "list"], config.project?.name) });
     });
 }

@@ -8,7 +8,7 @@ import { readConfig } from "../config.js";
 import { resolve } from "node:path";
 import { compareStrings, parseListLimit, type PaginationOptions } from "../pagination.js";
 import { z } from "zod";
-import { publishResult, paginateCliItems } from "./output.js";
+import { savedResult, publishResult, paginateCliItems } from "./output.js";
 
 const archiveListResult = z.object({
   items: z.array(z.object({
@@ -67,7 +67,7 @@ export async function archiveRunCommand(id: string): Promise<void> {
   const context = await contextArchiveRun(config, id);
   if (context) await context.service.archive(id);
   else await archiveRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id });
-  publishResult("archive run", () => archiveRunResult.parse({ runId: id, archived: true }));
+  publishResult("archive run", () => archiveRunResult.parse({ runId: id, archived: true }), { saved: savedResult(id, ["archive", "list"]) });
 }
 
 export async function archiveRestoreRunCommand(id: string): Promise<void> {
@@ -75,7 +75,7 @@ export async function archiveRestoreRunCommand(id: string): Promise<void> {
   const context = await contextArchiveRun(config, id);
   if (context) await context.service.archive(id, false);
   else await restoreRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id });
-  publishResult("archive restore run", () => archiveRunResult.parse({ runId: id, archived: false }));
+  publishResult("archive restore run", () => archiveRunResult.parse({ runId: id, archived: false }), { saved: savedResult(id, ["run", "show", "--run", id]) });
 }
 
 function normalizeArchiveKind(kind: string | undefined): ArchiveKind | undefined {

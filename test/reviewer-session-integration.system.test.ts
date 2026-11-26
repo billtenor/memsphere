@@ -90,6 +90,9 @@ async function shellWithWrongGlobalCli(f: Awaited<ReturnType<typeof evidenceFixt
 test('generated Artifact and External read commands execute inside the restricted launcher', { timeout: 120000 }, async t => {
   const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f);
   const wrong=run('memsphere --version');assert.equal(wrong.status,93);assert.match(wrong.stderr,/WRONG_GLOBAL_CLI/);
+  const previousShell = process.env.MSYSTEM;
+  process.env.MSYSTEM = "MINGW64";
+  t.after(() => { if (previousShell === undefined) delete process.env.MSYSTEM; else process.env.MSYSTEM = previousShell; });
   const generatedPrompt=await buildArtifactReviewerPrompt({context:await reviews.readArtifactReviewForActor(f.input),locale:"zh-CN",promptVersion:"artifact-review-v3"});
   const generatedReads=[...generatedPrompt.matchAll(/"readCommand":\s*("(?:\\.|[^"\\])*")/g)].map(m=>JSON.parse(m[1]) as string);
   assert.equal(generatedReads.length,5,"the frozen contract, both Artifact inputs and both External references have read commands");
@@ -357,13 +360,13 @@ test('graph sessions without a HANDLE hint discover External help and retain act
 test('assignment references, preview export and node commands stay bound after shell PATH replacement',async t=>{
  const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);
  for(const reference of JSON.parse(detail.stdout).references){const r=run(reference.readCommand);assert.equal(r.status,0,reference.readCommand+': '+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
- const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const action=JSON.parse(preview.stdout).nextAction;assert.equal(action.launcher,'reviewer');action.args[action.args.indexOf('<file>')]='preview-body.txt';const exported=run(formatCliCommand(action));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
+ const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const action=JSON.parse(preview.stdout).nextAction;assert.equal(action.launcher,'reviewer');action.args[action.args.indexOf('<file>')]='preview-body.txt';const exported=run(formatCliCommand(action, "bash"));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
  await reviews.markArtifactReviewAgentCliReady({...f.input,attemptId:f.first.attempt.id});
  const node=await f.cli(['run','review','show','--output','json']);assert.equal(node.status,0,node.stderr);
  const next=JSON.parse(node.stdout).nextAction;assert.equal(next.launcher,'reviewer');
  await writeFile(join(f.attempt,'node-report.json'),JSON.stringify({applicable:true}));
  next.args[next.args.indexOf('<node-result>')]='node-report.json';
- const reported=run(formatCliCommand(next));assert.equal(reported.status,0,reported.stderr);
+ const reported=run(formatCliCommand(next, "bash"));assert.equal(reported.status,0,reported.stderr);
  assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
 });
 

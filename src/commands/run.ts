@@ -612,7 +612,7 @@ export async function runReviewResolveCommand(options: ReviewResolveOptions): Pr
   publishResult("run review resolve", () => reviewDisposition.parse({
     reviewId, roundId, commentId, disposition: options.disposition,
     nextAction: cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", reviewId])
-  }), { format: options.output });
+  }), { format: options.output, saved: { id: commentId, inspect: cliCommand(["--project", config.project!.name, "run", "review", "show", "--review", reviewId, "--round", roundId]) } });
 }
 
 export async function runShowCommand(options: RunShowOptions): Promise<void> {
@@ -669,7 +669,7 @@ export async function runBindingUpdateCommand(options: RunBindingUpdateOptions):
   publishResult("run binding update", () => flowBindingUpdate.parse({
     changeId: result.change.id, slot, nextBinding: result.change.after,
     bindings: { runId: id, status, actors, slots, readOnly }
-  }), { format: options.output, locale: result.run.language });
+  }), { format: options.output, locale: result.run.language, saved: { id: result.change.id, inspect: cliCommand(["--project", config.project!.name, "run", "binding", "show", "--run", id]) } });
 }
 
 const tryRunResult = z.object({
@@ -732,7 +732,7 @@ export async function runArtifactExportCommand(options: { run: string; step: str
   await exportRunArtifact(config.runsRoot, run, requireStepRef(options.step), options.file, options.force, join(config.archiveRoot, "runs"));
   publishResult("run artifact export", () => z.object({ runId: z.string(), stepRef: z.string(), exported: z.string() }).strict().parse({
     runId: run.id, stepRef: options.step, exported: resolve(options.file)
-  }), { locale: run.language });
+  }), { locale: run.language, saved: { id: resolve(options.file) } });
 }
 
 export async function exportRunArtifact(runsRoot: string, run: RunState, reference: string, file: string, force = false, archivedRunsRoot = join(dirname(runsRoot), "archives", "runs")): Promise<void> {
@@ -830,7 +830,7 @@ export async function runReviewCommentCommand(options: AgentReviewCommentOptions
   publishResult("run review comment", () => reviewAssignmentReceipt.parse({
     reviewId: receipt.reviewId, roundId: receipt.reviewRoundId, assignmentId: receipt.assignmentId,
     status: receipt.status, vote: receipt.vote, commentCount: receipt.commentCount, completed: receipt.completed
-  }), { format: options.output });
+  }), { format: options.output, saved: { id: receipt.assignmentId, inspect: cliCommand(["run", "review", "assignment", "show", "--assignment", receipt.assignmentId], "reviewer") } });
 }
 
 export function validateInlineReviewCommentBody(body: string): void {
@@ -885,7 +885,7 @@ export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions):
   publishResult("run review submit", () => reviewAssignmentReceipt.parse({
     reviewId: receipt.reviewId, roundId: receipt.reviewRoundId, assignmentId: receipt.assignmentId,
     status: receipt.status, vote: receipt.vote, commentCount: receipt.commentCount, completed: receipt.completed
-  }), { format: options.output });
+  }), { format: options.output, saved: { id: receipt.assignmentId, inspect: cliCommand(["run", "review", "assignment", "show", "--assignment", receipt.assignmentId], "reviewer") } });
 }
 
 export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {

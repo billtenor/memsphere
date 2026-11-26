@@ -63,7 +63,8 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
     nextAction: action
   };
   const options = { format: input.format, locale: run.language, maximumBytes: 8192,
-    saved: command === "run review show" || !inspect ? undefined : { id: review.id, inspect } };
+    saved: command === "run review show" || command === "run review wait" && !input.taskId
+      ? undefined : { id: input.taskId ?? review.id, inspect } };
   const receipt = { ...summary, outcome: opinion ? undefined : round.result?.status };
   switch (command) {
     case "run review wait":

@@ -62,13 +62,6 @@ jobs:
       - run: npm ci
       # Build/typecheck once, then run only explicitly separated unit tests.
       - run: npm run test:ci -- --suite=unit
-      - name: Check CLI output budgets
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          python3 -m venv "$RUNNER_TEMP/memsphere-cli-budget"
-          "$RUNNER_TEMP/memsphere-cli-budget/bin/pip" install tiktoken==0.12.0
-          "$RUNNER_TEMP/memsphere-cli-budget/bin/python" scripts/ci/check-cli-output-budget.py
       - name: Preserve test timings
         if: always()
         uses: actions/upload-artifact@v4
@@ -133,6 +126,13 @@ jobs:
         run: npx playwright install chromium
       # Each matrix row runs one complete system or end-to-end suite.
       - run: npm run test:ci -- --suite=${{ matrix.suite }}
+      - name: Check CLI output budgets
+        if: runner.os == 'Linux' && matrix.suite == 'system'
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/memsphere-cli-budget"
+          "$RUNNER_TEMP/memsphere-cli-budget/bin/pip" install tiktoken==0.12.0
+          "$RUNNER_TEMP/memsphere-cli-budget/bin/python" scripts/ci/check-cli-output-budget.py
       - name: Preserve test timings
         if: always()
         uses: actions/upload-artifact@v4

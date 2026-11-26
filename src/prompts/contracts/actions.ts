@@ -28,6 +28,8 @@ export function validPublicCommand(command: CliCommand): boolean {
   const root = current;
   let index = 0;
   const path: string[] = [];
+  const supplied = new Set<string>();
+  let help = false;
   const identities: ReviewerIdentityOption[] = [];
   if (current.name() === "continue") {
     if (args[0] !== "continue") return false;
@@ -39,11 +41,12 @@ export function validPublicCommand(command: CliCommand): boolean {
     const arg = args[index++];
     if (arg.startsWith("-")) {
       // The Continue router handles its own contextual help before Commander parses the tail.
-      if (path.length === 1 && path[0] === "continue" && (arg === "--help" || arg === "-h") && index === args.length) continue;
+      if (path.length === 1 && path[0] === "continue" && (arg === "--help" || arg === "-h") && index === args.length) { help = true; continue; }
       const equal = arg.indexOf("=");
       const flag = equal < 0 ? arg : arg.slice(0, equal);
       const opt = [...current.createHelp().visibleOptions(current), ...root.options].find(o => o.long === flag || o.short === flag);
       if (!opt) return false;
+      supplied.add(opt.attributeName());
       if (opt.required || opt.optional) {
         const value = equal >= 0 ? arg.slice(equal + 1) : args[index++];
         if (value === undefined || value.startsWith("--")) return false;
@@ -58,6 +61,13 @@ export function validPublicCommand(command: CliCommand): boolean {
     }
   }
   if (!path.length || (current as Command & { _hidden?: boolean })._hidden) return false;
+  if (!help) {
+    if (!(current as Command & { _actionHandler?: unknown })._actionHandler) return false;
+    if (positional.length < current.registeredArguments.filter(arg => arg.required).length) return false;
+    for (let parent: Command | null = current; parent; parent = parent.parent) {
+      if (parent.options.some(option => option.mandatory && option.defaultValue === undefined && !supplied.has(option.attributeName()))) return false;
+    }
+  }
   if (positional.length > current.registeredArguments.length && !current.registeredArguments.at(-1)?.variadic) return false;
   if (context.reviewer) {
     const protocol = context.protocol;

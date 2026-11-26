@@ -36,7 +36,7 @@ import { listMemoryFiles } from "../memory/store.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 import { compareStrings, parseListLimit, type PaginationOptions } from "../pagination.js";
 import { z } from "zod";
-import { cliCommand, publishResult, paginateCliItems } from "./output.js";
+import { savedResult, cliCommand, publishResult, paginateCliItems } from "./output.js";
 import { nextAction } from "../prompts/cli-output.js";
 
 type BindOption = { bind?: boolean };
@@ -568,7 +568,7 @@ export async function projectRepairCommand(nameInput?: string): Promise<void> {
     created: result.created, updated: result.updated, deleted: result.deleted,
     revision: result.revision, worktree: result.worktree,
     nextAction: result.worktree ? cliCommand(["--project", result.project, "memory", "change", "validate"]) : undefined
-  }));
+  }), { saved: savedResult(result.project, ["project", "show", result.project]) });
 }
 
 async function runManagedSystemMemoryRepair(
@@ -978,7 +978,7 @@ export async function projectBindCommand(nameInput: string): Promise<void> {
     }
     registry.workspaces[workspace.key] = { primary: name, mounted: [] };
   });
-  publishResult("project bind", () => projectBindingReceipt.parse({ project: name, relation: "primary" }));
+  publishResult("project bind", () => projectBindingReceipt.parse({ project: name, relation: "primary" }), { saved: savedResult(name, ["project", "list"]) });
 }
 
 export async function projectUnbindCommand(): Promise<void> {
@@ -991,7 +991,7 @@ export async function projectUnbindCommand(): Promise<void> {
     delete registry.workspaces[workspace.key];
     project = binding.primary;
   });
-  publishResult("project unbind", () => projectBindingReceipt.parse({ project, relation: "unbound" }));
+  publishResult("project unbind", () => projectBindingReceipt.parse({ project, relation: "unbound" }), { saved: savedResult(project, ["project", "list"]) });
 }
 
 export async function projectMountCommand(nameInput: string): Promise<void> {
@@ -1007,7 +1007,7 @@ export async function projectMountCommand(nameInput: string): Promise<void> {
     if (binding.mounted.includes(name)) throw new Error(`Project "${name}" is already mounted`);
     binding.mounted.push(name);
   });
-  publishResult("project mount", () => projectBindingReceipt.parse({ project: name, relation: "mounted" }));
+  publishResult("project mount", () => projectBindingReceipt.parse({ project: name, relation: "mounted" }), { saved: savedResult(name, ["project", "list"]) });
 }
 
 async function assertProjectWorkspaceCompatible(
@@ -1034,7 +1034,7 @@ export async function projectUnmountCommand(nameInput: string): Promise<void> {
     if (index < 0) throw new Error(`Project "${name}" is not mounted`);
     binding.mounted.splice(index, 1);
   });
-  publishResult("project unmount", () => projectBindingReceipt.parse({ project: name, relation: "unbound" }));
+  publishResult("project unmount", () => projectBindingReceipt.parse({ project: name, relation: "unbound" }), { saved: savedResult(name, ["project", "list"]) });
 }
 
 export async function projectPruneCommand(): Promise<void> {
@@ -1050,7 +1050,8 @@ export async function projectPruneCommand(): Promise<void> {
       binding.mounted = binding.mounted.filter((name) => !missing.has(name));
     }
   });
-  publishResult("project prune", () => z.object({ removedCount: count }).strict().parse({ removedCount: missing.size }));
+  publishResult("project prune", () => z.object({ removedCount: count }).strict().parse({ removedCount: missing.size }),
+    { saved: missing.size ? savedResult([...missing][0], ["project", "list"]) : undefined });
 }
 
 async function preflightNewProject(input: { home: string; name: string; root: string; bind?: boolean }): Promise<void> {
@@ -1165,7 +1166,7 @@ export async function projectModelsInitializeCommand(nameInput?: string, options
       };
     });
   });
-  publishResult("project models initialize", () => projectModelsResult.parse(result), { format: options.output });
+  publishResult("project models initialize", () => projectModelsResult.parse(result), { format: options.output, saved: savedResult(result.project, ["model", "list"], result.project) });
 }
 
 /** Return only bundled System Memory differences, without writing a candidate. */

@@ -148,11 +148,12 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
       process.exit(7);
     }
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
-    while (view.node) {
-      if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
+    while (view.progress.phase === "reviewing") {
+      if (vote === "request_changes" && view.node?.kind === "open_review") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
       const saved = JSON.parse(await reportNode());
       if (saved.progress.phase !== "reviewing") break;
-      view = JSON.parse(await invokeReviewCli([...saved.nextAction.args, "--output", "json"]));
+      // Only a reviewer adding comments needs the next node's body.
+      view = vote === "request_changes" ? JSON.parse(await invokeReviewCli([...saved.nextAction.args, "--output", "json"])) : saved;
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;

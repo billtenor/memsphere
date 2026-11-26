@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { fork, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import { writeData, readData } from "../../../src/project/data-service.js";
 import { businessFixture, snapshotTree } from "../../helpers/business-data.js";
@@ -120,7 +120,7 @@ fs.readFileSync = function (file, ...args) {
 };
 syncBuiltinESMExports();
 `);
-  const child = spawn(process.execPath, ["--import", preload, cliPath, "--project", "test-project",
+  const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, cliPath, "--project", "test-project",
     "data", "create", "saved", "--store", "records", "--value", '{"name":"saved","count":0}'], {
     cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["ignore", "pipe", "pipe"]
   });

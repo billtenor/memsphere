@@ -823,7 +823,7 @@
     "cli-run-schema-report-2": [
       "native",
       "run schema report",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "cli-run-schema-report-3": [
       "native",
@@ -983,7 +983,7 @@
     "cli-run-enter-schema-2": [
       "native",
       "run enter-schema",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "cli-run-enter-schema-3": [
       "native",
@@ -1008,7 +1008,7 @@
     "cli-run-repeat-2": [
       "native",
       "run repeat",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "cli-run-repeat-3": [
       "native",
@@ -1033,7 +1033,7 @@
     "cli-run-skip-2": [
       "native",
       "run skip",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "cli-run-skip-3": [
       "native",
@@ -1313,7 +1313,7 @@
     "runner-continue-enter-schema-2": [
       "runnerContinue",
       "continue enter-schema",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "runner-continue-enter-schema-3": [
       "runnerContinue",
@@ -1368,7 +1368,7 @@
     "runner-continue-schema-report-2": [
       "runnerContinue",
       "continue schema report",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "runner-continue-schema-report-3": [
       "runnerContinue",
@@ -1388,7 +1388,7 @@
     "runner-continue-skip-2": [
       "runnerContinue",
       "continue skip",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "runner-continue-skip-3": [
       "runnerContinue",
@@ -1408,7 +1408,7 @@
     "runner-continue-repeat-2": [
       "runnerContinue",
       "continue repeat",
-      "cli-run-schema-show-2"
+      "cli-run-schema-report-2"
     ],
     "runner-continue-repeat-3": [
       "runnerContinue",
@@ -2571,7 +2571,7 @@
       "artifactId?": "string",
       "progress?": "{completed:int,remaining:int,total:int}",
       "effective?": "boolean",
-      "rules?": "[{scope:string,text:string}]≤8",
+      "rules?": "[{scope:string,text:string}]",
       "ruleCount?": "int",
       "nextAction?": "Action"
     },
@@ -3014,6 +3014,19 @@
       "comments?": "[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}]",
       "vote?": "string|{summary?:string,value:string}",
       "summary?": "string"
+    },
+    "cli-run-schema-report-2": {
+      "runId": "string",
+      "stepId": "string",
+      "phase": "string",
+      "position": "string",
+      "current": "{format?:string,id:string,instruction:string,kind:string,max?:number,min?:number,optional?:boolean,path?:string,type?:string}",
+      "artifactId?": "string",
+      "progress?": "{completed:int,remaining:int,total:int}",
+      "effective?": "boolean",
+      "rules?": "[{scope:string,text:string}]≤8",
+      "ruleCount?": "int",
+      "nextAction?": "Action"
     }
   }
 }

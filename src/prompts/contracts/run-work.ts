@@ -100,7 +100,7 @@ export const runWorkContracts = {
       artifactId: text.optional(),
       progress: publicRunSchemaShowProgress.optional(),
       effective: bool.optional(),
-      rules: list(publicRunStartRulesItem, 8).optional(),
+      rules: list(publicRunStartRulesItem).optional(),
       ruleCount: integer.optional(),
       nextAction: action.optional(),
     }),

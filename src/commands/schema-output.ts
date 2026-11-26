@@ -22,7 +22,7 @@ const schemaResult = z.object({
     min: z.number().optional(), max: z.number().optional()
   }).strict().optional(),
   validation: z.object({ status: z.string(), issueCount: z.number().int().nonnegative() }).strict().optional(),
-  rules: z.array(rule).max(8).optional(), ruleCount: z.number().int().nonnegative().optional(),
+  rules: z.array(rule).optional(), ruleCount: z.number().int().nonnegative().optional(),
   nextAction
 }).strict();
 
@@ -81,6 +81,10 @@ export function emitSchemaWriting(command: string, data: {
     collect("field_assert", source.assertTree, source.asserts);
     collect("field_suggest", source.suggestTree, source.suggests);
   }
+  const explicit = command === "run schema show";
+  const instruction = current && previewText(current.instruction, 256);
+  const preview = rules.slice(0, 8).map(({ scope, text }) => ({ scope, text: previewText(text, 160).text }));
+  const shortened = instruction?.truncated || rules.length > preview.length || preview.some((item, i) => item.text !== rules[i].text);
   publishResult(command, () => schemaResult.parse({
     runId: data.runId, stepId: data.stepId, phase: data.phase,
     artifactId: data.artifactId ?? data.draft?.id, effective: data.effective,
@@ -88,12 +92,12 @@ export function emitSchemaWriting(command: string, data: {
     progress: progress && { completed: progress.completed, total: progress.total, remaining: progress.remaining },
     current: current && {
       id: current.id, kind: current.kind ?? "action", path: current.schemaContext?.path,
-      instruction: previewText(current.instruction, 256).text, type: current.type, format: current.format?.name,
+      instruction: explicit ? current.instruction : instruction!.text, type: current.type, format: current.format?.name,
       optional: current.optional, min: current.repeat?.min, max: current.repeat?.max
     },
     validation: data.phase !== "writing" && validation ? { status: validation.status, issueCount: validation.issues?.length ?? 0 } : undefined,
-    rules: rules.length ? rules.slice(0, 8).map(({ scope, text }) => ({ scope, text: previewText(text, 160).text })) : undefined,
+    rules: rules.length ? (explicit ? rules : preview) : undefined,
     ruleCount: rules.length || undefined,
-    nextAction: action
-  }), { format: options.format, locale: options.locale, maximumBytes: 8192, saved: { id: data.stepId, inspect } });
+    nextAction: shortened && !explicit ? inspect : action
+  }), { format: options.format, locale: options.locale, maximumBytes: explicit ? undefined : 8192, saved: explicit ? undefined : { id: data.stepId, inspect } });
 }

@@ -4,7 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { z } from "zod";
-import { publishResult } from "./output.js";
+import { savedResult, publishResult } from "./output.js";
 
 const skillResult = z.object({
   skill: z.string(),
@@ -46,7 +46,7 @@ async function installSkill(operation: "init" | "upgrade", options: SkillOptions
   await writeFile(filePath, skillMarkdown, "utf8");
   publishResult(`skill ${operation}`, () => skillResult.parse({
     skill: skillName, path: filePath, status: operation === "init" ? "installed" : "upgraded"
-  }));
+  }), { saved: savedResult(filePath) });
 }
 
 /** Update the selected Skill installation using the same contract as init --force. */

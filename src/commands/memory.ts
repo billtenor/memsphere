@@ -1,7 +1,7 @@
 import { readMemorySyntax } from "../memory/syntax.js";
 import { writeCliChunk } from "../cli-transport.js";
 import { z } from "zod";
-import { cliCommand, cliPageBudget, publishResult, previewText, renderCommandResult, validateCommandResult } from "./output.js";
+import { savedResult, cliCommand, cliPageBudget, publishResult, previewText, renderCommandResult, validateCommandResult } from "./output.js";
 import { nextAction } from "../prompts/cli-output.js";
 import { memoryDiagnostic, summarizeMemoryIssues } from "./validate.js";
 import type { MemoryCatalog, MemoryDescriptor } from "../memory/catalog.js";
@@ -324,6 +324,13 @@ function emitCandidate(command: string, changeId: string, candidateRoot: string 
   }), { saved: { id: changeId, inspect } });
 }
 
+function savedChange(change: { id: string; checkpoint?: { digest: string } | null }) {
+  const args = change.checkpoint
+    ? ["memory", "change", "show", change.id, "--checkpoint", change.checkpoint.digest, "--part", "summary"]
+    : undefined;
+  return savedResult(change.id, args);
+}
+
 export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
   if (!options.change) throw new TypeError("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
@@ -332,7 +339,7 @@ export async function memoryPublishCommand(options: { change?: string; message?:
     changeId: change.id, status: applied ? "applied" : "published",
     storeType: change.store_type, revision: change.published_revision ?? undefined,
     nextAction: applied ? { kind: "human_confirmation" } : undefined
-  }));
+  }), { saved: savedChange(change) });
 }
 
 export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
@@ -355,12 +362,12 @@ export async function memoryChangeFinishCommand(
   const change = await finishMemoryChange({ changeId, commentIds: options.comment, reason: options.reason });
   publishResult("memory change finish", () => changeReceipt.parse({
     changeId: change.id, status: "completed", commentCount: (options.comment ?? []).length
-  }));
+  }), { saved: savedChange(change) });
 }
 
 export async function memoryChangeCompleteCommand(changeId: string): Promise<void> {
   const change = await completeMemoryChange(changeId);
-  publishResult("memory change complete", () => changeReceipt.parse({ changeId: change.id, status: "completed" }));
+  publishResult("memory change complete", () => changeReceipt.parse({ changeId: change.id, status: "completed" }), { saved: savedChange(change) });
 }
 
 export async function memoryChangeValidateCommand(
@@ -401,19 +408,20 @@ export async function memoryRecoverCommand(reference: string, options: { restore
   if (result.change) {
     emitCandidate("memory recover", result.change.id, result.candidateRoot);
   } else {
-    publishResult("memory recover", () => changeReceipt.parse({ status: "restored", reference }));
+    publishResult("memory recover", () => changeReceipt.parse({ status: "restored", reference }), { saved: savedResult(reference) });
   }
 }
 
 export async function memoryPushCommand(): Promise<void> {
-  await pushMemory();
-  publishResult("memory push", () => changeReceipt.parse({ status: "pushed", storeType: "managed" }));
+  const project = await pushMemory();
+  publishResult("memory push", () => changeReceipt.parse({ status: "pushed", storeType: "managed" }),
+    { saved: savedResult(project, ["project", "show", project]) });
 }
 
 export async function memorySyncCommand(): Promise<void> {
   const result = await syncMemory();
   if (result.change) emitCandidate("memory sync", result.change.id, result.candidateRoot);
-  else publishResult("memory sync", () => changeReceipt.parse({ status: "synchronized", revision: result.revision }));
+  else publishResult("memory sync", () => changeReceipt.parse({ status: "synchronized", revision: result.revision }), { saved: result.revision ? savedResult(result.revision) : undefined });
 }
 
 export async function memorySyncPublishCommand(options: { change?: string; message?: string }): Promise<void> {
@@ -421,7 +429,7 @@ export async function memorySyncPublishCommand(options: { change?: string; messa
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "sync" });
   publishResult("memory sync publish", () => changeReceipt.parse({
     changeId: change.id, status: "published", revision: change.published_revision ?? undefined
-  }));
+  }), { saved: savedChange(change) });
 }
 
 function toIdentity(descriptor: { reference: string; kind: MemoryKind; names: string[] }): MemoryIdentity {

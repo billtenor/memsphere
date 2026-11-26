@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
-import { cliCommand, publishResult } from "./output.js";
+import { savedResult, cliCommand, publishResult } from "./output.js";
 import { readConfig } from "../config.js";
 import {
   checkArtifactContractV2Migration,
@@ -51,7 +51,7 @@ function emitMigration(manifest: Manifest, options: { write?: boolean; to?: stri
     nextAction: manifest.status === "blocked"
       ? cliCommand(["migrate", command, "--check", ...(options.to ? ["--to", options.to] : [])])
       : options.write ? cliCommand(["validate"]) : undefined
-  }), { itemsField: "issues" });
+  }), { itemsField: "issues", saved: options.write && manifest.status === "ready" && manifest.files.some(file => file.changed) ? savedResult(manifest.target ?? manifest.migration) : undefined });
   if (manifest.status === "blocked") process.exitCode = 1;
 }
 

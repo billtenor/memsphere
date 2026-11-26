@@ -141,6 +141,11 @@ export function cliPageBudget<T>(sizing: "established" | "summary", project: (va
   };
 }
 
+/** Bind a completed mutation to its public identity and a read-only verification command. */
+export function savedResult(id: string, args?: string[], project?: string) {
+  return { id, inspect: args && cliCommand([...(project ? ["--project", project] : []), ...args]) };
+}
+
 export function paginateCliItems<T>(
   items: readonly T[], options: PaginationOptions, scope: CursorScope, sizing: "established" | "summary"
 ) {
@@ -310,6 +315,14 @@ export async function emitCliError(error: CliOutputError | PublicCliError, optio
     ? { code: error.code, details: error.saved ? { savedId: error.saved.id } : undefined, nextAction: error.saved?.inspect }
     : error;
   if (!options.nonfatal) process.exitCode = 1;
-  try { await writeCliChunk(renderCliError(result, cliFormat(), cliLocale()), process.stderr); }
+  const state = invocation.getStore();
+  const reviewer = Boolean(process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
+  const render = () => renderCliError(result, cliFormat(), cliLocale());
+  try {
+    const output = state?.program
+      ? withActionScope({ program: state.program, reviewer, protocol: state.reviewerProtocol, project: process.env.MEMSPHERE_PROJECT }, render)
+      : renderCliError(reviewer ? { code: result.code, details: result.details } : result, cliFormat(), cliLocale());
+    await writeCliChunk(output, process.stderr);
+  }
   catch { /* Both channels may have closed. The exit status still records failure. */ }
 }

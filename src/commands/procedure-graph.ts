@@ -224,7 +224,7 @@ export async function graphCommand(operation: string, input: object, scope?: Con
       publishResult(operation.replace("binding-", "run binding "), () => graphBindingResult.parse({
         runId: run.id, nextRound: publicBindings(result.bindings),
         rounds: result.rounds.map(({ stepId, roundId, bindings }) => ({ stepId, roundId, bindings: publicBindings(bindings) }))
-      }), display);
+      }), { ...display, saved: operation === "binding-update" ? { id: run.id, inspect: forRun(project, "binding", "show", "--run", run.id) } : undefined });
       return true;
     }
     if (operation === "show") {

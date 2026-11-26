@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, realpath, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -484,7 +484,7 @@ test("installed expense-project follows only the current workspace binding and t
   await cp(expenseExample, source, { recursive: true });
   const launcher = join(source, "cli/expense-project.cjs"), tool = join(source, "cli/expense.cjs");
   const override = join(root, "private-executable.cjs");
-  await writeFile(override, `if (process.env.BOUND_FLAG !== "private-env-value" || process.cwd() !== ${JSON.stringify(root)}) process.exit(3); require(${JSON.stringify(tool)});`);
+  await writeFile(override, `if (process.env.BOUND_FLAG !== "private-env-value" || process.cwd() !== ${JSON.stringify(await realpath(root))}) process.exit(3); require(${JSON.stringify(tool)});`);
   async function install(name: string) {
     if (name !== "test") await projectCreateCommand(name);
     const context = name === "test" ? first : await resolveProjectContext({ project: name });

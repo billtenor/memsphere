@@ -76,5 +76,5 @@ export function emitExplorationStep(command: string, item: {
     reviewers: item.reviewers.map(({ value, name }) => ({ value, label: previewText(name, 160).text })),
     missing: item.missing,
     nextAction: canReview ? cliCommand(["--project", options.project, "run", "review", "start", "--run", runId, "--artifact", artifactId]) : undefined
-  }), options);
+  }), { ...options, saved: command === "run step configure" ? { id: step.id, inspect: cliCommand(["--project", options.project, "run", "step", "show", "--run", runId, "--step", step.id]) } : undefined });
 }
