@@ -16,7 +16,6 @@ export function claudeReviewerSession(cwd: string, model?: string): acp.NewSessi
     _meta: {
       claudeCode: {
         options: {
-          settingSources: [],
           tools: ["Bash", "Read"],
           settings: { permissions: { ask: ["Bash", "Read"] } },
           allowDangerouslySkipPermissions: false,

@@ -70,6 +70,7 @@ test("Claude Reviewer only permits a one-time literal launcher command in its ow
 
 test("Claude Reviewer configuration restricts adapter arguments and environment overrides", () => {
   assert.equal(acpProviderConfigSchema.safeParse({ claude: { env: { ANTHROPIC_BASE_URL: "https://api.example.test" } } }).success, true);
+  assert.equal(acpProviderConfigSchema.safeParse({ claude: { env: { CLAUDE_CONFIG_DIR: "/fixture/claude" } } }).success, true);
   for (const claude of [
     { args: ["--system-prompt", "unexpected"] },
     { env: { BASH_ENV: "/fixture/config" } },
