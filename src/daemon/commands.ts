@@ -7,7 +7,7 @@ import { readConfig } from "../config.js";
 import { inspectReview } from "./review.js";
 import { prepareClaudeReviewRecipient } from "./claude-review-callback.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
-import { addCliOutput, cliCommand, savedResult, publishResult, paginateCliItems, previewText } from "../commands/output.js";
+import { registerResultAction, addCliOutput, cliCommand, savedResult, commandFacts, paginateCliItems, previewText } from "../commands/output.js";
 import { daemonStatusSchema, publicDaemonStatus } from "./public-status.js";
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
@@ -28,34 +28,32 @@ const retrySchema = z.object({ taskId: z.string(), roundId: z.string(), status: 
 
 async function showDaemon(command: string) {
   const status = await daemonStatus();
-  publishResult(command, () => daemonStatusSchema.parse(publicDaemonStatus(status)), {
-    saved: command === "daemon status" ? undefined : savedResult("daemon", ["daemon", "status"])
-  });
+  return commandFacts(() => daemonStatusSchema.parse(publicDaemonStatus(status)), { saved: command === "daemon status" ? undefined : savedResult("daemon", ["daemon", "status"]) });
 }
 
 export function registerDaemonCommands(program: Command) {
   const daemon = program.command("daemon").description("Manage the Home daemon, View and asynchronous tasks.");
-  addCliOutput(daemon.command("start")).action(async () => { await ensureDaemon(); await showDaemon("daemon start"); });
-  addCliOutput(daemon.command("status")).action(() => showDaemon("daemon status"));
-  addCliOutput(daemon.command("stop")).action(async () => { await stopDaemon(); await showDaemon("daemon stop"); });
-  addCliOutput(daemon.command("restart")).action(async () => { await stopDaemon(); await ensureDaemon(); await showDaemon("daemon restart"); });
+  registerResultAction(addCliOutput(daemon.command("start")), async () => { await ensureDaemon(); return showDaemon("daemon start"); });
+  registerResultAction(addCliOutput(daemon.command("status")), () => showDaemon("daemon status"));
+  registerResultAction(addCliOutput(daemon.command("stop")), async () => { await stopDaemon(); return showDaemon("daemon stop"); });
+  registerResultAction(addCliOutput(daemon.command("restart")), async () => { await stopDaemon(); await ensureDaemon(); return showDaemon("daemon restart"); });
   daemon.command("serve", { hidden: true }).action(async () => { await runDaemon(); });
   const runner = program.command("runner").description("Inspect installed Runner Agents and the calling session.");
-  addCliOutput(runner.command("detect")).action(async () => {
+  registerResultAction(addCliOutput(runner.command("detect")), async () => {
     const items = (await detectRunnerAgents()).map(({ type, status, version }) => ({
       type, status, ...(version ? { version: previewText(version, 160).text } : {})
     }));
-    publishResult("runner detect", () => runnerListSchema.parse({ items }));
+    return commandFacts(() => runnerListSchema.parse({ items }));
   });
-  addCliOutput(runner.command("identity")).action(() => {
+  registerResultAction(addCliOutput(runner.command("identity")), () => {
     const identity = detectIdentity();
-    publishResult("runner identity", () => runnerSchema.parse({ identified: Boolean(identity), agentType: identity?.agentType }));
+    return commandFacts(() => runnerSchema.parse({ identified: Boolean(identity), agentType: identity?.agentType }));
   });
 }
 
 export function registerWaitTaskCommands(wait: Command) {
-  addCliOutput(wait.command("status").option("--limit <n>", "Page size, 1–100; default 20")
-    .option("--cursor <token>")).action(async (_options, command: Command) => {
+  registerResultAction(addCliOutput(wait.command("status").option("--limit <n>", "Page size, 1–100; default 20")
+    .option("--cursor <token>")), async (_options, command: Command) => {
     const options = command.optsWithGlobals();
     if (!options.review) throw new Error("--review <id> is required");
     const config = await readConfig();
@@ -71,11 +69,11 @@ export function registerWaitTaskCommands(wait: Command) {
       scope: { project: config.project!.name, reviewId: options.review, identity },
       filters: { currentRoundId: context.round.id }
     }, "summary");
-    publishResult("run review wait status", () => taskListSchema.parse({
+    return commandFacts(() => taskListSchema.parse({
       items: page.items, total: items.length, nextCursor: page.nextCursor
     }));
   });
-  addCliOutput(wait.command("retry").requiredOption("--round <id>")).action(async (_options, command: Command) => {
+  registerResultAction(addCliOutput(wait.command("retry").requiredOption("--round <id>")), async (_options, command: Command) => {
     const options = command.optsWithGlobals();
     if (!options.review) throw new Error("--review <id> is required");
     const config = await readConfig();
@@ -96,7 +94,7 @@ export function registerWaitTaskCommands(wait: Command) {
     const task = await retryFailedTask(row.id, undefined, claudeRecipient);
     await daemonControl("notify");
     const resume = cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", options.review]);
-    publishResult("run review wait retry", () => retrySchema.parse({
+    return commandFacts(() => retrySchema.parse({
       taskId: task.id, roundId: task.input.roundId, status: task.status,
       mayRepeatNotification: true, nextAction: { kind: "wait", resume }
     }), { saved: { id: task.id, inspect: cliCommand([...resume.args, "status"]) } });

@@ -8,7 +8,7 @@ import { readConfig } from "../config.js";
 import { resolve } from "node:path";
 import { compareStrings, parseListLimit, type PaginationOptions } from "../pagination.js";
 import { z } from "zod";
-import { savedResult, publishResult, paginateCliItems } from "./output.js";
+import { savedResult, commandFacts, paginateCliItems } from "./output.js";
 
 const archiveListResult = z.object({
   items: z.array(z.object({
@@ -37,7 +37,7 @@ async function contextArchiveRun(config: MemsphereConfig, id: string) {
   return { service: service!, run };
 }
 
-export async function archiveListCommand(kind?: string, options: PaginationOptions & { output?: "text" | "json" } = {}): Promise<void> {
+export async function archiveListCommand(kind?: string, options: PaginationOptions & { output?: "text" | "json" } = {}) {
   parseListLimit(options.limit);
   const normalizedKind = normalizeArchiveKind(kind);
   const config = await readConfig();
@@ -56,26 +56,26 @@ export async function archiveListCommand(kind?: string, options: PaginationOptio
     || compareStrings(a.kind, b.kind) || compareStrings(a.id, b.id)), options, {
     command: "archive list", scope: { archiveRoot: resolve(config.archiveRoot) }, filters: { kind: normalizedKind }
   }, "established");
-  publishResult("archive list", () => archiveListResult.parse({
+  return commandFacts(() => archiveListResult.parse({
     items: page.items.map(({ kind, id, archivedAt }) => ({ kind, id, archivedAt })),
     nextCursor: page.nextCursor
-  }), { format: options.output });
+  }));
 }
 
-export async function archiveRunCommand(id: string): Promise<void> {
+export async function archiveRunCommand(id: string) {
   const config = await readConfig();
   const context = await contextArchiveRun(config, id);
   if (context) await context.service.archive(id);
   else await archiveRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id });
-  publishResult("archive run", () => archiveRunResult.parse({ runId: id, archived: true }), { saved: savedResult(id, ["archive", "list"]) });
+  return commandFacts(() => archiveRunResult.parse({ runId: id, archived: true }), { saved: savedResult(id, ["archive", "list"]) });
 }
 
-export async function archiveRestoreRunCommand(id: string): Promise<void> {
+export async function archiveRestoreRunCommand(id: string) {
   const config = await readConfig();
   const context = await contextArchiveRun(config, id);
   if (context) await context.service.archive(id, false);
   else await restoreRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id });
-  publishResult("archive restore run", () => archiveRunResult.parse({ runId: id, archived: false }), { saved: savedResult(id, ["run", "show", "--run", id]) });
+  return commandFacts(() => archiveRunResult.parse({ runId: id, archived: false }), { saved: savedResult(id, ["run", "show", "--run", id]) });
 }
 
 function normalizeArchiveKind(kind: string | undefined): ArchiveKind | undefined {

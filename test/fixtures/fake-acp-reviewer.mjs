@@ -130,7 +130,11 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   const invokeReviewCli = async (args) => {
     // Report actual work boundaries so a busy fixture does not look idle between CLI calls.
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
-    return invoke(cli, args);
+    const receipt = await invoke(cli, args);
+    if (process.env.REVIEW_TEST_CLI_TRANSCRIPT) {
+      await appendFile(process.env.REVIEW_TEST_CLI_TRANSCRIPT, JSON.stringify({ args, receipt }) + "\n");
+    }
+    return receipt;
   };
   // The retry scenario is already bound to a progressive Review. Its first
   // native command saves a node before the Provider deliberately exits.

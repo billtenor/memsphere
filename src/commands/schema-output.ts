@@ -3,7 +3,7 @@ import { flattenEffectiveRules, type EffectiveRuleTree } from "../memory/rules.j
 import type { RunStep } from "../run/store.js";
 import { nextAction } from "../prompts/cli-output.js";
 import type { PromptLocale } from "../prompts/locale.js";
-import { cliCommand, publishResult, previewText, type CliFormat } from "./output.js";
+import { cliCommand, commandFacts, previewText } from "./output.js";
 
 const exportResult = z.object({
   runId: z.string(), stepId: z.string(), artifactId: z.string(), exported: z.string(), nextAction
@@ -27,7 +27,7 @@ const schemaResult = z.object({
 }).strict();
 
 export function emitSchemaExport(data: Omit<z.input<typeof exportResult>, "nextAction">, options: {
-  project: string; phase: string; format?: CliFormat; locale?: PromptLocale;
+  project: string; phase: string; locale?: PromptLocale;
 }) {
   const scope = ["--project", options.project, "run"];
   const target = ["--run", data.runId, "--step", data.stepId];
@@ -35,9 +35,7 @@ export function emitSchemaExport(data: Omit<z.input<typeof exportResult>, "nextA
   const action = options.phase === "awaiting_finalization"
     ? cliCommand([...scope, "report", ...target, "--artifact-file", data.exported])
     : options.phase === "writing" ? inspect : undefined;
-  publishResult("run artifact export", () => exportResult.parse({ ...data, nextAction: action }), {
-    ...options, saved: { id: data.artifactId, inspect }
-  });
+  return commandFacts(() => exportResult.parse({ ...data, nextAction: action }), { ...options, saved: { id: data.artifactId, inspect } });
 }
 
 export function emitSchemaWriting(command: string, data: {
@@ -52,7 +50,7 @@ export function emitSchemaWriting(command: string, data: {
   current?: RunStep;
   validation?: { status: string; issues?: unknown[] };
   rules?: Record<string, EffectiveRuleTree>;
-}, options: { project: string; format?: CliFormat; locale?: PromptLocale }): void {
+}, options: { project: string; locale?: PromptLocale }) {
   const scope = ["--project", options.project, "run"];
   const target = ["--run", data.runId, "--step", data.stepId];
   const inspect = cliCommand([...scope, "schema", "show", ...target]);
@@ -85,7 +83,7 @@ export function emitSchemaWriting(command: string, data: {
   const instruction = current && previewText(current.instruction, 256);
   const preview = rules.slice(0, 8).map(({ scope, text }) => ({ scope, text: previewText(text, 160).text }));
   const shortened = instruction?.truncated || rules.length > preview.length || preview.some((item, i) => item.text !== rules[i].text);
-  publishResult(command, () => schemaResult.parse({
+  return commandFacts(() => schemaResult.parse({
     runId: data.runId, stepId: data.stepId, phase: data.phase,
     artifactId: data.artifactId ?? data.draft?.id, effective: data.effective,
     position: data.position,
@@ -99,5 +97,5 @@ export function emitSchemaWriting(command: string, data: {
     rules: rules.length ? (explicit ? rules : preview) : undefined,
     ruleCount: rules.length || undefined,
     nextAction: shortened && !explicit ? inspect : action
-  }), { format: options.format, locale: options.locale, maximumBytes: explicit ? undefined : 8192, saved: explicit ? undefined : { id: data.stepId, inspect } });
+  }), { locale: options.locale, saved: explicit ? undefined : { id: data.stepId, inspect } });
 }

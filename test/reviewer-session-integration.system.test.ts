@@ -523,7 +523,7 @@ test("native and restricted Memory readers select the declared kind, node and ef
   }
 });
 
-test("restricted review rejects conflicting options before changing the assignment and preserves completed exports", async t => {
+test("restricted review rejects conflicting options before changing the assignment", async t => {
   const f = await evidenceFixture(t);
   const before = (await reviews.readArtifactReviewForActor(f.input)).assignment;
   for (const format of ["text", "json"]) {
@@ -541,6 +541,10 @@ test("restricted review rejects conflicting options before changing the assignme
     }
   }
   assert.deepEqual((await reviews.readArtifactReviewForActor(f.input)).assignment, before);
+});
+
+test("restricted material exports remain verifiable after a closed stdout", async t => {
+  const f = await evidenceFixture(t);
   const preload = join(f.f.directory, "closed-channel.mjs");
   const { pathToFileURL } = await import("node:url");
   await writeFile(preload, 'process.stdout.write = (_chunk, callback) => { setImmediate(() => callback(new Error("closed"))); return false; };');

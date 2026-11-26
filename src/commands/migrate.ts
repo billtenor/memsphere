@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
-import { savedResult, cliCommand, publishResult } from "./output.js";
+import { savedResult, cliCommand, commandFacts } from "./output.js";
 import { readConfig } from "../config.js";
 import {
   checkArtifactContractV2Migration,
@@ -44,10 +44,11 @@ function requireMigrationMode(options: { check?: boolean; write?: boolean }): vo
   }
 }
 
-function emitMigration(manifest: Manifest, options: { write?: boolean; to?: string }): void {
+function emitMigration(manifest: Manifest, options: { write?: boolean; to?: string }) {
   const command = manifest.migration === "memory-syntax" ? "syntax" : manifest.migration;
   const issues = manifest.issues.slice(0, 10).map(({ code, file, path }) => ({ code, file, path }));
-  publishResult(`migrate ${command}`, () => migrationResult.parse({
+  if (manifest.status === "blocked") process.exitCode = 1;
+  return commandFacts(() => migrationResult.parse({
     mode: options.write ? "write" : "check",
     migration: manifest.migration,
     status: manifest.status,
@@ -59,42 +60,41 @@ function emitMigration(manifest: Manifest, options: { write?: boolean; to?: stri
     nextAction: manifest.status === "blocked"
       ? cliCommand(["migrate", command, "--check", ...(options.to ? ["--to", options.to] : [])])
       : options.write ? cliCommand(["validate"]) : undefined
-  }), { itemsField: "issues", saved: options.write && manifest.status === "ready" && manifest.files.some(file => file.changed) ? savedResult(manifest.target ?? manifest.migration) : undefined });
-  if (manifest.status === "blocked") process.exitCode = 1;
+  }), { saved: options.write && manifest.status === "ready" && manifest.files.some(file => file.changed) ? savedResult(manifest.target ?? manifest.migration) : undefined });
 }
 
-export async function migrateArtifactContractV2Command(options: { check?: boolean; write?: boolean }): Promise<void> {
+export async function migrateArtifactContractV2Command(options: { check?: boolean; write?: boolean }) {
   requireMigrationMode(options);
   const config = await readConfig();
   assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
     ? await writeArtifactContractV2Migration(config)
     : (await checkArtifactContractV2Migration(config)).manifest;
-  emitMigration(manifest, options);
+  return emitMigration(manifest, options);
 }
 
-export async function migrateSchemaContractV2Command(options: { check?: boolean; write?: boolean }): Promise<void> {
+export async function migrateSchemaContractV2Command(options: { check?: boolean; write?: boolean }) {
   requireMigrationMode(options);
   const config = await readConfig();
   assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
     ? await writeSchemaContractV2Migration(config)
     : (await checkSchemaContractV2Migration(config)).manifest;
-  emitMigration(manifest, options);
+  return emitMigration(manifest, options);
 }
 
 export async function migrateMemorySyntaxCommand(options: {
   check?: boolean;
   write?: boolean;
   to?: string;
-}): Promise<void> {
+}) {
   requireMigrationMode(options);
   const config = await readConfig();
   assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
     ? await writeMemorySyntaxMigration(config, options.to)
     : (await checkMemorySyntaxMigration(config, options.to)).manifest;
-  emitMigration(manifest, options);
+  return emitMigration(manifest, options);
 }
 
 function assertMigrationWriteAllowed(

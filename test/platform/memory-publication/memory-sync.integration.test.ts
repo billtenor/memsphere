@@ -126,6 +126,32 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     assert.equal(await readFile(join(memoryRoot, "concepts", "fixture.yaml"), "utf8"), original);
     assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revision);
 
+    const settingsPath = join(home, "config.json");
+    const settings = await readFile(settingsPath, "utf8").catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "ENOENT") throw error;
+      return undefined;
+    });
+    try {
+      for (const language of ["en", "zh-CN"]) {
+        await writeFile(settingsPath, JSON.stringify({ ...JSON.parse(settings ?? "{}"), language }));
+        for (const json of [false, true]) {
+          const file = join(memoryRoot, "concepts", "fixture.yaml");
+          await writeFile(file, original + "# local change\n");
+          const output = call(["memory", "recover", "Shared", "--restore", ...(json ? ["--output", "json"] : [])]);
+          if (json) assert.deepEqual(JSON.parse(output), { status: "restored", reference: "Shared" });
+          else {
+            assert.match(output, /status[：:] ?restored/);
+            assert.match(output, /reference[：:] ?Shared/);
+          }
+          assert.equal(await readFile(file, "utf8"), original);
+          assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revision);
+        }
+      }
+    } finally {
+      if (settings === undefined) await rm(settingsPath, { force: true });
+      else await writeFile(settingsPath, settings);
+    }
+
     await writeFile(join(memoryRoot, "concepts", "fixture.yaml"), original + "# recovered edit\n");
     const recovered = JSON.parse(call(["memory", "recover", "Shared", "--create-change", "--output", "json"]));
     assert.equal(recovered.status, "ready");

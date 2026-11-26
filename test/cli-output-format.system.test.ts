@@ -183,8 +183,9 @@ test("reading a null record preserves null in both formats and excludes it in me
   assert.deepEqual(JSON.parse(metadata.stdout), expectedMetadata);
 });
 
-test("Runner and debug commands keep session identifiers private in both representations", async t => {
+for (const language of ["en", "zh-CN"] as const) test(`Runner and debug commands keep session identifiers private in ${language} text and JSON`, async t => {
   const fixture = await businessFixture(t);
+  await writeFile(join(fixture.home, "config.json"), JSON.stringify({ language }));
   const clean: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: fixture.home };
   for (const name of Object.keys(clean)) {
     if (/^(?:path|codex_thread_id|traecli_thread_id|claude_code_session_id|memsphere_review_.+)$/i.test(name)) delete clean[name];
@@ -219,6 +220,12 @@ test("Runner and debug commands keep session identifiers private in both represe
           if (runner && identified) assert.match(reply.stdout, /agentType[：:] ?codex/);
         }
       }
+    }
+    for (const [agentType, variable] of [["claude", "CLAUDE_CODE_SESSION_ID"], ["traex", "TRAECLI_THREAD_ID"]]) {
+      const reply = execute(["runner", "identity"], { [variable]: session }, json);
+      assert.equal(reply.status, 0, reply.stderr);
+      if (json) assert.deepEqual(JSON.parse(reply.stdout), { identified: true, agentType });
+      else assert.match(reply.stdout, new RegExp("agentType[：:] ?" + agentType));
     }
     const conflict = execute(["runner", "identity"], { CODEX_THREAD_ID: session, TRAECLI_THREAD_ID: session }, json);
     assert.equal(conflict.status, 1);

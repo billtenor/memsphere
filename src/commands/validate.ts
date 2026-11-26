@@ -2,7 +2,7 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import { z } from "zod";
 import { validateMemoryRoot, validateMemoryStore, type ValidationIssue } from "../validation.js";
 import { nextAction } from "../prompts/cli-output.js";
-import { cliCommand, publishResult } from "./output.js";
+import { standaloneCommand, cliCommand, commandFacts } from "./output.js";
 
 export const memoryDiagnostic = z.object({
   code: z.enum(["INVALID_MEMORY", "MIGRATION_REQUIRED", "INVALID_STORE", "SCHEMA_OPTIONAL_INVALID", "REFERENCE_INVALID",
@@ -34,13 +34,16 @@ const validateResult = z.object({
   nextAction
 }).strict();
 
-export async function validateCommand(options: { memoryRoot?: string; format?: "text" | "json"; output?: "text" | "json" } = {}): Promise<void> {
+export const validateCommand = standaloneCommand("validate", validateFacts);
+
+export async function validateFacts(options: { memoryRoot?: string; format?: "text" | "json"; output?: "text" | "json" } = {}) {
   const result = options.memoryRoot
     ? await validateMemoryRoot(resolve(options.memoryRoot))
     : await validateMemoryStore();
   const issueCount = result.issues.length;
   const canMigrate = !options.memoryRoot && result.issues.some(issue => issue.migration === "syntax");
-  publishResult("validate", () => validateResult.parse({
+  if (issueCount > 0) process.exitCode = 1;
+  return commandFacts(() => validateResult.parse({
     valid: issueCount === 0,
     validationScope: options.memoryRoot ? "memory-root" : "project-store",
     changeSetEffect: "none",
@@ -49,6 +52,5 @@ export async function validateCommand(options: { memoryRoot?: string; format?: "
     nextAction: canMigrate
       ? cliCommand(["migrate", "syntax", "--check"])
       : !options.memoryRoot && issueCount === 0 ? cliCommand(["memory", "change", "validate"]) : undefined
-  }), { format: options.output ?? options.format, itemsField: "issues" });
-  if (issueCount > 0) process.exitCode = 1;
+  }));
 }

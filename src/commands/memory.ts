@@ -1,7 +1,7 @@
 import { readMemorySyntax } from "../memory/syntax.js";
 import { writeCliChunk } from "../cli-transport.js";
 import { z } from "zod";
-import { savedResult, cliCommand, cliPageBudget, publishResult, previewText, renderCommandResult, validateCommandResult } from "./output.js";
+import { standaloneCommand, savedResult, cliCommand, cliPageBudget, commandFacts, previewText, renderCommandResult, validateCommandResult } from "./output.js";
 import { nextAction } from "../prompts/cli-output.js";
 import { memoryDiagnostic, summarizeMemoryIssues } from "./validate.js";
 import type { MemoryCatalog, MemoryDescriptor } from "../memory/catalog.js";
@@ -126,8 +126,15 @@ export async function memoryListCommand(
   options: MemoryListCommandOptions,
   dependencies: MemoryCommandDependencies = defaultDependencies
 ): Promise<void> {
+  const result = await memoryListFacts(reference, options, dependencies);
+  const format = parseOutput(options.output ?? "text", listOutputs, "memory list");
+  await dependencies.writeStdout(renderCommandResult("memory list", result.facts, { format }));
+}
+
+export async function memoryListFacts(reference: string | undefined, options: MemoryListCommandOptions,
+  dependencies: Pick<MemoryCommandDependencies, "createCatalog"> = defaultDependencies) {
   const kind = parseKind(options.kind);
-  const output = parseOutput(options.output ?? "text", listOutputs, "memory list");
+  parseOutput(options.output ?? "text", listOutputs, "memory list");
   parseListLimit(options.limit);
   const limit = options.limit;
   if (!reference && options.node !== undefined) {
@@ -147,19 +154,18 @@ export async function memoryListCommand(
       run: options.run,
       kind
     }, cliPageBudget("established", summarizeMemoryNode));
-    await dependencies.writeStdout(renderCommandResult("memory list", memoryNodePage.parse({
+    return commandFacts(() => memoryNodePage.parse({
       memory: summarizeMemoryIdentity(page.memory),
       parent_node_ref: page.parent_node_ref,
       items: page.items.map(summarizeMemoryNode),
       nextCursor: page.nextCursor
-    }), { format: output }));
-    return;
+    }));
   }
   const page = await catalog.list({ kind, query: options.query, limit, cursor: options.cursor }, cliPageBudget("established", summarizeMemory));
-  await dependencies.writeStdout(renderCommandResult("memory list", memoryPage.parse({
+  return commandFacts(() => memoryPage.parse({
     items: page.items.map(summarizeMemory),
     nextCursor: page.nextCursor
-  }), { format: output }));
+  }));
 }
 
 function summarizeMemoryNode({ summary, name, field, artifact, condition_artifact, target, type, relation, node_ref, has_children }: MemoryNodeDescriptor) {
@@ -284,7 +290,7 @@ export async function createMemoryCommandCatalog(runId?: string): Promise<Memory
   return createMemoryCatalogForConfig(config, { memoryRoot, revision, runId: run.id, provider: new RunMemoryProvider(config.runsRoot, run) });
 }
 
-export async function memoryEditCommand(references: string[], options: { change?: string } = {}): Promise<void> {
+export async function memoryEditCommand(references: string[], options: { change?: string } = {}) {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   if (context.primary.config.store.type === "embedded") {
     if (options.change) throw new Error("--change is only available for a Managed Project");
@@ -292,35 +298,34 @@ export async function memoryEditCommand(references: string[], options: { change?
     const created = result.targets.filter(target => target.operation === "create");
     const saved = created.length ? savedResult(created.length === 1 ? join(result.memoryRoot, created[0].path) : result.memoryRoot,
       ["validate", "--memory-root", result.memoryRoot]) : undefined;
-    publishResult("memory edit", () => changeReceipt.parse({
+    return commandFacts(() => changeReceipt.parse({
       status: "ready", storeType: "embedded", targets: result.targets.map(({ reference, operation, path }) => ({
         reference, operation, path: join(result.memoryRoot, path)
       })),
       nextAction: cliCommand(["memory", "change", "validate"])
     }), { saved });
-    return;
   }
   const result = await editMemories({ references, changeId: options.change });
-  emitCandidate("memory edit", result.change.id, result.candidateRoot);
+  return emitCandidate("memory edit", result.change.id, result.candidateRoot);
 }
 
-export async function memoryDeleteCommand(references: string[], options: { change?: string } = {}): Promise<void> {
+export async function memoryDeleteCommand(references: string[], options: { change?: string } = {}) {
   const result = await editMemories({ references, changeId: options.change, operation: "delete" });
-  emitCandidate("memory delete", result.change.id, result.candidateRoot);
+  return emitCandidate("memory delete", result.change.id, result.candidateRoot);
 }
 
-export async function memoryRenameCommand(reference: string, newName: string, options: { change?: string } = {}): Promise<void> {
+export async function memoryRenameCommand(reference: string, newName: string, options: { change?: string } = {}) {
   const result = await renameMemory({ reference, newName, changeId: options.change });
-  emitCandidate("memory rename", result.change.id, result.candidateRoot);
+  return emitCandidate("memory rename", result.change.id, result.candidateRoot);
 }
 
 function emitCandidate(command: string, changeId: string, candidateRoot: string | undefined, extra: {
   status?: "ready" | "claimed";
   commentCount?: number;
   warningCount?: number;
-} = {}): void {
+} = {}) {
   const inspect = candidateRoot ? cliCommand(["validate", "--memory-root", candidateRoot]) : undefined;
-  publishResult(command, () => changeReceipt.parse({
+  return commandFacts(() => changeReceipt.parse({
     changeId, candidateRoot, status: extra.status ?? "ready",
     commentCount: extra.commentCount, warningCount: extra.warningCount,
     nextAction: cliCommand(["memory", "change", "validate", "--change", changeId])
@@ -334,24 +339,24 @@ function savedChange(change: { id: string; checkpoint?: { digest: string } | nul
   return savedResult(change.id, args);
 }
 
-export async function memoryPublishCommand(options: { change?: string; message?: string }): Promise<void> {
+export async function memoryPublishCommand(options: { change?: string; message?: string }) {
   if (!options.change) throw new TypeError("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "regular" });
   const applied = change.store_type === "embedded" && change.intent === "market_import";
-  publishResult("memory publish", () => changeReceipt.parse({
+  return commandFacts(() => changeReceipt.parse({
     changeId: change.id, status: applied ? "applied" : "published",
     storeType: change.store_type, revision: change.published_revision ?? undefined,
     nextAction: applied ? { kind: "human_confirmation" } : undefined
   }), { saved: savedChange(change) });
 }
 
-export async function memoryChangeResumeCommand(changeId: string): Promise<void> {
-  emitCandidate("memory change resume", changeId, await resumeMemoryChange(changeId));
+export async function memoryChangeResumeCommand(changeId: string) {
+  return emitCandidate("memory change resume", changeId, await resumeMemoryChange(changeId));
 }
 
-export async function memoryChangeClaimCommand(changeId: string, options: { force?: boolean } = {}): Promise<void> {
+export async function memoryChangeClaimCommand(changeId: string, options: { force?: boolean } = {}) {
   const result = await claimMemoryChange({ changeId, force: options.force });
-  emitCandidate("memory change claim", result.change.id, result.candidateRoot, {
+  return emitCandidate("memory change claim", result.change.id, result.candidateRoot, {
     status: "claimed",
     commentCount: result.change.comments.filter(comment => comment.status === "processing").length,
     warningCount: result.warnings.length
@@ -361,35 +366,35 @@ export async function memoryChangeClaimCommand(changeId: string, options: { forc
 export async function memoryChangeFinishCommand(
   changeId: string,
   options: { comment?: string[]; reason?: "fixed" | "rejected" } = {}
-): Promise<void> {
+) {
   const change = await finishMemoryChange({ changeId, commentIds: options.comment, reason: options.reason });
-  publishResult("memory change finish", () => changeReceipt.parse({
+  return commandFacts(() => changeReceipt.parse({
     changeId: change.id, status: "completed", commentCount: (options.comment ?? []).length
   }), { saved: savedChange(change) });
 }
 
-export async function memoryChangeCompleteCommand(changeId: string): Promise<void> {
+export async function memoryChangeCompleteCommand(changeId: string) {
   const change = await completeMemoryChange(changeId);
-  publishResult("memory change complete", () => changeReceipt.parse({ changeId: change.id, status: "completed" }), { saved: savedChange(change) });
+  return commandFacts(() => changeReceipt.parse({ changeId: change.id, status: "completed" }), { saved: savedChange(change) });
 }
 
 export async function memoryChangeValidateCommand(
   changeId: string | undefined,
   options: { format?: string; output?: string } = {}
-): Promise<void> {
+) {
   const format = parseOutput(options.output ?? options.format ?? "text", ["text", "json"] as const, "memory change validate");
   const result = await validateMemoryChange(changeId);
   const preview = await memoryChangePreview(result.changeId);
   const inspect = cliCommand(["memory", "change", "show", result.changeId, "--checkpoint", result.checkpointDigest,
     "--part", result.issues.length ? "validation" : "summary"]);
-  publishResult("memory change validate", () => changeValidation.parse({
+  if (result.issues.length > 0) process.exitCode = 1;
+  return commandFacts(() => changeValidation.parse({
     valid: result.issues.length === 0, changeId: result.changeId, storeType: result.storeType,
     baseRevision: result.baseRevision, checkpointDigest: result.checkpointDigest,
     completedChangeIds: result.completedChangeIds.slice(0, 20), completedChangeCount: result.completedChangeIds.length,
     issueCount: result.issues.length, issues: summarizeMemoryIssues(result.issues, result.memoryRoot, result.candidateRoot),
     empty: result.empty ?? false, previewPath: preview.path, previewUrl: preview.url, nextAction: inspect
-  }), { format, itemsField: "issues", saved: { id: result.changeId, inspect } });
-  if (result.issues.length > 0) process.exitCode = 1;
+  }), { saved: { id: result.changeId, inspect } });
 }
 
 async function memoryChangePreview(changeId: string): Promise<{ path: string; url?: string }> {
@@ -405,32 +410,33 @@ export function memoryChangePreviewPath(project: string, changeId: string): stri
   return `/projects/${encodeURIComponent(project)}/changes/${encodeURIComponent(changeId)}`;
 }
 
-export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }): Promise<void> {
+export async function memoryRecoverCommand(reference: string, options: { restore?: boolean; createChange?: boolean }) {
   if (options.restore === options.createChange) throw new Error("choose exactly one of --restore or --create-change");
   const result = await recoverMemory(reference, options.restore ? "restore" : "create-change");
   if (result.change) {
-    emitCandidate("memory recover", result.change.id, result.candidateRoot);
+    return emitCandidate("memory recover", result.change.id, result.candidateRoot);
   } else {
-    publishResult("memory recover", () => changeReceipt.parse({ status: "restored", reference }), { saved: savedResult(reference, ["project", "show", result.project]) });
+    return commandFacts(() => changeReceipt.parse({ status: "restored", reference }), { saved: savedResult(reference, ["project", "show", result.project]) });
   }
 }
 
-export async function memoryPushCommand(): Promise<void> {
+export async function memoryPushCommand() {
   const project = await pushMemory();
-  publishResult("memory push", () => changeReceipt.parse({ status: "pushed", storeType: "managed" }),
-    { saved: savedResult(project, ["project", "show", project]) });
+  return commandFacts(() => changeReceipt.parse({ status: "pushed", storeType: "managed" }), { saved: savedResult(project, ["project", "show", project]) });
 }
 
-export async function memorySyncCommand(): Promise<void> {
+export async function memorySyncCommand() {
   const result = await syncMemory();
-  if (result.change) emitCandidate("memory sync", result.change.id, result.candidateRoot);
-  else publishResult("memory sync", () => changeReceipt.parse({ status: "synchronized", revision: result.revision }), { saved: result.revision ? savedResult(result.revision, ["project", "show", result.project]) : undefined });
+  if (result.change) return emitCandidate("memory sync", result.change.id, result.candidateRoot);
+  else return commandFacts(() => changeReceipt.parse({ status: "synchronized", revision: result.revision }), { saved: result.revision ? savedResult(result.revision, ["project", "show", result.project]) : undefined });
 }
 
-export async function memorySyncPublishCommand(options: { change?: string; message?: string }): Promise<void> {
+export const memorySyncPublishCommand = standaloneCommand("memory sync publish", memorySyncPublishFacts);
+
+export async function memorySyncPublishFacts(options: { change?: string; message?: string }) {
   if (!options.change) throw new TypeError("--change <id> is required");
   const change = await publishMemoryChange(options.change, options.message, { expectedKind: "sync" });
-  publishResult("memory sync publish", () => changeReceipt.parse({
+  return commandFacts(() => changeReceipt.parse({
     changeId: change.id, status: "published", revision: change.published_revision ?? undefined
   }), { saved: savedChange(change) });
 }

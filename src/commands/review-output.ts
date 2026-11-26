@@ -4,7 +4,7 @@ import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import type { RunState } from "../run/store.js";
 import { buildArtifactReviewNextActionPromptModel } from "../prompts/review.js";
 import { nextAction } from "../prompts/cli-output.js";
-import { cliCommand, publishResult, previewText, type CliFormat } from "./output.js";
+import { cliCommand, commandFacts, previewText } from "./output.js";
 import { registeredWait, reviewReceipts, type ReviewReceiptCommand } from "../prompts/review-receipts.js";
 import type { RunProgress } from "./run-result.js";
 
@@ -19,11 +19,10 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
   taskId?: string;
   assignmentId?: string;
   vote?: string;
-  format?: CliFormat;
   statusOnly?: boolean;
   fullComments?: boolean;
   assignmentPage?: number;
-}): void {
+}) {
   const { project, run, review, round, progress } = input;
   const invoke = (...args: string[]) => cliCommand([...(project ? ["--project", project] : []), "run", ...args]);
   const resume = invoke("review", "wait", "--review", review.id);
@@ -64,22 +63,22 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
     details: input.fullComments ? undefined : inspect,
     nextAction: action
   };
-  const options = { format: input.format, locale: run.language, maximumBytes: 8192,
+  const options = { locale: run.language,
     saved: command === "run review show" || command === "run review wait" && !input.taskId
       ? undefined : { id: input.taskId ?? review.id, inspect } };
   const receipt = { ...summary, outcome: opinion ? undefined : round.result?.status };
   switch (command) {
     case "run review wait":
       if (input.taskId) {
-        return publishResult(command, () => registeredWait.parse({ ...summary, taskId: input.taskId, nextAction: { kind: "wait", resume } }), options);
+        return commandFacts(() => registeredWait.parse({ ...summary, taskId: input.taskId, nextAction: { kind: "wait", resume } }), options);
       }
-      return publishResult(command, () => reviewReceipts[command].parse(receipt), { ...options, receiptContext: input.statusOnly ? "historical-round" : undefined });
+      return commandFacts(() => reviewReceipts[command].parse(receipt), { ...options, receiptContext: input.statusOnly ? "historical-round" : undefined });
     case "run review vote":
-      return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, vote: input.vote! }), options);
+      return commandFacts(() => reviewReceipts[command].parse({ ...receipt, vote: input.vote! }), options);
     case "run review retry":
-      return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, assignmentId: input.assignmentId }), options);
+      return commandFacts(() => reviewReceipts[command].parse({ ...receipt, assignmentId: input.assignmentId }), options);
     case "run review submit-for-human":
-      return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, assignmentId: input.assignmentId!, vote: input.vote! }), options);
+      return commandFacts(() => reviewReceipts[command].parse({ ...receipt, assignmentId: input.assignmentId!, vote: input.vote! }), options);
   }
   const comments = round.assignments.flatMap(assignment => (assignment.submitted?.comments ?? []).map(item => {
     const commentId = reviewCommentId(item);
@@ -94,7 +93,7 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
   const assignments = round.assignments.slice((page - 1) * 10, page * 10);
   const nextPage = input.fullComments && inspect && page * 10 < round.assignments.length
     ? cliCommand([...inspect.args, "--assignment-page", String(page + 1)]) : undefined;
-  publishResult(command, () => reviewReceipts[command].parse({
+  return commandFacts(() => reviewReceipts[command].parse({
     ...receipt, details: nextPage ?? receipt.details,
     assignments: assignments.map(assignment => ({
       assignmentId: artifactReviewAssignmentId(assignment), actorId: assignment.actorId,
@@ -107,5 +106,5 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
         ? assignment.attempts?.at(-1)?.failure?.code : undefined
     })),
     comments: input.fullComments ? comments : comments.slice(0, 8)
-  }), { ...options, itemsField: "comments", maximumBytes: input.fullComments ? undefined : 8192 });
+  }), { ...options });
 }

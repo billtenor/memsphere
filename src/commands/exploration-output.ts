@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PromptLocale } from "../prompts/locale.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
-import { cliCommand, publishResult, previewText, type CliFormat } from "./output.js";
+import { cliCommand, commandFacts, previewText } from "./output.js";
 import { reviewCommentId } from "../review-nodes.js";
 import type { Review, Step } from "../context_control/types.js";
 
@@ -63,11 +63,11 @@ export function emitExplorationStep(command: string, item: {
   configuration: NonNullable<Step["reviewConfiguration"]>;
   reviewers: { value: string; name: string }[];
   missing: string[];
-}, options: { project: string; format?: CliFormat; locale?: PromptLocale }): void {
+}, options: { project: string; locale?: PromptLocale }) {
   const { runId, step, configuration } = item;
   const artifactId = step.artifact?.mode === "produce" ? step.artifact.id : undefined;
   const canReview = item.missing.length === 0 && artifactId;
-  publishResult(command, () => explorationStep.parse({
+  return commandFacts(() => explorationStep.parse({
     runId, stepId: step.id, stepStatus: step.status, artifactId,
     configuration: {
       reviewer: configuration.reviewer, asserts: configuration.asserts, suggests: configuration.suggests,

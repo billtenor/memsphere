@@ -2,7 +2,7 @@ import { z } from "zod";
 import { reviewRuleSchema, reviewSourceSchema } from "../review-nodes.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
 import type { PromptLocale } from "../prompts/locale.js";
-import { cliCommand, publishResult, paginateCliItems, type CliFormat } from "./output.js";
+import { cliCommand, commandFacts, paginateCliItems } from "./output.js";
 import type { PaginationOptions } from "../pagination.js";
 
 const str = z.string();
@@ -48,7 +48,7 @@ const nodeSummary = nodeResult.pick({
 });
 const nodePage = z.object({ runId: str, items: z.array(nodeSummary), nextCursor: opt }).strict();
 
-type ReceiptOptions = { format?: CliFormat; locale?: PromptLocale; reviewer?: boolean; project?: string };
+type ReceiptOptions = { locale?: PromptLocale; reviewer?: boolean; project?: string };
 type ReviewView = z.input<typeof nodeResult>;
 
 function publicReviewView(raw: unknown): ReviewView {
@@ -67,7 +67,7 @@ function publicReviewView(raw: unknown): ReviewView {
 export function emitReviewNodeResult(operation: string, raw: unknown, options: ReceiptOptions & {
   warnings?: ReviewView["warnings"];
   boundReviewId?: string;
-}): void {
+}) {
   const result = publicReviewView(raw);
   const launcher = options.reviewer ? "reviewer" : "memsphere";
   const scope = options.reviewer ? ["continue"] : [
@@ -106,15 +106,13 @@ export function emitReviewNodeResult(operation: string, raw: unknown, options: R
     default: throw new Error("Unknown review node operation");
   }
   const savedId = options.reviewer ? receipt.savedNodeId ?? receipt.commentId ?? options.boundReviewId : result.reviewId;
-  publishResult(`run review ${command}`, () => nodeResult.parse(receipt), { ...options, itemsField: "nodes",
-    saved: changed && savedId ? { id: savedId, inspect: action(options.reviewer ? ["show", "--all"] : ["show"]) } : undefined
-  });
+  return commandFacts(() => nodeResult.parse(receipt), { ...options, saved: changed && savedId ? { id: savedId, inspect: action(options.reviewer ? ["show", "--all"] : ["show"]) } : undefined });
 }
 
 export function emitReviewNodeList(runId: string, artifactId: string, items: z.input<typeof nodeSummary>[],
-  options: ReceiptOptions & PaginationOptions): void {
+  options: ReceiptOptions & PaginationOptions) {
   const page = paginateCliItems(items, options, {
     command: "run review list", scope: { project: options.project, runId }, filters: { artifact: artifactId, progressive: true }
   }, "summary");
-  publishResult("run review list", () => nodePage.parse({ runId, items: page.items, nextCursor: page.nextCursor }), options);
+  return commandFacts(() => nodePage.parse({ runId, items: page.items, nextCursor: page.nextCursor }), options);
 }

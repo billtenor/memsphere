@@ -1,3 +1,4 @@
+import { nativeResultRoute, resultPresentation } from "../prompts/contracts/presentation.js";
 import { withActionScope } from "../prompts/contracts/actions.js";
 import { acceptsPublicError } from "../prompts/contracts/errors.js";
 import { publicReceipt, commandCases, type OutputScope, type ReceiptContext, cliProtocol } from "../prompts/contracts/dispatch.js";
@@ -30,7 +31,7 @@ export function commandFromContract(parent: Command, contract: { readonly route:
   return parent.command(leaf);
 }
 
-type Invocation = { format: CliFormat; locale: PromptLocale; scope?: OutputScope; program?: Command; reviewerProtocol?: "graph" | "flow"; pending: Promise<void>[] };
+type Invocation = { format: CliFormat; locale: PromptLocale; scope?: OutputScope; program?: Command; returnsFacts?: boolean; reviewerProtocol?: "graph" | "flow"; receipt?: { output: string; saved?: ResultOptions["saved"] }; invalid?: CliOutputError; delivered?: boolean; afterDelivery?: () => Promise<void> };
 const invocation = new AsyncLocalStorage<Invocation>();
 
 export function setReviewerOutputProtocol(protocol: "graph" | "flow") {
@@ -53,14 +54,26 @@ export function bindCliOutputs(program: Command): void {
     if (route !== "continue" && !commandCases(role, route) && !leaf.commands.length && !(role === "native" && cliProtocol(route))) {
       throw new CliOutputError(undefined, new Error("Unregistered CLI route " + route));
     }
+    if (commandCases(role, route) && cliProtocol(nativeResultRoute({ role, route })) === "result" &&
+        route !== "data read" && !resultActions.has(leaf)) {
+      throw new CliOutputError(undefined, new Error("Command has no registered result handler: " + route));
+    }
     state.program = program;
+    state.returnsFacts = resultActions.has(leaf);
     state.scope = { route, role, options: { ...leaf.opts() }, args: leaf.processedArgs.slice() };
   });
 }
 
 export async function flushCliOutput(): Promise<void> {
   const state = invocation.getStore();
-  if (state) await Promise.all(state.pending.splice(0));
+  if (state?.invalid) throw state.invalid;
+  if (state?.returnsFacts && !state.receipt) throw new CliOutputError(undefined, new Error("Missing command result"));
+  if (!state?.receipt || state.delivered) return;
+  state.delivered = true;
+  const { output, saved } = state.receipt;
+  try { await writeCliChunk(output); }
+  catch (error) { throw new CliOutputError(saved, error); }
+  await state.afterDelivery?.();
 }
 
 
@@ -73,7 +86,7 @@ export async function withCliOutput<T>(format: CliFormat, run: () => Promise<T>)
     // Startup and help can run before Home exists. Configuration errors keep
     // their own CLI diagnostic and never affect the ability to print a reply.
   }
-  return invocation.run({ format, locale, reviewerProtocol: invocation.getStore()?.reviewerProtocol, pending: [] }, run);
+  return invocation.run({ format, locale, reviewerProtocol: invocation.getStore()?.reviewerProtocol }, run);
 }
 
 export function cliFormat(fallback: CliFormat = "text"): CliFormat {
@@ -171,6 +184,8 @@ type ResultOptions = {
   saved?: { id: string; inspect?: CliCommand };
 };
 
+type CommandResultOptions = Pick<ResultOptions, "receiptContext" | "locale" | "saved" | "format">;
+
 export class CliOutputError extends Error {
   readonly code = "OUTPUT_RENDER_FAILED";
   constructor(
@@ -181,15 +196,68 @@ export class CliOutputError extends Error {
   }
 }
 
-export function publishResult(command: string, value: unknown, options: ResultOptions = {}): void {
+export type ResultFacts = {
+  readonly locale?: PromptLocale;
+  readonly receiptContext?: ReceiptContext;
+  readonly afterDelivery?: () => Promise<void>;
+  readonly facts: () => Record<string, unknown>;
+  readonly saved?: ResultOptions["saved"];
+  readonly format?: never;
+  readonly maximumBytes?: never;
+  readonly command?: never;
+  readonly schema?: never;
+  readonly template?: never;
+};
+const resultActions = new WeakSet<Command>();
+
+/** A handler supplies business facts and, after a mutation, a read-only recovery target. */
+export function commandFacts(value: ResultFacts["facts"] | Record<string, unknown>,
+  { saved, locale, receiptContext }: Pick<ResultFacts, "saved" | "locale" | "receiptContext"> = {}): ResultFacts {
+  return { facts: typeof value === "function" ? value : () => value, saved, locale, receiptContext };
+}
+
+const protocolComplete = Symbol("dedicated CLI transport");
+export function completedCliProtocol(): typeof protocolComplete { return protocolComplete; }
+/** Bind the return value of a business handler to the actual parsed leaf. */
+export function registerResultAction(command: Command, handler: (...args: any[]) => Promise<ResultFacts | typeof protocolComplete> | ResultFacts): Command {
+  resultActions.add(command);
+  return command.action(async (...args) => {
+    const result = await handler(...args);
+    const state = invocation.getStore();
+    if (result === protocolComplete && state?.scope && (
+      state.scope.route === "data export" && state.scope.options.out === "-" ||
+      state.scope.route.startsWith("continue ") && state.scope.options.help === true
+    )) { state.returnsFacts = false; return; }
+    if (!state?.scope || !state.returnsFacts || state.receipt || state.invalid || !result || typeof result !== "object" ||
+        Object.keys(result).some(key => !["facts", "saved", "locale", "receiptContext", "afterDelivery"].includes(key)) || typeof result.facts !== "function") {
+      const failure = new CliOutputError(state?.receipt?.saved, new Error("Expected one result from the registered handler"));
+      if (state) state.invalid = failure;
+      throw failure;
+    }
+    state.receipt = { output: renderCommandResult(state.scope.route, result.facts, { saved: result.saved, locale: result.locale, receiptContext: result.receiptContext }), saved: result.saved };
+    state.afterDelivery = result.afterDelivery;
+  });
+}
+
+/** Compatibility adapter for module callers outside a Commander invocation. */
+export function standaloneResult(route: string, result: ResultFacts, format?: CliFormat): void {
   const state = invocation.getStore();
-  const output = renderCommandResult(command, value, options);
-  if (!state) { process.stdout.write(output); return; }
-  const pending = writeCliChunk(output).catch(error => { throw new CliOutputError(options.saved, error); });
-  // Commander actions can be synchronous. Attach a rejection listener now,
-  // and propagate the error from the dispatch completion boundary.
-  void pending.catch(() => {});
-  state.pending.push(pending);
+  if (state) {
+    state.invalid = new CliOutputError(result.saved, new Error("Standalone output inside a registered command"));
+    throw state.invalid;
+  }
+  process.stdout.write(renderCommandResult(route, result.facts, {
+    format, locale: result.locale, receiptContext: result.receiptContext, saved: result.saved
+  }));
+}
+
+export function standaloneCommand<Args extends unknown[]>(route: string, handler: (...args: Args) => Promise<ResultFacts>) {
+  return async (...args: Args): Promise<void> => {
+    const result = await handler(...args);
+    const options = args.find(value => value && typeof value === "object" &&
+      ("output" in value || "format" in value)) as { output?: CliFormat; format?: CliFormat } | undefined;
+    standaloneResult(route, result, options?.output ?? options?.format);
+  };
 }
 
 export function validateCommandResult(command: string, value: unknown, saved?: ResultOptions["saved"], receiptContext?: ReceiptContext) {
@@ -206,19 +274,14 @@ export function validateCommandResult(command: string, value: unknown, saved?: R
   }
 }
 
-export function renderCommandResult(command: string, value: unknown, options: ResultOptions = {}): string {
+export function renderCommandResult(command: string, value: unknown, options: CommandResultOptions = {}): string {
   try {
     const selected = validateCommandResult(command, typeof value === "function" ? value() : value, options.saved, options.receiptContext);
     const scope = invocation.getStore()?.scope;
-    const route = scope?.route ?? command;
-    const fullContent = options.contentField || command === "run artifact contract show"
-      || command === "run artifact show" && ("artifact" in selected || "contextArtifacts" in selected)
-      || command === "run review show" && (scope?.options.all || "node" in selected || "nodes" in selected)
-      || command === "run schema show" || command === "run step show";
-    const paged = /(?:^| )list$/.test(route) || "nextCursor" in selected;
-    const maximumBytes = options.maximumBytes ?? (fullContent ? undefined : paged
-      ? scope?.options.limit === undefined ? 32768 : 131072 : 8192);
-    return renderCliResult(route, z.record(z.unknown()), selected, { ...options, maximumBytes });
+    const target = scope ?? { route: command, role: "native" as const, options: {}, args: [] };
+    const presentation = resultPresentation(target, selected);
+    return renderCliResult(target.route, z.record(z.unknown()), selected, { ...options, ...presentation,
+      format: scope ? cliFormat() : options.format });
   } catch (error) {
     if (error instanceof CliOutputError) throw error;
     throw new CliOutputError(options.saved, error);

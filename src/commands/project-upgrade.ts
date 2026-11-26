@@ -10,7 +10,7 @@ import { upgradeProjectModelRegistrations, withModelRegistrationMaintenance } fr
 import { readSystemMemoryUpgradeTargets, prepareEmbeddedSystemMemoryRepair, applyEmbeddedSystemMemoryRepair } from "./project.js";
 import { errorCode } from "./cli-errors.js";
 import { z } from "zod";
-import { savedResult, cliCommand, publishResult } from "./output.js";
+import { savedResult, cliCommand, commandFacts } from "./output.js";
 import { nextAction } from "../prompts/cli-output.js";
 
 const require = createRequire(import.meta.url);
@@ -41,7 +41,7 @@ const upgradeResult = z.object({
 }).strict();
 
 /** One selected Project, two separately recoverable resource upgrades. */
-export async function projectUpgradeCommand(name?: string, options: { output?: "text" | "json"; change?: string } = {}): Promise<void> {
+export async function projectUpgradeCommand(name?: string, options: { output?: "text" | "json"; change?: string } = {}) {
   const previous = process.env.MEMSPHERE_PROJECT;
   const result: z.input<typeof upgradeResult> = {
     cliVersion: version, overall: "failed", models: { status: "not_run" }, memory: { status: "not_run" }, validation: "not_run"
@@ -140,6 +140,5 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
     if (previous === undefined) delete process.env.MEMSPHERE_PROJECT;
     else process.env.MEMSPHERE_PROJECT = previous;
   }
-  publishResult("project upgrade", () => upgradeResult.parse(result), { format: options.output,
-    saved: result.project && result.overall === "upgraded" ? savedResult(result.project, ["project", "show", result.project]) : undefined });
+  return commandFacts(() => upgradeResult.parse(result), { saved: result.project && result.overall === "upgraded" ? savedResult(result.project, ["project", "show", result.project]) : undefined });
 }

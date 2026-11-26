@@ -1061,3 +1061,42 @@ test("daemon suspends a delivered notification after terminal CAS conflict until
  assert.equal(recovered.value.status,"failed");assert.equal(recovered.value.error?.code,"execution_interrupted");
  assert.equal((await readFile(f.queueLog,"utf8")).trim().split("\n").length,1,"restart exposes uncertain outcome without automatic redelivery");
 });
+
+for (const language of ["en", "zh-CN"] as const) for (const json of [false, true]) {
+  test(`daemon, View and review wait deliver the registered ${language} ${json ? "JSON" : "default text"} receipts`, { timeout: 90000 }, async t => {
+    const f = await reviewFixture(t, "success", true, true, "codex", "graph", language);
+    const settings = join(f.home, "config.json");
+    await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, "utf8")), language }));
+    const call = async (args: string[], fact: string, expected?: unknown) => {
+      const { stdout, stderr } = await f.call(...args, ...(json ? ["--output", "json"] : []));
+      assert.equal(stderr, "");
+      if (json) {
+        const fields = JSON.parse(stdout);
+        assert.ok(Object.hasOwn(fields, fact), stdout);
+        if (expected !== undefined) assert.equal(fields[fact], expected);
+      } else {
+        assert.ok(stdout.includes(fact + (language === "en" ? ": " : "：")), stdout);
+        if (expected !== undefined) assert.ok(stdout.includes(String(expected)), stdout);
+      }
+    };
+    const stop = (await import("../../../src/daemon/service.js")).stopDaemon;
+    f.beforeCleanup(() => stop(f.home).then(() => undefined));
+    await call(["daemon", "start"], "running", true);
+    await call(["daemon", "restart"], "running", true);
+    await call(["daemon", "status"], "running", true);
+    for (const verb of ["start", "status", "restart", "stop"]) await call(["view", verb], "view");
+    const round = (await f.reviewState()).round.id;
+    const native = ["run", "review", "wait", "--review", f.reviewId];
+    await call(native, "taskId");
+    await call(["continue", "review", "wait"], "taskId");
+    await f.completeAgent();
+    const task = await f.waitForTask("completed");
+    await call(["continue", "review", "wait"], "roundId", round);
+    const { updateTask } = await import("../../../src/daemon/tasks.js");
+    await updateTask(task, { status: "failed", error: { stage: "send", code: "fixture", message: "Fixture retry" } }, f.home);
+    await call(["run", "review", "wait", "retry", "--review", f.reviewId, "--round", round], "taskId", task.id);
+    await f.waitForTask("completed");
+    assert.equal((await f.reviewState()).round.id, round);
+    await call(["daemon", "stop"], "running", false);
+  });
+}

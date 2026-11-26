@@ -7,7 +7,7 @@ import { resolveProjectContext } from "../project/resolver.js";
 import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
 import { agentTypes, detectRunnerAgents } from "../runner/identity.js";
-import { publishResult, savedResult } from "./output.js";
+import { commandFacts, savedResult } from "./output.js";
 import { daemonStatusSchema, publicDaemonStatus } from "../daemon/public-status.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
@@ -197,31 +197,31 @@ type MemoryLoadError = {
   issues: string[];
 };
 
-export async function viewStartCommand(): Promise<void> {
+export async function viewStartCommand() {
   const config = await readViewStartupConfig();
   await writeViewIntent("running", config.configPath);
   await ensureDaemon();
   const result = await daemonControl("view-start");
   if (result.view.error) throw Object.assign(new Error("View could not start."), { code: "VIEW_UNAVAILABLE" });
-  publishResult("view start", () => daemonStatusSchema.parse(publicDaemonStatus(result)), { saved: savedResult("view", ["view", "status"]) });
+  return commandFacts(() => daemonStatusSchema.parse(publicDaemonStatus(result)), { saved: savedResult("view", ["view", "status"]) });
 }
-export async function viewStopCommand(): Promise<void> {
+export async function viewStopCommand() {
   await writeViewIntent("stopped");
   await daemonControl("view-stop");
   const status = await daemonStatus();
-  publishResult("view stop", () => daemonStatusSchema.parse(publicDaemonStatus(status)), { saved: savedResult("view", ["view", "status"]) });
+  return commandFacts(() => daemonStatusSchema.parse(publicDaemonStatus(status)), { saved: savedResult("view", ["view", "status"]) });
 }
-export async function viewRestartCommand(): Promise<void> {
+export async function viewRestartCommand() {
   const config = await readViewStartupConfig();
   await writeViewIntent("running", config.configPath);
   await ensureDaemon();
   const result = await daemonControl("view-restart");
   if (result.view.error) throw Object.assign(new Error("View could not restart."), { code: "VIEW_UNAVAILABLE" });
-  publishResult("view restart", () => daemonStatusSchema.parse(publicDaemonStatus(result)), { saved: savedResult("view", ["view", "status"]) });
+  return commandFacts(() => daemonStatusSchema.parse(publicDaemonStatus(result)), { saved: savedResult("view", ["view", "status"]) });
 }
-export async function viewStatusCommand(): Promise<void> {
+export async function viewStatusCommand() {
   const status = await daemonStatus();
-  publishResult("view status", () => daemonStatusSchema.parse(publicDaemonStatus(status)));
+  return commandFacts(() => daemonStatusSchema.parse(publicDaemonStatus(status)));
 }
 
 export async function viewServeCommand(options: ViewServeOptions): Promise<void> {

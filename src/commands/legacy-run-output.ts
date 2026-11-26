@@ -2,12 +2,16 @@ import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
 import { buildRunCurrentStepPromptModel, buildRunReportReceiptPromptModel } from "../prompts/run.js";
 import { currentArtifactReview, currentFrame, currentSchemaFinalization, currentStep, runDisplayName, type RunReviewPreflight, type RunState } from "../run/store.js";
-import { cliCommand, publishResult, previewText } from "./output.js";
+import { standaloneResult, cliCommand, commandFacts, previewText } from "./output.js";
 import { runProgressSchema, type RunProgress } from "./run-result.js";
 import type { MemsphereConfig } from "../config.js";
 import { resolvePromptLocale } from "../prompts/locale.js";
 
-export function emitLegacyRun(
+export function emitLegacyRun(...args: Parameters<typeof legacyRunFacts>): void {
+  standaloneResult(args[0], legacyRunFacts(...args), args[3]);
+}
+
+export function legacyRunFacts(
   command: string,
   run: RunState,
   context: Pick<MemsphereConfig, "project" | "runsRoot">,
@@ -94,10 +98,7 @@ export function emitLegacyRun(
       }
     }
   }
-  publishResult(command, () => runProgressSchema.parse(result), {
-    locale: run.language, format, maximumBytes: 8192,
-    ...(command !== "run status" ? { saved: { id: run.id, inspect } } : {})
-  });
+  return commandFacts(() => runProgressSchema.parse(result), { locale: run.language, ...(command !== "run status" ? { saved: { id: run.id, inspect } } : {}) });
 }
 
 const preflightSchema = z.object({
@@ -112,11 +113,11 @@ const preflightSchema = z.object({
   nextAction
 }).strict();
 
-export function emitReviewPreflight(preflight: RunReviewPreflight, result: { project?: string; selector: string[]; name: string; format?: "text" | "json"; locale: RunState["language"] }) {
+export function emitReviewPreflight(preflight: RunReviewPreflight, result: { project?: string; selector: string[]; name: string; locale: RunState["language"] }) {
   const { reviews, slots, actors, example } = preflight;
-  publishResult("run start", () => preflightSchema.parse({
+  return commandFacts(() => preflightSchema.parse({
     status: "review_configuration_required", reviews, slots, actors, example,
     nextAction: cliCommand([...(result.project ? ["--project", result.project] : []), "run", "start",
       ...result.selector, "--name", result.name, "--review-config", "<path>"])
-  }), { format: result.format, locale: result.locale, contentField: "example" });
+  }), { locale: result.locale });
 }

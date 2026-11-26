@@ -5,7 +5,7 @@ import { authoredArtifact, flowArtifactDetail, flowBindings, flowBindingUpdate, 
 import { runOverviewSchema } from "./run-result.js";
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
-import { cliCommand, emitCliError, flushCliOutput, publishResult, paginateCliItems, previewText } from "./output.js";
+import { standaloneCommand, cliCommand, emitCliError, commandFacts, paginateCliItems, previewText } from "./output.js";
 import { reviewReceipt } from "./review-output.js";
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { currentIdentity, readRunnerAgents, detectRunnerAgent, checkQueueCapability } from "../runner/identity.js";
@@ -82,7 +82,7 @@ import {
 } from "../context_control/review-repository.js";
 import { parseModelArtifactWriteOptions } from "../project/model-artifact.js";
 import { assertReportExecutionCapability } from "../report-execution.js";
-import { emitLegacyRun, emitReviewPreflight } from "./legacy-run-output.js";
+import { legacyRunFacts, emitReviewPreflight } from "./legacy-run-output.js";
 
 type ReportOptions = {
   output?: "text" | "json";
@@ -193,11 +193,13 @@ type AgentReviewSubmitOptions = AgentReviewAssignmentOptions & {
   summaryFile?: string;
 };
 
-export async function runStartCommand(procedureName: string | undefined, options: RunStartOptions = {}): Promise<void> {
+export const runStartCommand = standaloneCommand("run start", runStartFacts);
+
+export async function runStartFacts(procedureName: string | undefined, options: RunStartOptions = {}) {
   const procedure = procedureName?.trim();
   const procedureFile = options.file?.trim();
   const changeId = options.change?.trim();
-  if (!procedure && !procedureFile) { await startExploration(options); return; }
+  if (!procedure && !procedureFile) { return startExploration(options); }
   if (procedure && procedureFile) throw new Error("use either a procedure name or --file <path>, not both");
   if (changeId && procedureFile) throw new Error("--change cannot be used with --file");
   const runName = normalizeRunName(options.name);
@@ -284,14 +286,13 @@ export async function runStartCommand(procedureName: string | undefined, options
     }
   } catch (error) {
     if (!(error instanceof RunReviewConfigurationRequired)) throw error;
-    emitReviewPreflight(error.preflight, {
-      project: config.project?.name, name: runName, format: options.output, locale: config.language,
+    return emitReviewPreflight(error.preflight, {
+      project: config.project?.name, name: runName, locale: config.language,
       selector: [...(procedureFile ? ["--file", procedureFile] : [procedure!]), ...(changeId ? ["--change", changeId] : [])]
     });
-    return;
   }
-  if ("run" in run) await printGraphStart(run, options.output);
-  else emitLegacyRun("run start", run, config, options.output);
+  if ("run" in run) return printGraphStart(run);
+  else return legacyRunFacts("run start", run, config, options.output);
 }
 
 export function parseRunReviewConfiguration(value: unknown): RunReviewConfiguration {
@@ -332,8 +333,9 @@ export function parseRunReviewConfiguration(value: unknown): RunReviewConfigurat
   return { reviews, slots };
 }
 
-export async function runReportCommand(options: ReportOptions): Promise<void> {
-  if (await tryContextCommand("report", options)) return;
+export async function runReportCommand(options: ReportOptions) {
+  const contextResult = await tryContextCommand("report", options);
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   let writeOptions;
   if (options.writeOptions !== undefined) {
@@ -359,10 +361,10 @@ export async function runReportCommand(options: ReportOptions): Promise<void> {
     beforeArtifactReview: assertReportExecutionCapability
   });
   await dispatchArtifactReviewAgents({ config, run });
-  emitLegacyRun("run report", run, config, options.output, true);
+  return legacyRunFacts("run report", run, config, options.output, true);
 }
 
-export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<void> {
+export async function runReviewWaitCommand(options: ReviewWaitOptions) {
   const reviewId = options.review?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
   const config = await readConfig();
@@ -376,16 +378,14 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
       await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId }), options.notificationRound!);
     const historical = context.review.currentRoundId !== context.round.id;
     if (historical && options.currentRoundOnly) throw failure("REVIEW_CONFLICT", "Continue follows the current round");
-    if (historical || !await printGraphReviewOutput("run review wait", context.review, context.round, context.run.id,
-      { readOnly: true, enter: false, output: options.output })) {
-      reviewReceipt("run review wait", { project: config.project?.name, ...context, format: options.output, statusOnly: historical });
-    }
-    await flushCliOutput();
-    if (delivery) {
+    const graph = !historical && await printGraphReviewOutput("run review wait", context.review, context.round, context.run.id,
+      { readOnly: true, enter: false, output: options.output });
+    const receipt = graph || reviewReceipt("run review wait", { project: config.project?.name, ...context, statusOnly: historical });
+    if (!delivery) return receipt;
+    return { ...receipt, afterDelivery: async () => {
       try { await delivery.acknowledge(); }
       catch { await emitCliError({ code: "NOTIFICATION_READ_RECEIPT_FAILED" }, { nonfatal: true }); }
-    }
-    return;
+    } };
   }
   const exploration = explorationReviewIdentity(reviewId), session = exploration ? options.sessionRow ?? await currentCommandState() : undefined;
   const located = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
@@ -399,10 +399,9 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
       && active.groupId === located.run.id && active.parameters.step !== located.review.stepId;
     if (staleStep) {
       if (options.currentRoundOnly) throw failure("SESSION_CONTEXT_CONFLICT", "Continue target has changed");
-      reviewReceipt("run review wait", {
-        ...located, project, format: options.output, statusOnly: true
+      return reviewReceipt("run review wait", {
+        ...located, project, statusOnly: true
       });
-      return;
     }
     await assertSessionTarget(project, located.run.id, graph ? located.review.stepId : undefined);
   }
@@ -410,15 +409,15 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
     if (exploration && result.round.assignments.every(a => a.status === "submitted")) {
       await releaseCommandTarget(session, config.project!.name, exploration.runId, { review: reviewId }).catch(() => undefined);
     }
-    if (await printGraphReviewOutput("run review wait", result.review, result.round, result.run.id, { enter, output: options.output })) return;
-    reviewReceipt("run review wait", { project: config.project?.name, ...result, format: options.output });
+    const graphResult = await printGraphReviewOutput("run review wait", result.review, result.round, result.run.id, { enter, output: options.output });
+    if (graphResult) return graphResult;
+    return reviewReceipt("run review wait", { project: config.project?.name, ...result });
   };
   await dispatchArtifactReviewAgents({ config, run: located.run });
   const identity = await currentIdentity();
   const context = await inspectReview(config, reviewId);
   if (reviewReady(context)) {
-    await finish(context, !identity);
-    return;
+    return finish(context, !identity);
   }
   const runner = identity && (await readRunnerAgents())[identity.agentType];
   if (identity && runner?.async_enabled) {
@@ -440,14 +439,13 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
     }
     const task = await registerTask({ input: taskInput, recipient });
     await daemonControl("notify");
-    reviewReceipt("run review wait", { project: config.project?.name, ...context, taskId: task.id, format: options.output });
-    return;
+    return reviewReceipt("run review wait", { project: config.project?.name, ...context, taskId: task.id });
   }
   const result = await waitForArtifactReview({ runsRoot: config.runsRoot, reviewId });
-  await finish(result, !identity);
+  return finish(result, !identity);
 }
 
-export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<void> {
+export async function runReviewVoteCommand(options: ReviewVoteOptions) {
   const reviewId = options.review?.trim();
   const roundId = options.round?.trim();
   if (!reviewId) throw invalidCliOptions("required", "--review");
@@ -471,12 +469,13 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
     vote: options.vote,
     comment
   });
-  if (await printGraphReviewOutput("run review vote", context.review, context.round, context.run.id,
-    { vote: options.vote, output: options.output })) return;
-  reviewReceipt("run review vote", { project: config.project?.name, ...context, vote: options.vote, format: options.output });
+  const graphResult = await printGraphReviewOutput("run review vote", context.review, context.round, context.run.id,
+    { vote: options.vote, output: options.output });
+  if (graphResult) return graphResult;
+  return reviewReceipt("run review vote", { project: config.project?.name, ...context, vote: options.vote });
 }
 
-export async function runReviewRetryCommand(options: ReviewRetryOptions): Promise<void> {
+export async function runReviewRetryCommand(options: ReviewRetryOptions) {
   const reviewId = options.review?.trim();
   if (!reviewId) throw invalidCliOptions("required", "--review");
   const exploration = explorationReviewIdentity(reviewId);
@@ -493,11 +492,13 @@ export async function runReviewRetryCommand(options: ReviewRetryOptions): Promis
     actorId: assignment
   });
   await dispatchArtifactReviewAgents({ config, run: context.run });
-  reviewReceipt("run review retry", { project: config.project?.name, ...context,
-    assignmentId: context.assignment.id ?? context.assignment.actorId, format: options.output });
+  return reviewReceipt("run review retry", { project: config.project?.name, ...context,
+    assignmentId: context.assignment.id ?? context.assignment.actorId });
 }
 
-export async function runReviewSubmitForHumanCommand(options: ReviewSubmitForHumanOptions): Promise<void> {
+export const runReviewSubmitForHumanCommand = standaloneCommand("run review submit-for-human", runReviewSubmitForHumanFacts);
+
+export async function runReviewSubmitForHumanFacts(options: ReviewSubmitForHumanOptions) {
   const runId = requireRunId(options.run);
   const reviewId = options.review?.trim();
   const roundId = options.round?.trim();
@@ -534,10 +535,11 @@ export async function runReviewSubmitForHumanCommand(options: ReviewSubmitForHum
   });
   const receipt = { assignmentId: context.assignment.id ?? context.assignment.actorId,
     vote: context.assignment.submitted?.vote, output: options.output };
-  if (context.review.status === "awaiting_revision"
-    && await printGraphReviewOutput("run review submit-for-human", context.review, context.round, context.run.id, receipt)) return;
-  reviewReceipt("run review submit-for-human", { project: config.project?.name, ...context,
-    assignmentId: receipt.assignmentId, vote: receipt.vote, format: options.output });
+  const graphResult = context.review.status === "awaiting_revision"
+    && await printGraphReviewOutput("run review submit-for-human", context.review, context.round, context.run.id, receipt);
+  if (graphResult) return graphResult;
+  return reviewReceipt("run review submit-for-human", { project: config.project?.name, ...context,
+    assignmentId: receipt.assignmentId, vote: receipt.vote });
 }
 
 export function parseRunnerDelegatedComments(value: unknown): ArtifactReviewDraftInput["comments"] {
@@ -596,7 +598,7 @@ const reviewDisposition = z.object({
   reviewId: z.string(), roundId: z.string(), commentId: z.string(), disposition: z.string(), nextAction
 }).strict();
 
-export async function runReviewResolveCommand(options: ReviewResolveOptions): Promise<void> {
+export async function runReviewResolveCommand(options: ReviewResolveOptions) {
   const reviewId = options.review?.trim();
   const roundId = options.round?.trim();
   const commentId = options.comment?.trim();
@@ -622,15 +624,17 @@ export async function runReviewResolveCommand(options: ReviewResolveOptions): Pr
     note,
     validationSummary
   });
-  publishResult("run review resolve", () => reviewDisposition.parse({
+  return commandFacts(() => reviewDisposition.parse({
     reviewId, roundId, commentId, disposition: options.disposition,
     nextAction: cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", reviewId])
-  }), { format: options.output, saved: { id: commentId, inspect: cliCommand(["--project", config.project!.name, "run", "review", "show", "--review", reviewId, "--round", roundId]) } });
+  }), { saved: { id: commentId, inspect: cliCommand(["--project", config.project!.name, "run", "review", "show", "--review", reviewId, "--round", roundId]) } });
 }
 
-export async function runShowCommand(options: RunShowOptions): Promise<void> {
-  if (await tryReviewerResource("run-show", options)) return;
-  if (await tryContextCommand("show", options)) return;
+export async function runShowCommand(options: RunShowOptions) {
+  const resourceResult = await tryReviewerResource("run-show", options);
+  if (resourceResult) return resourceResult;
+  const contextResult = await tryContextCommand("show", options);
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
@@ -647,23 +651,25 @@ export async function runShowCommand(options: RunShowOptions): Promise<void> {
   const page = paginateCliItems(rows, { limit: options.limit, cursor: options.cursor }, {
     command: "run.show", scope: { project: config.project?.name, runId }
   }, "summary");
-  publishResult("run show", () => runOverviewSchema.parse({
+  return commandFacts(() => runOverviewSchema.parse({
     run: { id: run.id, name: previewText(run.name ?? run.id, 160).text, status: run.status },
     steps: page.items, stepCount: rows.length, outputArtifactIds: [], outputArtifactCount: 0, nextCursor: page.nextCursor
-  }), { format: options.output, locale: run.language, itemsField: "steps" });
+  }), { locale: run.language });
 }
 
-export async function runBindingShowCommand(options: RunBindingShowOptions): Promise<void> {
-  if (await graphCommand("binding-show", options)) return;
+export async function runBindingShowCommand(options: RunBindingShowOptions) {
+  const graphResult = await graphCommand("binding-show", options);
+  if (graphResult) return graphResult;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
   const { runId: id, status, actors, slots, readOnly } = buildRunBindingSnapshot(run);
-  publishResult("run binding show", () => flowBindings.parse({ runId: id, status, actors, slots, readOnly }), { format: options.output, locale: run.language });
+  return commandFacts(() => flowBindings.parse({ runId: id, status, actors, slots, readOnly }), { locale: run.language });
 }
 
-export async function runBindingUpdateCommand(options: RunBindingUpdateOptions): Promise<void> {
-  if (await graphCommand("binding-update", options)) return;
+export async function runBindingUpdateCommand(options: RunBindingUpdateOptions) {
+  const graphResult = await graphCommand("binding-update", options);
+  if (graphResult) return graphResult;
   const runId = requireRunId(options.run);
   const slot = options.slot?.trim();
   if (!slot) throw new Error("--slot <procedure::slot> is required");
@@ -679,52 +685,54 @@ export async function runBindingUpdateCommand(options: RunBindingUpdateOptions):
     skip: options.skip
   });
   const { runId: id, status, actors, slots, readOnly } = result.snapshot;
-  publishResult("run binding update", () => flowBindingUpdate.parse({
+  return commandFacts(() => flowBindingUpdate.parse({
     changeId: result.change.id, slot, nextBinding: result.change.after,
     bindings: { runId: id, status, actors, slots, readOnly }
-  }), { format: options.output, locale: result.run.language, saved: { id: result.change.id, inspect: cliCommand(["--project", config.project!.name, "run", "binding", "show", "--run", id]) } });
+  }), { locale: result.run.language, saved: { id: result.change.id, inspect: cliCommand(["--project", config.project!.name, "run", "binding", "show", "--run", id]) } });
 }
 
 const tryRunResult = z.object({
   runId: z.string(), items: z.array(z.object({ assignmentId: z.string(), promptPath: z.string(), launchPath: z.string() }).strict())
 }).strict();
 
-export async function runTryRunCommand(options: RunIdOptions): Promise<void> {
+export async function runTryRunCommand(options: RunIdOptions) {
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
   const generated = await tryRunArtifactReviewAgents({ config, run });
-  publishResult("run try-run", () => tryRunResult.parse({
+  return commandFacts(() => tryRunResult.parse({
     runId, items: generated.map(({ assignmentId, promptPath, launchPath }) => ({ assignmentId, promptPath, launchPath }))
   }), { locale: run.language });
 }
 
-export async function runStepShowCommand(options: RunStepShowOptions): Promise<void> {
-  if (await tryReviewerResource("step-show", options)) return;
-  if (await tryContextCommand("step-show", options)) return;
+export async function runStepShowCommand(options: RunStepShowOptions) {
+  const resourceResult = await tryReviewerResource("step-show", options);
+  if (resourceResult) return resourceResult;
+  const contextResult = await tryContextCommand("step-show", options);
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   const stepRef = requireStepRef(options.step);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
-  publishResult("run step show", () => flowStepDetail.parse(buildRunStepDetail(run, stepRef) as z.input<typeof flowStepDetail>),
-    { format: options.output, locale: run.language });
+  return commandFacts(() => flowStepDetail.parse(buildRunStepDetail(run, stepRef) as z.input<typeof flowStepDetail>), { locale: run.language });
 }
 
-export async function runArtifactShowCommand(options: RunArtifactShowOptions): Promise<void> {
-  if (await tryReviewerResource("artifact-show", options)) return;
-  if (await tryContextCommand("artifact-show", options)) return;
+export async function runArtifactShowCommand(options: RunArtifactShowOptions) {
+  const resourceResult = await tryReviewerResource("artifact-show", options);
+  if (resourceResult) return resourceResult;
+  const contextResult = await tryContextCommand("artifact-show", options);
+  if (contextResult) return contextResult;
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);
     const value = await agentReviewArtifactPayload() as z.input<typeof reviewerCandidate>;
-    publishResult("run artifact show", () => reviewerCandidate.parse({
+    return commandFacts(() => reviewerCandidate.parse({
       artifact: authoredArtifact(value.artifact)!,
       contextArtifacts: value.contextArtifacts?.map(item => ({
         stepId: item.stepId, artifactId: item.artifactId, artifact: authoredArtifact(item.artifact)!
       })),
       revisionSummary: value.revisionSummary
-    }), { format: options.output });
-    return;
+    }));
   }
 
   const runId = requireRunId(options.run);
@@ -732,18 +740,19 @@ export async function runArtifactShowCommand(options: RunArtifactShowOptions): P
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
   const value = await buildRunArtifactDetail(config.runsRoot, run, stepRef) as z.input<typeof flowArtifactDetail>;
-  publishResult("run artifact show", () => flowArtifactDetail.parse({
+  return commandFacts(() => flowArtifactDetail.parse({
     stepRef: value.stepRef, source: value.source, artifact: authoredArtifact(value.artifact),
     revisionSummary: value.revisionSummary
-  }), { format: options.output, locale: run.language });
+  }), { locale: run.language });
 }
 
-export async function runArtifactExportCommand(options: { run: string; step: string; file: string; force?: boolean }): Promise<void> {
-  if (await tryContextCommand("schema-export", options)) return;
+export async function runArtifactExportCommand(options: { run: string; step: string; file: string; force?: boolean }) {
+  const contextResult = await tryContextCommand("schema-export", options);
+  if (contextResult) return contextResult;
   const config = await readConfig();
   const run = await readRun(config.runsRoot, requireRunId(options.run));
   await exportRunArtifact(config.runsRoot, run, requireStepRef(options.step), options.file, options.force, join(config.archiveRoot, "runs"));
-  publishResult("run artifact export", () => z.object({ runId: z.string(), stepRef: z.string(), exported: z.string() }).strict().parse({
+  return commandFacts(() => z.object({ runId: z.string(), stepRef: z.string(), exported: z.string() }).strict().parse({
     runId: run.id, stepRef: options.step, exported: resolve(options.file)
   }), { locale: run.language, saved: { id: resolve(options.file) } });
 }
@@ -792,31 +801,32 @@ export async function exportArtifactBytes(bytes: Uint8Array, file: string, force
   }
 }
 
-export async function runArtifactContractShowCommand(options: RunArtifactShowOptions): Promise<void> {
-  if (await tryReviewerResource("artifact-contract", options)) return;
-  if (!options.assignment && await graphCommand("contract-show", options)) return;
+export async function runArtifactContractShowCommand(options: RunArtifactShowOptions) {
+  const resourceResult = await tryReviewerResource("artifact-contract", options);
+  if (resourceResult) return resourceResult;
+  const graphResult = !options.assignment && await graphCommand("contract-show", options);
+  if (graphResult) return graphResult;
   if (options.assignment) {
     if (options.run || options.step) throw new Error("use --assignment or --run with --step, not both");
     requireBoundAssignment(options.assignment);
     const value = await agentReviewArtifactContractPayload() as z.input<typeof fixedReviewContract>;
-    publishResult("run artifact contract show", () => fixedReviewContract.parse(value), { format: options.output });
-    return;
+    return commandFacts(() => fixedReviewContract.parse(value));
   }
 
   const runId = requireRunId(options.run);
   const stepRef = requireStepRef(options.step);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
-  publishResult("run artifact contract show", () => flowContractDetail.parse(buildRunArtifactContractDetail(run, stepRef) as z.input<typeof flowContractDetail>), { format: options.output, locale: run.language });
+  return commandFacts(() => flowContractDetail.parse(buildRunArtifactContractDetail(run, stepRef) as z.input<typeof flowContractDetail>), { locale: run.language });
 }
 
-export async function runReviewAssignmentShowCommand(options: AgentReviewAssignmentOptions): Promise<void> {
+export async function runReviewAssignmentShowCommand(options: AgentReviewAssignmentOptions) {
   requireBoundAssignment(options.assignment);
   const value = await agentReviewAssignmentDetailPayload() as z.input<typeof reviewerAssignment>;
-  publishResult("run review assignment show", () => reviewerAssignment.parse(value), { format: options.output });
+  return commandFacts(() => reviewerAssignment.parse(value));
 }
 
-export async function runReviewCommentCommand(options: AgentReviewCommentOptions): Promise<void> {
+export async function runReviewCommentCommand(options: AgentReviewCommentOptions) {
   requireBoundAssignment(options.assignment);
   const body = await resolveReviewCommentBody(options);
   if (!options.severity) throw new Error("--severity is required");
@@ -840,10 +850,10 @@ export async function runReviewCommentCommand(options: AgentReviewCommentOptions
     } : undefined
   });
   const receipt = value as z.input<typeof reviewAssignmentReceipt> & { reviewRoundId: string };
-  publishResult("run review comment", () => reviewAssignmentReceipt.parse({
+  return commandFacts(() => reviewAssignmentReceipt.parse({
     reviewId: receipt.reviewId, roundId: receipt.reviewRoundId, assignmentId: receipt.assignmentId,
     status: receipt.status, vote: receipt.vote, commentCount: receipt.commentCount, completed: receipt.completed
-  }), { format: options.output, saved: { id: receipt.assignmentId, inspect: cliCommand(["run", "review", "assignment", "show", "--assignment", receipt.assignmentId], "reviewer") } });
+  }), { saved: { id: receipt.assignmentId, inspect: cliCommand(["run", "review", "assignment", "show", "--assignment", receipt.assignmentId], "reviewer") } });
 }
 
 export function validateInlineReviewCommentBody(body: string): void {
@@ -880,7 +890,7 @@ export async function resolveReviewCommentBody(
   return body;
 }
 
-export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions): Promise<void> {
+export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions) {
   requireBoundAssignment(options.assignment);
   if ((await agentReviewAssignmentDetailPayload() as { reviewProgress?: unknown }).reviewProgress) throw new Error("review_node_artifact_protocol_required");
   if (!options.vote || !["approve", "request_changes", "abstain"].includes(options.vote)) {
@@ -895,14 +905,15 @@ export async function runReviewSubmitCommand(options: AgentReviewSubmitOptions):
     summary
   });
   const receipt = value as z.input<typeof reviewAssignmentReceipt> & { reviewRoundId: string };
-  publishResult("run review submit", () => reviewAssignmentReceipt.parse({
+  return commandFacts(() => reviewAssignmentReceipt.parse({
     reviewId: receipt.reviewId, roundId: receipt.reviewRoundId, assignmentId: receipt.assignmentId,
     status: receipt.status, vote: receipt.vote, commentCount: receipt.commentCount, completed: receipt.completed
-  }), { format: options.output, saved: { id: receipt.assignmentId, inspect: cliCommand(["run", "review", "assignment", "show", "--assignment", receipt.assignmentId], "reviewer") } });
+  }), { saved: { id: receipt.assignmentId, inspect: cliCommand(["run", "review", "assignment", "show", "--assignment", receipt.assignmentId], "reviewer") } });
 }
 
-export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions): Promise<void> {
-  if (await tryContextCommand("schema-enter", { ...options, schemaName })) return;
+export async function runEnterSchemaCommand(schemaName: string | undefined, options: RunIdOptions) {
+  const contextResult = await tryContextCommand("schema-enter", { ...options, schemaName });
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await enterSchema({
@@ -913,11 +924,12 @@ export async function runEnterSchemaCommand(schemaName: string | undefined, opti
   });
   const snapshot = buildSchemaWritingSnapshot(config.runsRoot, run);
   if (!snapshot) throw new Error(`run has no active Schema writing context: ${runId}`);
-  emitLegacyRun("run enter-schema", run, config, options.output);
+  return legacyRunFacts("run enter-schema", run, config, options.output);
 }
 
-export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promise<void> {
-  if (await tryContextCommand("schema-show", options)) return;
+export async function runSchemaShowCommand(options: RunSchemaShowOptions) {
+  const contextResult = await tryContextCommand("schema-show", options);
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, runId));
@@ -928,19 +940,20 @@ export async function runSchemaShowCommand(options: RunSchemaShowOptions): Promi
   const action = phase === "awaiting_finalization"
     ? cliCommand(["run", "artifact", "export", "--run", runId, "--step", `${result.procedureName}#${result.parentStepId}`, "--file", "<local-copy>"])
     : cliCommand(["run", "status", "--run", runId]);
-  publishResult("run schema show", () => legacySchemaWriting.parse({
+  return commandFacts(() => legacySchemaWriting.parse({
     runId, stepId: result.parentStepId, artifactName: result.artifact.name, phase,
     completed: result.progress.completed, total: result.progress.total, currentField: result.currentField?.path,
     nextAction: action
-  }), { format: options.output, locale: run.language });
+  }), { locale: run.language });
 }
 
 export function buildSchemaWritingDetail(snapshot: SchemaWritingSnapshot): unknown {
   return toEffectiveRuleDisplayValue(snapshot);
 }
 
-export async function runRepeatCommand(countValue: string, options: RunIdOptions): Promise<void> {
-  if (await tryContextCommand("schema-repeat", { ...options, count: countValue })) return;
+export async function runRepeatCommand(countValue: string, options: RunIdOptions) {
+  const contextResult = await tryContextCommand("schema-repeat", { ...options, count: countValue });
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   if (!/^\d+$/.test(countValue)) {
     throw new Error("repeat count must be a non-negative integer");
@@ -951,19 +964,21 @@ export async function runRepeatCommand(countValue: string, options: RunIdOptions
   }
   const config = await readConfig();
   const run = await repeatRun({ runsRoot: config.runsRoot, runId, count });
-  emitLegacyRun("run repeat", run, config, options.output);
+  return legacyRunFacts("run repeat", run, config, options.output);
 }
 
-export async function runSkipCommand(options: RunIdOptions): Promise<void> {
-  if (await tryContextCommand("schema-skip", options)) return;
+export async function runSkipCommand(options: RunIdOptions) {
+  const contextResult = await tryContextCommand("schema-skip", options);
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   const config = await readConfig();
   const run = await skipRun({ runsRoot: config.runsRoot, runId });
-  emitLegacyRun("run skip", run, config, options.output);
+  return legacyRunFacts("run skip", run, config, options.output);
 }
 
-export async function runAbandonCommand(options: RunAbandonOptions): Promise<void> {
-  if (await tryContextCommand("abandon", options)) return;
+export async function runAbandonCommand(options: RunAbandonOptions) {
+  const contextResult = await tryContextCommand("abandon", options);
+  if (contextResult) return contextResult;
   const runId = requireRunId(options.run);
   if (options.reason !== undefined && options.reasonFile !== undefined) {
     throw new Error("use only one of --reason or --reason-file");
@@ -977,18 +992,18 @@ export async function runAbandonCommand(options: RunAbandonOptions): Promise<voi
     actorId: options.actor,
     reason
   });
-  emitLegacyRun("run abandon", result.run, config, options.output, false, result.terminationWarnings.length);
+  return legacyRunFacts("run abandon", result.run, config, options.output, false, result.terminationWarnings.length);
 }
 
-export async function runStatusCommand(options: RunIdOptions): Promise<void> {
+export async function runStatusCommand(options: RunIdOptions) {
   if (!options.run) {
-    await contextRunList(options);
-    return;
+    return contextRunList(options);
   }
-  if (await tryContextCommand("status", options)) return;
+  const contextResult = await tryContextCommand("status", options);
+  if (contextResult) return contextResult;
   const config = await readConfig();
   const run = await ensureCurrentSchemaDraft(config.runsRoot, await readRun(config.runsRoot, options.run));
-  emitLegacyRun("run status", run, config, options.output);
+  return legacyRunFacts("run status", run, config, options.output);
 }
 
 function readArtifactOption(options: ReportOptions): ArtifactReportSource {
@@ -1256,6 +1271,8 @@ function locatedStepRef(located: LocatedRunStep): string {
   return `${located.memoryName}#${located.step.id}`;
 }
 
-export async function runSchemaReportCommand(options: object): Promise<void> {
-  if (!await tryContextCommand("schema-report", options)) throw new Error("schema report requires a graph or free exploration Step; flow uses run report");
+export async function runSchemaReportCommand(options: object) {
+  const result = await tryContextCommand("schema-report", options);
+  if (!result) throw new Error("schema report requires a graph or free exploration Step; flow uses run report");
+  return result;
 }

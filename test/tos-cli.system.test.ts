@@ -74,3 +74,36 @@ for(const operation of ["read","validate","export"] as const)for(const failure o
     await assert.rejects(fs.stat(output),{code:"ENOENT"});
   });
 }
+
+for (const language of ["en", "zh-CN"] as const) for (const json of [false, true]) {
+  test(`TOS export and tombstone receipts preserve the bytes and revision in ${language} ${json ? "JSON" : "default text"}`, async t => {
+    const f = await businessFixture(t), service = useTosService(t);
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, CLI_TOS_AK: "fixture-ak", CLI_TOS_SK: "fixture-sk" };
+    await fs.writeFile(join(f.home, "config.json"), JSON.stringify({ language }));
+    const invoke = (args: string[], structured = json) => invokeCliModule(["--project", "test-project", "data", ...args,
+      ...(structured ? ["--output", "json"] : [])], f.cwd, env, "memsphere", t.signal);
+    const config = join(f.directory, "tos.json"), input = join(f.directory, "input.bin"), out = join(f.directory, "copy.bin");
+    await fs.writeFile(config, JSON.stringify({ mode: "revision", region: "cn-beijing", endpoint: "tos-cn-beijing.volces.com",
+      bucket: "test-bucket", prefix: "contract/", credentials: { source: "env", accessKeyIdEnv: "CLI_TOS_AK", accessKeySecretEnv: "CLI_TOS_SK" } }));
+    const bytes = Buffer.from([0, 255, 10]);
+    await fs.writeFile(input, bytes);
+    await invoke(["store", "create", "assets", "--model", "record.json", "--kind", "data", "--factory", "memsphere/tos", "--config-file", config], true);
+    await invoke(["create", "sample", "--store", "assets", "--payload-file", input, "--content-type", "application/octet-stream"], true);
+    const target = ["sample", "--store", "assets"];
+    const revision = JSON.parse((await invoke(["read", ...target, "--metadata-only"], true)).stdout).revision;
+    const command = async (args: string[], fact: string, expected: unknown) => {
+      const { stdout, stderr } = await invoke(args);
+      assert.equal(stderr, "");
+      if (json) assert.deepEqual(JSON.parse(stdout)[fact], expected);
+      else assert.ok(stdout.includes(String(expected)), stdout);
+    };
+    await command(["export", ...target, "--as", "payload", "--out", out], "out", out);
+    assert.deepEqual(await fs.readFile(out), bytes);
+    const before = Buffer.from(service.objects.get("contract/sample")!.bytes);
+    await command(["delete", ...target, "--expected-revision", revision, "--dry-run"], "dryRun", true);
+    assert.deepEqual(service.objects.get("contract/sample")!.bytes, before);
+    await command(["delete", ...target, "--expected-revision", revision], "id", "sample");
+    await command(["read", ...target], "deleted", true);
+    assert.notDeepEqual(service.objects.get("contract/sample")!.bytes, before);
+  });
+}

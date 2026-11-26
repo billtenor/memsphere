@@ -16,7 +16,7 @@ import { graphRunnerActorConflict, isGraphRun, type GraphRuntime } from "../cont
 import { failure } from "../context_control/errors.js";
 import type { Run, Snapshot, Step } from "../context_control/types.js";
 import type { ControlPlaneConfig, RunReviewConfiguration } from "../control-plane/index.js";
-import { CliOutputError, cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
+import { CliOutputError, cliCommand, commandFacts, paginateCliItems, previewText } from "./output.js";
 import { runEvidenceSchema, runOverviewSchema, runProgressSchema, type RunProgress } from "./run-result.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
 import { z } from "zod";
@@ -82,11 +82,8 @@ function forRun(project: string, ...args: string[]) {
   return cliCommand(["--project", project, "run", ...args]);
 }
 
-function printProgress(command: string, result: RunProgress, run: Run, format?: "text" | "json", savedId?: string, publicProject?: string) {
-  publishResult(command, () => runProgressSchema.parse(result), {
-    format, locale: run.language, maximumBytes: 8192, itemsField: "materials",
-    ...(savedId && publicProject ? { saved: { id: savedId, inspect: forRun(publicProject, "show", "--run", run.id) } } : {})
-  });
+function printProgress(command: string, result: RunProgress, run: Run, savedId?: string, publicProject?: string) {
+  return commandFacts(() => runProgressSchema.parse(result), { locale: run.language, ...(savedId && publicProject ? { saved: { id: savedId, inspect: forRun(publicProject, "show", "--run", run.id) } } : {}) });
 }
 
 async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, project: string, statusOnly = false): Promise<RunProgress> {
@@ -168,12 +165,12 @@ export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: st
   return { ...base, nextAction: forRun(project, "finish", "--run", run.id) };
 }
 
-export async function printGraphStart(snapshot: Snapshot, output?: "text" | "json") {
+export async function printGraphStart(snapshot: Snapshot) {
   const config = await readConfig();
   const project = config.project!.name;
   const service = (await openContextControl(config.scopeRoot))!;
   const result = await service.withGraph(g => graphNext(g, snapshot, project));
-  printProgress("run start", result, snapshot.run, output, snapshot.run.id, project);
+  return printProgress("run start", result, snapshot.run, snapshot.run.id, project);
 }
 export async function printGraphReviewOutput(
   command: "run review wait" | "run review vote" | "run review submit-for-human",
@@ -186,7 +183,7 @@ export async function printGraphReviewOutput(
   const config = await readConfig();
   const project = config.project!.name;
   const service = (await openContextControl(config.scopeRoot))!;
-  await service.withGraph(async g => {
+  return service.withGraph(async g => {
     const snapshot = options.readOnly ? await g.snapshot(runId) : await g.advance(runId);
     const step = snapshot.steps.find(s => s.id === review.stepId)!;
     let progress: RunProgress | undefined;
@@ -196,12 +193,12 @@ export async function printGraphReviewOutput(
     } else if (step.status === "running") {
       progress = await stepResult(g, snapshot, step, project);
     }
-    reviewReceipt(command, { project, run: snapshot.run, review, round, progress,
-      vote: options.vote, assignmentId: options.assignmentId, format: options.output });
+    return reviewReceipt(command, { project, run: snapshot.run, review, round, progress,
+      vote: options.vote, assignmentId: options.assignmentId });
   });
-  return true;
+
 }
-export async function graphCommand(operation: string, input: object, scope?: ContextCommandScope & { run: Run }): Promise<boolean> {
+export async function graphCommand(operation: string, input: object, scope?: ContextCommandScope & { run: Run }) {
   const options = input as Options & { position?: string; count?: string; schemaName?: string; force?: boolean; slot?: string; skip?: boolean; dryRun?: boolean; reason?: string; reasonFile?: string };
   if (!options.run) return false;
   const config = scope?.config ?? await readConfig();
@@ -216,16 +213,15 @@ export async function graphCommand(operation: string, input: object, scope?: Con
   }
   const project = config.project!.name;
   return service!.withGraph(async g => {
-    const display = { format: options.output, locale: run.language };
+    const display = { locale: run.language };
     if (operation === "binding-show" || operation === "binding-update") {
       const actors = Array.isArray(options.actor) ? options.actor as string[] : options.actor ? [options.actor] : [];
       if (operation === "binding-update" && options.skip && actors.length) throw failure("INVALID_ARGUMENT", "Choose Actors or skip");
       const result = operation === "binding-show" ? await g.bindingSnapshot(run.id) : await g.updateBinding(run.id, needed(options.slot, "--slot"), options.skip ? { skip: true } : { actorIds: actors });
-      publishResult(operation.replace("binding-", "run binding "), () => graphBindingResult.parse({
+      return commandFacts(() => graphBindingResult.parse({
         runId: run.id, nextRound: publicBindings(result.bindings),
         rounds: result.rounds.map(({ stepId, roundId, bindings }) => ({ stepId, roundId, bindings: publicBindings(bindings) }))
       }), { ...display, saved: operation === "binding-update" ? { id: run.id, inspect: forRun(project, "binding", "show", "--run", run.id) } : undefined });
-      return true;
     }
     if (operation === "show") {
       const snapshot = await g.snapshot(run.id);
@@ -234,13 +230,12 @@ export async function graphCommand(operation: string, input: object, scope?: Con
         artifactId: step.artifact?.mode === "produce" ? step.artifact.id : undefined,
         effective: effectiveStep(run, step.id)
       })), { limit: options.limit, cursor: options.cursor }, { command: "run.show", scope: { project, runId: run.id } }, "summary");
-      publishResult("run show", () => runOverviewSchema.parse({
+      return commandFacts(() => runOverviewSchema.parse({
         run: { id: run.id, name: previewText(run.name ?? run.id, 160).text, status: run.status },
         steps: page.items, stepCount: snapshot.steps.length,
         outputArtifactIds: snapshot.outputArtifactIds.slice(0, 20),
         outputArtifactCount: snapshot.outputArtifactIds.length, nextCursor: page.nextCursor
-      }), { format: options.output, locale: run.language, itemsField: "steps", maximumBytes: options.limit === undefined ? 32768 : 131072 });
-      return true;
+      }), { locale: run.language });
     }
     if (operation === "step-show") {
       const snapshot = await g.snapshot(run.id);
@@ -250,7 +245,7 @@ export async function graphCommand(operation: string, input: object, scope?: Con
       const action = g.action(run, step);
       const rules = Object.entries(await g.rules(run, action)).flatMap(([scope, tree]) =>
         flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
-      publishResult("run step show", () => graphStepDetail.parse({
+      return commandFacts(() => graphStepDetail.parse({
         runId: run.id, step: {
           id: step.id, actionId: step.source?.actionId, status: step.status, effective: effectiveStep(snapshot.run, step.id),
           supersedingRewindId: supersedingRewind(snapshot.run, step.id)?.id, inputGroups: step.inputs,
@@ -260,7 +255,6 @@ export async function graphCommand(operation: string, input: object, scope?: Con
         artifactName: action.artifact?.name, model: action.artifact?.model.definedBy,
         contentType: action.artifact?.payload.contentType, rules
       }), display);
-      return true;
     }
     if (operation === "contract-show" || operation === "artifact-show" && options.step) {
       const stepId = needed(options.step, "--step"), snapshot = await g.snapshot(run.id);
@@ -271,21 +265,21 @@ export async function graphCommand(operation: string, input: object, scope?: Con
         const schema = snapshot.run.schemaContracts?.[step.source!.actionId];
         const rules = Object.entries(await g.rules(run, action)).flatMap(([scope, tree]) =>
           flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
-        publishResult("run artifact contract show", () => graphContractDetail.parse({
+        return commandFacts(() => graphContractDetail.parse({
           runId: run.id, stepId, name: action.artifact?.name, contentType: action.artifact?.payload.contentType,
           model: action.artifact?.model.definedBy, definition: action.artifact?.model.definition,
           memoryReference: action.artifact?.model.ref,
           schema: schema && { definition: schema.definition, source: schema.sources.source }, rules
         }), display);
       } else {
-        publishResult("run artifact show", () => graphArtifactCollection.parse({ runId: run.id, stepId,
+        return commandFacts(() => graphArtifactCollection.parse({ runId: run.id, stepId,
           items: snapshot.artifacts.filter(a => a.stepId === stepId).map(a => ({
             artifactId: a.id, name: previewText(a.name, 160).text, status: a.status,
             contentType: a.content?.payload.contentType, dependencies: a.dependencies
           }))
         }), display);
       }
-      return true;
+
     }
     if (operation === "store-retry") {
       const stepId = needed(options.step, "--step");
@@ -296,11 +290,10 @@ export async function graphCommand(operation: string, input: object, scope?: Con
       const progress = await graphNext(g, snapshot, project);
       const target = snapshot.steps.find(step => step.id === stepId);
       const submitted = target?.artifact?.mode === "produce" ? snapshot.artifacts.find(a => a.id === (target.artifact as { id: string }).id) : undefined;
-      publishResult("run step store retry", () => graphReceiptSchema.parse({
+      return commandFacts(() => graphReceiptSchema.parse({
         runId: run.id, stepId, status: target?.status ?? "done", artifactId: submitted?.id,
         ...graphStoreReceipt(submitted), nextAction: progress.nextAction
-      }), { format: options.output, locale: run.language, saved: { id: stepId, inspect: forRun(project, "step", "show", "--run", run.id, "--step", stepId) } });
-      return true;
+      }), { locale: run.language, saved: { id: stepId, inspect: forRun(project, "step", "show", "--run", run.id, "--step", stepId) } });
     }
     if (operation === "rewind") {
       const stepId = needed(options.step, "--step");
@@ -311,27 +304,24 @@ export async function graphCommand(operation: string, input: object, scope?: Con
       const replacementStepId = "replacementStepId" in result ? String(result.replacementStepId) : undefined;
       const rewindId = "rewindId" in result ? String(result.rewindId) : undefined;
       const inspect = forRun(project, "show", "--run", run.id);
-      publishResult("run step rewind", () => graphRewindResult.parse({
+      return commandFacts(() => graphRewindResult.parse({
         runId: run.id, dryRun: Boolean(options.dryRun), targetStepId: result.targetStepId, actionId: result.actionId,
         affectedStepIds: result.affectedStepIds, affectedArtifactIds: result.affectedArtifactIds, retainedStepIds: result.retainedStepIds,
         rewindId, replacementStepId,
         nextAction: replacementStepId ? forRun(project, "step", "enter", "--run", run.id, "--step", replacementStepId) : undefined
       }), { ...display, saved: rewindId ? { id: rewindId, inspect } : undefined });
-      return true;
     }
     if (operation === "enter") {
       if (options.review) throw failure("INVALID_ARGUMENT", "--review requires a free exploration Run");
       const entered = await g.enter(run.id, needed(options.step, "--step"));
       await createCommandState(project, run.id, entered.step.id);
-      printProgress("run step enter", await stepResult(g, entered.snapshot, entered.step, project), run,
-        options.output, entered.step.id, project);
-      return true;
+      return printProgress("run step enter", await stepResult(g, entered.snapshot, entered.step, project), run,
+        entered.step.id, project);
     }
     if (operation === "status") {
       const snapshot = await g.advance(run.id);
       const result = await graphNext(g, snapshot, project, !await currentIdentity(), true);
-      printProgress("run status", result, run, options.output);
-      return true;
+      return printProgress("run status", result, run);
     }
     if (["schema-enter", "schema-show", "schema-report", "schema-skip", "schema-repeat", "schema-export"].includes(operation)) {
       const stepId = needed(options.step, "--step");
@@ -345,10 +335,9 @@ export async function graphCommand(operation: string, input: object, scope?: Con
         if (!id) throw failure("NOT_FOUND", "No Artifact to export");
         const content = await g.readArtifact(run.id, id);
         await exportArtifactBytes(content.bytes, needed(options.file, "--file"), Boolean(options.force), [config.runsRoot, join(config.archiveRoot, "runs"), join(config.scopeRoot, "data", "context_control")]);
-        emitSchemaExport({ runId: run.id, stepId, exported: options.file!, artifactId: id }, {
-          project, phase: state.phase, format: options.output, locale: run.language
+        return emitSchemaExport({ runId: run.id, stepId, exported: options.file!, artifactId: id }, {
+          project, phase: state.phase, locale: run.language
         });
-        return true;
       }
       let result;
       if (operation === "schema-enter") { result = await g.enterSchema(run.id, stepId); await createCommandState(project, run.id, stepId); }
@@ -366,8 +355,7 @@ export async function graphCommand(operation: string, input: object, scope?: Con
       }
       const command = operation.replace("schema-enter", "enter-schema").replace("schema-skip", "skip")
         .replace("schema-repeat", "repeat").replace("schema-", "schema ");
-      emitSchemaWriting(`run ${command}`, result, { project, format: options.output, locale: run.language });
-      return true;
+      return emitSchemaWriting(`run ${command}`, result, { project, locale: run.language });
     }
     if (operation !== "report") return false;
     const stepId = needed(options.step, "--step");
@@ -395,15 +383,14 @@ export async function graphCommand(operation: string, input: object, scope?: Con
     const next = await (result.step.status === "done" ? graphNext(g, result.snapshot, project)
       : stepResult(g, result.snapshot, result.step, project)).catch(error => { throw new CliOutputError(saved, error); });
     const reviewing = result.step.status === "awaiting_review";
-    publishResult("run report", () => graphReceiptSchema.parse({
+    return commandFacts(() => graphReceiptSchema.parse({
       runId: run.id, stepId, artifactId: result.artifact.id, status: result.step.status,
       reviewId: reviewing ? next.reviewId : undefined, roundId: reviewing ? next.roundId : undefined,
       ...graphStoreReceipt(result.artifact), nextAction: next.nextAction,
       dependencies: result.artifact.dependencies.slice(0, 20), dependencyCount: result.artifact.dependencies.length,
       nextStep: next.stepId, nextInstruction: next.instruction, nextActor: next.actor, nextDetails: next.details,
       nextMaterials: next.materials, nextRules: next.rules
-    }), { format: options.output, locale: run.language, saved, maximumBytes: 8192, itemsField: "nextMaterials" });
-    return true;
+    }), { locale: run.language, saved });
   });
 }
 

@@ -8,7 +8,7 @@ import { appConfigurationRevision, readAppState, requireApp } from "../app/state
 import { AppMemoryProvider } from "../app/memory-provider.js";
 import { DefaultMemoryCatalog } from "../memory/catalog.js";
 import { bindCli, checkCli, cliCheckNameSchema, listClis, registerCli, showCli } from "../tools/registry.js";
-import { savedResult, addCliOutput, cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
+import { savedResult, addCliOutput, cliCommand, registerResultAction, commandFacts, paginateCliItems, previewText } from "./output.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
 import { type PaginationOptions } from "../pagination.js";
 
@@ -57,18 +57,18 @@ function restartAction(restartRequired: boolean) {
 
 export function registerAppCommands(program: Command): void {
   const app = program.command("app").description("Install and compose Apps in the selected Project.");
-  command(app, "install").argument("<directory>").option("--config <file>").action(async (directory, options: { config?: string }) => {
+  registerResultAction(command(app, "install").argument("<directory>").option("--config <file>"), async (directory, options: { config?: string }) => {
     const target = await context();
     const result = await installApp(target, directory, options.config ? await readJson(options.config) : {});
     const inspect = cliCommand(["--project", target.primary.name, "app", "show", result.id]);
     const nextAction = !result.enabled && !("diagnostic" in result)
       ? cliCommand(["--project", target.primary.name, "app", "enable", result.id]) : inspect;
-    publishResult("app install", () => installResult.parse({
+    return commandFacts(() => installResult.parse({
       id: result.id, status: result.status, version: "version" in result ? result.version : undefined,
       enabled: result.enabled, nextAction
     }), { saved: { id: result.id, inspect } });
   });
-  listOptions(command(app, "list")).action(async (options: PaginationOptions) => {
+  registerResultAction(listOptions(command(app, "list")), async (options: PaginationOptions) => {
     const { primary } = await context();
     const state = await readAppState(primary);
     const items = Object.values(state.installations).map(({ manifest, enabled }) => ({
@@ -76,10 +76,9 @@ export function registerAppCommands(program: Command): void {
     })).sort((a, b) => a.id.localeCompare(b.id));
     const page = paginateCliItems(items, { limit: options.limit, cursor: options.cursor },
       { command: "app.list", scope: { project: primary.name } }, "summary");
-    publishResult("app list", () => appPage.parse({ apps: page.items, nextCursor: page.nextCursor, pendingCount: Object.keys(state.operations).length }),
-      { itemsField: "apps", maximumBytes: options.limit === undefined ? 32768 : 131072 });
+    return commandFacts(() => appPage.parse({ apps: page.items, nextCursor: page.nextCursor, pendingCount: Object.keys(state.operations).length }));
   });
-  command(app, "show").argument("<id>").action(async (id) => {
+  registerResultAction(command(app, "show").argument("<id>"), async (id) => {
     const { primary: project } = await context();
     const app = requireApp(await readAppState(project), id);
     const catalog = new DefaultMemoryCatalog(new AppMemoryProvider(project.paths.root, project.memoryRoot));
@@ -92,7 +91,7 @@ export function registerAppCommands(program: Command): void {
       return { reference: current, action: cliCommand(args) };
     });
     const description = app.manifest.description === undefined ? undefined : previewText(app.manifest.description, 256);
-    publishResult("app show", () => appDetail.parse({
+    return commandFacts(() => appDetail.parse({
       id, name: previewText(app.manifest.name, 160).text, version: app.manifest.version, enabled: app.enabled,
       description: description?.text, descriptionTruncated: description?.truncated,
       revision: appConfigurationRevision(app), configuration: app.manifest.configuration,
@@ -107,56 +106,55 @@ export function registerAppCommands(program: Command): void {
       viewChangesRequireRestart: app.manifest.entrypoints.view.length > 0
     }));
   });
-  command(app, "configure").argument("<id>").requiredOption("--config <file>").action(async (id, options: { config: string }) => {
+  registerResultAction(command(app, "configure").argument("<id>").requiredOption("--config <file>"), async (id, options: { config: string }) => {
     const target = await context();
     const { status, revision, restartRequired } = await configureApp(target, id, await readJson(options.config));
-    publishResult("app configure", () => configureResult.parse({ id, status, revision, restartRequired, nextAction: restartAction(restartRequired) }), { saved: savedResult(id, ["app", "show", id], target.primary.name) });
+    return commandFacts(() => configureResult.parse({ id, status, revision, restartRequired, nextAction: restartAction(restartRequired) }), { saved: savedResult(id, ["app", "show", id], target.primary.name) });
   });
   for (const enabled of [true, false]) {
     const operation = enabled ? "enable" : "disable";
-    command(app, operation).argument("<id>").action(async (id) => {
+    registerResultAction(command(app, operation).argument("<id>"), async (id) => {
       const target = await context();
       const result = await setAppEnabled(target, id, enabled);
-      publishResult("app " + operation, () => enableResult.parse({ id, enabled: result.enabled, restartRequired: result.restartRequired,
+      return commandFacts(() => enableResult.parse({ id, enabled: result.enabled, restartRequired: result.restartRequired,
         nextAction: restartAction(result.restartRequired) }), { saved: savedResult(id, ["app", "show", id], target.primary.name) });
     });
   }
-  command(app, "check").argument("<id>").action(async (id) => {
+  registerResultAction(command(app, "check").argument("<id>"), async (id) => {
     const result = await checkApp((await context()).primary, id);
     const items = result.items.slice(0, 10).map(item => ({ name: previewText(item.name, 160).text, status: item.available ? "available" : "unavailable" }));
-    publishResult("app check", () => checkResult.parse({ id, status: result.status, items, total: result.items.length }));
     if (result.status !== "available") process.exitCode = 1;
+    return commandFacts(() => checkResult.parse({ id, status: result.status, items, total: result.items.length }));
   });
 
   const cli = program.command("cli").description("Discover external tools and their Project/App invocation bindings.");
-  command(cli, "register").argument("<descriptor-file>").action(async (file) => {
+  registerResultAction(command(cli, "register").argument("<descriptor-file>"), async (file) => {
     const target = await context();
     const { id, status } = await registerCli(target, file);
-    publishResult("cli register", () => registrationResult.parse({ id, status }), { saved: savedResult(id, ["cli", "show", id], target.primary.name) });
+    return commandFacts(() => registrationResult.parse({ id, status }), { saved: savedResult(id, ["cli", "show", id], target.primary.name) });
   });
-  command(cli, "bind").argument("<id>").requiredOption("--binding <file>").option("--app <id>").action(async (id, options: { app?: string; binding: string }) => {
+  registerResultAction(command(cli, "bind").argument("<id>").requiredOption("--binding <file>").option("--app <id>"), async (id, options: { app?: string; binding: string }) => {
     const result = await bindCli(await context(), id, options.binding, options.app);
-    publishResult("cli bind", () => registrationResult.parse({ id: result.id, project: result.project, app: result.app, status: result.status }),
-      { saved: savedResult(result.id, ["cli", "show", result.id, ...(result.app ? ["--app", result.app] : [])], result.project) });
+    return commandFacts(() => registrationResult.parse({ id: result.id, project: result.project, app: result.app, status: result.status }), { saved: savedResult(result.id, ["cli", "show", result.id, ...(result.app ? ["--app", result.app] : [])], result.project) });
   });
-  listOptions(command(cli, "list").option("--app <id>")).action(async (options: PaginationOptions & { app?: string }) => {
+  registerResultAction(listOptions(command(cli, "list").option("--app <id>")), async (options: PaginationOptions & { app?: string }) => {
     const { primary } = await context();
     const candidates = await listClis(primary, options.app);
     const items = candidates.map(entry => ({ id: entry.id, status: entry.status, apps: entry.apps ?? [] }));
     const page = paginateCliItems(items, { limit: options.limit, cursor: options.cursor },
       { command: "cli.list", scope: { project: primary.name }, filters: { app: options.app } }, "summary");
-    publishResult("cli list", () => cliPage.parse(page));
+    return commandFacts(() => cliPage.parse(page));
   });
-  command(cli, "show").argument("<id>").option("--app <id>").action(async (id, options: { app?: string }) => {
+  registerResultAction(command(cli, "show").argument("<id>").option("--app <id>"), async (id, options: { app?: string }) => {
     const result = await showCli((await context()).primary, id, options.app);
-    publishResult("cli show", () => cliDetail.parse({
+    return commandFacts(() => cliDetail.parse({
       id: result.id, status: result.status, project: result.project, app: result.app, apps: result.apps
     }));
   });
-  command(cli, "check").argument("<id>").option("--app <id>").action(async (id, options: { app?: string }) => {
+  registerResultAction(command(cli, "check").argument("<id>").option("--app <id>"), async (id, options: { app?: string }) => {
     const result = await checkCli((await context()).primary, id, options.app);
     const items = result.items.slice(0, 10).map(({ name, status }) => ({ name, status }));
-    publishResult("cli check", () => cliCheckResult.parse({ id, app: result.app, status: result.status, items, total: result.items.length }));
     if (result.status !== "available") process.exitCode = 1;
+    return commandFacts(() => cliCheckResult.parse({ id, app: result.app, status: result.status, items, total: result.items.length }));
   });
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { PaginationError } from "../pagination.js";
 import type { ModelRegistration } from "../project/model-registration-contract.js";
-import { publishResult, inline, previewText, renderCliResult, type CliFormat } from "./output.js";
+import { commandFacts, inline, previewText, renderCliResult } from "./output.js";
 
 const text = z.string();
 const optional = text.optional();
@@ -48,7 +48,7 @@ export const dataPageResult = z.object({
   ...project, storeId: text, ...pagination,
   items: z.array(z.object({ id: text }).strict())
 }).strict();
-export function emitDataPage(page: z.input<typeof dataPageResult>, limit: number, format: CliFormat) {
+export function dataPageFacts(page: z.input<typeof dataPageResult>, limit: number) {
   const rowBytes = 2 * 1024;
   const envelopeBytes = 8 * 1024;
   if (page.items.length > limit || page.items.some(item => Math.max(
@@ -60,7 +60,7 @@ export function emitDataPage(page: z.input<typeof dataPageResult>, limit: number
   if (views.some(view => Buffer.byteLength(renderCliResult("data list", dataPageResult, envelope, view)) > envelopeBytes)) {
     throw new PaginationError("Provider page exceeds the cursor budget", "OUTPUT_LIMIT_EXCEEDED");
   }
-  publishResult("data list", () => dataPageResult.parse(page), { format, maximumBytes: envelopeBytes + limit * rowBytes });
+  return commandFacts(() => dataPageResult.parse(page));
 }
 
 export const dataExistsResult = z.object({ ...dataIdentity, exists: z.boolean() }).strict();

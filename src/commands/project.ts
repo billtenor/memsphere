@@ -36,7 +36,7 @@ import { listMemoryFiles } from "../memory/store.js";
 import { assertWindowsPrerequisites } from "../windows-prerequisites.js";
 import { compareStrings, parseListLimit, type PaginationOptions } from "../pagination.js";
 import { z } from "zod";
-import { savedResult, cliCommand, publishResult, paginateCliItems } from "./output.js";
+import { standaloneCommand, savedResult, cliCommand, commandFacts, paginateCliItems } from "./output.js";
 import { nextAction } from "../prompts/cli-output.js";
 
 type BindOption = { bind?: boolean };
@@ -94,17 +94,19 @@ const projectModelsResult = z.object({
 }).strict();
 
 function emitProjectReceipt(operation: "create" | "clone" | "register", project: string, root: string,
-  storeType: "managed" | "embedded", bound = false): void {
+  storeType: "managed" | "embedded", bound = false) {
   const inspect = cliCommand(["project", "show", project]);
-  publishResult(`project ${operation}`, () => projectReceipt.parse({
+  return commandFacts(() => projectReceipt.parse({
     project, root, storeType, bound, nextAction: inspect
   }), { saved: { id: project, inspect } });
 }
 
-export async function projectCreateCommand(
+export const projectCreateCommand = standaloneCommand("project create", projectCreateFacts);
+
+export async function projectCreateFacts(
   nameInput: string,
   options: BindOption & { embedded?: string } = {}
-): Promise<void> {
+) {
   const name = assertProjectName(nameInput);
   const home = resolveMemsphereHome();
   const root = resolve(homePaths(home).projectsRoot, name);
@@ -121,7 +123,7 @@ export async function projectCreateCommand(
     else await bootstrapManagedSystemMemory(name);
     await registerCreatedProject(home, name, root, options.bind);
   });
-  emitProjectReceipt("create", name, root, options.embedded ? "embedded" : "managed", options.bind);
+  return emitProjectReceipt("create", name, root, options.embedded ? "embedded" : "managed", options.bind);
 }
 
 async function bootstrapManagedSystemMemory(projectName: string): Promise<void> {
@@ -556,14 +558,16 @@ async function runSelectedEmbeddedSystemMemoryRepair(
   };
 }
 
-export async function projectRepairCommand(nameInput?: string): Promise<void> {
+export const projectRepairCommand = standaloneCommand("project repair", projectRepairFacts);
+
+export async function projectRepairFacts(nameInput?: string) {
   const result = await withSelectedProject(nameInput, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     return context.primary.config.store.type === "managed"
       ? runManagedSystemMemoryRepair(context.primary.name, "Repair Memsphere system Memory")
       : runEmbeddedSystemMemoryRepair(context.primary.name);
   });
-  publishResult("project repair", () => projectRepairResult.parse({
+  return commandFacts(() => projectRepairResult.parse({
     project: result.project, storeType: result.storeType,
     created: result.created, updated: result.updated, deleted: result.deleted,
     revision: result.revision, worktree: result.worktree,
@@ -875,10 +879,12 @@ function isCode(error: unknown, code: string): boolean {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === code);
 }
 
-export async function projectCloneCommand(
+export const projectCloneCommand = standaloneCommand("project clone", projectCloneFacts);
+
+export async function projectCloneFacts(
   source: string,
   options: BindOption & { name?: string; branch?: string; upstream?: string } = {}
-): Promise<void> {
+) {
   const name = assertProjectName(options.name?.trim() ?? "");
   const home = resolveMemsphereHome();
   const root = resolve(homePaths(home).projectsRoot, name);
@@ -899,10 +905,12 @@ export async function projectCloneCommand(
     });
     await registerCreatedProject(home, name, root, options.bind);
   });
-  emitProjectReceipt("clone", name, root, "managed", options.bind);
+  return emitProjectReceipt("clone", name, root, "managed", options.bind);
 }
 
-export async function projectRegisterCommand(rootInput: string, options: BindOption = {}): Promise<void> {
+export const projectRegisterCommand = standaloneCommand("project register", projectRegisterFacts);
+
+export async function projectRegisterFacts(rootInput: string, options: BindOption = {}) {
   const root = await realpath(resolve(rootInput));
   const paths = projectPaths(root);
   const manifest = projectManifestSchema.parse(JSON.parse(await readFile(paths.manifestPath, "utf8")));
@@ -921,7 +929,7 @@ export async function projectRegisterCommand(rootInput: string, options: BindOpt
     registry.projects[manifest.name] = { root };
     if (workspace) registry.workspaces[workspace.key] = { primary: manifest.name, mounted: [] };
   });
-  emitProjectReceipt("register", manifest.name, root, config.store.type, options.bind);
+  return emitProjectReceipt("register", manifest.name, root, config.store.type, options.bind);
 }
 
 /** Repair and publication share admission for the actual worktree/Memory directory. */
@@ -929,7 +937,7 @@ function withEmbeddedRepairClaim<T>(memoryRoot: string, action: () => Promise<T>
   return withMemoryWriteAccess(memoryRoot, action, "MEMORY_REPAIR_BUSY");
 }
 
-export async function projectListCommand(options: OutputOption & PaginationOptions = {}): Promise<void> {
+export async function projectListCommand(options: OutputOption & PaginationOptions = {}) {
   parseListLimit(options.limit);
   const home = resolveMemsphereHome();
   const registry = await readProjectRegistry(home);
@@ -942,10 +950,10 @@ export async function projectListCommand(options: OutputOption & PaginationOptio
   })).sort((a, b) => compareStrings(a.name, b.name)), options, {
     command: "project list", scope: { home: resolve(home), workspace: workspace.key }
   }, "established");
-  publishResult("project list", () => projectListResult.parse(result), { format: options.output });
+  return commandFacts(() => projectListResult.parse(result));
 }
 
-export async function projectShowCommand(nameInput: string | undefined, options: OutputOption = {}): Promise<void> {
+export async function projectShowCommand(nameInput: string | undefined, options: OutputOption = {}) {
   const home = resolveMemsphereHome();
   const registry = await readProjectRegistry(home);
   const workspace = await resolveWorkspaceIdentity();
@@ -955,15 +963,17 @@ export async function projectShowCommand(nameInput: string | undefined, options:
   const health = await projectHealth(project.memoryRoot, project.config);
   const effective = await resolveRegisteredProject(name, registry.projects, { workspace }).catch(() => undefined);
   const store = project.config.store;
-  publishResult("project show", () => projectDetails.parse({
+  return commandFacts(() => projectDetails.parse({
     name, root: project.paths.root, storeType: store.type,
     canonicalMemoryRoot: project.memoryRoot, effectiveMemoryRoot: effective?.memoryRoot,
     branch: store.type === "managed" ? store.branch : undefined,
     revision: store.type === "managed" ? store.published_revision : undefined, health
-  }), { format: options.output });
+  }));
 }
 
-export async function projectBindCommand(nameInput: string): Promise<void> {
+export const projectBindCommand = standaloneCommand("project bind", projectBindFacts);
+
+export async function projectBindFacts(nameInput: string) {
   const name = assertProjectName(nameInput);
   const home = resolveMemsphereHome();
   const workspace = await resolveWorkspaceIdentity();
@@ -978,10 +988,12 @@ export async function projectBindCommand(nameInput: string): Promise<void> {
     }
     registry.workspaces[workspace.key] = { primary: name, mounted: [] };
   });
-  publishResult("project bind", () => projectBindingReceipt.parse({ project: name, relation: "primary" }), { saved: savedResult(name, ["project", "list"]) });
+  return commandFacts(() => projectBindingReceipt.parse({ project: name, relation: "primary" }), { saved: savedResult(name, ["project", "list"]) });
 }
 
-export async function projectUnbindCommand(): Promise<void> {
+export const projectUnbindCommand = standaloneCommand("project unbind", projectUnbindFacts);
+
+export async function projectUnbindFacts() {
   const home = resolveMemsphereHome();
   const workspace = await resolveWorkspaceIdentity();
   let project = "";
@@ -991,10 +1003,12 @@ export async function projectUnbindCommand(): Promise<void> {
     delete registry.workspaces[workspace.key];
     project = binding.primary;
   });
-  publishResult("project unbind", () => projectBindingReceipt.parse({ project, relation: "unbound" }), { saved: savedResult(project, ["project", "list"]) });
+  return commandFacts(() => projectBindingReceipt.parse({ project, relation: "unbound" }), { saved: savedResult(project, ["project", "list"]) });
 }
 
-export async function projectMountCommand(nameInput: string): Promise<void> {
+export const projectMountCommand = standaloneCommand("project mount", projectMountFacts);
+
+export async function projectMountFacts(nameInput: string) {
   const name = assertProjectName(nameInput);
   const home = resolveMemsphereHome();
   const workspace = await resolveWorkspaceIdentity();
@@ -1007,7 +1021,7 @@ export async function projectMountCommand(nameInput: string): Promise<void> {
     if (binding.mounted.includes(name)) throw new Error(`Project "${name}" is already mounted`);
     binding.mounted.push(name);
   });
-  publishResult("project mount", () => projectBindingReceipt.parse({ project: name, relation: "mounted" }), { saved: savedResult(name, ["project", "list"]) });
+  return commandFacts(() => projectBindingReceipt.parse({ project: name, relation: "mounted" }), { saved: savedResult(name, ["project", "list"]) });
 }
 
 async function assertProjectWorkspaceCompatible(
@@ -1023,7 +1037,7 @@ async function assertProjectWorkspaceCompatible(
   }
 }
 
-export async function projectUnmountCommand(nameInput: string): Promise<void> {
+export async function projectUnmountCommand(nameInput: string) {
   const name = assertProjectName(nameInput);
   const home = resolveMemsphereHome();
   const workspace = await resolveWorkspaceIdentity();
@@ -1034,10 +1048,10 @@ export async function projectUnmountCommand(nameInput: string): Promise<void> {
     if (index < 0) throw new Error(`Project "${name}" is not mounted`);
     binding.mounted.splice(index, 1);
   });
-  publishResult("project unmount", () => projectBindingReceipt.parse({ project: name, relation: "unbound" }), { saved: savedResult(name, ["project", "list"]) });
+  return commandFacts(() => projectBindingReceipt.parse({ project: name, relation: "unbound" }), { saved: savedResult(name, ["project", "list"]) });
 }
 
-export async function projectPruneCommand(): Promise<void> {
+export async function projectPruneCommand() {
   const home = resolveMemsphereHome();
   const missing = new Set((await listRegisteredProjects(home)).filter((project) => project.missing).map((project) => project.name));
   await updateProjectRegistry(home, (registry) => {
@@ -1050,8 +1064,7 @@ export async function projectPruneCommand(): Promise<void> {
       binding.mounted = binding.mounted.filter((name) => !missing.has(name));
     }
   });
-  publishResult("project prune", () => z.object({ removedCount: count }).strict().parse({ removedCount: missing.size }),
-    { saved: missing.size ? savedResult([...missing][0], ["project", "list"]) : undefined });
+  return commandFacts(() => z.object({ removedCount: count }).strict().parse({ removedCount: missing.size }), { saved: missing.size ? savedResult([...missing][0], ["project", "list"]) : undefined });
 }
 
 async function preflightNewProject(input: { home: string; name: string; root: string; bind?: boolean }): Promise<void> {
@@ -1151,7 +1164,7 @@ async function projectHealth(memoryRoot: string, config: ProjectConfigFile): Pro
 }
 
 /** Explicit initialization never runs during model discovery or GET requests. */
-export async function projectModelsInitializeCommand(nameInput?: string, options: OutputOption = {}): Promise<void> {
+export async function projectModelsInitializeCommand(nameInput?: string, options: OutputOption = {}) {
   const result = await withSelectedProject(nameInput, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     const { initializeProjectModelRegistrations, withModelRegistrationMaintenance } = await import("../project/model-registration.js");
@@ -1166,7 +1179,7 @@ export async function projectModelsInitializeCommand(nameInput?: string, options
       };
     });
   });
-  publishResult("project models initialize", () => projectModelsResult.parse(result), { format: options.output, saved: savedResult(result.project, ["model", "list"], result.project) });
+  return commandFacts(() => projectModelsResult.parse(result), { saved: savedResult(result.project, ["model", "list"], result.project) });
 }
 
 /** Return only bundled System Memory differences, without writing a candidate. */
