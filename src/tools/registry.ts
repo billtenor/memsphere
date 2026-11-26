@@ -107,18 +107,20 @@ export async function resolveExecutable(command: string, cwd?: string): Promise<
   }
   return undefined;
 }
-export type CheckItem = { name: string; status: "available" | "unavailable" | "unknown"; message?: string };
+const cliCheckNames = ["binding", "app", "environment", "executable", "cwd", "file", "version"] as const;
+export const cliCheckNameSchema = z.enum(cliCheckNames);
+export type CheckItem = { name: z.infer<typeof cliCheckNameSchema>; status: "available" | "unavailable" | "unknown"; message?: string };
 export async function checkCli(project: AppProject, id: string, appId?: string, options: { allowDisabled?: boolean } = {}) {
   const shown = await showCli(project, id, appId);
   const items: CheckItem[] = [];
-  const add = (name: string, ok: boolean, message?: string) => items.push({ name, status: ok ? "available" : "unavailable", message });
+  const add = (name: CheckItem["name"], ok: boolean, message?: string) => items.push({ name, status: ok ? "available" : "unavailable", message });
   if (!shown.invocation) items.push({ name: "binding", status: "unknown", message: "Select an App and provide its own binding" });
   if (shown.status === "disabled" && !options.allowDisabled) add("app", false, "App is disabled");
   if (shown.invocation) {
     const { invocation, descriptor, binding } = shown;
     const environment = { ...invocation.env };
     for (const [name, source] of Object.entries(invocation.envFrom ?? {})) {
-      add(`envFrom:${name}`, Boolean(process.env[source]), source);
+      add("environment", Boolean(process.env[source]));
       if (process.env[source]) environment[name] = process.env[source]!;
     }
     const executable = await resolveExecutable(invocation.executable, invocation.cwd);
@@ -128,11 +130,11 @@ export async function checkCli(project: AppProject, id: string, appId?: string, 
       if (invocation.cwd) try { exists = (await stat(invocation.cwd)).isDirectory(); } catch (error) { if (!isMissing(error)) throw error; }
       add("cwd", exists);
     }
-    for (const name of descriptor.requirements?.env ?? []) add(`env:${name}`, Boolean(environment[name] ?? process.env[name]));
+    for (const name of descriptor.requirements?.env ?? []) add("environment", Boolean(environment[name] ?? process.env[name]));
     for (const file of [...(descriptor.requirements?.files ?? []), ...(binding?.files ?? [])]) {
       const path = resolve(invocation.cwd ?? project.paths.root, file);
-      try { await access(path, constants.R_OK); add(`file:${file}`, (await stat(path)).isFile()); }
-      catch (error) { if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== "EACCES") throw error; add(`file:${file}`, false); }
+      try { await access(path, constants.R_OK); add("file", (await stat(path)).isFile()); }
+      catch (error) { if (!isMissing(error) && (error as NodeJS.ErrnoException).code !== "EACCES") throw error; add("file", false); }
     }
     const app = appId ? requireApp(await readAppState(project), appId) : undefined;
     const ranges = [descriptor.requirements?.version, ...app?.manifest.dependencies.filter(d => d.kind === "cli" && d.id === id).map(d => d.version) ?? []].filter((v): v is string => Boolean(v));

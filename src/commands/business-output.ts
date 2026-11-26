@@ -1,6 +1,7 @@
 import { z } from "zod";
+import { PaginationError } from "../pagination.js";
 import type { ModelRegistration } from "../project/model-registration-contract.js";
-import { previewText } from "./output.js";
+import { publishResult, inline, previewText, renderCliResult, type CliFormat } from "./output.js";
 
 const text = z.string();
 const optional = text.optional();
@@ -45,9 +46,23 @@ const dataMetadata = {
 };
 export const dataPageResult = z.object({
   ...project, storeId: text, ...pagination,
-  items: z.array(z.object({ id: text, ...dataMetadata }).strict())
+  items: z.array(z.object({ id: text }).strict())
 }).strict();
-export const dataReadResult = z.object({ ...dataIdentity, ...dataMetadata, value: z.unknown().optional() }).strict();
+export function emitDataPage(page: z.input<typeof dataPageResult>, limit: number, format: CliFormat) {
+  const rowBytes = 2 * 1024;
+  const envelopeBytes = 8 * 1024;
+  if (page.items.length > limit || page.items.some(item => Math.max(
+    Buffer.byteLength(JSON.stringify(item)) + 1, Buffer.byteLength(`- id=${inline(item.id)}\n`)) > rowBytes)) {
+    throw new PaginationError("Provider page exceeds the record ID budget", "OUTPUT_LIMIT_EXCEEDED");
+  }
+  const envelope = { ...page, items: [] };
+  const views = [{ format: "json" }, { format: "text", locale: "en" }, { format: "text", locale: "zh-CN" }] as const;
+  if (views.some(view => Buffer.byteLength(renderCliResult("data list", dataPageResult, envelope, view)) > envelopeBytes)) {
+    throw new PaginationError("Provider page exceeds the cursor budget", "OUTPUT_LIMIT_EXCEEDED");
+  }
+  publishResult("data list", () => dataPageResult.parse(page), { format, maximumBytes: envelopeBytes + limit * rowBytes });
+}
+
 export const dataExistsResult = z.object({ ...dataIdentity, exists: z.boolean() }).strict();
 export const dataWriteResult = z.object({
   ...dataIdentity, ...dataMetadata, operation: text, dryRun: z.boolean().optional(), expectedRevision: optional,

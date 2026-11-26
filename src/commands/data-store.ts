@@ -8,7 +8,7 @@ import { parseFilesystemDataStoreConfig } from "../data/extensions/filesystem-da
 import { Config } from "../data/api/config.js";
 import { assertJsonDescriptor } from "../data/extensions/json-serializer/index.js";
 import { compareStrings } from "../pagination.js";
-import { addCliOutput, emitCliResult, paginateCliItems } from "./output.js";
+import { addCliOutput, publishResult, paginateCliItems } from "./output.js";
 import { businessStoreListResult, businessStoreReadResult, businessStoreWriteResult } from "./business-output.js";
 import { readInputText, parseJsonInput } from "./input.js";
 import type { BusinessStoreBinding } from "../project/model.js";
@@ -47,9 +47,9 @@ export function registerDataStoreCommands(data: Command) {
         .sort((a, b) => compareStrings(a.storeId, b.storeId));
       await assertModelOperationStamp(root, stamp);
       const page = paginateCliItems(items, options, { command: "data.store.list", scope: { root }, filters: { model: options.model, kind: options.kind } }, "established");
-      emitCliResult("data store list", businessStoreListResult, {
+      publishResult("data store list", () => businessStoreListResult.parse({
         project: config.project?.name, items: page.items, nextCursor: page.nextCursor
-      }, { format: options.output });
+      }), { format: options.output });
     });
   output(store.command("read <store-id>"))
     .action(async (id, options) => {
@@ -65,11 +65,11 @@ export function registerDataStoreCommands(data: Command) {
       if (mapping && !Object.hasOwn(mapping, "application/json")) jsonValue = false;
       const { status, errorCode } = stateOfModel;
       await assertModelOperationStamp(config.scopeRoot, state.stamp);
-      emitCliResult("data store read", businessStoreReadResult, {
+      publishResult("data store read", () => businessStoreReadResult.parse({
         project: config.project?.name, storeId: id, model: state.binding.model,
         kind: state.binding.kind, factory: state.binding.factory, status, errorCode,
         idRule: value ? state.binding.factory === "memsphere/tos-json" ? "portable relative path; .json is a physical suffix" : "single portable record name; .json is a physical suffix" : state.binding.factory === "memsphere/tos" ? "portable relative path; no filename suffix required" : "portable relative path including a MIME-mapped suffix",
-        capabilities: { value: jsonValue, payload: !value && status === "available", conditionalWrite: value && jsonValue || status === "available" && state.binding.factory === "memsphere/tos" && state.binding.config.mode === "revision", update: status === "available" && (value ? jsonValue : state.binding.factory !== "memsphere/tos" || state.binding.config.mode === "revision"), upsert: value && jsonValue, edit: value && jsonValue }, ...(mapping ? { contentTypeExtensions: mapping } : {}) }, { format: options.output });
+        capabilities: { value: jsonValue, payload: !value && status === "available", conditionalWrite: value && jsonValue || status === "available" && state.binding.factory === "memsphere/tos" && state.binding.config.mode === "revision", update: status === "available" && (value ? jsonValue : state.binding.factory !== "memsphere/tos" || state.binding.config.mode === "revision"), upsert: value && jsonValue, edit: value && jsonValue }, ...(mapping ? { contentTypeExtensions: mapping } : {}) }), { format: options.output });
     });
   output(store.command("create <store-id>").requiredOption("--model <ref>")
     .addOption(new Option("--kind <kind>").choices(["data", "value"]).makeOptionMandatory())
@@ -82,19 +82,19 @@ export function registerDataStoreCommands(data: Command) {
       const input = parseJsonInput(await readInputText(options.configFile));
       const result = await createBusinessStore({}, config.scopeRoot, id, { model: options.model, kind: options.kind, factory: options.factory, config: input }, options.dryRun);
       const { model, kind, factory } = result.binding;
-      emitCliResult("data store create", businessStoreWriteResult, {
+      publishResult("data store create", () => businessStoreWriteResult.parse({
         project: config.project?.name, storeId: id, operation: result.operation, model, kind, factory,
         pendingCleanup: "pendingCleanup" in result && result.pendingCleanup === true ? true : undefined,
         dryRun: "dryRun" in result && result.dryRun === true ? true : undefined
-      }, { format: options.output });
+      }), { format: options.output });
     });
   output(store.command("remove <store-id>").option("--dry-run"))
     .action(async (id, options) => {
       const config = await readConfig();
       const result = await removeBusinessStore({}, config.scopeRoot, id, options.dryRun);
-      emitCliResult("data store remove", businessStoreWriteResult, {
+      publishResult("data store remove", () => businessStoreWriteResult.parse({
         project: config.project?.name, storeId: id, operation: result.operation,
         dataRetained: result.dataRetained, dryRun: result.dryRun
-      }, { format: options.output });
+      }), { format: options.output });
     });
 }

@@ -1,4 +1,4 @@
-import { cliHelpNote } from "../commands/output.js";
+import { cliHelpNote, setReviewerOutputProtocol } from "../commands/output.js";
 import type { Command } from "commander";
 import { readConfig } from "../config.js";
 import { boundAgentReviewSession } from "./review-session.js";
@@ -45,6 +45,7 @@ export function installReviewerCommands(program: Command) {
     process.env.MEMSPHERE_PROJECT = expected.project;
     const binding = await boundAgentReviewSession();
     const capabilities = reviewerCapabilities(isModelReviewHandle(binding.reviewId) ? "graph" : "flow");
+    setReviewerOutputProtocol(capabilities.protocol);
     if (p !== "continue" && !capabilities.commands.includes(p as typeof reviewerCommands[number])) throw Object.assign(failure("INVALID_ARGUMENT", `Command is unsupported in this ${capabilities.protocol} Review protocol: ${p}. ${capabilities.targets}`),
       { details: { protocol: capabilities.protocol } });
     for (const [key, value] of Object.entries(reviewerCommandDefaults(p, action.opts(), expected)))

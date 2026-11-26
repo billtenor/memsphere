@@ -16,7 +16,7 @@ import { isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.
 import { failure } from "../context_control/errors.js";
 import type { Run, Snapshot, Step } from "../context_control/types.js";
 import type { ControlPlaneConfig, RunReviewConfiguration } from "../control-plane/index.js";
-import { CliOutputError, cliCommand, emitCliResult, paginateCliItems, previewText } from "./output.js";
+import { CliOutputError, cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
 import { runEvidenceSchema, runOverviewSchema, runProgressSchema, type RunProgress } from "./run-result.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
 import { z } from "zod";
@@ -75,13 +75,13 @@ function forRun(project: string, ...args: string[]) {
 }
 
 function printProgress(command: string, result: RunProgress, run: Run, format?: "text" | "json", savedId?: string, publicProject?: string) {
-  emitCliResult(command, runProgressSchema, result, {
+  publishResult(command, () => runProgressSchema.parse(result), {
     format, locale: run.language, maximumBytes: 8192, itemsField: "materials",
     ...(savedId && publicProject ? { saved: { id: savedId, inspect: forRun(publicProject, "show", "--run", run.id) } } : {})
   });
 }
 
-async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, project: string): Promise<RunProgress> {
+async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, project: string, statusOnly = false): Promise<RunProgress> {
   const run = snapshot.run;
   const action = g.action(run, step);
   const bound = await context(project, run.id, step.id);
@@ -117,8 +117,9 @@ async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
     const writing = await g.schemaShow(run.id, step.id);
     const cmd = writing.phase === "not_started" ? ["enter-schema"] : ["schema", "show"];
     const resume = bound ? cliCommand(["continue", ...cmd]) : forRun(project, ...cmd, ...target);
-    return { ...current, schemaPhase: writing.phase, nextAction: action.actor === "human"
-      ? { kind: "human_confirmation", resume } : resume };
+    const nextAction = action.actor === "human" ? { kind: "human_confirmation" as const, resume } : resume;
+    if (writing.phase === "not_started" && !statusOnly) return { ...current, nextAction };
+    return { ...base, instruction, artifactName: current.artifactName, details, schemaPhase: writing.phase, nextAction };
   }
 
   const report = bound ? cliCommand(["continue", "report", "--artifact-file", "<file>"])
@@ -126,7 +127,7 @@ async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
   return { ...current, nextAction: action.actor === "human" ? { kind: "human_confirmation", resume: report } : report };
 }
 
-export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: string, enter = true): Promise<RunProgress> {
+export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: string, enter = true, statusOnly = false): Promise<RunProgress> {
   const run = snapshot.run;
   const base = progress(run);
   if (run.status !== "running") return base;
@@ -144,9 +145,9 @@ export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: st
       return { ...base, reason: "step_completed_concurrently", nextAction: status };
     }
     await createCommandState(project, run.id, entered.step.id).catch(() => undefined);
-    return stepResult(g, entered.snapshot, entered.step, project);
+    return stepResult(g, entered.snapshot, entered.step, project, statusOnly);
   }
-  if (ready.length === 1) return { ...base, eligibleSteps: 1, stepId: ready[0].id, stepStatus: ready[0].status, nextAction: enterStep(ready[0]) };
+  if (ready.length === 1) return { ...base, eligibleSteps: 1, nextAction: enterStep(ready[0]) };
   if (ready.length > 1) return { ...base, eligibleSteps: ready.length, nextAction: {
     kind: "choose", choices: ready.slice(0, 10).map(enterStep), ...(ready.length > 10 ? { more: show } : {})
   } };
@@ -167,7 +168,7 @@ export async function printGraphStart(snapshot: Snapshot, output?: "text" | "jso
   printProgress("run start", result, snapshot.run, output, snapshot.run.id, project);
 }
 export async function printGraphReviewOutput(
-  command: string,
+  command: "run review wait" | "run review vote" | "run review submit-for-human",
   review: ArtifactReview<import("../run/store.js").RunEvent["artifact"]>,
   round: ArtifactReviewRound,
   runId: string,
@@ -211,10 +212,10 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const actors = Array.isArray(options.actor) ? options.actor as string[] : options.actor ? [options.actor] : [];
       if (operation === "binding-update" && options.skip && actors.length) throw failure("INVALID_ARGUMENT", "Choose Actors or skip");
       const result = operation === "binding-show" ? await g.bindingSnapshot(run.id) : await g.updateBinding(run.id, needed(options.slot, "--slot"), options.skip ? { skip: true } : { actorIds: actors });
-      emitCliResult(operation.replace("binding-", "run binding "), graphBindingResult, {
+      publishResult(operation.replace("binding-", "run binding "), () => graphBindingResult.parse({
         runId: run.id, nextRound: publicBindings(result.bindings),
         rounds: result.rounds.map(({ stepId, roundId, bindings }) => ({ stepId, roundId, bindings: publicBindings(bindings) }))
-      }, display);
+      }), display);
       return true;
     }
     if (operation === "show") {
@@ -224,12 +225,12 @@ export async function graphCommand(operation: string, input: object): Promise<bo
         artifactId: step.artifact?.mode === "produce" ? step.artifact.id : undefined,
         effective: effectiveStep(run, step.id)
       })), { limit: options.limit, cursor: options.cursor }, { command: "run.show", scope: { project, runId: run.id } }, "summary");
-      emitCliResult("run show", runOverviewSchema, {
+      publishResult("run show", () => runOverviewSchema.parse({
         run: { id: run.id, name: previewText(run.name ?? run.id, 160).text, status: run.status },
         steps: page.items, stepCount: snapshot.steps.length,
         outputArtifactIds: snapshot.outputArtifactIds.slice(0, 20),
         outputArtifactCount: snapshot.outputArtifactIds.length, nextCursor: page.nextCursor
-      }, { format: options.output, locale: run.language, itemsField: "steps", maximumBytes: options.limit === undefined ? 32768 : 131072 });
+      }), { format: options.output, locale: run.language, itemsField: "steps", maximumBytes: options.limit === undefined ? 32768 : 131072 });
       return true;
     }
     if (operation === "step-show") {
@@ -240,7 +241,7 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const action = g.action(run, step);
       const rules = Object.entries(await g.rules(run, action)).flatMap(([scope, tree]) =>
         flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
-      emitCliResult("run step show", graphStepDetail, {
+      publishResult("run step show", () => graphStepDetail.parse({
         runId: run.id, step: {
           id: step.id, actionId: step.source?.actionId, status: step.status, effective: effectiveStep(snapshot.run, step.id),
           supersedingRewindId: supersedingRewind(snapshot.run, step.id)?.id, inputGroups: step.inputs,
@@ -249,7 +250,7 @@ export async function graphCommand(operation: string, input: object): Promise<bo
         instruction: action.description, actor: action.actor ?? "agent",
         artifactName: action.artifact?.name, model: action.artifact?.model.definedBy,
         contentType: action.artifact?.payload.contentType, rules
-      }, display);
+      }), display);
       return true;
     }
     if (operation === "contract-show" || operation === "artifact-show" && options.step) {
@@ -261,19 +262,19 @@ export async function graphCommand(operation: string, input: object): Promise<bo
         const schema = snapshot.run.schemaContracts?.[step.source!.actionId];
         const rules = Object.entries(await g.rules(run, action)).flatMap(([scope, tree]) =>
           flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
-        emitCliResult("run artifact contract show", graphContractDetail, {
+        publishResult("run artifact contract show", () => graphContractDetail.parse({
           runId: run.id, stepId, name: action.artifact?.name, contentType: action.artifact?.payload.contentType,
           model: action.artifact?.model.definedBy, definition: action.artifact?.model.definition,
           memoryReference: action.artifact?.model.ref,
           schema: schema && { definition: schema.definition, source: schema.sources.source }, rules
-        }, display);
+        }), display);
       } else {
-        emitCliResult("run artifact show", graphArtifactCollection, { runId: run.id, stepId,
+        publishResult("run artifact show", () => graphArtifactCollection.parse({ runId: run.id, stepId,
           items: snapshot.artifacts.filter(a => a.stepId === stepId).map(a => ({
             artifactId: a.id, name: previewText(a.name, 160).text, status: a.status,
             contentType: a.content?.payload.contentType, dependencies: a.dependencies
           }))
-        }, display);
+        }), display);
       }
       return true;
     }
@@ -286,10 +287,10 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const progress = await graphNext(g, snapshot, project);
       const target = snapshot.steps.find(step => step.id === stepId);
       const submitted = target?.artifact?.mode === "produce" ? snapshot.artifacts.find(a => a.id === (target.artifact as { id: string }).id) : undefined;
-      emitCliResult("run step store retry", graphReceiptSchema, {
+      publishResult("run step store retry", () => graphReceiptSchema.parse({
         runId: run.id, stepId, status: target?.status ?? "done", artifactId: submitted?.id,
         ...graphStoreReceipt(submitted), nextAction: progress.nextAction
-      }, { format: options.output, locale: run.language, saved: { id: stepId, inspect: forRun(project, "step", "show", "--run", run.id, "--step", stepId) } });
+      }), { format: options.output, locale: run.language, saved: { id: stepId, inspect: forRun(project, "step", "show", "--run", run.id, "--step", stepId) } });
       return true;
     }
     if (operation === "rewind") {
@@ -300,13 +301,13 @@ export async function graphCommand(operation: string, input: object): Promise<bo
       const result = options.dryRun ? await g.rewindPreview(run.id, stepId) : await g.rewind(run.id, stepId, reason!);
       const replacementStepId = "replacementStepId" in result ? String(result.replacementStepId) : undefined;
       const rewindId = "rewindId" in result ? String(result.rewindId) : undefined;
-      const inspect = forRun(project, "status", "--run", run.id);
-      emitCliResult("run step rewind", graphRewindResult, {
+      const inspect = forRun(project, "show", "--run", run.id);
+      publishResult("run step rewind", () => graphRewindResult.parse({
         runId: run.id, dryRun: Boolean(options.dryRun), targetStepId: result.targetStepId, actionId: result.actionId,
         affectedStepIds: result.affectedStepIds, affectedArtifactIds: result.affectedArtifactIds, retainedStepIds: result.retainedStepIds,
         rewindId, replacementStepId,
         nextAction: replacementStepId ? forRun(project, "step", "enter", "--run", run.id, "--step", replacementStepId) : undefined
-      }, { ...display, saved: rewindId ? { id: rewindId, inspect } : undefined });
+      }), { ...display, saved: rewindId ? { id: rewindId, inspect } : undefined });
       return true;
     }
     if (operation === "enter") {
@@ -319,7 +320,7 @@ export async function graphCommand(operation: string, input: object): Promise<bo
     }
     if (operation === "status") {
       const snapshot = await g.advance(run.id);
-      const result = await graphNext(g, snapshot, project, !await currentIdentity());
+      const result = await graphNext(g, snapshot, project, !await currentIdentity(), true);
       printProgress("run status", result, run, options.output);
       return true;
     }
@@ -385,14 +386,14 @@ export async function graphCommand(operation: string, input: object): Promise<bo
     const next = await (result.step.status === "done" ? graphNext(g, result.snapshot, project)
       : stepResult(g, result.snapshot, result.step, project)).catch(error => { throw new CliOutputError(saved, error); });
     const reviewing = result.step.status === "awaiting_review";
-    emitCliResult("run report", graphReceiptSchema, {
+    publishResult("run report", () => graphReceiptSchema.parse({
       runId: run.id, stepId, artifactId: result.artifact.id, status: result.step.status,
       reviewId: reviewing ? next.reviewId : undefined, roundId: reviewing ? next.roundId : undefined,
       ...graphStoreReceipt(result.artifact), nextAction: next.nextAction,
       dependencies: result.artifact.dependencies.slice(0, 20), dependencyCount: result.artifact.dependencies.length,
       nextStep: next.stepId, nextInstruction: next.instruction, nextActor: next.actor, nextDetails: next.details,
       nextMaterials: next.materials, nextRules: next.rules
-    }, { format: options.output, locale: run.language, saved, maximumBytes: 8192, itemsField: "nextMaterials" });
+    }), { format: options.output, locale: run.language, saved, maximumBytes: 8192, itemsField: "nextMaterials" });
     return true;
   });
 }

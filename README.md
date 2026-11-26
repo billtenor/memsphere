@@ -420,7 +420,7 @@ memsphere data store list --kind value --limit 20 --output json
 memsphere memory list --kind procedures --limit 20 --output json
 ```
 
-普通命令默认用文本 Prompt 显示公开事实和下一步动作。`--output json` 从 stdout 返回同样的事实和动作，以单一 JSON 值供 jq 或程序读取。执行失败时以非零状态退出，JSON 错误从 stderr 返回，包含稳定的 `error.code` 和经该错误码批准的可选字段。原始导出、固定材料、帮助及版本按各自协议输出。见 [CLI 输出契约与迁移指南](docs/cli-output-contract.md)。
+普通命令默认用文本 Prompt 显示公开事实和下一步动作。`--output json` 从 stdout 返回同样的事实和动作，以单一 JSON 值供 jq 或程序读取。执行失败时以非零状态退出，JSON 错误从 stderr 返回，包含稳定的 `error.code` 和经该错误码批准的可选字段。原始导出、固定材料、帮助及版本按各自协议输出。
 
 ## 7. Memsphere 仍在进化
 

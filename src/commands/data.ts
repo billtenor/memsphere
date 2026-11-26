@@ -1,3 +1,6 @@
+import { parseListLimit } from "../pagination.js";
+import { dataReadContract, type DataReadPrompt } from "../prompts/data-read.js";
+import { renderPrompt } from "../prompts/renderer.js";
 import { writeCliChunk } from "../cli-transport.js";
 import { z } from "zod";
 import { encodeJsonChunks } from "../data/extensions/json-serializer/streaming.js";
@@ -6,9 +9,9 @@ import { readConfig } from "../config.js";
 import { assertEtag } from "../data/extensions/tos-datastore/revision.js";
 import { validateTosWriteOptions } from "../data/extensions/tos-datastore/write-policy.js";
 import { getBusinessBinding, openBusinessStore, serviceError } from "../project/business-stores.js";
-import { listData, readData, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
-import { addCliOutput, cliCommand, emitCliResult, renderCliResult, type CliFormat } from "./output.js";
-import { dataExistsResult, dataPageResult, dataReadResult, dataWriteResult } from "./business-output.js";
+import { listData, readDataOutcome, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
+import { addCliOutput, cliCommand, commandFromContract, publishResult, cliLocale, CliOutputError, inline, validateCommandResult, type CliFormat } from "./output.js";
+import { emitDataPage, dataExistsResult, dataWriteResult } from "./business-output.js";
 import { assertInputOptions, readDataInput, readJsonInput, readInputText, parseJsonInput, parseRevision } from "./input.js";
 import { registerDataStoreCommands } from "./data-store.js";
 
@@ -21,30 +24,36 @@ export function registerDataCommands(program: Command) {
   stored(data.command("list").option("--limit <n>", "Page size, 1–1000; default 100").option("--cursor <token>"))
     .action(async options => {
       const config = await readConfig();
-      const page = await listData({}, config.scopeRoot, options.store, options);
+      // A Provider cursor points past its entire page. Never truncate that page
+      // at the output boundary or a subsequent request would skip records.
+      const limit = parseListLimit(options.limit);
+      const page = await listData({}, config.scopeRoot, options.store, { limit, cursor: options.cursor });
       const items = page.items.map(item => ({ id: item.id }));
-      emitCliResult("data list", dataPageResult, { project: config.project?.name, storeId: options.store,
-        items, nextCursor: page.nextCursor }, { format: options.output });
+      emitDataPage({ project: config.project?.name, storeId: options.store, nextCursor: page.nextCursor, items }, limit, options.output);
     });
-  stored(data.command("read <id>").option("--metadata-only", "Read metadata without decoding Payload").option("--path <path>", "Query within the JSON value using JSONPath (RFC 9535)"))
+  stored(commandFromContract(data, dataReadContract).argument("<id>").option("--metadata-only", "Read metadata without decoding Payload").option("--path <path>", "Query within the JSON value using JSONPath (RFC 9535)"))
     .action(async (id, options) => {
       const config = await readConfig();
-      const record = await readData({}, config.scopeRoot, options.store, id, options);
-      const result = {
-        project: config.project?.name, storeId: options.store, id: record.id, modelRef: record.modelRef,
-        ...publicMetadata(record), ...("value" in record ? { value: record.value } : {})
+      const outcome = await readDataOutcome({}, config.scopeRoot, options.store, id, options);
+      const metadata = {
+        project: config.project?.name, storeId: options.store, id: outcome.record.id, modelRef: outcome.record.modelRef,
+        ...publicMetadata(outcome.record)
       };
-      const { binding } = await getBusinessBinding(config.scopeRoot, options.store);
-      if (binding.factory === "memsphere/tos-json" && "value" in result) {
-        await streamDataRead(result, options.output);
-      } else emitCliResult("data read", dataReadResult, result, { format: options.output, contentField: "value" });
+      switch (outcome.kind) {
+        case "deleted":
+        case "metadata":
+          return writeDataRead(dataReadContract[outcome.kind], metadata, options.output);
+        case "selectedPath":
+        case "value":
+          return writeDataRead(dataReadContract[outcome.kind], { ...metadata, value: outcome.record.value }, options.output, outcome.streaming);
+      }
     });
   stored(data.command("has <id>"))
     .action(async (id, options) => {
       const config = await readConfig();
       const result = await hasData({}, config.scopeRoot, options.store, id);
-      emitCliResult("data has", dataExistsResult, { project: config.project?.name, storeId: options.store,
-        id: result.id, modelRef: result.modelRef, exists: result.exists }, { format: options.output });
+      publishResult("data has", () => dataExistsResult.parse({ project: config.project?.name, storeId: options.store,
+        id: result.id, modelRef: result.modelRef, exists: result.exists }), { format: options.output });
     });
   for (const operation of ["create", "update"] as const) {
     const command = stored(valueInput(data.command(`${operation} <id>`)).option("--payload-file <path|->", "Raw bytes; DataStore only")
@@ -124,21 +133,43 @@ function emitDataWrite(
       "data", command === "data delete" ? "has" : "read", id, "--store", storeId,
       ...(command === "data delete" ? [] : ["--metadata-only"]), "--output", "json"])
   };
-  emitCliResult(command, dataWriteResult, {
+  publishResult(command, () => dataWriteResult.parse({
     project, storeId, id, modelRef, operation, ...publicMetadata(result), dryRun, expectedRevision, out, bytes, valid
-  }, { format, saved: saved || undefined });
+  }), { format, saved: saved || undefined });
 }
 
-async function streamDataRead(value: z.input<typeof dataReadResult>, format?: CliFormat) {
-  const result = dataReadResult.parse(value);
-  const { value: body, ...metadata } = result;
-  const prefix = format === "json" ? undefined : renderCliResult("data read", dataReadResult,
-    { ...metadata, value: "" }, { contentField: "value", contentStream: true });
-  const envelope = Object.fromEntries(Object.entries(result).filter(([, value]) => value !== undefined));
-  const stream = encodeJsonChunks({}, format === "json" ? envelope : body);
+type ReadBranch = (typeof dataReadContract)[Exclude<keyof typeof dataReadContract, "route">];
+
+async function writeDataRead(branch: ReadBranch, value: unknown, format: CliFormat, streaming = false) {
+  let header: string;
+  let body: unknown;
+  try {
+    const result = branch.schema.parse(validateCommandResult("data read", value));
+    body = "value" in result ? result.value : undefined;
+    if (format === "json") {
+      if (!streaming) return await writeCliChunk(JSON.stringify(result) + "\n");
+      // The streaming encoder expects JSON values. Optional Store metadata
+      // follows the same omission rule as JSON.stringify on the buffered path.
+      body = Object.fromEntries(Object.entries(result).filter(([, field]) => field !== undefined));
+      header = "";
+    } else {
+      const facts: DataReadPrompt = {
+        id: inline(result.id), storeId: inline(result.storeId), modelRef: inline(result.modelRef)
+      };
+      for (const key of ["project", "revision", "contentType", "createdAt", "updatedAt", "deleted"] as const) {
+        if (result[key] !== undefined) facts[key] = inline(result[key]);
+      }
+      header = (branch.template === "cli.data.read.content"
+        ? renderPrompt(branch.template, cliLocale(), { ...facts, body: streaming ? "" : inline(body) })
+        : renderPrompt(branch.template, cliLocale(), facts)) + "\n";
+      if (!streaming) return await writeCliChunk(header);
+    }
+  } catch (error) {
+    throw new CliOutputError(undefined, error);
+  }
   let first = true;
-  for await (const chunk of stream) {
-    if (first && prefix) await writeCliChunk(prefix);
+  for await (const chunk of encodeJsonChunks({}, body)) {
+    if (first && header) await writeCliChunk(header);
     first = false;
     await writeCliChunk(chunk);
   }

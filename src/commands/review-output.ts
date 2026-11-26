@@ -1,58 +1,16 @@
 import { z } from "zod";
-import { artifactReviewAssignmentId, type ArtifactReview, type ArtifactReviewRound } from "../artifact-review.js";
+import { artifactReviewAssignmentId, artifactReviewRoundControlPlane, type ArtifactReview, type ArtifactReviewRound } from "../artifact-review.js";
 import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import type { RunState } from "../run/store.js";
 import { buildArtifactReviewNextActionPromptModel } from "../prompts/review.js";
-import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
-import { cliCommand, emitCliResult, previewText, type CliFormat } from "./output.js";
+import { nextAction } from "../prompts/cli-output.js";
+import { cliCommand, publishResult, previewText, type CliFormat } from "./output.js";
+import { registeredWait, reviewReceipts, type ReviewReceiptCommand } from "../prompts/review-receipts.js";
 import type { RunProgress } from "./run-result.js";
 
 type Review = ArtifactReview<RunState["events"][number]["artifact"]>;
 
-const actor = z.object({
-  assignmentId: z.string(),
-  actorId: z.string(),
-  name: z.string(),
-  kind: z.enum(["agent", "human"]),
-  binding: z.enum(["advisory", "decision"]),
-  status: z.string(),
-  vote: z.string().optional(),
-  summary: z.string().optional(),
-  progress: z.object({ phase: z.string(), processed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
-  failureCode: z.string().optional()
-}).strict();
-
-const comment = z.object({
-  commentId: z.string(),
-  actorId: z.string(),
-  severity: z.string().optional(),
-  body: z.string(),
-  disposition: z.string().optional(),
-  truncated: z.boolean().optional()
-}).strict();
-
-const reviewResult = z.object({
-  runId: z.string(),
-  stepId: z.string(),
-  reviewId: z.string(),
-  roundId: z.string(),
-  candidateId: z.string(),
-  scope: z.enum(["decision", "opinion"]),
-  status: z.string(),
-  roundStatus: z.string(),
-  outcome: z.string().optional(),
-  taskId: z.string().optional(),
-  assignmentId: z.string().optional(),
-  vote: z.string().optional(),
-  assignmentCount: z.number().int().nonnegative(),
-  assignments: z.array(actor).max(10),
-  comments: z.array(comment),
-  commentCount: z.number().int().nonnegative(),
-  details: cliCommandSchema.optional(),
-  nextAction
-}).strict();
-
-export function reviewReceipt(command: string, input: {
+export function reviewReceipt(command: ReviewReceiptCommand, input: {
   project?: string;
   run: Pick<RunState, "id" | "language">;
   review: Review;
@@ -73,7 +31,9 @@ export function reviewReceipt(command: string, input: {
   const failed = round.assignments.filter(assignment => assignment.status === "failed");
   let action: z.input<typeof nextAction>;
   const step = review.id.startsWith("graph-review-") ? ["--step", review.stepId] : [];
-  if (input.statusOnly) action = invoke("status", "--run", run.id);
+  const inspect = artifactReviewRoundControlPlane(review, round).permissions.runner.effective.includes("artifact.read")
+    ? invoke("review", "show", "--review", review.id, "--round", round.id, "--all") : undefined;
+  if (input.statusOnly) action = input.fullComments ? undefined : inspect;
   else if (input.taskId) action = { kind: "wait", resume };
   else if (progress) action = progress.nextAction;
   else if (opinion && round.assignments.every(assignment => assignment.status === "submitted")) action = undefined;
@@ -93,6 +53,31 @@ export function reviewReceipt(command: string, input: {
   else if (failed.length) action = { kind: "choose", choices: failed.slice(0, 10).map(assignment =>
     invoke("review", "retry", "--review", review.id, ...(review.id.startsWith("exploration-review-")
       ? [] : ["--assignment", artifactReviewAssignmentId(assignment)]))) };
+  const summary = {
+    runId: run.id, stepId: review.stepId, reviewId: review.id, roundId: round.id,
+    candidateId: round.submissionId, scope: opinion ? "opinion" as const : "decision" as const,
+    status: opinion ? round.assignments[0]?.status ?? review.status : review.status,
+    roundStatus: round.status, assignmentCount: round.assignments.length,
+    commentCount: round.assignments.reduce((total, item) => total + (item.submitted?.comments.length ?? 0), 0),
+    details: input.fullComments ? undefined : inspect,
+    nextAction: action
+  };
+  const options = { format: input.format, locale: run.language, maximumBytes: 8192,
+    saved: command === "run review show" || !inspect ? undefined : { id: review.id, inspect } };
+  const receipt = { ...summary, outcome: opinion ? undefined : round.result?.status };
+  switch (command) {
+    case "run review wait":
+      if (input.taskId) {
+        return publishResult(command, () => registeredWait.parse({ ...summary, taskId: input.taskId, nextAction: { kind: "wait", resume } }), options);
+      }
+      return publishResult(command, () => reviewReceipts[command].parse(receipt), options);
+    case "run review vote":
+      return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, vote: input.vote! }), options);
+    case "run review retry":
+      return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, assignmentId: input.assignmentId }), options);
+    case "run review submit-for-human":
+      return publishResult(command, () => reviewReceipts[command].parse({ ...receipt, assignmentId: input.assignmentId!, vote: input.vote! }), options);
+  }
   const comments = round.assignments.flatMap(assignment => (assignment.submitted?.comments ?? []).map(item => {
     const commentId = reviewCommentId(item);
     const preview = input.fullComments ? undefined : previewText(item.body, 96);
@@ -102,13 +87,10 @@ export function reviewReceipt(command: string, input: {
       disposition: round.commentDispositions?.find(d => d.commentId === commentId)?.disposition
     };
   }));
-  emitCliResult(command, reviewResult, {
-    runId: run.id, stepId: review.stepId, reviewId: review.id, roundId: round.id,
-    candidateId: round.submissionId, scope: opinion ? "opinion" : "decision",
-    status: opinion ? round.assignments[0]?.status ?? review.status : review.status, roundStatus: round.status,
-    outcome: !opinion ? round.result?.status : undefined, taskId: input.taskId, vote: input.vote, assignmentId: input.assignmentId,
-    assignmentCount: round.assignments.length,
-    assignments: round.assignments.slice(0, 10).map(assignment => ({
+  const assignments = input.fullComments ? round.assignments : round.assignments.slice(0, 10);
+  publishResult(command, () => reviewReceipts[command].parse({
+    ...receipt,
+    assignments: assignments.map(assignment => ({
       assignmentId: artifactReviewAssignmentId(assignment), actorId: assignment.actorId,
       name: previewText(assignment.actorName, 160).text, kind: assignment.actorKind ?? "human",
       binding: assignment.binding, status: assignment.status, vote: assignment.submitted?.vote,
@@ -118,9 +100,6 @@ export function reviewReceipt(command: string, input: {
       failureCode: assignment.status === "failed" && /^[a-z0-9_]{1,64}$/i.test(assignment.attempts?.at(-1)?.failure?.code ?? "")
         ? assignment.attempts?.at(-1)?.failure?.code : undefined
     })),
-    comments: input.fullComments ? comments : comments.slice(0, 8), commentCount: comments.length,
-    details: progress?.details ?? (!input.fullComments && comments.length
-      ? invoke("review", "show", "--review", review.id, "--round", round.id, "--all") : undefined),
-    nextAction: action
-  }, { format: input.format, locale: run.language, itemsField: "comments", maximumBytes: input.fullComments ? undefined : 8192, saved: { id: review.id, inspect: resume } });
+    comments: input.fullComments ? comments : comments.slice(0, 8)
+  }), { ...options, itemsField: "comments", maximumBytes: input.fullComments ? undefined : 8192 });
 }

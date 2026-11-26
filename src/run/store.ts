@@ -2472,7 +2472,7 @@ export async function appendArtifactReviewAgentComment(input: {
   });
 }
 
-export async function mutateArtifactReviewNodes(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; mutation: NodeMutation }): Promise<ArtifactReviewAgentContext> {
+export async function mutateArtifactReviewNodes(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; mutation: NodeMutation }): Promise<ArtifactReviewAgentContext & { savedCommentIds: string[] }> {
   const located = await findArtifactReview(input);
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const context = requireRunningAgentContext(await readRun(input.runsRoot, located.run.id), input);
@@ -2480,9 +2480,13 @@ export async function mutateArtifactReviewNodes(input: { runsRoot: string; revie
     const authorization = authorizeArtifactReviewActor({ controlPlane: artifactReviewRoundControlPlane(review, round), assignment, permission: assignment.binding === "decision" ? "decision.decide" : "decision.assess" });
     if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
     if (!assignment.nodeTree || !assignment.nodeStates) throw new Error("review_nodes_not_enabled");
+    const previous = new Set(assignment.draft.comments.map(reviewCommentId));
     assignment.draft.comments = mutateReviewNode({ nodeTree: assignment.nodeTree, nodeStates: assignment.nodeStates }, assignment.draft.comments, input.mutation, item => normalizeArtifactReviewComments([{ body: item.body, severity: item.severity, ...(item.anchor ? { anchor: artifactReviewAnchorSchema.parse({ ...item.anchor, submissionId: item.anchor.submissionId ?? round.submissionId }) } : {}) }], reviewSubmission(review, round.submissionId), new Date().toISOString())[0]);
     const now = new Date().toISOString(); round.revision++; review.updatedAt = now; run.updatedAt = now;
-    await writeRun(input.runsRoot, run); return context;
+    await writeRun(input.runsRoot, run);
+    const savedCommentIds = input.mutation.operation === "comment-update" ? [input.mutation.commentId]
+      : assignment.draft.comments.map(reviewCommentId).filter(id => !previous.has(id));
+    return { ...context, savedCommentIds };
   });
 }
 

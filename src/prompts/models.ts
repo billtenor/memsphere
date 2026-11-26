@@ -1,3 +1,4 @@
+import type { DataReadPrompt } from "./data-read.js";
 import type { PromptLocale } from "./locale.js";
 import type { CliContinuePrompt, CliErrorPrompt, CliHelpPrompt, CliNotification, CliResultPrompt } from "./cli-output.js";
 
@@ -5,6 +6,8 @@ export type ReviewNodePromptModel = { data: string; open: boolean; hasNode: bool
 export type ReviewNodePromptId = "acp.review-v3.initial" | "acp.review-v3.node" | "acp.review-v3.summary" | "acp.review-v3.edit-receipt" | "acp.review-v3.submit-receipt" | "acp.review-v3.list" | "acp.review-v3.results" | "acp.review-v3.reminder";
 
 export type PromptInputMap = {
+  "cli.data.read.metadata": DataReadPrompt;
+  "cli.data.read.content": DataReadPrompt & { body: string };
   "cli.result": CliResultPrompt;
   "cli.error": CliErrorPrompt;
   "cli.help": CliHelpPrompt;

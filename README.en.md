@@ -416,7 +416,7 @@ memsphere data store list --kind value --limit 20 --output json
 memsphere memory list --kind procedures --limit 20 --output json
 ```
 
-Ordinary commands display public facts and next actions as a text prompt by default. Use `--output json` to read the same facts and actions from stdout as one JSON value with jq or another program. Failures exit with a nonzero status and emit JSON errors to stderr, with a stable `error.code` and optional fields approved for that code. Raw exports, pinned materials, help, and version have their own output protocols. See the [CLI output contract and migration guide](docs/cli-output-contract.md).
+Ordinary commands display public facts and next actions as a text prompt by default. Use `--output json` to read the same facts and actions from stdout as one JSON value with jq or another program. Failures exit with a nonzero status and emit JSON errors to stderr, with a stable `error.code` and optional fields approved for that code. Raw exports, pinned materials, help, and version have their own output protocols.
 
 ## 7. Memsphere Is Still Evolving
 

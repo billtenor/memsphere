@@ -81,8 +81,10 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
       const stdout = process.stdout.write.bind(process.stdout);
       t.mock.method(process.stdout, "write", (text: string | Uint8Array, ...args: unknown[]) => {
         const line = typeof text === "string" ? text : Buffer.from(text).toString("utf8");
-        if (line.startsWith('{"operation":')) {
+        if (line.startsWith("{") && JSON.parse(line).operation === "comment-add") {
           receipt = JSON.parse(line);
+          const callback = args.at(-1);
+          if (typeof callback === "function") callback();
           return true;
         }
         return Reflect.apply(stdout, process.stdout, [text, ...args]);
@@ -107,7 +109,7 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
         assert.deepEqual(actual, afterReport, "rejected add preserves the concurrent report without any partial edit");
         assert.equal(receipt, undefined);
       } else {
-        assert.equal(receipt.savedNodeId, node.nodeId);
+        assert.equal(receipt.operation, "comment-add");
         const ids = actual.draft.comments.map(reviewCommentId);
         assert.equal(ids.length, 1);
         assert.deepEqual(receipt.savedCommentIds, ids);
@@ -119,7 +121,8 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
           assert.equal(state.reasonCommentId, ids[0]);
           assert.deepEqual(state.ruleResults, []);
         }
-        assert.equal(receipt.node.nodeId, open.nodeId);
+        assert.equal(receipt.commentId, ids[0]);
+        assert.equal(receipt.progress.processed, 1);
         assert.equal(actual.draft.comments[0].body, body.body);
       }
     });

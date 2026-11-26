@@ -12,3 +12,4 @@ asserts:
   - 使用返回的 ID、revision、position 及 nextCursor 原值继续操作。列表在筛选后分页，直到响应没有 nextCursor；详情和正文通过相应读取命令、part 或输出文件取得。
   - memory read、固定 ChangeSet 材料、帮助、版本及原始内容导出沿各自的输出协议。调用方依据命令及场景选择协议；不得把明确请求的正文截为普通摘要。
   - 动作由当前状态决定。等待回执给出恢复入口；Human 确认动作要求获取对应明确决定。成功写入后回执失败时按返回的真实业务标识核验，避免重复写入。
+  - review wait、vote 和 retry 提供轮次、计数、操作结果与下一步。需要明细时使用同轮 details 入口按权限读取。cli show 只给登记与应用关系，工具的公开用法由 App Memory 提供。

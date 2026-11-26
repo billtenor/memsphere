@@ -8,7 +8,7 @@ import { readConfig } from "../config.js";
 import { resolve } from "node:path";
 import { compareStrings, parseListLimit, type PaginationOptions } from "../pagination.js";
 import { z } from "zod";
-import { emitCliResult, paginateCliItems } from "./output.js";
+import { publishResult, paginateCliItems } from "./output.js";
 
 const archiveListResult = z.object({
   items: z.array(z.object({
@@ -56,10 +56,10 @@ export async function archiveListCommand(kind?: string, options: PaginationOptio
     || compareStrings(a.kind, b.kind) || compareStrings(a.id, b.id)), options, {
     command: "archive list", scope: { archiveRoot: resolve(config.archiveRoot) }, filters: { kind: normalizedKind }
   }, "established");
-  emitCliResult("archive list", archiveListResult, {
+  publishResult("archive list", () => archiveListResult.parse({
     items: page.items.map(({ kind, id, archivedAt }) => ({ kind, id, archivedAt })),
     nextCursor: page.nextCursor
-  }, { format: options.output });
+  }), { format: options.output });
 }
 
 export async function archiveRunCommand(id: string): Promise<void> {
@@ -67,7 +67,7 @@ export async function archiveRunCommand(id: string): Promise<void> {
   const context = await contextArchiveRun(config, id);
   if (context) await context.service.archive(id);
   else await archiveRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id });
-  emitCliResult("archive run", archiveRunResult, { runId: id, archived: true });
+  publishResult("archive run", () => archiveRunResult.parse({ runId: id, archived: true }));
 }
 
 export async function archiveRestoreRunCommand(id: string): Promise<void> {
@@ -75,7 +75,7 @@ export async function archiveRestoreRunCommand(id: string): Promise<void> {
   const context = await contextArchiveRun(config, id);
   if (context) await context.service.archive(id, false);
   else await restoreRun({ archiveRoot: config.archiveRoot, runsRoot: config.runsRoot, id });
-  emitCliResult("archive restore run", archiveRunResult, { runId: id, archived: false });
+  publishResult("archive restore run", () => archiveRunResult.parse({ runId: id, archived: false }));
 }
 
 function normalizeArchiveKind(kind: string | undefined): ArchiveKind | undefined {

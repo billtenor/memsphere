@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { cliCommand, emitCliResult, previewText } from "../commands/output.js";
+import { cliCommand, publishResult, previewText } from "../commands/output.js";
 import { authoredArtifact, reviewerCandidate } from "../commands/flow-output.js";
 import { destination, fixedCandidate, fixedConfirmation, fixedConfirmationList, fixedMaterial,
   fixedReviewContract, fixedRunSummary, publicConfirmation } from "../commands/reviewer-output.js";
@@ -126,16 +126,16 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     const allowedSteps = [context.review.stepId, ...submission.contextArtifacts.map(a => a.stepId)];
     if (o.step && !allowedSteps.includes(o.step)) throw denied(o.step);
     if (operation === "run-show" || operation === "step-show") {
-      emitCliResult(command, fixedRunSummary, { id: context.run.id, name: context.run.name,
+      publishResult(command, () => fixedRunSummary.parse({ id: context.run.id, name: context.run.name,
         status: context.run.status, stepIds: o.step ? [o.step] : allowedSteps
-      }, { ...format, locale: context.run.language });
+      }), { ...format, locale: context.run.language });
       return true;
     }
     if (operation === "external-show" || o.review || o.artifact) throw Object.assign(failure("INVALID_ARGUMENT", "Fixed targets require a graph Review"), { details: { protocol: "flow" } });
     if (operation === "artifact-contract") {
       if (o.step && o.step !== context.review.stepId) throw Object.assign(failure("INVALID_ARGUMENT", "Historical flow supports the pinned candidate contract only"), { details: { protocol: "flow" } });
       const contract = await (await import("./review-session.js")).agentReviewArtifactContractPayload() as z.input<typeof fixedReviewContract>;
-      emitCliResult(command, fixedReviewContract, contract, { ...format, locale: context.run.language });
+      publishResult(command, () => fixedReviewContract.parse(contract), { ...format, locale: context.run.language });
       return true;
     }
     // Legacy candidate/context payload and contracts retain the existing protocol.
@@ -145,10 +145,10 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
       const artifact = await expandReviewArtifact((await readConfig(process.env.MEMSPHERE_CONFIG_PATH)).runsRoot, item);
       const value = artifact.value;
       if (o.out) await exportReviewerBody(o.out, Buffer.from(typeof value === "string" ? value : JSON.stringify(value)));
-      if (o.out) emitCliResult(command, z.object({ out: z.string() }).strict(), { out: o.out }, format);
-      else emitCliResult(command, reviewerCandidate, { artifact: authoredArtifact(artifact)!,
+      if (o.out) publishResult(command, () => z.object({ out: z.string() }).strict().parse({ out: o.out }), format);
+      else publishResult(command, () => reviewerCandidate.parse({ artifact: authoredArtifact(artifact)!,
         revisionSummary: !o.step || o.step === context.review.stepId ? submission.revisionSummary : undefined
-      }, { ...format, locale: context.run.language });
+      }), { ...format, locale: context.run.language });
       return true;
     }
     return false;
@@ -165,7 +165,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     return matches[0]!;
   };
   if (operation === "artifact-show" && !o.artifact && !o.step && !o.out) {
-    emitCliResult(command, fixedCandidate, {
+    publishResult(command, fixedCandidate.parse({
       artifactId: candidate.id, artifact: await expanded(candidate),
       contextArtifacts: await Promise.all(artifacts.filter(a => a.id !== candidate.id).map(async a => ({
         artifactId: a.id, stepId: a.stepId, artifact: await expanded(a)
@@ -179,7 +179,7 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
         createdAt: own.exploration ? own.createdAt : steps.find(s => s.id === candidate.stepId)!.reviewRounds!.find(r => r.id === own.roundId)!.createdAt,
         previousSubmissionId: candidate.revisedFrom
       } : undefined
-    }, display);
+    }), display);
   } else if (["artifact-show", "external-show"].includes(operation)) {
     const item = operation === "artifact-show" ? selectArtifact() : externals.find(e => e.id === o.external);
     if (!item) throw denied(String(o.external));
@@ -191,15 +191,15 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     const text = /^(text\/|application\/(?:json|yaml|x-yaml|xml|javascript))/.test(body.contentType);
     const preview = text && o.out === undefined ? previewText(Buffer.from(body.bytes).toString("utf8"), 200) : undefined;
     const value = stored && o.out === undefined ? previewText(stored.valueJson, 200) : undefined;
-    emitCliResult(command, fixedMaterial, {
+    publishResult(command, () => fixedMaterial.parse({
       runId: run.id, id: item.id, contentType: body.contentType, out: o.out,
       content: preview?.text, truncated: preview?.truncated,
       source: "source" in item ? previewText(item.source, 256).text : undefined,
       viaArtifactIds: "source" in item ? artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) : undefined,
       dependencies: "dependencies" in item ? visibleDependencies(item) : undefined,
-      business: stored ? { destination: publicDestination(stored.destination), valuePreview: value?.text, valueTruncated: value?.truncated } : undefined,
+      business: stored && o.out === undefined ? { destination: publicDestination(stored.destination), valuePreview: value?.text, valueTruncated: value?.truncated } : undefined,
       nextAction: o.out === undefined && (!preview || preview.truncated) ? action : undefined
-    }, display);
+    }), display);
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;
     if (own.exploration) {
@@ -207,8 +207,8 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
       const contract = buildReviewContract({ procedureName: "", procedureRules: [], artifactName: a.name,
         step: { instruction: a.name, artifact: a.name, type: dto.type, format: dto.format && { name: dto.format.name, options: dto.format.options ?? {} } } });
       contract.artifact.schema = a.schemaContract;
-      emitCliResult(command, fixedReviewContract, contract, display);
-    } else emitCliResult(command, fixedReviewContract, await service.withGraph(async g => {
+      publishResult(command, () => fixedReviewContract.parse(contract), display);
+    } else publishResult(command, fixedReviewContract.parse(await service.withGraph(async g => {
       const action = g.action(run, step), rules = await g.rules(run, action), dto = await expanded(a);
       const contract = buildReviewContract({ procedureName: run.memoryRef!.slice("procedures/".length), procedureRules: [rules.procedure], artifactName: a.name,
         step: { instruction: action.description, artifact: a.name, type: dto.type, format: dto.format && { name: dto.format.name, options: dto.format.options ?? {} },
@@ -222,15 +222,15 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
         contract.artifact.schema = structuredClone(run.schemaContracts![action.id]);
       }
       return contract;
-    }), display);
+    })), display);
   } else if (operation === "run-show" || operation === "step-show") {
     if (o.step && !steps.some(s => s.id === o.step)) throw denied(o.step);
-    emitCliResult(command, fixedRunSummary, {
+    publishResult(command, () => fixedRunSummary.parse({
       id: run.id, name: run.name, status: run.status,
       steps: steps.filter(s => !o.step || s.id === o.step).map(s => ({
         id: s.id, actionId: s.source?.actionId, status: s.status, artifactIds: artifacts.filter(a => a.stepId === s.id).map(a => a.id)
       }))
-    }, display);
+    }), display);
   } else if (operation === "review-show" || operation === "review-list") {
     if (!o.review && !o.artifact) return false;
     if (o.artifact && !artifacts.some(a => a.id === o.artifact && a.id !== candidate.id)) throw denied(String(o.artifact));
@@ -238,8 +238,8 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     if (o.review && !records.length) throw denied(o.review);
     if (operation === "review-show") {
       if (!records.length) throw denied(String(o.review ?? o.artifact));
-      emitCliResult(command, fixedConfirmation, publicConfirmation(records[0]!), display);
-    } else emitCliResult(command, fixedConfirmationList, { items: records.map(publicConfirmation) }, display);
+      publishResult(command, () => fixedConfirmation.parse(publicConfirmation(records[0]!)), display);
+    } else publishResult(command, () => fixedConfirmationList.parse({ items: records.map(publicConfirmation) }), display);
   } else return false;
   return true;
   function visibleDependencies(a: Artifact) { return bodies ? a.dependencies.filter(ref => bodies.has(ref.id)) : a.dependencies; }

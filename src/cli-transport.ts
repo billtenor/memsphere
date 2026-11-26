@@ -1,6 +1,5 @@
 /** Await each write before requesting another chunk from a streaming encoder. */
-export function writeCliChunk(chunk: string | Uint8Array): Promise<void> {
-  const stdout = process.stdout;
+export function writeCliChunk(chunk: string | Uint8Array, stdout: NodeJS.WriteStream = process.stdout): Promise<void> {
   return new Promise((resolve, reject) => {
     // Node calls the write callback and emits the stream failure. Account for
     // both notifications while this write owns the output.

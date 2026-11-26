@@ -1,3 +1,7 @@
+import { withActionScope } from "../prompts/contracts/actions.js";
+import { acceptsPublicError } from "../prompts/contracts/errors.js";
+import { publicReceipt, commandCases, type OutputScope, cliProtocol } from "../prompts/contracts/dispatch.js";
+import { writeCliChunk } from "../cli-transport.js";
 import { paginateItems, type CursorScope, type PaginationOptions } from "../pagination.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile } from "node:fs/promises";
@@ -16,7 +20,49 @@ export function addCliOutput(command: Command): Command {
   return command.addOption(new Option("--output <format>", "output format").choices(["text", "json"]).default("text"));
 }
 
-const invocation = new AsyncLocalStorage<{ format: CliFormat; locale: PromptLocale }>();
+/** Register the leaf from its contract and reject placement under a different command group. */
+export function commandFromContract(parent: Command, contract: { readonly route: string }): Command {
+  const path = contract.route.split(" ");
+  const leaf = path.pop();
+  const groups: string[] = [];
+  for (let command: Command | null = parent; command?.parent; command = command.parent) groups.unshift(command.name());
+  if (!leaf || groups.join(" ") !== path.join(" ")) throw new Error(`Invalid CLI contract placement: ${contract.route}`);
+  return parent.command(leaf);
+}
+
+type Invocation = { format: CliFormat; locale: PromptLocale; scope?: OutputScope; program?: Command; reviewerProtocol?: "graph" | "flow"; pending: Promise<void>[] };
+const invocation = new AsyncLocalStorage<Invocation>();
+
+export function setReviewerOutputProtocol(protocol: "graph" | "flow") {
+  const state = invocation.getStore();
+  if (state) state.reviewerProtocol = protocol;
+}
+
+export function bindCliOutputs(program: Command): void {
+  program.hook("preAction", (_root, leaf) => {
+    const state = invocation.getStore();
+    if (!state) return;
+    const names: string[] = [];
+    for (let part: Command | null = leaf; part?.parent; part = part.parent) names.unshift(part.name());
+    const continuation = program.name() === "continue";
+    if (continuation) names.unshift("continue");
+    const route = names.join(" ");
+    const reviewer = Boolean(process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID);
+    const role = continuation ? reviewer ? "reviewerContinue" : "runnerContinue" : reviewer ? "reviewer" : "native";
+    // Intermediate Continue groups with no leaf operation render scoped help.
+    if (route !== "continue" && !commandCases(role, route) && !leaf.commands.length && !(role === "native" && cliProtocol(route))) {
+      throw new CliOutputError(undefined, new Error("Unregistered CLI route " + route));
+    }
+    state.program = program;
+    state.scope = { route, role, options: { ...leaf.opts() }, args: leaf.processedArgs.slice() };
+  });
+}
+
+export async function flushCliOutput(): Promise<void> {
+  const state = invocation.getStore();
+  if (state) await Promise.all(state.pending.splice(0));
+}
+
 
 export async function withCliOutput<T>(format: CliFormat, run: () => Promise<T>): Promise<T> {
   let locale = defaultPromptLocale;
@@ -27,7 +73,7 @@ export async function withCliOutput<T>(format: CliFormat, run: () => Promise<T>)
     // Startup and help can run before Home exists. Configuration errors keep
     // their own CLI diagnostic and never affect the ability to print a reply.
   }
-  return invocation.run({ format, locale }, run);
+  return invocation.run({ format, locale, reviewerProtocol: invocation.getStore()?.reviewerProtocol, pending: [] }, run);
 }
 
 export function cliFormat(fallback: CliFormat = "text"): CliFormat {
@@ -57,12 +103,12 @@ function escapeDisplayControls(value: string): string {
     char => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 
-function inline(value: unknown): string {
+export function inline(value: unknown): string {
   if (typeof value === "string") {
     // A title or preview is data in a single display position. JSON quoting
     // makes line breaks, escapes and terminal controls visible as characters.
     const escaped = escapeDisplayControls(value);
-    return escaped !== value || /[\s\x00-\x1f`#<>]/u.test(value)
+    return value === "" || escaped !== value || /[\s\x00-\x1f`#<>]/u.test(value)
       ? escapeDisplayControls(JSON.stringify(value))
       : value;
   }
@@ -116,7 +162,7 @@ type ResultOptions = {
   contentStream?: boolean;
   itemsField?: string;
   maximumBytes?: number;
-  saved?: { id: string; inspect: CliCommand };
+  saved?: { id: string; inspect?: CliCommand };
 };
 
 export class CliOutputError extends Error {
@@ -129,13 +175,48 @@ export class CliOutputError extends Error {
   }
 }
 
-export function emitCliResult<Schema extends z.ZodTypeAny>(
-  command: string,
-  schema: Schema,
-  value: z.input<Schema>,
-  options: ResultOptions = {}
-): void {
-  process.stdout.write(renderCliResult(command, schema, value, options));
+export function publishResult(command: string, value: unknown, options: ResultOptions = {}): void {
+  const state = invocation.getStore();
+  const output = renderCommandResult(command, value, options);
+  if (!state) { process.stdout.write(output); return; }
+  const pending = writeCliChunk(output).catch(error => { throw new CliOutputError(options.saved, error); });
+  // Commander actions can be synchronous. Attach a rejection listener now,
+  // and propagate the error from the dispatch completion boundary.
+  void pending.catch(() => {});
+  state.pending.push(pending);
+}
+
+export function validateCommandResult(command: string, value: unknown, saved?: ResultOptions["saved"]) {
+  const state = invocation.getStore();
+  const scope = state?.scope;
+  try {
+    if (scope && state.program) {
+      return withActionScope({ program: state.program, reviewer: scope.role.startsWith("reviewer"),
+        protocol: state.reviewerProtocol, project: process.env.MEMSPHERE_PROJECT }, () => publicReceipt(scope, value));
+    }
+    return publicReceipt(scope ?? { route: command, role: "native", options: {}, args: [] }, value, scope !== undefined);
+  } catch (error) {
+    throw new CliOutputError(saved, error);
+  }
+}
+
+export function renderCommandResult(command: string, value: unknown, options: ResultOptions = {}): string {
+  try {
+    const selected = validateCommandResult(command, typeof value === "function" ? value() : value, options.saved);
+    const scope = invocation.getStore()?.scope;
+    const route = scope?.route ?? command;
+    const fullContent = options.contentField || command === "run artifact contract show"
+      || command === "run artifact show" && ("artifact" in selected || "contextArtifacts" in selected)
+      || command === "run review show" && (scope?.options.all || "node" in selected || "nodes" in selected)
+      || command === "run schema show" || command === "run step show";
+    const paged = /(?:^| )list$/.test(route) || "nextCursor" in selected;
+    const maximumBytes = options.maximumBytes ?? (fullContent ? undefined : paged
+      ? scope?.options.limit === undefined ? 32768 : 131072 : 8192);
+    return renderCliResult(route, z.record(z.unknown()), selected, { ...options, maximumBytes });
+  } catch (error) {
+    if (error instanceof CliOutputError) throw error;
+    throw new CliOutputError(options.saved, error);
+  }
 }
 
 export function renderCliResult<Schema extends z.ZodTypeAny>(
@@ -204,6 +285,10 @@ export type PublicCliError = {
 };
 
 export function renderCliError(result: PublicCliError, format: CliFormat, locale: PromptLocale): string {
+  if (!acceptsPublicError(result) && result.nextAction) result = { code: result.code, details: result.details };
+  if (!acceptsPublicError(result) || Buffer.byteLength(JSON.stringify(result)) > 8000) {
+    result = { code: acceptsPublicError({ code: result.code }) ? result.code : "INTERNAL_ERROR" };
+  }
   if (format === "json") return `${JSON.stringify({ error: result })}\n`;
   const facts = Object.entries(result.details ?? {})
     .filter(([, value]) => value !== undefined)
@@ -220,10 +305,11 @@ export function renderCliError(result: PublicCliError, format: CliFormat, locale
   }
 }
 
-export function emitCliError(error: CliOutputError | PublicCliError): void {
+export async function emitCliError(error: CliOutputError | PublicCliError): Promise<void> {
   const result = error instanceof CliOutputError
     ? { code: error.code, details: error.saved ? { savedId: error.saved.id } : undefined, nextAction: error.saved?.inspect }
     : error;
-  process.stderr.write(renderCliError(result, cliFormat(), cliLocale()));
   process.exitCode = 1;
+  try { await writeCliChunk(renderCliError(result, cliFormat(), cliLocale()), process.stderr); }
+  catch { /* Both channels may have closed. The exit status still records failure. */ }
 }

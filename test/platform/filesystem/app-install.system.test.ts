@@ -7,7 +7,7 @@ import test from "node:test";
 import { ownHttpTestServer, waitForHttpState } from "../../helpers/http-test-state.js";
 import type { AddressInfo } from "node:net";
 import { createViewServer } from "../../../src/commands/view.js";
-import { projectCreateCommand } from "../../../src/commands/project.js";
+import { projectBindCommand, projectUnbindCommand, projectCreateCommand } from "../../../src/commands/project.js";
 import { resolveProjectContext } from "../../../src/project/resolver.js";
 import { readConfig } from "../../../src/config.js";
 
@@ -478,3 +478,58 @@ test("missing disconnect log fails finitely and cleans barriers, handlers and fi
   assert.equal(process.cwd(),previous.cwd);assert.equal(process.env.MEMSPHERE_HOME,previous.home);
   await assert.rejects(stat(directory),{code:"ENOENT"});
 });
+
+test("installed expense-project follows only the current workspace binding and the current private executable", async () => fixture(async (root, first) => {
+  const source = join(root, "expense");
+  await cp(expenseExample, source, { recursive: true });
+  const launcher = join(source, "cli/expense-project.cjs"), tool = join(source, "cli/expense.cjs");
+  const override = join(root, "private-executable.cjs");
+  await writeFile(override, `if (process.env.BOUND_FLAG !== "private-env-value" || process.cwd() !== ${JSON.stringify(root)}) process.exit(3); require(${JSON.stringify(tool)});`);
+  async function install(name: string) {
+    if (name !== "test") await projectCreateCommand(name);
+    const context = name === "test" ? first : await resolveProjectContext({ project: name });
+    const ledger = join(root, "private-ledger-" + name);
+    await installApp(context, source, { ledgerDirectory: ledger });
+    const binding = join(root, "binding-" + name + ".json");
+    await writeFile(binding, JSON.stringify({ schemaVersion: 1, executable: process.execPath,
+      args: [override, "--ledger", ledger], cwd: root, env: { BOUND_FLAG: "private-env-value" } }));
+    await bindCli(context, "org.memsphere.expense-cli", binding, "org.memsphere.expense");
+    await projectBindCommand(name);
+  }
+  const env = { ...process.env };
+  delete env.MEMSPHERE_PROJECT;
+  function call(...args: string[]) {
+    const output = execFileSync(process.execPath, [launcher, ...args], { env, encoding: "utf8", stdio: "pipe" });
+    assert.doesNotMatch(output, /private-ledger|private-executable|private-env-value/);
+    return JSON.parse(output);
+  }
+  await install("test");
+  const record = call("create", "--description", "Lunch", "--amount", "12");
+  assert.equal(call("list").records[0].id, record.id);
+  assert.equal(call("submit", "--id", record.id, "--revision", record.revision).value.status, "submitted");
+  assert.throws(() => call("submit", "--id", record.id, "--revision", record.revision), /Expense request failed/);
+  await projectUnbindCommand();
+  await install("second");
+  assert.deepEqual(call("list").records, []);
+  assert.throws(() => call("submit", "--id", record.id, "--revision", record.revision), /Expense request failed/);
+  assert.throws(() => call("list", "--ledger", "other"), /Expense request failed/);
+  assert.throws(() => call("list", "--project", "test"), /Expense request failed/);
+  await projectUnbindCommand();
+  await projectBindCommand("test");
+  assert.equal(call("list").records[0].id, record.id);
+  await setAppEnabled(first, "org.memsphere.expense", true);
+  const models = await createProjectModelHost({}, { root: first.primary.paths.root });
+  const ledger = await models.manager.getStore({}, "apps/org.memsphere.expense/ledger");
+  assert.equal(ledger.kind, "ValueStore");
+  if (ledger.kind !== "ValueStore") throw new Error("Expected expense ledger");
+  for (let index = 0; index < 100; index++) {
+    await ledger.create({}, "page-" + index, { description: "Page fixture", amount: 1, status: "draft" });
+  }
+  const page = call("list");
+  assert.equal(page.records.length, 100);
+  assert.equal(typeof page.nextCursor, "string");
+  const final = call("list", "--cursor", page.nextCursor);
+  assert.equal(final.nextCursor, undefined);
+  assert.equal(new Set([...page.records, ...final.records].map(item => item.id)).size, 101);
+
+}));

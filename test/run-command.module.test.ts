@@ -1,3 +1,4 @@
+import { printRunOutput, printRunBindingOutput, printSchemaWritingOverview } from "./helpers/historical-run-prompts.js";
 import assert from "node:assert/strict";
 
 
@@ -6,7 +7,7 @@ import { join } from "node:path";
 
 import test from "node:test";
 
-import { buildRunArtifactContractDetail, buildRunArtifactDetail, buildRunOverview, buildRunStepDetail, buildSchemaWritingDetail, printRunOutput, printRunBindingOutput, printSchemaWritingOverview } from "../src/commands/run.js";
+import { buildRunArtifactContractDetail, buildRunArtifactDetail, buildRunOverview, buildRunStepDetail, buildSchemaWritingDetail } from "../src/commands/run.js";
 
 import type { ArtifactReview, ArtifactReviewRound } from "../src/artifact-review.js";
 

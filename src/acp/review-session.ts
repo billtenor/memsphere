@@ -227,7 +227,7 @@ export async function boundReviewNodeContext() {
 }
 export async function boundReviewNodeView(options: { nodeId?: string; all?: boolean; list?: boolean } = {}) {
   const context = await boundReviewNodeContext();
-  return { ...reviewNodeView(context.assignment, context.assignment.submitted?.comments ?? context.assignment.draft.comments, { ...options, status: context.assignment.status }), vote: context.assignment.submitted?.vote, summary: context.assignment.submitted?.summary };
+  return { status: context.assignment.status, ...reviewNodeView(context.assignment, context.assignment.submitted?.comments ?? context.assignment.draft.comments, { ...options, status: context.assignment.status }), vote: context.assignment.submitted?.vote, summary: context.assignment.submitted?.summary };
 }
 export async function mutateBoundReviewNode(mutation: Omit<Extract<NodeMutation, { operation: "report" }>, "expectedNodeId"> | Exclude<NodeMutation, { operation: "report" }>) {
   const binding = await boundAgentReviewSession(true);
@@ -241,8 +241,10 @@ export async function mutateBoundReviewNode(mutation: Omit<Extract<NodeMutation,
   const commentIds = (state: ReviewNodeState) => [...state.ruleResults.flatMap(r => r.commentIds), ...(state.reasonCommentId ? [state.reasonCommentId] : []), ...(state.commentIds ?? [])];
   const targetNodeId = fixed.operation === "report" ? fixed.expectedNodeId : fixed.operation === "update" ? fixed.nodeId : fixed.operation === "comment-add" ? fixed.nodeId : context.assignment.nodeStates?.find(s => commentIds(s).includes(fixed.commentId))?.nodeId;
   const saved = await mutateArtifactReviewNodes({ ...binding, mutation: fixed });
-  const state = saved.assignment.nodeStates?.find(s => s.nodeId === targetNodeId);
-  return { operation: mutation.operation, savedNodeId: targetNodeId, savedCommentIds: state ? commentIds(state) : [], ...("commentId" in fixed ? { commentId: fixed.commentId } : {}), ...reviewNodeView(saved.assignment, saved.assignment.draft.comments, { status: saved.assignment.status }) };
+  const { savedCommentIds } = saved;
+  return { operation: mutation.operation, savedNodeId: targetNodeId, savedCommentIds,
+    commentId: "commentId" in fixed ? fixed.commentId : fixed.operation === "comment-add" ? savedCommentIds[0] : undefined,
+    status: saved.assignment.status, ...reviewNodeView(saved.assignment, saved.assignment.draft.comments, { status: saved.assignment.status }) };
 }
 export async function submitBoundReviewNodes(artifact: unknown) {
   const input = nodeSubmitSchema.parse(artifact);

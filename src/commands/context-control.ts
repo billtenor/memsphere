@@ -13,7 +13,7 @@ import { failure, type ContextControl } from "../context_control/service.js";
 import { textContent, type Body, type ReportInput } from "../context_control/types.js";
 import { downstream, scopedSnapshot } from "../context_control/graph.js";
 import { emitReviewNodeList, emitReviewNodeResult } from "./review-node-output.js";
-import { CliOutputError, cliCommand, emitCliResult, paginateCliItems, previewText } from "./output.js";
+import { CliOutputError, cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
 import { runOverviewSchema, runPageSchema, runProgressSchema } from "./run-result.js";
 import { graphCommand } from "./procedure-graph.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
@@ -146,9 +146,9 @@ export async function tryContextCommand(operation: string, options: object): Pro
     if (review && !review.permissions.runner.permissions.includes("artifact.read")) throw failure("PERMISSION_DENIED", "Runner requires artifact.read");
     const context = await createCommandState(config.project!.name, runId, undefined, o.review, expected);
     if (!context) throw failure("AGENT_SESSION_REQUIRED", "Enable Agent identity to bind this Run");
-    emitCliResult("run enter", runReference, { runId, reviewId: o.review,
+    publishResult("run enter", () => runReference.parse({ runId, reviewId: o.review,
       nextAction: cliCommand(o.review ? ["continue", "review", "show"] : ["continue", "--help"])
-    }, display);
+    }), display);
     return true;
   }
   if (schemaOperations.has(operation)) {
@@ -178,10 +178,10 @@ export async function tryContextCommand(operation: string, options: object): Pro
     try { await releaseCommandTarget(previous, config.project!.name, runId, { step: step.id }); }
     catch { warnings.push(`Artifact saved. Use run enter --run ${runId} to restore the Run context.`); }
     const inspect = invoke("step", "show", "--step", step.id);
-    emitCliResult("run report", explorationReceipt, {
+    publishResult("run report", () => explorationReceipt.parse({
       runId, stepId: step.id, artifactId: artifact.id, artifactStatus: artifact.status, stepStatus: step.status,
       warningCount: warnings.length, nextAction: warnings.length ? invoke("enter") : inspect
-    }, { ...display, saved: { id: artifact.id, inspect } });
+    }), { ...display, saved: { id: artifact.id, inspect } });
     return true;
   } else if (operation === "report") {
     let window: CommandStateRow | undefined;
@@ -209,11 +209,11 @@ export async function tryContextCommand(operation: string, options: object): Pro
     }
     if (r.candidates.length) warnings.push("Some previous/read materials are not declared dependencies; review candidates if relevant");
     const inspect = invoke("step", "show", "--step", r.step.id);
-    emitCliResult("run report", explorationReceipt, {
+    publishResult("run report", () => explorationReceipt.parse({
       runId, artifactId: r.artifact.id, stepId: r.step.id, artifactStatus: r.artifact.status, stepStatus: r.step.status,
       tags: r.artifact.tags, candidates: r.candidates.slice(0, 20), candidateCount: r.candidates.length,
       warningCount: warnings.length, nextAction: inspect
-    }, { ...display, saved: { id: r.artifact.id, inspect } });
+    }), { ...display, saved: { id: r.artifact.id, inspect } });
     return true;
   } else if (operation === "status" || operation === "show") {
     if (operation === "status") {
@@ -221,12 +221,12 @@ export async function tryContextCommand(operation: string, options: object): Pro
       const open = snapshot.steps.find(step => step.status === "running" || step.status === "awaiting_review");
       const binding = (await currentCommandState().catch(() => undefined))?.value;
       const available = binding?.status === "active" && binding.groupId === runId && binding.parameters.project === project;
-      emitCliResult("run status", runProgressSchema, {
+      publishResult("run status", () => runProgressSchema.parse({
         runId, name: previewText(run.name, 160).text, status: snapshot.run.status,
         completedSteps: snapshot.steps.filter(step => step.status === "done").length,
         stepId: open?.id, stepStatus: open?.status, details: cliCommand(["--project", project, "run", "show", "--run", runId]),
         ...(snapshot.run.status === "running" && available ? { nextAction: cliCommand(["continue", "--help"]) } : {})
-      }, { format: o.output, locale: run.language, maximumBytes: 8192 });
+      }), { format: o.output, locale: run.language, maximumBytes: 8192 });
       return true;
     }
     const inspected = await s.inspect(runId);
@@ -238,12 +238,12 @@ export async function tryContextCommand(operation: string, options: object): Pro
     const page = paginateCliItems(steps, { limit: o.limit, cursor: o.cursor }, {
       command: "run.show", scope: { project, runId, root: o.root }
     }, "summary");
-    emitCliResult("run show", runOverviewSchema, {
+    publishResult("run show", () => runOverviewSchema.parse({
       run: { id: runId, name: previewText(run.name, 160).text, status: run.status },
       steps: page.items, stepCount: steps.length,
       outputArtifactIds: snapshot.outputArtifactIds.slice(0, 20), outputArtifactCount: snapshot.outputArtifactIds.length,
       nextCursor: page.nextCursor
-    }, { format: o.output, locale: run.language, itemsField: "steps", maximumBytes: o.limit === undefined ? 32768 : 131072 });
+    }), { format: o.output, locale: run.language, itemsField: "steps", maximumBytes: o.limit === undefined ? 32768 : 131072 });
     return true;
   } else if (operation === "artifact-show" || operation === "external-show") {
     const ref = operation === "artifact-show" ? { kind: "artifact" as const, id: requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact") } : { kind: "external" as const, id: requireOption(o.external, "--external") };
@@ -253,24 +253,24 @@ export async function tryContextCommand(operation: string, options: object): Pro
     const preview = text ? previewText(Buffer.from(body.bytes).toString("utf8"), 200) : undefined;
     if (o.out !== undefined) await writeFile(requireOption(o.out, "--out"), body.bytes, { flag: "wx" });
     await accountRead(project, runId, `${ref.kind}:${ref.id}`).catch(() => undefined);
-    emitCliResult(`run ${ref.kind} show`, previewResult, {
+    publishResult(`run ${ref.kind} show`, () => previewResult.parse({
       runId, id: ref.id, contentType: body.contentType, out: o.out,
       content: o.out === undefined ? preview?.text : undefined, truncated: o.out === undefined ? preview?.truncated : undefined,
       nextAction: o.out === undefined && (!preview || preview.truncated)
         ? invoke(ref.kind, "show", "--" + ref.kind, ref.id, "--out", "<file>") : undefined
-    }, display);
+    }), display);
     return true;
   } else if (operation === "artifact-create") {
     throw failure("INVALID_ARGUMENT", "Prepare the content and report it directly; artifact create is not supported");
   } else if (operation === "artifact-tag") {
     const artifact = await s.tag(runId, requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"), o.tag ?? []);
-    emitCliResult("run artifact tag", explorationReceipt, { runId, artifactId: artifact.id, tags: artifact.tags }, display);
+    publishResult("run artifact tag", () => explorationReceipt.parse({ runId, artifactId: artifact.id, tags: artifact.tags }), display);
     return true;
   } else if (operation === "artifact-impact") {
     const id = requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact");
     const ids = downstream(await s.snapshot(runId), id);
     const page = paginateCliItems(ids, o, { command: "run artifact impact", scope: { project, runId }, filters: { id } }, "summary");
-    emitCliResult("run artifact impact", artifactImpact, { runId, artifactIds: page.items, nextCursor: page.nextCursor }, display);
+    publishResult("run artifact impact", () => artifactImpact.parse({ runId, artifactIds: page.items, nextCursor: page.nextCursor }), display);
     return true;
   }
   else if (operation === "external-add") {
@@ -279,35 +279,35 @@ export async function tryContextCommand(operation: string, options: object): Pro
       const { captureMemoryChange } = await import("./memory-change-show.js");
       const captured = await captureMemoryChange(o.change, o.checkpoint);
       const external = await s.addExternal(runId, `memsphere:changeset:${o.change}@${o.checkpoint}`, { content: textContent(JSON.stringify(captured), "application/json") });
-      emitCliResult("run external add", explorationReceipt, {
+      publishResult("run external add", () => explorationReceipt.parse({
         runId, externalId: external.id, source: external.source, checkpointDigest: o.checkpoint
-      }, display);
+      }), display);
       return true;
     }
     if (o.file && (o.source !== undefined || o.content !== undefined || o.contentType !== undefined)) throw failure("INVALID_ARGUMENT", "Use file or source/content");
     const input = o.file ? strictObject(JSON.parse(await readFile(o.file, "utf8")), ["source", "content", "contentRef"]) : { source: o.source, content: textContent(requireOption(o.content, "--content"), o.contentType) };
     const external = await s.addExternal(runId, requireOption(input.source as string, "--source"), input as Body);
-    emitCliResult("run external add", explorationReceipt, {
+    publishResult("run external add", () => explorationReceipt.parse({
       runId, externalId: external.id, source: previewText(external.source, 256).text
-    }, display);
+    }), display);
     return true;
   } else if (operation === "review-create") {
     if (o.commentFile && o.comment?.length) throw failure("INVALID_ARGUMENT", "Use --comment or --comment-file");
     const comments = o.commentFile ? [await readFile(o.commentFile, "utf8")] : o.comment ?? [];
     if (o.reviewer !== "human" && o.reviewer !== "agent") throw failure("INVALID_ARGUMENT", "Light feedback requires --reviewer human or agent");
     const review = await s.review(runId, requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"), o.reviewer, comments);
-    emitCliResult("run review create", lightReviewDetail, { runId, ...publicLightReview(review) }, display);
+    publishResult("run review create", () => lightReviewDetail.parse({ runId, ...publicLightReview(review) }), display);
     return true;
   } else if (operation === "outputs-list" || operation === "outputs-update") {
     if (operation === "outputs-update") await s.updateOutputs(runId, o.add ?? [], o.remove ?? []);
     const snapshot = await s.snapshot(runId);
     const page = paginateCliItems(snapshot.outputArtifactIds, o, { command: "run outputs list", scope: { project, runId } }, "summary");
-    emitCliResult(operation.replace("outputs-", "run outputs "), artifactItems, {
+    publishResult(operation.replace("outputs-", "run outputs "), () => artifactItems.parse({
       runId, nextCursor: page.nextCursor, items: page.items.map(id => {
         const artifact = snapshot.artifacts.find(a => a.id === id)!;
         return { id, name: previewText(artifact.name, 160).text, status: artifact.status };
       })
-    }, display);
+    }), display);
     return true;
   } else if (operation === "review-start") {
     const expected = { row: o.sessionRow ?? await currentCommandState() };
@@ -343,9 +343,13 @@ export async function tryContextCommand(operation: string, options: object): Pro
         return true;
       }
       else {
-        const reviews = (await s.inspect(runId)).reviews.filter(r => !r.exploration && r.artifactId === artifact).map(publicLightReview);
+        const reviews = (await s.inspect(runId)).reviews.filter(r => !r.exploration && r.artifactId === artifact).map(review => ({
+          reviewId: review.id, artifactId: review.artifactId, status: review.status, source: review.reviewer.source,
+          commentCount: review.comments.length,
+          details: cliCommand(["--project", project, "run", "review", "show", "--run", runId, "--review", review.id])
+        }));
         const page = paginateCliItems(reviews, o, { command: "run review list", scope: { project, runId }, filters: { artifact } }, "summary");
-        emitCliResult("run review list", lightReviewPage, { runId, items: page.items, nextCursor: page.nextCursor }, display);
+        publishResult("run review list", () => lightReviewPage.parse({ runId, items: page.items, nextCursor: page.nextCursor }), display);
         return true;
       }
     } else {
@@ -362,7 +366,7 @@ export async function tryContextCommand(operation: string, options: object): Pro
         if (o.node || o.all) throw failure("INVALID_ARGUMENT", "Node selection requires a progressive Review");
         const light = (await s.inspect(runId)).reviews.find(r => !r.exploration && r.id === review);
         if (!light) throw failure("NOT_FOUND", "Review not found");
-        emitCliResult("run review show", lightReviewDetail, { runId, ...publicLightReview(light) }, display);
+        publishResult("run review show", () => lightReviewDetail.parse({ runId, ...publicLightReview(light) }), display);
         return true;
       }
     }
@@ -374,17 +378,17 @@ export async function tryContextCommand(operation: string, options: object): Pro
     }
     const finished = await s.finish(runId, Array.isArray(o.artifact) ? o.artifact : o.artifact ? [o.artifact] : undefined);
     const warnings = await closeRunCommandStates(project, runId, config.homeRoot);
-    emitCliResult("run finish", runProgressSchema, {
+    publishResult("run finish", () => runProgressSchema.parse({
       runId, name: previewText(finished.name, 160).text, status: finished.status, warningCount: warnings.length
-    }, display);
+    }), display);
     return true;
   } else if (operation === "abandon") {
     if (o.reason !== undefined && o.reasonFile) throw failure("INVALID_ARGUMENT", "Use reason or reason-file");
     const abandoned = await s.abandon(runId, o.reasonFile ? await readFile(o.reasonFile, "utf8") : o.reason);
     const warnings = await closeRunCommandStates(project, runId, config.homeRoot);
-    emitCliResult("run abandon", runProgressSchema, {
+    publishResult("run abandon", () => runProgressSchema.parse({
       runId, name: previewText(abandoned.name, 160).text, status: abandoned.status, warningCount: warnings.length
-    }, display);
+    }), display);
     return true;
   } else throw failure("INVALID_ARGUMENT", `Unknown context control operation: ${operation}`);
   return true;
@@ -402,10 +406,10 @@ export async function startExploration(options: object) {
   const inspect = cliCommand(["--project", config.project!.name, "run", "show", "--run", run.id]);
   try {
     const context = await createCommandState(config.project!.name, run.id);
-    emitCliResult("run start", runProgressSchema, {
+    publishResult("run start", () => runProgressSchema.parse({
       runId: run.id, name: previewText(run.name, 160).text, status: run.status,
       nextAction: context ? cliCommand(["continue", "--help"]) : inspect
-    }, { format: o.output, locale: run.language, saved: { id: run.id, inspect } });
+    }), { format: o.output, locale: run.language, saved: { id: run.id, inspect } });
   } catch (error) {
     if (error instanceof CliOutputError) throw error;
     throw new CliOutputError({ id: run.id, inspect }, error);
@@ -474,7 +478,7 @@ export async function contextRunList(options: object): Promise<boolean> {
   const page = paginateCliItems(runs.map(run => ({
     runId: run.id, name: previewText(run.name ?? run.id, 110).text, status: run.status
   })), { limit: o.limit, cursor: o.cursor }, { command: "run.status", scope: { project: config.project?.name ?? null } }, "summary");
-  emitCliResult("run status", runPageSchema, { runs: page.items, nextCursor: page.nextCursor },
+  publishResult("run status", () => runPageSchema.parse({ runs: page.items, nextCursor: page.nextCursor }),
     { format: o.output, locale: config.language, itemsField: "runs", maximumBytes: o.limit === undefined ? 32768 : 131072 });
   return true;
 }

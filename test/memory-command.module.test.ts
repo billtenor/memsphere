@@ -94,12 +94,12 @@ test("memory list exposes the same public summary in JSON, YAML and text", async
 test("memory read defaults to tagged YAML and supports JSON", async () => {
   const yaml = fixture();
   await memoryReadCommand("记忆", { kind: "concepts" }, yaml.dependencies);
-  assert.deepEqual(parseMemoryYaml(yaml.stdout()), yaml.entity);
+  assert.deepEqual(parseMemoryYaml(yaml.stdout()), { ...yaml.entity, syntax: "start" });
   assert.deepEqual(yaml.catalog.readCalls, [{ reference: "记忆", query: { kind: "concepts" } }]);
 
   const json = fixture();
   await memoryReadCommand("concepts/Memory", { output: "json" }, json.dependencies);
-  assert.deepEqual(JSON.parse(json.stdout()), json.entity);
+  assert.deepEqual(JSON.parse(json.stdout()), { ...json.entity, syntax: "start" });
 });
 
 test("memory read --effective preserves references and section groups without exposing rule ids", async () => {
@@ -144,7 +144,7 @@ test("memory read --effective preserves references and section groups without ex
 
   await memoryReadCommand("schemas/record", { effective: true, output: "json" }, dependencies);
   const result = JSON.parse(stdout);
-  assert.deepEqual(result.declared, consumer);
+  assert.deepEqual(result.declared, { ...consumer, syntax: "start" });
   assert.deepEqual(result.effective.effectiveRules.asserts[0], "Local rule.");
   assert.equal(result.effective.effectiveRules.asserts[1].reference, "statements/shared-rules");
   assert.equal(result.effective.effectiveRules.asserts[1].sections[0].name, "Security");

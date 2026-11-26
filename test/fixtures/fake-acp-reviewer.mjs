@@ -143,12 +143,14 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.node) {
       if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
-      view = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
+      const saved = JSON.parse(await invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]));
       const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
       if (crashMarker) {
         try { await writeFile(crashMarker, "node saved\n", { flag: "wx" }); process.exit(7); }
         catch (error) { if (error.code !== "EEXIST") throw error; }
       }
+      if (saved.progress.phase !== "reviewing") break;
+      view = JSON.parse(await invokeReviewCli([...saved.nextAction.args, "--output", "json"]));
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;
@@ -180,7 +182,7 @@ async function invoke(command, args) {
       errors.push(chunk); errorBytes += chunk.length;
       if (errorBytes > limit) { child.kill(); reject(new Error('fake reviewer CLI stderr exceeded maxBuffer')); }
     });
-    child.once('close', code => code === 0 ? resolve() : reject(new Error(`fake reviewer CLI failed: ${Buffer.concat(errors).toString() || Buffer.concat(output).toString()}`)));
+    child.once('close', code => code === 0 ? resolve() : reject(new Error(`fake reviewer CLI ${args.slice(0, args.findIndex(arg => arg.startsWith("-"))).join(" ")} failed: ${Buffer.concat(errors).toString() || Buffer.concat(output).toString()}`)));
   });
   return Buffer.concat(output).toString().trim();
 }

@@ -3,7 +3,7 @@ import { flattenEffectiveRules, type EffectiveRuleTree } from "../memory/rules.j
 import type { RunStep } from "../run/store.js";
 import { nextAction } from "../prompts/cli-output.js";
 import type { PromptLocale } from "../prompts/locale.js";
-import { cliCommand, emitCliResult, previewText, type CliFormat } from "./output.js";
+import { cliCommand, publishResult, previewText, type CliFormat } from "./output.js";
 
 const exportResult = z.object({
   runId: z.string(), stepId: z.string(), artifactId: z.string(), exported: z.string(), nextAction
@@ -35,7 +35,7 @@ export function emitSchemaExport(data: Omit<z.input<typeof exportResult>, "nextA
   const action = options.phase === "awaiting_finalization"
     ? cliCommand([...scope, "report", ...target, "--artifact-file", data.exported])
     : options.phase === "writing" ? inspect : undefined;
-  emitCliResult("run artifact export", exportResult, { ...data, nextAction: action }, {
+  publishResult("run artifact export", () => exportResult.parse({ ...data, nextAction: action }), {
     ...options, saved: { id: data.artifactId, inspect }
   });
 }
@@ -81,7 +81,7 @@ export function emitSchemaWriting(command: string, data: {
     collect("field_assert", source.assertTree, source.asserts);
     collect("field_suggest", source.suggestTree, source.suggests);
   }
-  emitCliResult(command, schemaResult, {
+  publishResult(command, () => schemaResult.parse({
     runId: data.runId, stepId: data.stepId, phase: data.phase,
     artifactId: data.artifactId ?? data.draft?.id, effective: data.effective,
     position: data.position,
@@ -91,9 +91,9 @@ export function emitSchemaWriting(command: string, data: {
       instruction: previewText(current.instruction, 256).text, type: current.type, format: current.format?.name,
       optional: current.optional, min: current.repeat?.min, max: current.repeat?.max
     },
-    validation: validation && { status: validation.status, issueCount: validation.issues?.length ?? 0 },
+    validation: data.phase !== "writing" && validation ? { status: validation.status, issueCount: validation.issues?.length ?? 0 } : undefined,
     rules: rules.length ? rules.slice(0, 8).map(({ scope, text }) => ({ scope, text: previewText(text, 160).text })) : undefined,
     ruleCount: rules.length || undefined,
     nextAction: action
-  }, { format: options.format, locale: options.locale, maximumBytes: 8192, saved: { id: data.stepId, inspect } });
+  }), { format: options.format, locale: options.locale, maximumBytes: 8192, saved: { id: data.stepId, inspect } });
 }

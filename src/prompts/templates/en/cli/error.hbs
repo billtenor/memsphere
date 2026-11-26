@@ -1,13 +1,31 @@
 Error {{code}}
-{{#ifEq code "CONTROL_PLANE_REQUIRED"}}Configure the Project review control plane or skip the Review Slots that do not require Actors.{{/ifEq}}
-{{#ifEq code "ARTIFACT_VALIDATION_FAILED"}}Check the Artifact and field constraints against the validation results.{{/ifEq}}
-{{#ifEq code "INVALID_ARGUMENT"}}Check the command syntax and arguments.{{/ifEq}}
-{{#ifEq code "INVALID_INPUT"}}Check the input format.{{/ifEq}}
-{{#ifEq code "INVALID_CURSOR"}}Use a cursor returned by this command with the same filters.{{/ifEq}}
-{{#ifEq code "INTERNAL_ERROR"}}The command could not complete.{{/ifEq}}
-{{#ifEq code "SESSION_CONTEXT_CONFLICT"}}Explicitly enter the intended Run or Step before continuing.{{/ifEq}}
-{{#ifEq code "EMBEDDED_CHANGE_AMBIGUOUS"}}Specify the ChangeSet using --change.{{/ifEq}}
-{{#ifEq code "OUTPUT_RENDER_FAILED"}}The command result could not be rendered.{{/ifEq}}
+{{#ifEq code "CONTROL_PLANE_REQUIRED"}}
+Configure the Project review control plane or skip the Review Slots that do not require Actors.
+{{/ifEq}}
+{{#ifEq code "ARTIFACT_VALIDATION_FAILED"}}
+Check the Artifact and field constraints against the validation results.
+{{/ifEq}}
+{{#ifEq code "INVALID_ARGUMENT"}}
+Check the command syntax and arguments.
+{{/ifEq}}
+{{#ifEq code "INVALID_INPUT"}}
+Check the input format.
+{{/ifEq}}
+{{#ifEq code "INVALID_CURSOR"}}
+Use a cursor returned by this command with the same filters.
+{{/ifEq}}
+{{#ifEq code "INTERNAL_ERROR"}}
+The command could not complete.
+{{/ifEq}}
+{{#ifEq code "SESSION_CONTEXT_CONFLICT"}}
+Explicitly enter the intended Run or Step before continuing.
+{{/ifEq}}
+{{#ifEq code "EMBEDDED_CHANGE_AMBIGUOUS"}}
+Specify the ChangeSet using --change.
+{{/ifEq}}
+{{#ifEq code "OUTPUT_RENDER_FAILED"}}
+The command result could not be rendered.
+{{/ifEq}}
 {{#ifEq code "HUMAN_CONFIRMATION_REQUIRED"}}
 Ask the Human to confirm the current outputs before finishing the Run.
 {{/ifEq}}

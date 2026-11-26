@@ -1,3 +1,4 @@
+import { bindCliOutputs, setReviewerOutputProtocol } from "./output.js";
 import { artifactReviewRoundControlPlane } from "../artifact-review.js";
 import { reviewReceipt } from "./review-output.js";
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
@@ -10,7 +11,7 @@ import { emitReviewNodeResult } from "./review-node-output.js";
 import { contextOnlyCommand, type Options } from "./context-control.js";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
-import { ExplorationReviews, explorationReviewIdentity, mutateModelReviewNode } from "../context_control/exploration-review.js";
+import { ExplorationReviews, explorationReviewIdentity, isModelReviewHandle, mutateModelReviewNode } from "../context_control/exploration-review.js";
 import { explorationReviewView, readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { failure } from "../context_control/errors.js";
 import { currentCommandState, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
@@ -31,6 +32,7 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
   const input = reading || operation === "comment-delete" ? undefined : JSON.parse(options.artifact ?? await readFile(options.artifactFile!, "utf8"));
   if (!binding) { await explorationReviewNodes(operation, options, input); return; }
   const context = await boundReviewNodeContext();
+  setReviewerOutputProtocol(isModelReviewHandle(context.review.id) ? "graph" : "flow");
   if (!context.assignment.nodeTree) throw failure("REVIEW_PROTOCOL_UNSUPPORTED", "This Assignment uses the historical Review protocol");
   let result: unknown;
   if (reading) result = await boundReviewNodeView({ nodeId: options.node, all: options.all, list: operation === "list" });
@@ -56,6 +58,7 @@ async function explorationReviewNodes(operation: string, options: ReviewNodeOpti
   const repository = new ExplorationReviews(service);
   const { run, round, row, actor } = await repository.locate(target.runId, target.recordId);
   if (actor !== "runner") throw failure("PERMISSION_DENIED", "Only the assigned Project reviewer can write to this Review");
+  let saved: { operation?: string; savedNodeId?: string; savedCommentIds?: string[]; commentId?: string } = {};
   if (operation === "submit") {
     const submission = nodeSubmitSchema.parse(input);
     await repository.submit(run.id, row.value.id, round.id, actor, submission.vote, submission.summary);
@@ -73,7 +76,16 @@ async function explorationReviewNodes(operation: string, options: ReviewNodeOpti
     await repository.materials(run.id, row.value);
     const allowed = new Set(row.value.exploration!.materials.map(ref => `${ref.kind}:${ref.id}`));
     await repository.mutate(run.id, row.value.id, round.id, actor, async value => {
-      mutateModelReviewNode(value, mutation, allowed, service.runtime.now, () => `comment-${randomUUID()}`);
+      const created: string[] = [];
+      const nodeId = mutation.operation === "report" ? mutation.expectedNodeId
+        : mutation.operation === "update" ? mutation.nodeId : undefined;
+      mutateModelReviewNode(value, mutation, allowed, service.runtime.now, () => {
+        const id = `comment-${randomUUID()}`;
+        created.push(id);
+        return id;
+      });
+      saved = { operation, savedNodeId: nodeId, savedCommentIds: mutation.operation === "comment-update" ? [mutation.commentId] : created,
+        commentId: "commentId" in mutation ? mutation.commentId : operation === "comment-add" ? created[0] : undefined };
     });
   }
   let warning: string | undefined;
@@ -83,7 +95,7 @@ async function explorationReviewNodes(operation: string, options: ReviewNodeOpti
   }
   const current = (await repository.locate(run.id, row.value.id)).row.value;
   const result = await explorationReviewView(repository, run.id, current);
-  emitReviewNodeResult(operation, result, { format: options.output, locale: run.language, project: config.project?.name });
+  emitReviewNodeResult(operation, { ...result, ...saved }, { format: options.output, locale: run.language, project: config.project?.name });
 }
 // Commander can consume shared flags on a parent command. Prefer explicitly
 // supplied options over child defaults, so native and Continue agree.
@@ -150,6 +162,7 @@ export function createReviewerContinueRouter(nativeRun: Command): Command {
     }
     route.action(o => reviewNodeCommand(path.join("-"), o));
   }
+  bindCliOutputs(router);
   return router;
 }
 

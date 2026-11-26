@@ -47,6 +47,7 @@ temp/
 
 # OS and editor files
 examples/apps/expense/cli/expense.cjs
+examples/apps/expense/cli/expense-project.cjs
 .DS_Store
 Thumbs.db
 .idea/

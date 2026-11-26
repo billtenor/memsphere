@@ -1,3 +1,5 @@
+import { validateCommandResult } from "./output.js";
+import { writeCliChunk } from "../cli-transport.js";
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -16,7 +18,7 @@ export async function memoryChangeShowCommand(changeId: string, options: {
       return memoryChangePart({ change, files }, options);
     }
   });
-  process.stdout.write(JSON.stringify(payload, null, 2) + "\n");
+  await writeCliChunk(JSON.stringify(validateCommandResult("memory change show", payload), null, 2) + "\n");
 }
 
 type Detail = Parameters<Parameters<typeof withMemoryChangeDetailSnapshot>[0]["use"]>[0];

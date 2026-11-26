@@ -410,9 +410,16 @@ export async function mutateArtifactReviewNodes(input: AttemptInput & { mutation
     ...submission.contextArtifacts.flatMap(a => a.artifactId ? [`artifact:${a.artifactId}`] : []),
     ...(submission.contextExternals ?? []).map(e => `external:${e.externalId}`)
   ]);
-  return mutateAttempt(input, (review, _attempt, now) => {
-    mutateModelReviewNode(review, input.mutation, materialIds, now, () => `comment-${randomUUID()}`);
+  let savedCommentIds: string[] = [];
+  const saved = await mutateAttempt(input, (review, _attempt, now) => {
+    savedCommentIds = input.mutation.operation === "comment-update" ? [input.mutation.commentId] : [];
+    mutateModelReviewNode(review, input.mutation, materialIds, now, () => {
+      const id = `comment-${randomUUID()}`;
+      savedCommentIds.push(id);
+      return id;
+    });
   });
+  return { ...saved, savedCommentIds };
 }
 
 export async function explorationReviewView(repository: ExplorationReviews, runId: string, review: Review, selection: { all?: boolean; nodeId?: string } = {}) {

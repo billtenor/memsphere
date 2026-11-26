@@ -209,6 +209,30 @@ test("CLI opaque Payload export writes exact bytes and keeps raw stdout free of 
   assert.equal(await fs.readFile(target, "utf8"), "retained");
 });
 
+test("closing stdout after a write returns a read-only receipt on stderr", { timeout: 30_000 }, async t => {
+  const fixture = await businessFixture(t);
+  await fixture.createStore();
+  const child = spawn(process.execPath, [cliPath, "--project", "test-project", "data", "create", "saved-once",
+    "--store", "records", "--value", '{"name":"saved","count":0}', "--output", "json"], {
+    cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["ignore", "pipe", "pipe"]
+  });
+  ownTestProcess(child, t.signal, fixture.beforeCleanup);
+  child.stdout.destroy();
+  const stderr: Buffer[] = [];
+  child.stderr.on("data", chunk => stderr.push(chunk));
+  const [code, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  assert.equal(code, 1);
+  const { error } = JSON.parse(Buffer.concat(stderr).toString());
+  assert.equal(error.code, "OUTPUT_RENDER_FAILED");
+  assert.deepEqual(error.details, { savedId: "saved-once" });
+  assert.deepEqual(error.nextAction.args.slice(0, 4), ["--project", "test-project", "data", "read"]);
+  const actual = success(await cli(t, fixture, error.nextAction.args.slice(2)));
+  assert.equal(actual.id, "saved-once");
+  assert.equal(actual.revision, "1");
+  assert.equal(Object.hasOwn(actual, "value"), false);
+});
+
 test("a raw export exits cleanly when the consumer closes after the first bytes", { timeout: 30_000 }, async t => {
   const fixture = await businessFixture(t);
   await fixture.createStore("files", "record.json", "data");

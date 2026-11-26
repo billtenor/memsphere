@@ -7,7 +7,7 @@ import { resolveProjectContext } from "../project/resolver.js";
 import { reviewCommentId, reviewNodeProgress } from "../review-nodes.js";
 import { daemonControl, daemonStatus, ensureDaemon, writeViewIntent } from "../daemon/service.js";
 import { detectRunnerAgents } from "../runner/identity.js";
-import { emitCliResult } from "./output.js";
+import { publishResult } from "./output.js";
 import { daemonStatusSchema, publicDaemonStatus } from "../daemon/public-status.js";
 import { withContextControlViewRead } from "../project/context-control-access.js";
 import { readRun } from "../run/store.js";
@@ -204,12 +204,13 @@ export async function viewStartCommand(): Promise<void> {
   await ensureDaemon();
   const result = await daemonControl("view-start");
   if (result.view.error) throw Object.assign(new Error("View could not start."), { code: "VIEW_UNAVAILABLE" });
-  emitCliResult("view start", daemonStatusSchema, publicDaemonStatus(result));
+  publishResult("view start", () => daemonStatusSchema.parse(publicDaemonStatus(result)));
 }
 export async function viewStopCommand(): Promise<void> {
   await writeViewIntent("stopped");
   await daemonControl("view-stop");
-  emitCliResult("view stop", daemonStatusSchema, publicDaemonStatus(await daemonStatus()));
+  const status = await daemonStatus();
+  publishResult("view stop", () => daemonStatusSchema.parse(publicDaemonStatus(status)));
 }
 export async function viewRestartCommand(): Promise<void> {
   const config = await readViewStartupConfig();
@@ -217,10 +218,11 @@ export async function viewRestartCommand(): Promise<void> {
   await ensureDaemon();
   const result = await daemonControl("view-restart");
   if (result.view.error) throw Object.assign(new Error("View could not restart."), { code: "VIEW_UNAVAILABLE" });
-  emitCliResult("view restart", daemonStatusSchema, publicDaemonStatus(result));
+  publishResult("view restart", () => daemonStatusSchema.parse(publicDaemonStatus(result)));
 }
 export async function viewStatusCommand(): Promise<void> {
-  emitCliResult("view status", daemonStatusSchema, publicDaemonStatus(await daemonStatus()));
+  const status = await daemonStatus();
+  publishResult("view status", () => daemonStatusSchema.parse(publicDaemonStatus(status)));
 }
 
 export async function viewServeCommand(options: ViewServeOptions): Promise<void> {

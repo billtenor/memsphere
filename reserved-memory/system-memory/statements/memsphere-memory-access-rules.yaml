@@ -7,6 +7,7 @@ names:
 defines:
   - 规定 Agent 如何通过 memsphere CLI 发现和读取当前 Workspace 可见 Project 中的 Memory。
 asserts:
+  - 普通列表只读取公开摘要。读取正文需指定 Memory、节点、冻结 Run 或 checkpoint 范围，输出沿用本次授权。
   - memory list 默认输出面向 Agent 的文本。可用 --output json 或显式 --output yaml 获取同一分页摘要；通过 memory read 获取完整 Memory。
   - 普通 Embedded ChangeSet 表示一轮尚未合入的 Memory 修改，首次 validate 自动建立，不要求额外 create、finish 或 commit 状态操作；commit、amend、rebase 或合并 master 后仍可沿用同一 ID。每次以本地 master 与 HEAD 的唯一 merge-base 比较最终工作树，包含已提交和未跟踪的净修改，不隐式 fetch。
   - 显式续编统一使用 memsphere memory change validate --change <id>，旧位置参数不再接受。自动识别优先参考 PR、分支及未建分支时的 worktree；绑定保存在各 ChangeSet 自身，只查询未归档 active 记录，不按 HEAD 或基线 SHA 判断身份。同一 worktree 切换无关分支不得自动沿用旧需求。临时 worktree 关联还须核实来源目录及创建身份；Git 管理目录回收后重新创建的工作区不得静默接续旧记录，身份依据不足时要求 --change 显式选择。

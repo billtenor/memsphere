@@ -1,3 +1,4 @@
+import { bindCliOutputs } from "./commands/output.js";
 import { registerReviewNodeCommands, reviewNodeCommand } from "./commands/review-nodes.js";
 import { withConfigReadScope } from "./config-read-scope.js";
 import { installReviewerCommands, inReviewerSession } from "./acp/reviewer-commands.js";
@@ -10,7 +11,7 @@ import { Command, Option } from "commander";
 import { z } from "zod";
 import { registerAppCommands } from "./commands/app.js";
 import { parseCli } from "./commands/cli-errors.js";
-import { addCliOutput, cliHelpNote, emitCliResult } from "./commands/output.js";
+import { addCliOutput, cliHelpNote, publishResult } from "./commands/output.js";
 import { registerModelCommands } from "./commands/model.js";
 import { registerDataCommands } from "./commands/data.js";
 import { memoryChangeShowCommand } from "./commands/memory-change-show.js";
@@ -127,7 +128,7 @@ addCliOutput(program.command("debug-thread-id"))
   .description("Check whether this process was started in a Codex session.")
   .action(() => {
     const identified = Boolean(process.env.CODEX_THREAD_ID?.trim());
-    emitCliResult("debug-thread-id", z.object({ identified: z.boolean() }).strict(), { identified });
+    publishResult("debug-thread-id", () => z.object({ identified: z.boolean() }).strict().parse({ identified }));
     if (!identified) process.exitCode = 1;
   });
 
@@ -730,5 +731,6 @@ addCliOutput(restore
   .action(archiveRestoreRunCommand);
 
 installReviewerCommands(program);
+bindCliOutputs(program);
 return program;
 }

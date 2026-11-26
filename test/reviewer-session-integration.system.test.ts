@@ -379,7 +379,7 @@ test("scoped Reviewer reads bound Artifact previews and exports its original bod
   assert.equal(projected.valueTruncated, true);
   const exported = await cli([...artifact, "--out", "stored.md", "--output", "json"]);
   assert.equal(exported.status, 0, exported.stderr);
-  assert.deepEqual(JSON.parse(exported.stdout).business, { destination: projected.destination });
+  assert.equal(JSON.parse(exported.stdout).business, undefined);
   assert.equal(await readFile(join(attempt, "stored.md"), "utf8"), body);
   const full = await cli(["run", "artifact", "show", "--output", "json"]);
   assert.equal(full.status, 0, full.stderr);

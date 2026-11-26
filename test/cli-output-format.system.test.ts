@@ -43,7 +43,8 @@ async function representations(fixture: Fixture, args: string[], input?: string)
   const [json, text, implicit] = results;
   const value = JSON.parse(json.stdout);
   assert.equal(json.stdout, `${JSON.stringify(value)}\n`, "JSON remains one compact value followed by a newline");
-  assert.match(text.stdout, /\nproject[:：] ?test-project\n/);
+  if (args[0] === "data" && args[1] === "read") assert.match(text.stdout, /\n(?:项目|Project)[:：] ?test-project\n/);
+  else assert.match(text.stdout, /\nproject[:：] ?test-project\n/);
   assert.throws(() => JSON.parse(text.stdout), SyntaxError, "text must no longer be pretty-printed JSON");
   for (const field of ["modelRef", "id", "storeId", "nextCursor"]) {
     if (value[field] !== undefined) assert.ok(text.stdout.includes(value[field]), field);
@@ -88,6 +89,10 @@ test("actual model/data/Store reads use Agent text by default and preserve speci
   const query = cli(f, ["data", "read", "a", "--store", "records", "--path", "$.nested.nil"], "json");
   assert.equal(query.status, 0, query.stderr);
   assert.deepEqual(JSON.parse(query.stdout).value, [null]);
+  const metadata = await representations(f, ["data", "read", "a", "--store", "records", "--metadata-only"]);
+  assert.equal(Object.hasOwn(metadata, "value"), false);
+  const metadataText = cli(f, ["data", "read", "a", "--store", "records", "--metadata-only"]);
+  assert.doesNotMatch(metadataText.stdout, /正文|Content[:：]|nested/);
   const store = await representations(f, ["data", "store", "read", "records"]);
   assert.equal(store.storeId, "records");
   assert.equal(store.model, "record.json");
@@ -158,4 +163,20 @@ test("model/data/Store failures keep stdout empty and wire the shared JSON or re
       assert.throws(() => JSON.parse(readable.stderr), SyntaxError);
     }
   }
+});
+
+test("reading a null record preserves null in both formats and excludes it in metadata scope", async t => {
+  const f = await businessFixture(t, { "nullable.json": { type: "null" } });
+  await f.createStore("nullable", "nullable.json");
+  await writeData({}, f.root, "nullable", "n-7", "create", { kind: "value", value: null });
+  const args = ["data", "read", "n-7", "--store", "nullable"];
+  const json = cli(f, args, "json"), text = cli(f, args), metadata = cli(f, [...args, "--metadata-only"], "json");
+  for (const result of [json, text, metadata]) {
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+  }
+  assert.equal(JSON.parse(json.stdout).value, null);
+  assert.match(text.stdout, /(?:正文：|Content:)\nnull\n$/);
+  const { value, ...expectedMetadata } = JSON.parse(json.stdout);
+  assert.deepEqual(JSON.parse(metadata.stdout), expectedMetadata);
 });

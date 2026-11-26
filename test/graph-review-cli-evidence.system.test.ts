@@ -99,3 +99,24 @@ test('production CLI rejects an unrelated supplemental Artifact and accepts a ca
  const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/PERMISSION_DENIED|INVALID_ARGUMENT/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
  await f.produce('C','valid',['--depends-on',`artifact:${r.artifactId}`]);const reader=await f.claim(step);reader.read('artifact',r.artifactId,'ancestor.txt');reader.read('artifact',u.artifactId,'unrelated.txt',false);
 });
+
+test("Runner follows a completed review receipt to its authorized round details", async t => {
+  const f = await fixture(t, [action("deliver", "START", true)]);
+  const candidate = await f.produce("deliver", "candidate");
+  const reviewer = await f.claim(candidate.stepId);
+  await reviewer.decide("approve");
+  const wait = ["run", "review", "wait", "--review", reviewer.input.reviewId];
+  const receipt = JSON.parse(f.runner([...wait, "--output", "json"]).stdout);
+  assert.equal(receipt.roundId, reviewer.input.roundId);
+  assert.equal(receipt.assignmentCount, 1);
+  assert.equal(receipt.commentCount, 0);
+  for (const key of ["assignments", "comments", "taskId", "vote"]) assert.ok(!Object.hasOwn(receipt, key), key);
+  const text = f.runner(wait).stdout;
+  assert.ok(text.includes(receipt.roundId));
+  assert.doesNotMatch(text, /assignments[:：]|comments[:：]|Reader/);
+  assert.deepEqual(receipt.details.args.slice(0, 2), ["--project", "test-project"]);
+  const detail = JSON.parse(f.runner([...receipt.details.args.slice(2), "--output", "json"]).stdout);
+  assert.equal(detail.roundId, receipt.roundId);
+  assert.equal(detail.assignments[0].actorId, "reader");
+  assert.equal(detail.assignments[0].vote, "approve");
+});

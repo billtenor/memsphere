@@ -1,3 +1,4 @@
+import { dataReadPrompt, dataReadContentPrompt } from "./data-read.js";
 import { z } from "zod";
 import type { PromptInputMap, PromptTemplateId } from "./models.js";
 import { cliContinueSchema, cliErrorPromptSchema, cliHelpSchema, cliNotificationSchema, cliResultPromptSchema } from "./cli-output.js";
@@ -313,6 +314,8 @@ const schemaOverviewSchema = z.object({
 const reviewNodePromptSchema = z.object({ data: z.string(), open: z.boolean(), hasNode: z.boolean(), rolePrompts: z.array(z.string()), materials: z.string(), permissions: z.array(permissionSchema) }).strict();
 
 const definitions = {
+  "cli.data.read.metadata": { path: "cli/data-read-metadata.hbs", schema: dataReadPrompt, audience: "shared", purpose: "receipt" },
+  "cli.data.read.content": { path: "cli/data-read-content.hbs", schema: dataReadContentPrompt, audience: "shared", purpose: "receipt" },
   "cli.result": { path: "cli/result.hbs", schema: cliResultPromptSchema, audience: "shared", purpose: "receipt" },
   "cli.continue": { path: "cli/continue.hbs", schema: cliContinueSchema, audience: "shared", purpose: "remediation" },
   "cli.notification": { path: "cli/notification.hbs", schema: cliNotificationSchema, audience: "shared", purpose: "remediation" },

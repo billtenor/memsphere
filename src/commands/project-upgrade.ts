@@ -10,7 +10,7 @@ import { upgradeProjectModelRegistrations, withModelRegistrationMaintenance } fr
 import { readSystemMemoryUpgradeTargets, prepareEmbeddedSystemMemoryRepair, applyEmbeddedSystemMemoryRepair } from "./project.js";
 import { errorCode } from "./cli-errors.js";
 import { z } from "zod";
-import { cliCommand, emitCliResult } from "./output.js";
+import { cliCommand, publishResult } from "./output.js";
 import { nextAction } from "../prompts/cli-output.js";
 
 const require = createRequire(import.meta.url);
@@ -140,5 +140,5 @@ export async function projectUpgradeCommand(name?: string, options: { output?: "
     if (previous === undefined) delete process.env.MEMSPHERE_PROJECT;
     else process.env.MEMSPHERE_PROJECT = previous;
   }
-  emitCliResult("project upgrade", upgradeResult, result, { format: options.output });
+  publishResult("project upgrade", () => upgradeResult.parse(result), { format: options.output });
 }

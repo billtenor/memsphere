@@ -2,7 +2,7 @@ import { z } from "zod";
 import { reviewRuleSchema, reviewSourceSchema } from "../review-nodes.js";
 import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
 import type { PromptLocale } from "../prompts/locale.js";
-import { cliCommand, emitCliResult, paginateCliItems, type CliFormat } from "./output.js";
+import { cliCommand, publishResult, paginateCliItems, type CliFormat } from "./output.js";
 import type { PaginationOptions } from "../pagination.js";
 
 const str = z.string();
@@ -81,11 +81,30 @@ export function emitReviewNodeResult(operation: string, raw: unknown, options: R
     result.nextAction = { kind: "wait", resume: cliCommand([
       ...(options.project ? ["--project", options.project] : []), "run", "review", "wait", "--review", result.reviewId!
     ]) };
-  } else if (result.progress?.phase === "reviewing") result.nextAction = action(["report", "--artifact-file", "<node-result>"]);
+  } else if (result.progress?.phase === "reviewing") result.nextAction = operation === "show" ? action(["report", "--artifact-file", "<node-result>"]) : action(["show"]);
   else if (result.progress?.phase === "final_review") result.nextAction = action(["submit", "--artifact-file", "<vote>"]);
   const command = operation.replace("comment-", "comment ");
   const changed = ["start", "report", "update", "comment-add", "comment-update", "comment-delete", "submit"].includes(operation);
-  emitCliResult(`run review ${command}`, nodeResult, result, { ...options, itemsField: "nodes",
+  const identity = options.reviewer ? {} : {
+    runId: result.runId, stepId: result.stepId, reviewId: result.reviewId, roundId: result.roundId, artifactId: result.artifactId
+  };
+  const base = { ...identity, status: result.status, progress: result.progress };
+  const nextAction = result.progress?.phase === "submitted" || result.status === "submitted" || result.status === "cancelled"
+    ? undefined : result.nextAction;
+  let receipt: ReviewView;
+  switch (operation) {
+    case "start": receipt = { ...base, warnings: result.warnings, nextAction }; break;
+    case "report": case "update":
+      receipt = { ...base, operation, savedNodeId: result.savedNodeId, savedCommentIds: result.savedCommentIds, nextAction }; break;
+    case "comment-add": case "comment-update": case "comment-delete":
+      receipt = { ...base, operation, commentId: result.commentId, savedCommentIds: result.savedCommentIds, nextAction }; break;
+    case "submit": receipt = { ...base, operation, vote: result.vote, summary: result.summary }; break;
+    case "list": receipt = { ...base, tree: result.tree, vote: result.vote, summary: result.summary, nextAction }; break;
+    case "show": receipt = { ...base, node: result.node, nodes: result.nodes, comments: result.comments,
+      vote: result.vote, summary: result.summary, nextAction: result.comments ? undefined : nextAction }; break;
+    default: throw new Error("Unknown review node operation");
+  }
+  publishResult(`run review ${command}`, () => nodeResult.parse(receipt), { ...options, itemsField: "nodes",
     saved: changed && result.reviewId ? { id: result.reviewId, inspect: action(["show"]) } : undefined
   });
 }
@@ -95,5 +114,5 @@ export function emitReviewNodeList(runId: string, artifactId: string, items: z.i
   const page = paginateCliItems(items, options, {
     command: "run review list", scope: { project: options.project, runId }, filters: { artifact: artifactId, progressive: true }
   }, "summary");
-  emitCliResult("run review list", nodePage, { runId, items: page.items, nextCursor: page.nextCursor }, options);
+  publishResult("run review list", () => nodePage.parse({ runId, items: page.items, nextCursor: page.nextCursor }), options);
 }

@@ -1,3 +1,7 @@
+import { writeCliChunk } from "../cli-transport.js";
+import { publicReceipt } from "../prompts/contracts/dispatch.js";
+import { cliContinueSchema } from "../prompts/cli-output.js";
+import { bindCliOutputs } from "./output.js";
 import { createReviewerContinueRouter, reviewNodeCommand, type ReviewNodeOptions } from "./review-nodes.js";
 import { Command, Option } from "commander";
 import { currentCommandState } from "../home/command-state-store.js";
@@ -47,6 +51,7 @@ const operations: Array<[string[], string, string[]]> = [
 export function registerContinueCommand(program: Command, nativeRun: Command) {
   const continuation = program.command("continue [command...]").description("Continue production in an existing free exploration Run or graph Step; use native run commands to read it.").helpOption(false).allowUnknownOption();
   const router = new Command("continue").helpOption(false);
+  bindCliOutputs(router);
   const reviewerRouter = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID ? createReviewerContinueRouter(nativeRun) : undefined;
   registerCliOutputRouter(continuation, reviewerRouter ?? router);
   const help = async (target: Command) => {
@@ -57,7 +62,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         ? /^review-(show|report|update|comment-|submit|wait|retry)/.test(operation)
         : !/^review-(wait|vote|resolve|submit|retry|show|report|update|comment)/.test(operation);
     }).map(([path]) => path.join(" "));
-    process.stdout.write(renderPrompt("cli.continue", cliLocale(), {
+    const receipt = publicReceipt({ role: "native", route: "continue", options: {}, args: [] }, {
       project: context.parameters.project,
       runId: context.groupId,
       stepId: context.parameters.step,
@@ -66,7 +71,8 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       available: context.available,
       commands: target === router ? commands : [],
       usage: target === router ? undefined : target.helpInformation().trimEnd()
-    }) + "\n");
+    });
+    await writeCliChunk(renderPrompt("cli.continue", cliLocale(), cliContinueSchema.parse(receipt)) + "\n");
   };
   const load = async () => {
     const row = (await currentCommandState(true))!;

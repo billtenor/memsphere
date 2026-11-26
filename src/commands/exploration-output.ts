@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { PromptLocale } from "../prompts/locale.js";
-import { nextAction } from "../prompts/cli-output.js";
-import { cliCommand, emitCliResult, previewText, type CliFormat } from "./output.js";
+import { cliCommandSchema, nextAction } from "../prompts/cli-output.js";
+import { cliCommand, publishResult, previewText, type CliFormat } from "./output.js";
 import { reviewCommentId } from "../review-nodes.js";
 import type { Review, Step } from "../context_control/types.js";
 
@@ -38,7 +38,7 @@ const lightReview = z.object({
 }).strict();
 
 export const lightReviewDetail = lightReview.extend({ runId: z.string() }).strict();
-export const lightReviewPage = z.object({ runId: z.string(), items: z.array(lightReview), nextCursor: optionalText }).strict();
+export const lightReviewPage = z.object({ runId: z.string(), items: z.array(lightReview.omit({ comments: true }).extend({ commentCount: z.number().int().nonnegative(), details: cliCommandSchema })), nextCursor: optionalText }).strict();
 
 export function publicLightReview(review: Review) {
   return {
@@ -67,7 +67,7 @@ export function emitExplorationStep(command: string, item: {
   const { runId, step, configuration } = item;
   const artifactId = step.artifact?.mode === "produce" ? step.artifact.id : undefined;
   const canReview = item.missing.length === 0 && artifactId;
-  emitCliResult(command, explorationStep, {
+  publishResult(command, () => explorationStep.parse({
     runId, stepId: step.id, stepStatus: step.status, artifactId,
     configuration: {
       reviewer: configuration.reviewer, asserts: configuration.asserts, suggests: configuration.suggests,
@@ -76,5 +76,5 @@ export function emitExplorationStep(command: string, item: {
     reviewers: item.reviewers.map(({ value, name }) => ({ value, label: previewText(name, 160).text })),
     missing: item.missing,
     nextAction: canReview ? cliCommand(["--project", options.project, "run", "review", "start", "--run", runId, "--artifact", artifactId]) : undefined
-  }, options);
+  }), options);
 }

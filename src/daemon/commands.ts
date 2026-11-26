@@ -5,7 +5,7 @@ import { listTasks, retryFailedTask } from "./tasks.js";
 import { readConfig } from "../config.js";
 import { inspectReview } from "./review.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
-import { addCliOutput, cliCommand, emitCliResult, paginateCliItems, previewText } from "../commands/output.js";
+import { addCliOutput, cliCommand, publishResult, paginateCliItems, previewText } from "../commands/output.js";
 import { daemonStatusSchema, publicDaemonStatus } from "./public-status.js";
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
@@ -25,7 +25,8 @@ const taskListSchema = z.object({
 const retrySchema = z.object({ taskId: z.string(), roundId: z.string(), status: z.string(), mayRepeatNotification: z.boolean(), nextAction }).strict();
 
 async function showDaemon(command: string) {
-  emitCliResult(command, daemonStatusSchema, publicDaemonStatus(await daemonStatus()));
+  const status = await daemonStatus();
+  publishResult(command, () => daemonStatusSchema.parse(publicDaemonStatus(status)));
 }
 
 export function registerDaemonCommands(program: Command) {
@@ -40,11 +41,11 @@ export function registerDaemonCommands(program: Command) {
     const items = (await detectRunnerAgents()).map(({ type, status, version }) => ({
       type, status, ...(version ? { version: previewText(version, 160).text } : {})
     }));
-    emitCliResult("runner detect", runnerListSchema, { items });
+    publishResult("runner detect", () => runnerListSchema.parse({ items }));
   });
   addCliOutput(runner.command("identity")).action(() => {
     const identity = detectIdentity();
-    emitCliResult("runner identity", runnerSchema, { identified: Boolean(identity), agentType: identity?.agentType });
+    publishResult("runner identity", () => runnerSchema.parse({ identified: Boolean(identity), agentType: identity?.agentType }));
   });
 }
 
@@ -66,9 +67,9 @@ export function registerWaitTaskCommands(wait: Command) {
       scope: { project: config.project!.name, reviewId: options.review, identity },
       filters: { currentRoundId: context.round.id }
     }, "summary");
-    emitCliResult("run review wait status", taskListSchema, {
+    publishResult("run review wait status", () => taskListSchema.parse({
       items: page.items, total: items.length, nextCursor: page.nextCursor
-    });
+    }));
   });
   addCliOutput(wait.command("retry").requiredOption("--round <id>")).action(async (_options, command: Command) => {
     const options = command.optsWithGlobals();
@@ -84,9 +85,9 @@ export function registerWaitTaskCommands(wait: Command) {
     const task = await retryFailedTask(row.id);
     await daemonControl("notify");
     const resume = cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", options.review]);
-    emitCliResult("run review wait retry", retrySchema, {
+    publishResult("run review wait retry", () => retrySchema.parse({
       taskId: task.id, roundId: task.input.roundId, status: task.status,
       mayRepeatNotification: true, nextAction: { kind: "wait", resume }
-    }, { saved: { id: task.id, inspect: cliCommand([...resume.args, "status"]) } });
+    }), { saved: { id: task.id, inspect: cliCommand([...resume.args, "status"]) } });
   });
 }
