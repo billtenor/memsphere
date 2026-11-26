@@ -622,15 +622,17 @@ test("Windows queue passes complete multiline messages through direct and npm No
   t.after(() => rm(directory, { recursive: true, force: true }));
   const script = join(directory, "queue.mjs"), output = join(directory, "args.json"), shim = join(directory, "codex.cmd");
   await writeFile(script, `import { writeFileSync } from 'node:fs'; if (process.argv.includes('--help')) console.log('queue --thread --message'); else writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));`);
-  const body = '请执行命令以继续：\ncommand "quoted" %percent% & | ^ !';
+  const { reviewResumeNotification } = await import("../../../src/daemon/review.js");
+  const message = reviewResumeNotification("test-project", 'review "quoted" %percent% & | ^ !');
+  const expected = '[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project \'test-project\' run review wait --review \'review "quoted" %percent% & | ^ !\'';
   for (const source of [
     `@"${process.execPath}" "${script}" %*\r\n`,
     'SET "_prog=%dp0%\\node.exe"\r\nSET "_prog=node"\r\nendLocal & "%_prog%" "%dp0%\\queue.mjs" %*\r\n'
   ]) {
     await writeFile(shim, source);
     await checkQueueCapability(shim);
-    await sendQueue(shim, "session", body, directory);
-    assert.deepEqual(JSON.parse(await readFile(output, "utf8")), ["queue", "--thread", "session", "--message", `[Memsphere 自动消息]\n${body}`]);
+    await sendQueue(shim, "session", message, directory);
+    assert.deepEqual(JSON.parse(await readFile(output, "utf8")), ["queue", "--thread", "session", "--message", expected]);
   }
   await writeFile(shim, '@echo unknown %*\r\n');
   await assert.rejects(checkQueueCapability(shim), /QUEUE_BATCH_UNSUPPORTED/);
