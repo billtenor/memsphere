@@ -33,22 +33,22 @@ run(cli, ["validate"], project);
 run(cli, ["memory", "list", "--kind", "procedures", "--output", "json"], project);
 run(cli, ["memory", "read", "Windows CI smoke", "--output", "json"], project);
 
-const started = JSON.parse(run(
+const started = run(
   cli,
-  ["run", "start", "Windows CI smoke", "--name", "Windows packaged smoke", "--output", "json"],
+  ["run", "start", "Windows CI smoke", "--name", "Windows packaged smoke"],
   project
-));
-const runId = started.runId;
-if (typeof runId !== "string") throw new Error("Windows smoke Run did not return a runId");
+);
+const runId = started.match(/\b(run-[a-z0-9-]+)\b/i)?.[1];
+if (!runId) throw new Error(`Could not read Run id from output:\n${started}`);
 run(cli, ["run", "report", "--run", runId, "--artifact", "Windows packaged CLI passed."], project);
 const completed = JSON.parse(run(cli, ["run", "show", "--run", runId, "--output", "json"], project));
-if (completed.run.status !== "done") throw new Error(`Windows smoke Run did not complete: ${completed.run.status}`);
+if (completed.status !== "done") throw new Error(`Windows smoke Run did not complete: ${completed.status}`);
 
 run(cli, ["daemon", "start"], project);
 run(cli, ["daemon", "status"], project);
-const startedView = JSON.parse(run(cli, ["view", "start", "--output", "json"], project));
-const origin = startedView.view.url;
-if (typeof origin !== "string") throw new Error("View start did not return an origin");
+const startedView = run(cli, ["view", "start"], project);
+const origin = startedView.match(/https?:\/\/[^\s]+/)?.[0];
+if (!origin) throw new Error(`View start did not return an origin:\n${startedView}`);
 run(cli, ["view", "status"], project);
 const response = await fetch(origin);
 if (!response.ok) throw new Error(`View request failed with HTTP ${response.status}`);
