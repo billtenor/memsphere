@@ -691,6 +691,33 @@ syncBuiltinESMExports();
   }
 });
 
+test("a delayed notification reads its original candidate while Continue follows the new round", async t => {
+  const f = await reviewFixture(t, "success", false, true);
+  const first = await f.reviewState();
+  await f.voteHuman("request_changes", false);
+  await f.service.withGraph(g => g.report(first.run.id, first.review.stepId, {
+    text: "second candidate", revisionSummary: "Review the revised version"
+  }));
+  const second = await f.reviewState();
+  assert.notEqual(second.round.id, first.round.id);
+  const binding = await requireCommandState("codex-origin-session", f.home);
+  const notice = ["run", "review", "wait", "--review", f.reviewId, "--notification-round", first.round.id];
+  const original = JSON.parse((await f.call(...notice, "--output", "json")).stdout);
+  assert.equal(original.roundId, first.round.id);
+  assert.equal(original.candidateId, first.round.submissionId);
+  assert.equal(original.roundStatus, "changes_requested");
+  assert.deepEqual(original.nextAction, original.details);
+  assert.deepEqual(original.details.args.slice(-3), ["--round", first.round.id, "--all"]);
+  assert.ok((await f.call(...notice)).stdout.includes(first.round.id));
+  assert.equal(JSON.parse((await f.call(...original.details.args.slice(2), "--output", "json")).stdout).roundId, first.round.id);
+  await assert.rejects(f.call("continue", "review", "wait", "--notification-round", first.round.id, "--output", "json"), /INVALID_ARGUMENT/);
+  assert.deepEqual(await f.reviewState(), second);
+  assert.deepEqual(await requireCommandState("codex-origin-session", f.home), binding);
+  const current = JSON.parse((await f.call("continue", "review", "wait", "--output", "json")).stdout);
+  assert.equal(current.roundId, second.round.id);
+  assert.equal(current.candidateId, second.round.submissionId);
+});
+
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t, "success", true, true);
   const { call, queue } = f;
@@ -703,7 +730,7 @@ test("asynchronous review wait notifies its original session without waiting for
   const sent: string[] = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(sent[0], "queue"); assert.equal(sent[2], "origin-session");
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
-  assert.equal(sent[4], notification(f.reviewId));
+  assert.equal(sent[4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
   assert.doesNotMatch(sent[4], /approve|投票|状态|Reviewer/);
   const ready = await call("continue", "review", "wait");
   assert.ok(ready.stdout.includes(f.reviewId));
@@ -726,7 +753,7 @@ test("explicit retry delivers the same continuation to the original session", { 
   await f.waitForTask("completed");
   const retriedMessage = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(retriedMessage[2], "origin-session");
-  assert.equal(retriedMessage[4], notification(f.reviewId));
+  assert.equal(retriedMessage[4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
 });
 
 test("Continue refuses missing, ambiguous, disabled and invalid session identities without creating state", { timeout: 30000 }, async t => {
@@ -832,7 +859,7 @@ test("daemon notification for a requested revision contains only the continuatio
   const sent = JSON.parse(await readFile(f.queue, "utf8"));
   const sync = await f.call("run", "review", "wait", "--review", f.reviewId);
   assert.equal(sent[2], "origin-session");
-  assert.equal(sent[4], notification(f.reviewId));
+  assert.equal(sent[4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
   assert.ok(sync.stdout.includes(f.reviewId));
 });
 
@@ -846,7 +873,7 @@ test("failed wakeup remains queryable without sending a second notification", { 
   const attempts: string[][] = (await readFile(f.queueLog, "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0][2], "origin-session");
-  assert.equal(attempts[0][4], notification(f.reviewId));
+  assert.equal(attempts[0][4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
   const ready = await f.call("run", "review", "wait", "--review", f.reviewId);
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.doesNotMatch(ready.stdout, /已登记/);

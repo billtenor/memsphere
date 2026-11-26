@@ -140,7 +140,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
       }
       if (reviewId) {
-        if (operation === "review-wait") await (await import("./run.js")).runReviewWaitCommand({ review: reviewId, ...options, sessionRow: context.row });
+        if (operation === "review-wait") await (await import("./run.js")).runReviewWaitCommand({ review: reviewId, ...options, currentRoundOnly: true, sessionRow: context.row });
         else if (operation === "review-retry") await (await import("./run.js")).runReviewRetryCommand({ ...options, review: reviewId });
         else if (["review-report", "review-update", "review-comment-add", "review-comment-update", "review-comment-delete", "review-submit"].includes(operation))
           await reviewNodeCommand(operation.slice(7), { ...(options as ReviewNodeOptions), run: context.groupId, review: reviewId, sessionRow: context.row }, context.scope);
@@ -152,7 +152,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
         if (!stepId || !context.roundId) throw failure("INVALID_ARGUMENT", "This command requires a graph Step Review");
         const commands = await import("./run.js");
         const review = graphReviewHandle(context.groupId, stepId);
-        if (operation === "review-wait") await commands.runReviewWaitCommand({ review, ...options });
+        if (operation === "review-wait") await commands.runReviewWaitCommand({ review, ...options, currentRoundOnly: true });
         else if (operation === "review-vote") await commands.runReviewVoteCommand({ ...options, review, round: context.roundId } as Parameters<typeof commands.runReviewVoteCommand>[0]);
         else if (operation === "review-retry") await commands.runReviewRetryCommand({ ...options, review });
         else if (operation === "review-resolve") await commands.runReviewResolveCommand({ ...options, review, round: context.roundId } as Parameters<typeof commands.runReviewResolveCommand>[0]);

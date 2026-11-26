@@ -88,26 +88,34 @@ for (const language of ["zh-CN", "en"]) {
         language + " " + label + " used " + length + "/" + bytes + " bytes and " + count + "/" + tokens + " tokens");
       return stdout;
     }
-    const listText = await measure("run list text", ["status"], 350, 125);
-    const list = JSON.parse(await measure("run list JSON", ["status", "--output", "json"], 700, 200));
-    assert.equal(list.runs.length, 4);
-    for (const row of list.runs) assert.ok(listText.includes(row.runId));
-    const graphArgs = ["status", "--run", graph.runId];
-    const graphText = await measure("graph text", graphArgs, 950, 300);
-    const graphStatus = JSON.parse(await measure("graph JSON", [...graphArgs, "--output", "json"], 1100, 325));
-    assert.equal(graphStatus.status, "running");
-    assert.equal(graphStatus.schemaPhase, "not_started");
-    assert.deepEqual(graphStatus.nextAction.args, ["--project", "prompt-audit", "run", "enter-schema",
-      "--run", graph.runId, "--step", graph.stepId]);
-    assert.match(graphText, /enter-schema/);
-    assert.doesNotMatch(graphText, /schema report/);
-    const exploreArgs = ["status", "--run", exploration];
-    const exploreText = await measure("exploration text", exploreArgs, 600, 210);
-    const exploreJSON = await measure("exploration JSON", [...exploreArgs, "--output", "json"], 600, 210);
-    const exploreStatus = JSON.parse(exploreJSON);
-    assert.equal(exploreStatus.runId, exploration);
-    assert.equal(exploreStatus.completedSteps, 1);
-    assert.doesNotMatch(exploreText + exploreJSON, /hello/);
-    assert.equal(JSON.parse(await run("status", "--run", flow.runId, "--output", "json")).runId, flow.runId);
+    await t.test("Run list", async () => {
+      const listText = await measure("run list text", ["status"], 350, 125);
+      const list = JSON.parse(await measure("run list JSON", ["status", "--output", "json"], 700, 200));
+      assert.equal(list.runs.length, 4);
+      for (const row of list.runs) assert.ok(listText.includes(row.runId));
+    });
+    await t.test("graph Schema status", async () => {
+      const graphArgs = ["status", "--run", graph.runId];
+      const graphText = await measure("graph text", graphArgs, 950, 300);
+      const graphStatus = JSON.parse(await measure("graph JSON", [...graphArgs, "--output", "json"], 1100, 325));
+      assert.equal(graphStatus.status, "running");
+      assert.equal(graphStatus.schemaPhase, "not_started");
+      assert.deepEqual(graphStatus.nextAction.args, ["--project", "prompt-audit", "run", "enter-schema",
+        "--run", graph.runId, "--step", graph.stepId]);
+      assert.match(graphText, /enter-schema/);
+      assert.doesNotMatch(graphText, /schema report/);
+    });
+    await t.test("exploration status", async () => {
+      const exploreArgs = ["status", "--run", exploration];
+      const exploreText = await measure("exploration text", exploreArgs, 600, 210);
+      const exploreJSON = await measure("exploration JSON", [...exploreArgs, "--output", "json"], 600, 210);
+      const exploreStatus = JSON.parse(exploreJSON);
+      assert.equal(exploreStatus.runId, exploration);
+      assert.equal(exploreStatus.completedSteps, 1);
+      assert.doesNotMatch(exploreText + exploreJSON, /hello/);
+    });
+    await t.test("historical flow status", async () => {
+      assert.equal(JSON.parse(await run("status", "--run", flow.runId, "--output", "json")).runId, flow.runId);
+    });
   });
 }

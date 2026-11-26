@@ -248,6 +248,23 @@ test("restricted Embedded Memory uses the launching worktree with a custom Home 
  const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:entrypoint});t.after(()=>runtime.cleanup());
  const read=crossSpawn.sync(runtime.launcherPath,['--project','test-project','memory','read','workspace-evidence','--output','json'],{cwd:f.cwd,env,encoding:'utf8',timeout:20000});
  assert.equal(read.status,0,read.stderr);assert.match(read.stdout,/SOURCE_WORKTREE/);assert.doesNotMatch(read.stdout,/MAIN_CANONICAL/);
+ const statements = join(worktree, memoryPath, "statements");
+ await mkdir(statements, { recursive: true });
+ await writeFile(join(statements, "source-rules.yaml"), `!statement\nsyntax: ${graphMemorySyntax}\nnames: [source-rules]\nasserts: [Keep source facts]\n`);
+ for (const options of [[], ["--effective"]]) {
+   const args = ["memory", "read", "source-rules", ...options];
+   for (const format of [[], ["--output", "json"]]) {
+     const result = crossSpawn.sync(runtime.launcherPath, [...args, ...format], {cwd:f.cwd,env,encoding:"utf8",timeout:20000});
+     assert.equal(result.status, 0, result.stderr);
+     assert.match(result.stdout, /Keep source facts/);
+     if (format.length) {
+       const value = JSON.parse(result.stdout);
+       const declared = options.length ? value.declared : value;
+       assert.deepEqual(declared.asserts, ["Keep source facts"]);
+       if (options.length) assert.ok(value.effective);
+     }
+   }
+ }
  const bad=crossSpawn.sync(runtime.launcherPath,['memory','read','workspace-evidence','--output','json'],{cwd:f.cwd,env:{...env,MEMSPHERE_REVIEW_SOURCE_WORKSPACE:main,MEMSPHERE_CONFIG_PATH:join(f.cwd,'config.json')},encoding:'utf8',timeout:20000});
  assert.notEqual(bad.status,0);assert.equal(bad.stdout,'');assert.match(bad.stderr,/REVIEW_SESSION_INVALID/);
 });
@@ -343,6 +360,22 @@ test('personal node report and comment edits survive a missing unrelated old can
 });
 
 
+test("packaged Reviewer reads an authorized Step and rejects an unrelated Step through the argument transport", async t => {
+  const f = await evidenceFixture(t);
+  const step = (id: string) => ["--windows-argv", "run", "step", "show", "--step",
+    "msarg_" + Buffer.from(JSON.stringify(id)).toString("base64url")];
+  const allowed = await f.cli([...step(f.c.step.id), "--output", "json"]);
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.deepEqual(JSON.parse(allowed.stdout).steps.map((s: {id: string}) => s.id), [f.c.step.id]);
+  const text = await f.cli(step(f.c.step.id));
+  assert.equal(text.status, 0, text.stderr);
+  assert.ok(text.stdout.includes(f.c.step.id));
+  const denied = await f.cli([...step(f.u.step.id), "--output", "json"]);
+  assert.notEqual(denied.status, 0);
+  assert.equal(denied.stdout, "");
+  assert.match(denied.stderr, /REVIEW_RESOURCE_DENIED/);
+});
+
 test('Reviewer production commands remain forbidden independently of target identity',async t=>{
  const f=await evidenceFixture(t),r=await f.cli(['run','report','--run',f.runId,'--step',f.c.step.id,'--artifact','attack','--output','json']);assert.notEqual(r.status,0);assert.equal(r.stdout,'');assert.match(r.stderr,/REVIEW_SESSION_DENIED/);
 });
@@ -429,4 +462,50 @@ test("restricted Reviewer can verify persisted nodes and comments through its ow
   assert.deepEqual(JSON.parse(commentFailure.stderr), { error: {
     code: "OUTPUT_RENDER_FAILED", details: { savedId: persisted[0].commentId }, nextAction: inspect
   } });
+});
+
+test("native and restricted Memory readers select the declared kind, node and effective rules", async t => {
+  const fixture = await evidenceFixture(t);
+  const root = join(fixture.f.root, "memory");
+  const sources = [
+    ["schemas", "labels", "!schema", "fields: [Label]"],
+    ["statements", "policy", "!statement", "asserts: [Scope matters]\nsections:\n  - !statement\n    names: [Review]\n    asserts: [Read the candidate]"],
+    ["procedures", "flow-policy", "!procedure", "flow:\n  - !action\n    action: Read the candidate\n    artifact: !artifact\n      name: Candidate\n      type: string\n      format: markdown"],
+    ["procedures", "graph-policy", "!procedure", "mode: graph\ndefines: [Review procedure]\nactions:\n  - !action\n    id: read\n    description: Read the candidate\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Candidate\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}"]
+  ];
+  for (const [kind, name, tag, body] of sources) {
+    await mkdir(join(root, kind), {recursive: true});
+    await writeFile(join(root, kind, name + ".yaml"), tag + "\nsyntax: " + graphMemorySyntax + "\nnames: [" + name + "]\n" + body + "\n");
+  }
+  await runGit(["add", "."], { cwd: root });
+  await runGit(["-c","user.name=Test","-c","user.email=test@example.com","commit","-qm","Publish Memory reader fixtures"], { cwd: root });
+  const configPath = join(fixture.f.root, "config.json");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.store.published_revision = await gitOutput(["rev-parse", "HEAD"], root);
+  await writeFile(configPath, JSON.stringify(config));
+  for (const restricted of [false, true]) {
+    const call = async (args: string[]) => {
+      const result = restricted ? await fixture.cli(args) :
+        crossSpawn.sync(process.execPath, [entrypoint, "--project", "test-project", ...args], {
+          cwd: fixture.f.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.f.home }, encoding: "utf8", timeout: 20000 });
+      assert.equal(result.status, 0, args.join(" ") + "\n" + result.stderr);
+      return result.stdout;
+    };
+    for (const [, name, tag] of sources) {
+      const args = ["memory", "read", name];
+      const json = JSON.parse(await call([...args, "--output", "json"]));
+      assert.equal(json.tag, tag);
+      assert.deepEqual(json.names, [name]);
+      assert.ok((await call(args)).includes(name));
+    }
+    const list = JSON.parse(await call(["memory", "list", "policy", "--output", "json"]));
+    assert.equal(list.items[0].node_ref, "statement:Review");
+    const node = ["memory", "read", "policy", "--node", "statement:Review"];
+    assert.ok((await call(node)).includes("Read the candidate"));
+    const fragment = JSON.parse(await call([...node, "--output", "json"]));
+    assert.deepEqual(fragment.fragment.asserts, ["Read the candidate"]);
+    const effective = JSON.parse(await call(["memory", "read", "policy", "--effective", "--output", "json"]));
+    assert.deepEqual(effective.declared.asserts, ["Scope matters"]);
+    assert.ok(JSON.stringify(effective.effective).includes("Scope matters"));
+  }
 });

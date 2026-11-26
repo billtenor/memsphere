@@ -235,5 +235,15 @@ test("App show and check find renamed entrypoints beyond the first Memory page",
   )));
   const shown = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "app", "show", "example.app", "--output", "json"], { cwd: root, encoding: "utf8" }));
   assert.equal(shown.usage.agent[0].reference, "concepts/zzz-app-intro");
+  const call = (args: string[], json = false) => execFileSync(process.execPath, [...cliArguments, "--project", "test",
+    "app", ...args, ...(json ? ["--output", "json"] : [])], { cwd: root, encoding: "utf8" });
+  const checked = JSON.parse(call(["check", "example.app"], true));
+  assert.equal(checked.id, "example.app");
+  assert.ok(checked.items.some((item: { name: string; status: string }) =>
+    item.name === "entrypoint:concepts/app-intro" && item.status === "available"));
+  assert.ok(call(["check", "example.app"]).includes("entrypoint:concepts/app-intro"));
+  assert.equal(JSON.parse(call(["disable", "example.app"], true)).enabled, false);
+  assert.ok(call(["disable", "example.app"]).includes("false"));
+  assert.equal(JSON.parse(call(["list"], true)).apps[0].enabled, false);
   assert.equal((await checkApp(context.primary, "example.app")).items.find(item => item.name === "entrypoint:concepts/app-intro")?.available, true);
 }, true));

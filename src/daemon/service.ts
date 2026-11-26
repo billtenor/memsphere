@@ -198,7 +198,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           if (claimed) await dispatchArtifactReviewAgents({ config, run: context.run, workspaceRoot: row.value.input.cwd });
           if (!reviewReady(context)) return;
           stage = "render";
-          const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId);
+          const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, { roundId: row.value.input.roundId });
           const latest = await inspectReview(config, row.value.input.reviewId);
           if (latest.round.id !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed before sending" } }); return; }
           if (!reviewReady(latest)) return;
@@ -210,7 +210,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           if (recipient.agentType === "claude") {
             deliveryId = randomUUID();
             await save({ claudeDelivery: { id: deliveryId } });
-            const callbackBody = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, `${row.id}:${deliveryId}`);
+            const callbackBody = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, { callback: `${row.id}:${deliveryId}` });
             await sendClaudeNotification({
               command: recipient.agentCommand, sessionId: recipient.sessionId, inbox: recipient.inbox,
               cwd: row.value.input.cwd, message: callbackBody, signal: stopNotifications.signal

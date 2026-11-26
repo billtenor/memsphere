@@ -415,9 +415,9 @@ test("delegated exploration Review retries in the same round after saving a node
     await untilFixture(() => ownWorkerExited(second, t.signal), "retried exploration Review worker exit");
     begin("read final receipt and verify session");
     const before = await f.service.inspect(R);
-    const note = reviewResumeNotification("test-project", reviewId);
-    assert.equal(note, `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`);
-    const resumed = await f.call("run", "review", "wait", "--review", reviewId);
+    const note = reviewResumeNotification("test-project", reviewId, { roundId: result.round.id });
+    assert.equal(note, `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}' --notification-round '${result.round.id}'`);
+    const resumed = await f.call("run", "review", "wait", "--review", reviewId, "--notification-round", result.round.id);
     assert.equal(resumed.assignments, undefined);
     const resumedDetail = await f.call(...resumed.details.args.slice(2));
     assert.equal(resumedDetail.assignments[0].vote, "approve");

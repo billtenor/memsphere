@@ -1440,11 +1440,6 @@
       "continue review wait",
       "cli-run-review-wait-2"
     ],
-    "runner-continue-review-wait-3": [
-      "runnerContinue",
-      "continue review wait",
-      "cli-run-review-wait-2"
-    ],
     "runner-continue-review-vote-1": [
       "runnerContinue",
       "continue review vote",

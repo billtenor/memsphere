@@ -22,6 +22,7 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
   format?: CliFormat;
   statusOnly?: boolean;
   fullComments?: boolean;
+  assignmentPage?: number;
 }): void {
   const { project, run, review, round, progress } = input;
   const invoke = (...args: string[]) => cliCommand([...(project ? ["--project", project] : []), "run", ...args]);
@@ -56,7 +57,8 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
   const summary = {
     runId: run.id, stepId: review.stepId, reviewId: review.id, roundId: round.id,
     candidateId: round.submissionId, scope: opinion ? "opinion" as const : "decision" as const,
-    status: opinion ? round.assignments[0]?.status ?? review.status : review.status,
+    status: opinion ? round.assignments[0]?.status ?? review.status :
+      round.id !== review.currentRoundId ? (round.status === "changes_requested" ? "awaiting_revision" : round.status) : review.status,
     roundStatus: round.status, assignmentCount: round.assignments.length,
     commentCount: round.assignments.reduce((total, item) => total + (item.submitted?.comments.length ?? 0), 0),
     details: input.fullComments ? undefined : inspect,
@@ -88,9 +90,12 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
       disposition: round.commentDispositions?.find(d => d.commentId === commentId)?.disposition
     };
   }));
-  const assignments = round.assignments.slice(0, 10);
+  const page = input.assignmentPage ?? 1;
+  const assignments = round.assignments.slice((page - 1) * 10, page * 10);
+  const nextPage = input.fullComments && inspect && page * 10 < round.assignments.length
+    ? cliCommand([...inspect.args, "--assignment-page", String(page + 1)]) : undefined;
   publishResult(command, () => reviewReceipts[command].parse({
-    ...receipt,
+    ...receipt, details: nextPage ?? receipt.details,
     assignments: assignments.map(assignment => ({
       assignmentId: artifactReviewAssignmentId(assignment), actorId: assignment.actorId,
       name: previewText(assignment.actorName, 160).text, kind: assignment.actorKind ?? "human",

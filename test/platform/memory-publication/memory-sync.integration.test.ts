@@ -126,10 +126,19 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     assert.equal(await readFile(join(memoryRoot, "concepts", "fixture.yaml"), "utf8"), original);
     assert.equal(await gitOutput(["rev-parse", "HEAD"], memoryRoot), revision);
 
+    await writeFile(join(memoryRoot, "concepts", "fixture.yaml"), original + "# recovered edit\n");
+    const recovered = JSON.parse(call(["memory", "recover", "Shared", "--create-change", "--output", "json"]));
+    assert.equal(recovered.status, "ready");
+    assert.equal(await readFile(join(memoryRoot, "concepts", "fixture.yaml"), "utf8"), original);
+    assert.match(await readFile(join(recovered.candidateRoot, "concepts", "fixture.yaml"), "utf8"), /recovered edit/);
     const local = await editMemories({ references: ["Shared"] });
     const localPath = join(local.candidateRoot, "concepts", "fixture.yaml");
     await writeFile(localPath, (await readFile(localPath, "utf8")).replace("Base", "Personal"));
-    await publishMemoryChange(local.change.id);
+    const published = JSON.parse(call(["memory", "publish", "--change", local.change.id, "--output", "json"]));
+    assert.equal(published.status, "published");
+    assert.equal(published.revision, await gitOutput(["rev-parse", "HEAD"], memoryRoot));
+    assert.deepEqual(JSON.parse(call(["memory", "push", "--output", "json"])), { status: "pushed", storeType: "managed" });
+    assert.equal(await gitOutput(["rev-parse", "refs/heads/users/test"], remote), published.revision);
     await writeFile(join(organization, "concepts", "fixture.yaml"), (await readFile(join(organization, "concepts", "fixture.yaml"), "utf8")).replace("Base", "Team"));
     await runGit(["add", "-A"], { cwd: organization });
     await runGit(["commit", "-m", "conflicting organization update"], { cwd: organization });
@@ -142,9 +151,12 @@ test("Memory sync creates merge commits and isolates conflicts in a Sync ChangeS
     const conflictPath = join(conflict.candidateRoot, "concepts", "fixture.yaml");
     assert.match(await readFile(conflictPath, "utf8"), /<<<<<<<|>>>>>>>/);
     await writeFile(conflictPath, withCurrentMemorySyntax("!concept\nnames: [shared, Shared]\ndefines: [Merged]\n"));
-    const resolved = await publishMemoryChange(conflict.changeId, "Resolve Memory sync");
-    assert(resolved.published_revision);
-    assert.equal((await runGit(["rev-list", "--parents", "-n", "1", resolved.published_revision], { cwd: memoryRoot })).stdout.split(" ").length, 3);
+    const resolved = JSON.parse(call(["memory", "sync", "publish", "--change", conflict.changeId,
+      "--message", "Resolve Memory sync", "--output", "json"]));
+    assert.equal(resolved.changeId, conflict.changeId);
+    assert.equal(resolved.status, "published");
+    assert.equal(resolved.revision, await gitOutput(["rev-parse", "HEAD"], memoryRoot));
+    assert.equal((await runGit(["rev-list", "--parents", "-n", "1", resolved.revision], { cwd: memoryRoot })).stdout.split(" ").length, 3);
     assert.equal((await runGit(["status", "--porcelain"], { cwd: memoryRoot })).stdout, "");
 
     const localDelete = await editMemories({ references: ["Rules"], operation: "delete" });

@@ -1341,8 +1341,10 @@ function assertArtifactReviewDelegationProvenance(run: RunState): RunState {
 }
 
 export async function listRuns(runsRoot: string): Promise<RunState[]> {
-  await ensureRunDirectory(runsRoot);
-  const entries = await readdir(runsRoot, { withFileTypes: true });
+  const entries = await readdir(runsRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
   const runsById = new Map<string, RunState>();
   for (const entry of entries) {
     if (entry.isDirectory()) {
@@ -1365,8 +1367,10 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 }
 
 export async function listRunSummaries(runsRoot: string): Promise<RunListSummary[]> {
-  await ensureRunDirectory(runsRoot);
-  const entries = await readdir(runsRoot, { withFileTypes: true });
+  const entries = await readdir(runsRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
   const directoryIds = new Set(entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
   const ids = [
     ...directoryIds,

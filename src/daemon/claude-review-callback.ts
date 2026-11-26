@@ -7,7 +7,7 @@ import { openContextControl } from "../project/context-control.js";
 import { captureClaudeInbox } from "../runner/claude-notifications.js";
 import { currentIdentity, detectRunnerAgent, readRunnerAgents } from "../runner/identity.js";
 import { readTask, recordClaudeDelivery, type ClaudeRecipient, type DaemonTask } from "./tasks.js";
-import { reviewReady } from "./review.js";
+import { notificationRound } from "./review.js";
 
 import { failure } from "../context_control/errors.js";
 
@@ -54,13 +54,13 @@ export async function readClaudeReviewCallback(config: MemsphereConfig, reviewId
     const snapshot = await service?.snapshot(task.input.runId);
     if (snapshot) requireEffectiveStep(snapshot.run, task.input.stepId);
     const step = snapshot?.steps.find(candidate => candidate.id === task.input.stepId);
-    if (step?.reviewRounds?.at(-1)?.id !== task.input.roundId) {
+    if (!step?.reviewRounds?.some(round => round.id === task.input.roundId)) {
       throw failure("REVIEW_CONFLICT", "Claude Code notification is for an obsolete Review round");
     }
   }
   const context = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
-  if (context.run.id !== task.input.runId || context.round.id !== task.input.roundId || !reviewReady(context)) {
+  if (context.run.id !== task.input.runId || !context.review.rounds.some(round => round.id === task.input.roundId)) {
     throw failure("REVIEW_NOT_READY", "Claude Code notification is for an obsolete or unfinished Review round");
   }
-  return { context, acknowledge: () => recordClaudeDelivery(taskId, deliveryId, "readAt") };
+  return { context: notificationRound(context, task.input.roundId), acknowledge: () => recordClaudeDelivery(taskId, deliveryId, "readAt") };
 }

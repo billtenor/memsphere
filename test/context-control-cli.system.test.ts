@@ -180,3 +180,29 @@ test("CLI rejects removed production-boundary options and caller-supplied identi
   const invalid = join(f.directory, "invalid.json"); await writeFile(invalid, JSON.stringify({ id: "caller", content: {} }));
   await assert.rejects(f.call("run", "report", "--run", r.id, "--file", invalid));
 });
+
+test("exploration receipts identify tagged artifacts, dependent artifacts and the selected feedback", async t => {
+  const f = await fixture(t);
+  const start = await f.call("run", "start", "--name", "Receipt checks");
+  const target = ["--run", start.runId];
+  const a = await f.call("run", "report", ...target, "--name", "Source", "--artifact", "source");
+  const b = await f.call("run", "report", ...target, "--name", "Derived", "--artifact", "derived", "--depends-on", "artifact:" + a.artifactId);
+  const artifact = ["--artifact", a.artifactId];
+  const tags = await f.call("run", "artifact", "tag", ...target, ...artifact, "--tag", "first");
+  assert.deepEqual(tags.tags, ["default", "first"]);
+  const continued = await f.call("continue", "artifact", "tag", ...artifact, "--tag", "second");
+  assert.ok(continued.tags.includes("second"));
+  const impact = ["run", "artifact", "impact", ...target, ...artifact];
+  assert.ok((await f.call(...impact)).artifactIds.includes(b.artifactId));
+  assert.ok((await f.invoke(...impact)).stdout.includes(b.artifactId));
+  const feedback = await f.call("run", "review", "create", ...target, ...artifact, "--reviewer", "human", "--comment", "Checked this version");
+  const show = ["run", "review", "show", ...target, "--review", feedback.reviewId];
+  const read = await f.call(...show);
+  assert.equal(read.artifactId, a.artifactId);
+  assert.ok(JSON.stringify(read.comments).includes("Checked this version"));
+  assert.ok((await f.invoke(...show)).stdout.includes(a.artifactId));
+  const ended = await f.call("continue", "abandon", "--reason", "Fixture complete");
+  assert.equal(ended.status, "abandoned");
+  const next = await f.call("run", "start", "--name", "Another receipt");
+  assert.equal((await f.call("run", "abandon", "--run", next.runId, "--reason", "Fixture complete")).status, "abandoned");
+});

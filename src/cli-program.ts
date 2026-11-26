@@ -528,6 +528,7 @@ const reviewWait = addCliOutput(runReview
   .command("wait")
   .description("Wait until assigned reviews are submitted or the current round is decided.")
   .option("--review <id>", "artifact review id")
+  .option("--notification-round <id>", "read the result of this specific notification round")
   .option("--callback <reference>", "read back a notification for the current Claude Code session"))
   .action(runReviewWaitCommand);
 registerWaitTaskCommands(reviewWait);

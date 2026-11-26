@@ -6,7 +6,7 @@ import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import test from "node:test";
-import { projectBindCommand, projectCloneCommand, projectCreateCommand, projectMountCommand, projectPruneCommand, projectUnbindCommand, projectUnmountCommand } from "../../../src/commands/project.js";
+import { projectBindCommand, projectCloneCommand, projectCreateCommand, projectMountCommand } from "../../../src/commands/project.js";
 import { gitOutput, runGit } from "../../../src/git.js";
 import { readProjectRegistry } from "../../../src/project/registry.js";
 import { resolveWorkspaceIdentity } from "../../../src/project/workspace.js";
@@ -86,19 +86,21 @@ test("Project lifecycle keeps creation separate from Workspace binding", async (
       [...(await readReservedMemoryManifest()).system_memory.install].sort()
     );
 
-    await projectMountCommand("career");
+    const command = async (...args: string[]) => JSON.parse((await invokeCliModule(
+      ["project", ...args, "--output", "json"], workspace, process.env, "memsphere")).stdout);
+    assert.deepEqual(await command("mount", "career"), { project: "career", relation: "mounted" });
     registry = await readProjectRegistry(home);
     assert.deepEqual(registry.workspaces[identity.key]?.mounted, ["career"]);
     await assert.rejects(projectMountCommand("career"), /already mounted/);
-    await projectUnmountCommand("career");
+    assert.deepEqual(await command("unmount", "career"), { project: "career", relation: "unbound" });
 
     await assert.rejects(projectBindCommand("career"), /project unbind/);
-    await projectUnbindCommand();
-    await projectBindCommand("career");
+    assert.equal((await command("unbind")).relation, "unbound");
+    assert.deepEqual(await command("bind", "career"), { project: "career", relation: "primary" });
     registry = await readProjectRegistry(home);
     assert.equal(registry.workspaces[identity.key]?.primary, "career");
     assert.deepEqual(registry.workspaces[identity.key]?.mounted, []);
-    await projectUnbindCommand();
+    assert.equal((await command("unbind")).relation, "unbound");
   } finally {
     process.chdir(previous.cwd);
     if (previous.home === undefined) delete process.env.MEMSPHERE_HOME;
@@ -251,7 +253,9 @@ test("Project clone accepts a valid non-empty Memory repository and rejects an e
     await runGit(["init", "-b", "master"], { cwd: empty });
     process.env.MEMSPHERE_HOME = home;
     process.chdir(workspace);
-    await projectCloneCommand(source, { name: "cloned", bind: true });
+    const clone = await invokeCliModule(["project", "clone", source, "--name", "cloned", "--bind", "--output", "json"],
+      process.cwd(), process.env, "memsphere");
+    assert.equal(JSON.parse(clone.stdout).project, "cloned");
     const registry = await readProjectRegistry(home);
     assert.equal(registry.workspaces[(await resolveWorkspaceIdentity()).key]?.primary, "cloned");
     assert.match(await runGit(["rev-parse", "HEAD"], { cwd: join(registry.projects.cloned.root, "memory") }).then((result) => result.stdout), /^[0-9a-f]{40,64}$/);
@@ -278,7 +282,8 @@ test("prune removes only missing registrations and bindings", async () => {
       registry.projects.missing = { root: join(fixture, "gone") };
       registry.workspaces[workspace.key] = { primary: "missing", mounted: [] };
     });
-    await projectPruneCommand();
+    const result = await invokeCliModule(["project", "prune", "--output", "json"], process.cwd(), process.env, "memsphere");
+    assert.deepEqual(JSON.parse(result.stdout), { removedCount: 1 });
     const registry = await readProjectRegistry(fixture);
     assert.deepEqual(registry.projects, {});
     assert.deepEqual(registry.workspaces, {});

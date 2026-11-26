@@ -36,6 +36,14 @@ type Manifest = {
   backupRoot?: string;
 };
 
+function requireMigrationMode(options: { check?: boolean; write?: boolean }): void {
+  if (Boolean(options.check) === Boolean(options.write)) {
+    throw Object.assign(new Error("Choose exactly one of --check or --write"), {
+      code: "INVALID_ARGUMENT", issues: [{ code: "exactly_one_required", path: ["--check", "--write"] }]
+    });
+  }
+}
+
 function emitMigration(manifest: Manifest, options: { write?: boolean; to?: string }): void {
   const command = manifest.migration === "memory-syntax" ? "syntax" : manifest.migration;
   const issues = manifest.issues.slice(0, 10).map(({ code, file, path }) => ({ code, file, path }));
@@ -56,9 +64,7 @@ function emitMigration(manifest: Manifest, options: { write?: boolean; to?: stri
 }
 
 export async function migrateArtifactContractV2Command(options: { check?: boolean; write?: boolean }): Promise<void> {
-  if (Boolean(options.check) === Boolean(options.write)) {
-    throw new Error("choose exactly one of --check or --write");
-  }
+  requireMigrationMode(options);
   const config = await readConfig();
   assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
@@ -68,9 +74,7 @@ export async function migrateArtifactContractV2Command(options: { check?: boolea
 }
 
 export async function migrateSchemaContractV2Command(options: { check?: boolean; write?: boolean }): Promise<void> {
-  if (Boolean(options.check) === Boolean(options.write)) {
-    throw new Error("choose exactly one of --check or --write");
-  }
+  requireMigrationMode(options);
   const config = await readConfig();
   assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write
@@ -84,9 +88,7 @@ export async function migrateMemorySyntaxCommand(options: {
   write?: boolean;
   to?: string;
 }): Promise<void> {
-  if (Boolean(options.check) === Boolean(options.write)) {
-    throw new Error("choose exactly one of --check or --write");
-  }
+  requireMigrationMode(options);
   const config = await readConfig();
   assertMigrationWriteAllowed(config, options.write);
   const manifest = options.write

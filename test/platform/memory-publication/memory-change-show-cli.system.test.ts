@@ -26,6 +26,14 @@ test("Reviewer ChangeSet default options", async t => {
 
 test("Reviewer ChangeSet material receipts", async t => {
   const f = await changeShowFixture(t);
+  await t.test("the Runner and the assigned Reviewer independently retrieve the same four checkpoint materials", async () => {
+    for (const part of ["summary", "validation", "memory", "diff"]) {
+      const args = ["--part", part, ...(part === "memory" ? ["--reference", "concepts/review-evidence"] : [])];
+      const material = await f.readMaterial(args, "runner");
+      assert.equal(material.checkpointDigest, f.checkpoint.checkpointDigest);
+      assert.deepEqual(material, f.read(args));
+    }
+  });
   await t.test("body reads preserve both sides of create, update, delete and rename", async () => {
     const body = async (reference: string, side = "after") => (await f.readMaterial(["--part", "memory", "--reference", reference, "--side", side])).content;
     assert.match(await body("concepts/review-evidence"), /Pinned content/);

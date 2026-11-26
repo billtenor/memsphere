@@ -10,7 +10,8 @@ import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { currentIdentity, readRunnerAgents, detectRunnerAgent, checkQueueCapability } from "../runner/identity.js";
 import { currentCommandState, assertSessionTarget, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 import { explorationReviewIdentity } from "../context_control/exploration-review.js";
-import { inspectReview, reviewReady } from "../daemon/review.js";
+import { failure } from "../context_control/errors.js";
+import { inspectReview, notificationRound, reviewReady } from "../daemon/review.js";
 import { ensureDaemon, ensureClaudeNotificationDaemon, daemonControl } from "../daemon/service.js";
 import { registerTask, type DaemonTask } from "../daemon/tasks.js";
 import { prepareClaudeReviewRecipient, readClaudeReviewCallback } from "../daemon/claude-review-callback.js";
@@ -101,7 +102,7 @@ type RunStartOptions = {
   output?: "text" | "json";
 };
 
-type ReviewWaitOptions = OutputOptions & { review?: string; callback?: string; sessionRow?: CommandStateRow };
+type ReviewWaitOptions = OutputOptions & { review?: string; notificationRound?: string; callback?: string; currentRoundOnly?: boolean; sessionRow?: CommandStateRow };
 
 type ReviewVoteOptions = OutputOptions & {
   review?: string;
@@ -364,15 +365,25 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const reviewId = options.review?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
   const config = await readConfig();
-  if (options.callback !== undefined) {
-    const { context, acknowledge } = await readClaudeReviewCallback(config, reviewId, options.callback);
-    if (!await printGraphReviewOutput("run review wait", context.review, context.round, context.run.id,
+  if (options.callback !== undefined || options.notificationRound !== undefined) {
+    if (options.callback !== undefined && options.notificationRound !== undefined) {
+      throw failure("INVALID_ARGUMENT", "Choose a notification reference or a round");
+    }
+    const delivery = options.callback === undefined ? undefined :
+      await readClaudeReviewCallback(config, reviewId, options.callback);
+    const context = delivery?.context ?? notificationRound(
+      await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId }), options.notificationRound!);
+    const historical = context.review.currentRoundId !== context.round.id;
+    if (historical && options.currentRoundOnly) throw failure("REVIEW_CONFLICT", "Continue follows the current round");
+    if (historical || !await printGraphReviewOutput("run review wait", context.review, context.round, context.run.id,
       { readOnly: true, enter: false, output: options.output })) {
-      reviewReceipt("run review wait", { project: config.project?.name, ...context, format: options.output });
+      reviewReceipt("run review wait", { project: config.project?.name, ...context, format: options.output, statusOnly: historical });
     }
     await flushCliOutput();
-    try { await acknowledge(); }
-    catch { await emitCliError({ code: "NOTIFICATION_READ_RECEIPT_FAILED" }, { nonfatal: true }); }
+    if (delivery) {
+      try { await delivery.acknowledge(); }
+      catch { await emitCliError({ code: "NOTIFICATION_READ_RECEIPT_FAILED" }, { nonfatal: true }); }
+    }
     return;
   }
   const exploration = explorationReviewIdentity(reviewId), session = exploration ? options.sessionRow ?? await currentCommandState() : undefined;
@@ -386,6 +397,7 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
       && active?.status === "active" && active.parameters.project === project
       && active.groupId === located.run.id && active.parameters.step !== located.review.stepId;
     if (staleStep) {
+      if (options.currentRoundOnly) throw failure("SESSION_CONTEXT_CONFLICT", "Continue target has changed");
       reviewReceipt("run review wait", {
         ...located, project, format: options.output, statusOnly: true
       });

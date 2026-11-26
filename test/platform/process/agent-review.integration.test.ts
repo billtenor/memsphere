@@ -623,8 +623,8 @@ test("Windows queue passes complete multiline messages through direct and npm No
   const script = join(directory, "queue.mjs"), output = join(directory, "args.json"), shim = join(directory, "codex.cmd");
   await writeFile(script, `import { writeFileSync } from 'node:fs'; if (process.argv.includes('--help')) console.log('queue --thread --message'); else writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));`);
   const { reviewResumeNotification } = await import("../../../src/daemon/review.js");
-  const message = reviewResumeNotification("test-project", 'review "quoted" %percent% & | ^ !');
-  const expected = '[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project \'test-project\' run review wait --review \'review "quoted" %percent% & | ^ !\'';
+  const message = reviewResumeNotification("test-project", 'review "quoted" %percent% & | ^ !', { roundId: 'round-1' });
+  const expected = '[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project \'test-project\' run review wait --review \'review "quoted" %percent% & | ^ !\' --notification-round \'round-1\'';
   for (const source of [
     `@"${process.execPath}" "${script}" %*\r\n`,
     'SET "_prog=%dp0%\\node.exe"\r\nSET "_prog=node"\r\nendLocal & "%_prog%" "%dp0%\\queue.mjs" %*\r\n'

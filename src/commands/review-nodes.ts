@@ -129,8 +129,15 @@ export function registerReviewNodeCommands(run: Command) {
     const command = review.commands.find(c => c.name() === op)!;
     command.options.forEach(o => { if (["run", "review", "artifact"].includes(o.attributeName())) o.mandatory = false; });
     command.option("--assignment <id>").option("--round <id>", "fixed acceptance Round for an authorized context Artifact");
-    if (op === "show") command.option("--node <id>").option("--all");
+    if (op === "show") command.option("--node <id>").option("--all")
+      .option("--assignment-page <number>", "Page of assignments in authorized round details (10 per page)");
     command.action(async o => {
+      const page = o.assignmentPage === undefined ? 1 : Number(o.assignmentPage);
+      if (o.assignmentPage !== undefined && (!o.all || !o.round || !o.review || o.assignment ||
+          process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID || !/^[1-9]\d*$/.test(o.assignmentPage) ||
+          !Number.isSafeInteger(page))) {
+        throw failure("INVALID_ARGUMENT", "Assignment pages require a fixed round and --all");
+      }
       if (o.assignment || process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID) {
         if (await tryReviewerResource(`review-${op}`, o)) return;
         if (o.review || o.artifact) throw new Error("review_query_target_conflict");
@@ -146,9 +153,12 @@ export function registerReviewNodeCommands(run: Command) {
         }
         reviewReceipt("run review show", {
           ...context, round, project: config.project?.name, format: o.output,
-          fullComments: Boolean(o.all), statusOnly: round.id !== context.review.currentRoundId
+          assignmentPage: page, fullComments: Boolean(o.all), statusOnly: round.id !== context.review.currentRoundId
         });
-      } else await contextOnlyCommand(`review-${op}`, o as Options);
+      } else {
+        if (o.assignmentPage !== undefined) throw failure("INVALID_ARGUMENT", "Assignment pages require a formal Review round");
+        await contextOnlyCommand(`review-${op}`, o as Options);
+      }
     });
   }
 }

@@ -22,6 +22,27 @@ function assertFacts(text: string, value: unknown, id: string) {
   }
 }
 
+function assertLabeledFacts(text: string, value: Record<string, unknown>, id: string) {
+  const lines = text.split(/\r?\n/);
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "items" || key === "nextAction" || item === undefined) continue;
+    const line = lines.find(row => row.startsWith(key + ": ") || row.startsWith(key + "："));
+    assert.ok(line, id + " missing field " + key);
+    const display = line.slice(key.length).replace(/^(?:: |：)/, "");
+    if (item === "") assert.equal(display, '""', id + "." + key);
+    else assertFacts(display, item, id + "." + key);
+  }
+}
+
+test("two equal field values and an empty string retain independent labels", () => {
+  const value = { draft: false, submitted: false, summary: "" };
+  const text = 'draft: false\nsubmitted: false\nsummary: ""';
+  assertLabeledFacts(text, value, "round");
+  for (const missing of Object.keys(value)) {
+    assert.throws(() => assertLabeledFacts(text.split("\n").filter(line => !line.startsWith(missing + ":")).join("\n"), value, "round"));
+  }
+});
+
 test("reviewed examples select exactly their authorized case and preserve every displayed fact", () => {
   const program = createCliProgram();
   const reviewerProgram = createReviewerContinueRouter(program.commands.find(c => c.name() === "run")!);
@@ -56,6 +77,7 @@ test("reviewed examples select exactly their authorized case and preserve every 
       for (const locale of ["en", "zh-CN"] as const) {
         const text = renderCliResult(route, entry.schema, value, { format: "text", locale });
         assert.ok(text.includes(route), row.id);
+        assertLabeledFacts(text, value, row.id);
         assertFacts(text, value, row.id);
       }
     });

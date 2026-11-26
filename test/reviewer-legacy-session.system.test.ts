@@ -35,6 +35,16 @@ test('legacy candidate reads accept legal global Project parameters',async t=>{
 test('legacy fixed Step reads reject targets outside the pinned submission',async t=>{
  const {state,env,cli,...f}=await legacyFixture(t);
  const step=cli(['run','artifact','show','--run',f.runId,'--step',state.artifactReviews![0].stepId,'--output','json']);assert.equal(step.status,0,step.stderr);assert.match(step.stdout,/Candidate/);
+ for (const args of [["run", "show"], ["run", "step", "show", "--step", state.artifactReviews![0].stepId]]) {
+   const json = cli([...args, "--run", f.runId, "--output", "json"]);
+   assert.equal(json.status, 0, json.stderr);
+   const value = JSON.parse(json.stdout);
+   assert.equal(value.id, f.runId);
+   assert.deepEqual(value.stepIds, [state.artifactReviews![0].stepId]);
+   const text = cli([...args, "--run", f.runId]);
+   assert.equal(text.status, 0, text.stderr);
+   assert.ok(text.stdout.includes(value.stepIds[0]));
+ }
  const wrong=cli(['run','artifact','show','--run',f.runId,'--step','outside','--output','json']);assert.equal(wrong.status,1);assert.equal(wrong.stdout,'');assert.match(wrong.stderr,/REVIEW_RESOURCE_DENIED/);
 
 });

@@ -27,7 +27,9 @@ export async function skillInitCommand(options: SkillOptions): Promise<void> {
 
 async function installSkill(operation: "init" | "upgrade", options: SkillOptions): Promise<void> {
   if (options.global && options.directory) {
-    throw new Error("--global and --directory cannot be used together");
+    throw Object.assign(new Error("--global and --directory cannot be used together"), {
+      code: "INVALID_ARGUMENT", issues: [{ code: "mutually_exclusive", path: ["--global", "--directory"] }]
+    });
   }
 
   const base = options.global

@@ -28,6 +28,11 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const started = await call("run", "start", "--file", file, "--name", "Schema CLI");
   const run = started.runId;
   const snapshot = await call("run", "show", "--run", run); const step = snapshot.steps[0].id;
+  const target = ["--run", run, "--step", step];
+  for (const state of [await call("run", "schema", "show", ...target), await call("continue", "schema", "show")]) {
+    assert.equal(state.phase, "not_started");
+    assert.ok(state.nextAction.args.includes("enter-schema"));
+  }
   const initial = await call("continue", "enter-schema");
   const saved = await call("continue", "schema", "report", "--position", initial.position, "--artifact", '{"summary":"draft"}');
   assert.equal(saved.artifactId, initial.artifactId); assert.equal(saved.phase, "awaiting_finalization");
@@ -39,6 +44,13 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   assert.equal(failed.validation.status, "failed");
   assert.equal(failed.validation.issueCount, 1);
   assert.equal(Object.hasOwn(failed, "draft"), false);
+  const native = await call("run", "schema", "show", ...target);
+  assert.equal(native.phase, "awaiting_finalization");
+  assert.equal(native.artifactId, initial.artifactId);
+  const nativeCopy = join(f.directory, "native-copy.json");
+  const nativeExport = await call("run", "artifact", "export", ...target, "--file", nativeCopy);
+  assert.equal(nativeExport.exported, nativeCopy);
+  assert.deepEqual(JSON.parse(await readFile(nativeCopy, "utf8")), { summary: "draft" });
   const copy = join(f.directory, "copy.json");
   const exported = await call("continue", "artifact", "export", "--file", copy);
   assert.deepEqual(exported.nextAction.args, ["--project", "test-project", "run", "report", "--run", run,

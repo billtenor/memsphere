@@ -68,8 +68,9 @@ export async function changeShowFixture(t: test.TestContext) {
   const read = (extra: string[] = []) => {
     const r = invoke(extra); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout);
   };
-  const readMaterial = async (extra: string[] = []) => {
-    const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, env, cli);
+  const readMaterial = async (extra: string[] = [], role: "runner" | "reviewer" = "reviewer") => {
+    const caller = role === "reviewer" ? env : { ...process.env, MEMSPHERE_HOME: home };
+    const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, caller, cli);
     return JSON.parse(receipt.stdout);
   };
   // Material stability exercises the real command tree without repeatedly

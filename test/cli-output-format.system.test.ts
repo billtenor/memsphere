@@ -287,3 +287,74 @@ test("update and edit dry-runs preserve the stored record in both representation
   }
   assert.deepEqual(await snapshotTree(f.root), before);
 });
+
+test("validating an existing record identifies the checked record and preserves the Store", async t => {
+  const f = await fixture(t);
+  const before = await snapshotTree(f.root);
+  const args = ["data", "validate", "a", "--store", "records"];
+  const json = cli(f, args, "json");
+  assert.equal(json.status, 0, json.stderr);
+  const record = JSON.parse(json.stdout);
+  assert.equal(record.id, "a");
+  assert.equal(record.storeId, "records");
+  assert.equal(record.valid, true);
+  const text = cli(f, args);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /records/);
+  assert.deepEqual(await snapshotTree(f.root), before);
+});
+
+for (const command of ["syntax", "artifact-contract-v2", "schema-contract-v2"]) {
+  test("migrate " + command + " publishes a check receipt and rejects conflicting options before writing", async t => {
+    const f = await businessFixture(t, {});
+    const args = ["migrate", command];
+    const before = await snapshotTree(f.root);
+    for (const format of [undefined, "json"] as const) {
+      const checked = cli(f, [...args, "--check"], format);
+      assert.equal(checked.status, 0, checked.stderr);
+      if (format === "json") {
+        const value = JSON.parse(checked.stdout);
+        assert.equal(value.mode, "check");
+        assert.equal(value.status, "ready");
+        assert.equal(value.migration, command === "syntax" ? "memory-syntax" : command);
+      } else assert.match(checked.stdout, /check/);
+      for (const flags of [[], ["--check", "--write"]]) {
+        const invalid = cli(f, [...args, ...flags], format);
+        assert.notEqual(invalid.status, 0);
+        assert.equal(invalid.stdout, "");
+        for (const field of ["INVALID_ARGUMENT", "exactly_one_required", "--check", "--write"]) assert.ok(invalid.stderr.includes(field), invalid.stderr);
+      }
+    }
+    assert.deepEqual(await snapshotTree(f.root), before);
+  });
+}
+
+test("Skill destination flags identify the conflict before writing", async t => {
+  const f = await businessFixture(t, {});
+  const before = await snapshotTree(f.root);
+  for (const operation of ["init", "upgrade"]) {
+    for (const format of [undefined, "json"] as const) {
+      const invalid = cli(f, ["skill", operation, "--global", "--directory", f.root], format);
+      assert.notEqual(invalid.status, 0);
+      assert.equal(invalid.stdout, "");
+      for (const field of ["INVALID_ARGUMENT", "mutually_exclusive", "--directory", "--global"]) assert.ok(invalid.stderr.includes(field));
+    }
+  }
+  assert.deepEqual(await snapshotTree(f.root), before);
+});
+
+test("removing a Store in dry-run returns the proposed operation and preserves its records", async t => {
+  const f = await fixture(t);
+  const before = await snapshotTree(f.root);
+  const args = ["data", "store", "remove", "records", "--dry-run"];
+  for (const format of [undefined, "json"] as const) {
+    const r = cli(f, args, format);
+    assert.equal(r.status, 0, r.stderr);
+    if (format === "json") {
+      const result = JSON.parse(r.stdout);
+      assert.equal(result.storeId, "records");
+      assert.equal(result.dryRun, true);
+    } else assert.match(r.stdout, /dryRun[:：] ?true/);
+  }
+  assert.deepEqual(await snapshotTree(f.root), before);
+});

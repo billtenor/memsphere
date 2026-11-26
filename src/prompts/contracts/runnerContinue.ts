@@ -77,8 +77,6 @@ export const runnerContinueContracts = {
       { rule: "nextAction 为 wait；无完整分派表及意见正文。", omit: ["assignments", "comments", "vote"] }),
     inherit(runReviewContracts["run review wait"], "cli-run-review-wait-2", "runner-continue-review-wait-2",
       { rule: "正式轮次形成结论才给 outcome；需要决策时给本身份可执行的下一步。", omit: ["assignments", "comments", "vote", "taskId"] }),
-    inherit(runReviewContracts["run review wait"], "cli-run-review-wait-3", "runner-continue-review-wait-3",
-      { rule: "仅指向原轮次或只读入口，禁止再给投票和重报动作。", omit: ["assignments", "comments", "vote", "taskId"] }),
   ],
   "continue review vote": [
     inherit(runReviewContracts["run review vote"], "cli-run-review-vote-1", "runner-continue-review-vote-1",
