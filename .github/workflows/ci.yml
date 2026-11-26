@@ -157,17 +157,6 @@ jobs:
       - name: Install Playwright Chromium
         if: matrix.browser
         run: npx playwright install chromium
-      - name: Initialize Windows process observation
-        if: runner.os == 'Windows' && (matrix.suite == 'platform-process' || matrix.suite == 'platform-rewind')
-        shell: powershell
-        timeout-minutes: 1
-        run: |
-          $timer = [System.Diagnostics.Stopwatch]::StartNew()
-          $process = Get-CimInstance Win32_Process -Filter "ProcessId=$PID" -ErrorAction Stop
-          if ($process.ProcessId -ne $PID -or $null -eq $process.CreationDate) {
-            throw 'CIM did not return the current process identity'
-          }
-          Write-Host "Win32_Process ready after $($timer.ElapsedMilliseconds) ms"
       - run: npm run test:ci -- --suite=${{ matrix.suite }}
       - name: Preserve test timings
         if: always()
