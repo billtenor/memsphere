@@ -57,7 +57,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
   const help = async (target: Command) => {
     const context = await load();
     const commands = operations.filter(([path, operation]) => {
-      if (context.graph) return /^(schema-|review-(wait|vote|retry|resolve|submit-for-human)$)/.test(operation) || path.join(" ") === "report";
+      if (context.graph) return operation === "step-show" || /^(schema-|review-(wait|vote|retry|resolve|submit-for-human)$)/.test(operation) || path.join(" ") === "report";
       return context.parameters.review
         ? /^review-(show|report|update|comment-|submit|wait|retry)/.test(operation)
         : !/^review-(wait|vote|resolve|submit|retry|show|report|update|comment)/.test(operation);
@@ -131,12 +131,18 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       if (options.help) { await help(target); return; }
       const context = await load();
       const reviewId = context.parameters.review;
+      if (context.graph && operation === "step-show") {
+        if (options.step && options.step !== context.parameters.step) throw failure("SESSION_CONTEXT_CONFLICT", "Step differs from the current binding");
+        await contextOnlyCommand(operation, { ...options, run: context.groupId, step: context.parameters.step }, context.scope);
+        return;
+      }
       if (!context.graph && ["review-show", "review-list"].includes(operation)) {
         if (operation === "review-show" && !reviewId) throw failure("INVALID_ARGUMENT", "Enter a Review with run enter --run R --review V");
         await contextOnlyCommand(operation, { ...options, run: context.groupId, review: reviewId }, context.scope);
         return;
       }
-      if (!context.available && !(operation === "review-wait" && options.callback !== undefined)) {
+      const boundSchemaRead = context.graph && operation === "schema-show";
+      if (!context.available && !boundSchemaRead && !(operation === "review-wait" && options.callback !== undefined)) {
         throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
       }
       if (reviewId) {

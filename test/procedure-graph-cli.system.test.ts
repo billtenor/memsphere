@@ -194,7 +194,7 @@ test("CLI isolates invalid ACP Providers and Actors until a Review Slot binds th
   assert.deepEqual(historical.run.permissionConfig, snapshot.run.permissionConfig);
 });
 
-test("CLI module Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
+for (const route of ["run", "continue"]) for (const format of ["text", "json"]) test(`CLI ${route} binds advisory resolution and Runner acceptance in ${format}`, { timeout: 120000 }, async t => {
   const f = await fixture(t);
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
   config.control_plane = { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { reviewer: { kind: "human", name: "Human", permissions: ["artifact.read", "decision.decide"] }, advisor: { kind: "human", name: "Advisor", permissions: ["artifact.read", "decision.assess"] } } };
@@ -207,10 +207,14 @@ test("CLI module Continue binds Human authorization and advisory resolution to i
   const report = await f.call("continue", "report", "--artifact", "candidate");
   assert.equal(report.status, "awaiting_review"); assert.deepEqual(report.nextAction.resume.args, ["continue", "review", "wait"]);
   const snapshot = await f.inspect(start.runId), step = snapshot.steps[0], round = step.reviewRounds![0];
+  assert.equal((await f.call("run", "step", "enter", "--run", start.runId, "--step", step.id)).roundId, round.id);
+  const boundStep = await f.invoke("continue", "step", "show", ...(format === "json" ? ["--output", "json"] : []));
+  assert.ok(boundStep.stdout.includes(step.id), boundStep.stdout);
+  await assert.rejects(f.call("continue", "step", "show", "--step", "foreign"), /SESSION_CONTEXT_CONFLICT/);
   const comments = join(f.directory, "comments.json"); await writeFile(comments, "[]");
   const handle = `graph-review-${start.runId}__${step.id}`;
   const vote = ["review", "submit-for-human", "--assignment", "reviewer", "--vote", "approve", "--comments-file", comments];
-  await assert.rejects(f.call("continue", ...vote), /INTERNAL_ERROR/);
+  await assert.rejects(f.call("continue", ...vote), /exactly_one_required/);
   await assert.rejects(f.call("continue", ...vote, "--authorization-note", ""), /PERMISSION_DENIED/);
   await assert.rejects(f.call("continue", ...vote, "--round", "other-round", "--authorization-note", "fixture authorization"), /INVALID_ARGUMENT/);
   await assert.rejects(f.call("continue", ...vote, "--run", "other-run", "--authorization-note", "fixture authorization"), /INVALID_ARGUMENT/);
@@ -231,13 +235,19 @@ test("CLI module Continue binds Human authorization and advisory resolution to i
   await writeFile(runPath, JSON.stringify(restricted));
   await assert.rejects(f.call("continue", ...resolve, "--validation-summary", "Checked candidate"), /PERMISSION_DENIED/);
   await writeFile(runPath, saved);
-  await f.call("continue", ...resolve, "--validation-summary", "Checked candidate");
+  const target = route === "run" ? ["--review", handle, "--round", round.id] : [];
+  const formatArgs = format === "json" ? ["--output", "json"] : [];
+  const beforeResolution = await f.inspect(start.runId);
+  await assert.rejects(f.invoke(route, "review", "resolve", ...target, "--comment", "missing-comment", "--disposition", "accepted-fixed", "--note", "Clarified", "--validation-summary", "Checked", ...formatArgs));
+  assert.deepEqual(await f.inspect(start.runId), beforeResolution);
+  const applied = await f.invoke(route, ...resolve, ...target, "--validation-summary", "Checked candidate", ...formatArgs);
+  assert.ok(applied.stdout.includes(round.id), applied.stdout);
   const resolved = await f.inspect(start.runId);
   assert.equal(resolved.steps[0].reviewRounds[0].resolutions[0].commentId, commentId);
   assert.equal(resolved.steps[0].reviewRounds[0].id, round.id);
   assert.equal(resolved.steps[0].id, step.id);
   const wait = await f.invoke("continue", "review", "wait"); assert.match(wait.stdout, /approve/);
-  const accepted = await f.invoke("continue", "review", "vote", "--vote", "approve"); assert.match(accepted.stdout, /finish/);
+  const accepted = await f.invoke(route, "review", "vote", ...target, "--vote", "approve", ...formatArgs); assert.match(accepted.stdout, /finish/);
   assert.equal((await f.call("run", "show", "--run", start.runId)).steps[0].id, step.id);
   assert.match((await f.invoke("continue", "--help")).stdout, /done/);
 });

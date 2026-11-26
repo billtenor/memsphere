@@ -1,5 +1,6 @@
 import { artifactImpact, artifactItems, emitExplorationStep, explorationReceipt, lightReviewDetail,
   lightReviewPage, previewResult, publicLightReview, runReference } from "./exploration-output.js";
+import { invalidCliOptions } from "./cli-errors.js";
 import { emitSchemaExport, emitSchemaWriting } from "./schema-output.js";
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { assertSessionTarget, currentCommandState, closeRunCommandStates, openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
@@ -144,7 +145,8 @@ export async function tryContextCommand(operation: string, options: object, scop
   if (operation === "enter") {
     const expected = { row: await currentCommandState() };
     const identity = o.review ? explorationReviewIdentity(o.review) : undefined;
-    if (o.review && identity?.runId !== runId) throw failure("INVALID_ARGUMENT", "Review does not belong to this Run");
+    if (identity && identity.runId !== runId) throw failure("INVALID_ARGUMENT", "Review does not belong to this Run");
+    if (o.review && !identity && !(await s.inspect(runId)).reviews.some(r => !r.exploration && r.id === o.review)) throw failure("INVALID_ARGUMENT", "Review does not belong to this Run");
     const review = identity ? await new ExplorationReviews(s).locate(runId, identity.recordId) : undefined;
     if (review && !review.permissions.runner.permissions.includes("artifact.read")) throw failure("PERMISSION_DENIED", "Runner requires artifact.read");
     const context = await createCommandState(config.project!.name, runId, undefined, o.review, expected);
@@ -359,7 +361,7 @@ export async function tryContextCommand(operation: string, options: object, scop
       const review = requireOption(o.review, "--review"), identity = explorationReviewIdentity(review);
       if (identity) {
         if (identity.runId !== runId) throw failure("INVALID_ARGUMENT", "Review does not belong to this Run");
-        if (o.node && o.all) throw failure("INVALID_ARGUMENT", "Choose --node or --all");
+        if (o.node && o.all) throw invalidCliOptions("mutually_exclusive", "--node", "--all");
         const { row, permissions } = await repository.locate(runId, identity.recordId);
         if (!permissions.runner.permissions.includes("artifact.read")) throw failure("PERMISSION_DENIED", "Runner requires artifact.read");
         const result = await explorationReviewView(repository, runId, row.value, { nodeId: o.node, all: o.all });

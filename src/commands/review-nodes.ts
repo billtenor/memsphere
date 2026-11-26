@@ -13,22 +13,23 @@ import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { ExplorationReviews, explorationReviewIdentity, isModelReviewHandle, mutateModelReviewNode } from "../context_control/exploration-review.js";
 import { explorationReviewView, readArtifactReviewForRunner } from "../context_control/review-repository.js";
+import { invalidCliOptions } from "./cli-errors.js";
 import { failure } from "../context_control/errors.js";
 import { currentCommandState, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 
 export type ReviewNodeOptions = { run?: string; review?: string; assignment?: string; node?: string; comment?: string; all?: boolean; artifact?: string; artifactFile?: string; output?: "text" | "json"; sessionRow?: CommandStateRow };
 export async function reviewNodeCommand(operation: string, options: ReviewNodeOptions, scope?: ContextCommandScope) {
   for (const key of ["vote", "summary", "summaryFile", "body", "bodyFile", "bodyStdin", "severity", "target", "sourceHash", "submissionId", "context"]) {
-    if ((options as Record<string, unknown>)[key] !== undefined) throw new Error(`review_node_content_must_use_artifact: ${key}`);
+    if ((options as Record<string, unknown>)[key] !== undefined) throw invalidCliOptions("use_artifact", "--artifact", "--artifact-file");
   }
   const binding = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (binding && (options.review || options.run || options.assignment && options.assignment !== binding)) throw new Error("review_assignment_not_bound");
   if (!binding && (!options.run || !options.review || options.assignment)) throw failure("INVALID_ARGUMENT", "Specify an exploration Run and Review");
   const reading = ["show", "list"].includes(operation);
-  if (options.node && options.all) throw new Error("review_show_node_all_exclusive");
+  if (options.node && options.all) throw invalidCliOptions("mutually_exclusive", "--node", "--all");
   if (reading || operation === "comment-delete") {
-    if (options.artifact !== undefined || options.artifactFile !== undefined) throw new Error("review_no_artifact_expected");
-  } else if ((options.artifact !== undefined) === (options.artifactFile !== undefined)) throw new Error("review_artifact_source_required_exclusive");
+    if (options.artifact !== undefined || options.artifactFile !== undefined) throw invalidCliOptions("not_allowed", "--artifact", "--artifact-file");
+  } else if ((options.artifact !== undefined) === (options.artifactFile !== undefined)) throw invalidCliOptions("exactly_one_required", "--artifact", "--artifact-file");
   const input = reading || operation === "comment-delete" ? undefined : JSON.parse(options.artifact ?? await readFile(options.artifactFile!, "utf8"));
   if (!binding) { await explorationReviewNodes(operation, options, input, scope); return; }
   const context = await boundReviewNodeContext();
@@ -39,11 +40,11 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
   else if (operation === "submit") result = await submitBoundReviewNodes(input);
   else if (operation === "report") result = await mutateBoundReviewNode({ operation, artifact: nodeReportSchema.parse(input) });
   else if (operation === "update") {
-    if (!options.node) throw new Error("review_update_node_required");
+    if (!options.node) throw invalidCliOptions("required", "--node");
     result = await mutateBoundReviewNode({ operation, nodeId: options.node, artifact: nodeUpdateSchema.parse(input) });
   } else if (operation === "comment-add") result = await mutateBoundReviewNode({ operation, nodeId: options.node, artifact: nodeCommentInputSchema.parse(input) });
   else if (operation === "comment-update" || operation === "comment-delete") {
-    if (!options.comment) throw new Error("review_comment_required");
+    if (!options.comment) throw invalidCliOptions("required", "--comment");
     result = operation === "comment-delete" ? await mutateBoundReviewNode({ operation, commentId: options.comment }) : await mutateBoundReviewNode({ operation, commentId: options.comment, artifact: nodeCommentUpdateSchema.parse(input) });
   } else throw new Error("review_operation_invalid");
   emitReviewNodeResult(operation, result, { format: options.output, locale: context.run.language, reviewer: true, boundReviewId: context.review.id });
@@ -132,6 +133,7 @@ export function registerReviewNodeCommands(run: Command) {
     if (op === "show") command.option("--node <id>").option("--all")
       .option("--assignment-page <number>", "Page of assignments in authorized round details (10 per page)");
     command.action(async o => {
+      if (o.node && o.all) throw invalidCliOptions("mutually_exclusive", "--node", "--all");
       const page = o.assignmentPage === undefined ? 1 : Number(o.assignmentPage);
       if (o.assignmentPage !== undefined && (!o.all || !o.round || !o.review || o.assignment ||
           process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID || !/^[1-9]\d*$/.test(o.assignmentPage) ||

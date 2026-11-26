@@ -107,6 +107,7 @@ export async function exportReviewerBody(file: string, bytes: Uint8Array) {
       await rm(temporary, { recursive: true, force: true }).catch(error => { if (!failed) throw error; });
     }
   }
+  return relative(root, canonical);
 }
 
 type Options = { run?: string; assignment?: string; artifact?: string | string[]; external?: string; review?: string; round?: string; step?: string; out?: string; output?: "text" | "json" };
@@ -144,8 +145,11 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
       const item = !o.step || o.step === context.review.stepId ? submission.artifact : submission.contextArtifacts.find(a => a.stepId === o.step)!.artifact;
       const artifact = await expandReviewArtifact((await readConfig(process.env.MEMSPHERE_CONFIG_PATH)).runsRoot, item);
       const value = artifact.value;
-      if (o.out) await exportReviewerBody(o.out, Buffer.from(typeof value === "string" ? value : JSON.stringify(value)));
-      if (o.out) publishResult(command, () => z.object({ out: z.string() }).strict().parse({ out: o.out }), format);
+      if (o.out) {
+        const out = await exportReviewerBody(o.out, Buffer.from(typeof value === "string" ? value : JSON.stringify(value)));
+        const inspect = cliCommand(["run", "artifact", "show", "--step", o.step ?? context.review.stepId], "reviewer");
+        publishResult(command, { out }, { ...format, locale: context.run.language, saved: { id: out, inspect } });
+      }
       else publishResult(command, () => reviewerCandidate.parse({ artifact: authoredArtifact(artifact)!,
         revisionSummary: !o.step || o.step === context.review.stepId ? submission.revisionSummary : undefined
       }), { ...format, locale: context.run.language });
@@ -187,19 +191,19 @@ export async function tryReviewerResource(operation: string, o: Options): Promis
     const stored = "business" in item ? item.business : undefined;
     const kind = operation === "artifact-show" ? "artifact" : "external";
     const action = cliCommand(["run", kind, "show", "--run", run.id, "--" + kind, item.id, "--out", "<file>"], "reviewer");
-    if (o.out !== undefined) await exportReviewerBody(o.out, body.bytes);
+    const out = o.out === undefined ? undefined : await exportReviewerBody(o.out, body.bytes);
     const text = /^(text\/|application\/(?:json|yaml|x-yaml|xml|javascript))/.test(body.contentType);
     const preview = text && o.out === undefined ? previewText(Buffer.from(body.bytes).toString("utf8"), 200) : undefined;
     const value = stored && o.out === undefined ? previewText(stored.valueJson, 200) : undefined;
     publishResult(command, () => fixedMaterial.parse({
-      runId: run.id, id: item.id, contentType: body.contentType, out: o.out,
+      runId: run.id, id: item.id, contentType: body.contentType, out,
       content: preview?.text, truncated: preview?.truncated,
       source: "source" in item ? previewText(item.source, 256).text : undefined,
       viaArtifactIds: "source" in item ? artifacts.filter(a => a.dependencies.some(r => r.kind === "external" && r.id === item.id)).map(a => a.id) : undefined,
       dependencies: "dependencies" in item ? visibleDependencies(item) : undefined,
       business: stored && o.out === undefined ? { destination: publicDestination(stored.destination), valuePreview: value?.text, valueTruncated: value?.truncated } : undefined,
       nextAction: o.out === undefined && (!preview || preview.truncated) ? action : undefined
-    }), display);
+    }), { ...display, saved: out === undefined ? undefined : { id: out, inspect: cliCommand(["run", kind, "show", "--" + kind, item.id], "reviewer") } });
   } else if (operation === "artifact-contract") {
     const a = selectArtifact(), step = steps.find(s => s.id === a.stepId)!;
     if (own.exploration) {

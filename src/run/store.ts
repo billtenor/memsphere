@@ -1072,7 +1072,7 @@ export async function startRun(input: {
   );
   const steps = instantiateProcedureTemplate(rootTemplate, controlPlane, reviewConfiguration);
   if (!steps.length) {
-    throw new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`);
+    throw Object.assign(new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`), { code: "INVALID_ARGUMENT" });
   }
 
   const declarations: Array<{ store: string; model?: string }> = [];

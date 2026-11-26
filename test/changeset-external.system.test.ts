@@ -96,3 +96,30 @@ test("checkpoint changes during pure construction fail before any External regis
  f.beforeCleanup(async () => { await work.catch(() => undefined); });
  await work;
 });
+
+test("Continue captures only the requested checkpoint in its bound exploration Run", async t => {
+  const f = await changeShowFixture(t);
+  const configPath = join(f.home, "config.json");
+  await writeFile(configPath, JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
+  const runner = Object.fromEntries(Object.entries(f.env).filter(([key]) =>
+    !key.startsWith("MEMSPHERE_REVIEW_") && !["MEMSPHERE_WORKSPACE_ROOT", "MEMSPHERE_CONFIG_PATH"].includes(key)));
+  const env = { ...runner, CODEX_THREAD_ID: "checkpoint-receipt", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
+  const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+  const invoke = (...args: string[]) => execute(process.execPath, [cli, "--project", "project", ...args], { env, cwd: process.cwd() });
+  const run = JSON.parse((await invoke("run", "start", "--name", "Checkpoint receipt", "--output", "json")).stdout).runId;
+  const service = (await openContextControl(f.projectRoot))!;
+  const args = ["continue", "external", "add", "--change", f.edit.change.id, "--checkpoint"];
+  for (const format of ["text", "json"]) {
+    const output = format === "json" ? ["--output", "json"] : [];
+    const before = (await service.snapshot(run)).externals;
+    await assert.rejects(invoke(...args, "invalid-checkpoint", ...output), (e: any) => e.code === 1 && e.stdout === "");
+    assert.deepEqual((await service.snapshot(run)).externals, before);
+    const receipt = await invoke(...args, f.checkpoint.checkpointDigest, ...output);
+    const added = (await service.snapshot(run)).externals.filter(row => !before.some(old => old.id === row.id));
+    assert.equal(added.length, 1);
+    assert.ok(receipt.stdout.includes(added[0].id));
+    assert.ok(receipt.stdout.includes(f.checkpoint.checkpointDigest));
+    const snapshot = await service.readExternal(run, added[0].id);
+    assert.equal(JSON.parse(Buffer.from(snapshot.bytes).toString()).summary.checkpointDigest, f.checkpoint.checkpointDigest);
+  }
+});

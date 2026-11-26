@@ -522,3 +522,41 @@ test("native and restricted Memory readers select the declared kind, node and ef
     assert.ok(JSON.stringify(effective.effective).includes("Scope matters"));
   }
 });
+
+test("restricted review rejects conflicting options before changing the assignment and preserves completed exports", async t => {
+  const f = await evidenceFixture(t);
+  const before = (await reviews.readArtifactReviewForActor(f.input)).assignment;
+  for (const format of ["text", "json"]) {
+    for (const [args, flags, issue] of [
+      [["show", "--all", "--node", "private-node"], ["--node", "--all"], "mutually_exclusive"],
+      [["report"], ["--artifact", "--artifact-file"], "exactly_one_required"],
+      [["report", "--artifact", "private-body", "--artifact-file", "private-path"], ["--artifact", "--artifact-file"], "exactly_one_required"]
+    ] as const) {
+      const failed = await f.cli(["continue", ...args, "--output", format]);
+      assert.equal(failed.status, 1); assert.equal(failed.stdout, "");
+      assert.match(failed.stderr, /INVALID_ARGUMENT/);
+      assert.doesNotMatch(failed.stderr, /private-node|private-body|private-path/);
+      for (const flag of flags) assert.ok(failed.stderr.includes(flag), failed.stderr);
+      if (format === "json") assert.deepEqual(JSON.parse(failed.stderr).error.details.diagnostics, [{code: issue, path: flags}]);
+    }
+  }
+  assert.deepEqual((await reviews.readArtifactReviewForActor(f.input)).assignment, before);
+  const preload = join(f.f.directory, "closed-channel.mjs");
+  const { pathToFileURL } = await import("node:url");
+  await writeFile(preload, 'process.stdout.write = (_chunk, callback) => { setImmediate(() => callback(new Error("closed"))); return false; };');
+  for (const [kind, id, bytes] of [["external", f.e.id, f.bytes], ["artifact", f.c.artifact.id, Buffer.from("candidate")]] as const) {
+    const out = kind + ".txt";
+    const args = ["run", kind, "show", "--" + kind, id, "--out", out, "--output", "json"];
+    const failed = await f.cli(args, { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+    assert.equal(failed.status, 1); assert.equal(failed.stdout, "");
+    const { error } = JSON.parse(failed.stderr);
+    assert.equal(error.code, "OUTPUT_RENDER_FAILED"); assert.deepEqual(error.details, { savedId: out });
+    const inspected = await f.cli([...error.nextAction.args, "--output", "json"]);
+    assert.equal(inspected.status, 0, inspected.stderr); assert.equal(JSON.parse(inspected.stdout).id, id);
+    assert.deepEqual(await readFile(join(f.attempt, out)), bytes);
+    const retry = await f.cli(args);
+    assert.equal(retry.status, 1); assert.equal(retry.stdout, "");
+    assert.equal(JSON.parse(retry.stderr).error.code, "ALREADY_EXISTS");
+    assert.deepEqual(await readFile(join(f.attempt, out)), bytes);
+  }
+});

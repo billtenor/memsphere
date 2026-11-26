@@ -1,6 +1,7 @@
 import type { MemsphereConfig } from "../config.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { openContextControl } from "../project/context-control.js";
+import { resolvePromptLocale } from "../prompts/locale.js";
 import { renderPrompt } from "../prompts/renderer.js";
 import { failure } from "../context_control/errors.js";
 import { artifactReviewRoundControlPlane, artifactReviewWaitReady } from "../artifact-review.js";
@@ -32,9 +33,9 @@ export function notificationRound(context: ReviewContext, roundId: string) {
 }
 
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-export function reviewResumeNotification(project: string, reviewId: string, delivery: { roundId: string } | { callback: string }) {
+export function reviewResumeNotification(project: string, reviewId: string, delivery: { roundId: string } | { callback: string }, language: ReviewContext["run"]["language"]) {
   const target = `memsphere --project ${quote(project)} run review wait --review ${quote(reviewId)}`;
-  return renderPrompt("cli.notification", "zh-CN", {
+  return renderPrompt("cli.notification", resolvePromptLocale(language), {
     command: "callback" in delivery ? `${target} --callback ${quote(delivery.callback)}` : `${target} --notification-round ${quote(delivery.roundId)}`
   });
 }

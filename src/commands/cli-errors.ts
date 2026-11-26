@@ -4,6 +4,10 @@ import { CliOutputError, cliCommand, emitCliError, flushCliOutput, withCliOutput
 
 import { publicCodes } from "../prompts/contracts/errors.js";
 
+export function invalidCliOptions(code: "use_artifact" | "mutually_exclusive" | "not_allowed" | "exactly_one_required" | "required" | "invalid_value", ...path: string[]) {
+  return Object.assign(new Error(code), { code: "INVALID_ARGUMENT", issues: [{ code, path }] });
+}
+
 export function errorCode(error: unknown): string {
   if (error instanceof CommanderError) return "INVALID_ARGUMENT";
   if (error && typeof error === "object" && "code" in error && typeof error.code === "string") {

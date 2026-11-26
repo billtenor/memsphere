@@ -518,7 +518,7 @@ memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex、Traex 或 Claude Code 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知仅包含 `[Memsphere 自动消息]`、“请执行命令以继续：”和定位到投递轮次的原生 wait 命令。执行通知命令可读回当时的结果，随后输入 `continue review wait` 会继续当前会话的评审。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
+Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex、Traex 或 Claude Code 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知按 Run 的冻结语言显示来源标记和执行提示，第三行是定位到投递轮次的原生 wait 命令。执行通知命令可读回当时的结果，随后输入 `continue review wait` 会继续当前会话的评审。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
 
 Claude Code Reviewer 通过另行安装和认证的 `@agentclientprotocol/claude-agent-acp@0.109.1` 接入。参与者配置的模型在 ACP 会话中生效。
 

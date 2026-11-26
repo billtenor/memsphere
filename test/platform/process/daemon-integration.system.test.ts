@@ -102,7 +102,7 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex", mode: "graph" | "exploration" = "graph") {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex", mode: "graph" | "exploration" = "graph", language: "en" | "zh-CN" = "zh-CN") {
   // Installation and Embedded worktree discovery are not part of daemon
   // delivery. Reuse installed models in separate Managed filesystem Stores.
   const f = await initializedContextFixture(t);
@@ -209,7 +209,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const service = (await openContextControl(f.root))!;
   const { runId, reviewId, target, otherReviewId } = mode === "exploration"
     ? await explorationReviewTarget(service, config)
-    : await graphReviewTarget(service, config, includeAgent);
+    : await graphReviewTarget(service, config, includeAgent, language);
   const started = { runId };
   const stateId = `${runnerType}-origin-session`;
   await (await openCommandStates(true, f.home))!.create({}, stateId, {
@@ -255,14 +255,14 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
 type FixtureService = NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
 type FixtureConfig = Awaited<ReturnType<typeof readProjectConfig>>;
 
-async function graphReviewTarget(service: FixtureService, config: FixtureConfig, includeAgent: boolean) {
+async function graphReviewTarget(service: FixtureService, config: FixtureConfig, includeAgent: boolean, language: "en" | "zh-CN") {
   const procedure: GraphProcedureMemory = {
     tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
     actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
       artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
   };
   return service.withGraph(async graph => {
-    const initial = await graph.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
+    const initial = await graph.start({ name: "Async", language, procedure, controlPlane: config.controlPlane,
       reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
         slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } });
     const runId = initial.run.id, step = initial.steps[0].id;
@@ -719,7 +719,7 @@ test("a delayed notification reads its original candidate while Continue follows
 });
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t, "success", true, true);
+  const f = await reviewFixture(t, "success", true, true, "codex", "graph", "en");
   const { call, queue } = f;
   await f.startDaemon();
   const wait = await call("continue", "review", "wait");
@@ -730,7 +730,7 @@ test("asynchronous review wait notifies its original session without waiting for
   const sent: string[] = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(sent[0], "queue"); assert.equal(sent[2], "origin-session");
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
-  assert.equal(sent[4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
+  assert.equal(sent[4], `[Memsphere automated message]\nRun this command to continue:\nmemsphere --project 'test-project' run review wait --review '${f.reviewId}' --notification-round '${(await f.reviewState()).round.id}'`);
   assert.doesNotMatch(sent[4], /approve|投票|状态|Reviewer/);
   const ready = await call("continue", "review", "wait");
   assert.ok(ready.stdout.includes(f.reviewId));

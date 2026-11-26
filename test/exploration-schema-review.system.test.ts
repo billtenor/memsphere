@@ -76,13 +76,36 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   assert.equal(first.materials, undefined);
   assert.deepEqual(materials.map((ref: { id: string }) => ref.id), [A, E]);
   assert.ok(!materials.some((ref: { id: string }) => ref.id === unused));
-  await assert.rejects(f.call("continue", "review", "submit", "--artifact", '{"vote":"approve"}'), /INTERNAL_ERROR|REVIEW_CONFLICT/);
+  await assert.rejects(f.call("continue", "review", "submit", "--artifact", '{"vote":"approve"}'), /REVIEW_CONFLICT/);
   await writeFile(f.statement, withCurrentMemorySyntax("!statement\nnames: [fact]\nasserts: [Check updated fact]\nsuggests: [Use plain language]\n"));
   const frozen = await f.call("run", "review", "show", "--run", R, "--review", V, "--all");
   assert.ok(frozen.nodes.some((n: { asserts: Array<{ text: string }> }) => n.asserts.some(rule => rule.text === "Check original fact")));
   let progress = await f.call("continue", "review", "show");
   const ruleNode = progress.node.nodeId;
+  const beforeInvalid = await f.service.inspect(R);
+  for (const route of ["run", "continue"]) for (const format of ["text", "json"]) {
+    const target = route === "run" ? ["--run", R, "--review", V] : [];
+    for (const [verb, args, issue, flags] of [
+      ["show", ["--node", ruleNode, "--all"], "mutually_exclusive", ["--node", "--all"]],
+      ["report", [], "exactly_one_required", ["--artifact", "--artifact-file"]],
+      ["report", ["--artifact", "private-input", "--artifact-file", "private-path"], "exactly_one_required", ["--artifact", "--artifact-file"]]
+    ] as const) {
+      await assert.rejects(f.invoke(route, "review", verb, ...target, ...args, ...(format === "json" ? ["--output", "json"] : [])), (e: any) => {
+        assert.equal(e.code, 1); assert.equal(e.stdout, "");
+        assert.match(e.stderr, /INVALID_ARGUMENT/); assert.doesNotMatch(e.stderr, /private-input|private-path/);
+        if (format === "json") assert.deepEqual(JSON.parse(e.stderr).error.details.diagnostics, [{ code: issue, path: flags }]);
+        else for (const flag of flags) assert.ok(e.stderr.includes(flag), e.stderr);
+        return true;
+      });
+    }
+    const shown = await f.invoke(route, "review", "show", ...target, "--node", ruleNode, "--output", format);
+    assert.ok(shown.stdout.includes(ruleNode));
+    const all = await f.invoke(route, "review", "show", ...target, "--all", "--output", format);
+    assert.ok(all.stdout.includes(ruleNode));
+  }
+  assert.deepEqual(await f.service.inspect(R), beforeInvalid);
   progress = await f.call("run", "review", "report", "--run", R, "--review", V, "--artifact", '{"applicable":true}');
+  await f.call("run", "review", "update", "--run", R, "--review", V, "--node", ruleNode, "--artifact", '{"applicable":true,"comments":[]}');
   const afterUpdate = await f.call("continue", "review", "update", "--node", ruleNode, "--artifact", '{"applicable":true,"comments":[]}');
   assert.equal(afterUpdate.savedNodeId, ruleNode);
   progress = await f.call("continue", "review", "show");
@@ -93,6 +116,10 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   const finding = await f.call("run", "review", "comment", "add", "--run", R, "--review", V, "--node", progress.node.nodeId,
     "--artifact", '{"body":"First opinion","severity":"suggestion"}');
   const comment = finding.commentId;
+  const alternate = await f.call("continue", "review", "comment", "add", "--node", progress.node.nodeId, "--artifact", '{"body":"Temporary","severity":"suggestion"}');
+  const changed = await f.call("run", "review", "comment", "update", "--run", R, "--review", V, "--comment", alternate.commentId, "--artifact", '{"body":"Edited"}');
+  assert.equal(changed.commentId, alternate.commentId);
+  assert.equal((await f.call("continue", "review", "comment", "delete", "--comment", changed.commentId)).commentId, alternate.commentId);
   const updated = await f.call("continue", "review", "comment", "update", "--comment", comment, "--artifact", '{"body":"Updated opinion"}');
   assert.equal(updated.commentId, comment);
   assert.equal((await f.call("continue", "review", "show")).node.comments[0].body, "Updated opinion");
@@ -104,6 +131,9 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   await assert.rejects(f.call("continue", "review", "show"), /INVALID_ARGUMENT/);
   const old = await f.call("run", "review", "show", "--run", R, "--review", V);
   assert.equal(old.vote.value, "approve");
+  await f.call("run", "enter", "--run", R, "--review", V);
+  assert.equal((await f.call("continue", "review", "show")).vote.value, "approve");
+  await f.call("run", "enter", "--run", R);
   const revised = await f.call("continue", "enter-schema", "--revised-from", A);
   assert.notEqual(revised.artifactId, A);
   const inherited = await f.call("run", "step", "show", "--run", R, "--step", revised.stepId);
@@ -326,7 +356,7 @@ test("a restricted exploration Reviewer CLI reads only the materials bound to it
   }
 });
 
-test("delegated exploration Review retries in the same round after saving a node and the Worker exits", { timeout: 60000 }, async t => {
+for (const route of ["native", "continue-json", "continue-text"]) test(`delegated exploration Review retries through ${route} after saving a node and the Worker exits`, { timeout: 60000 }, async t => {
   let phase = "fixture setup", phaseStarted = performance.now();
   const timings: string[] = [];
   const begin = (next: string) => {
@@ -339,7 +369,7 @@ test("delegated exploration Review retries in the same round after saving a node
     begin("done");
     t.diagnostic(`Delegated Review phases: ${timings.join(", ")}`);
   });
-  const f = await fixture(t), R = (await f.service.start("delegated")).id;
+  const f = await fixture(t), R = (await f.service.start("delegated", "en")).id;
   const { artifact, step } = await f.service.report(R, { name: "candidate", content: textContent("review this") });
   await f.service.configureExplorationStep(R, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
   const repository = new ExplorationReviews(f.service);
@@ -414,7 +444,14 @@ test("delegated exploration Review retries in the same round after saving a node
     assert.equal(failedReceipt.scope, "opinion");
     const attemptId = failed.assignment.attempts![0].id;
     begin("retry dispatch");
-    const retry = f.call("run", "review", "retry", "--review", reviewId);
+    if (route !== "native") {
+      await f.call("run", "enter", "--run", R, "--review", reviewId);
+      await assert.rejects(f.call("continue", "review", "retry", "--assignment", "another-reviewer"));
+      assert.deepEqual(await attempts(), firstAttempts);
+    }
+    const retry = route === "native" ? f.call("run", "review", "retry", "--review", reviewId)
+      : route === "continue-json" ? f.call("continue", "review", "retry")
+      : f.invoke("continue", "review", "retry").then(r => { assert.ok(r.stdout.includes(value.roundId!)); return { roundId: value.roundId }; });
     dispatchWork = retry;
     const retried = await retry;
     begin("retried Reviewer CLI and receipt");
@@ -434,8 +471,8 @@ test("delegated exploration Review retries in the same round after saving a node
     await untilFixture(() => ownWorkerExited(second, t.signal), "retried exploration Review worker exit");
     begin("read final receipt and verify session");
     const before = await f.service.inspect(R);
-    const note = reviewResumeNotification("test-project", reviewId, { roundId: result.round.id });
-    assert.equal(note, `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}' --notification-round '${result.round.id}'`);
+    const note = reviewResumeNotification("test-project", reviewId, { roundId: result.round.id }, result.run.language);
+    assert.equal(note, `[Memsphere automated message]\nRun this command to continue:\nmemsphere --project 'test-project' run review wait --review '${reviewId}' --notification-round '${result.round.id}'`);
     const resumed = await f.call("run", "review", "wait", "--review", reviewId, "--notification-round", result.round.id);
     assert.equal(resumed.assignments, undefined);
     const resumedDetail = await f.call(...resumed.details.args.slice(2));
@@ -443,7 +480,10 @@ test("delegated exploration Review retries in the same round after saving a node
     assert.equal(resumedDetail.assignments[0].name, "Reader");
     assert.equal(resumed.outcome, undefined);
     assert.equal(resumed.nextAction, undefined);
-    assert.deepEqual(await home.get({}, session), target);
+    if (route !== "native") {
+      assert.equal((await home.get({}, session))?.value.parameters.review, reviewId);
+      await f.call("run", "enter-schema", "--run", R, "--step", draft.stepId);
+    } else assert.deepEqual(await home.get({}, session), target);
     assert.equal((await f.call("continue", "schema", "show")).stepId, draft.stepId);
     assert.deepEqual(await f.service.inspect(R), before);
     assert.equal((await repository.list(R)).length, 1);
@@ -531,4 +571,68 @@ test("a late Schema submission cannot release a newer Home target", { timeout: 3
   assert.equal((await late).artifactId, draft.artifactId);
   assert.equal((await f.call("continue", "schema", "show")).stepId, another.stepId);
   assert.ok((await f.service.inspect(R)).completeIds.includes(draft.artifactId));
+});
+
+for (const format of ["text", "json"]) test(`native Schema writes and Continue feedback use their bound targets in ${format}`, async t => {
+  const f = await fixture(t);
+  await writeFile(f.schema, (await readFile(f.schema, "utf8")) + "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]\n");
+  const run = (await f.call("run", "start", "--name", "Scoped commands")).runId;
+  const draft = await f.call("continue", "enter-schema", "report", "--name", "Record", "--content-type", "text/markdown");
+  const target = ["--run", run, "--step", draft.stepId];
+  const output = format === "json" ? ["--output", "json"] : [];
+  const write = (...args: string[]) => f.invoke("run", ...args, ...target, ...output);
+  const current = () => f.call("run", "schema", "show", ...target);
+  const notes = await f.call("continue", "schema", "report", "--position", draft.position, "--artifact", "Title");
+  const before = await current();
+  await assert.rejects(write("skip", "--position", draft.position));
+  assert.deepEqual(await current(), before);
+  assert.ok((await write("skip", "--position", notes.position)).stdout.includes(draft.stepId));
+  const count = await current();
+  await write("schema", "report", "--position", count.position, "--artifact", "42");
+  const repeat = await current();
+  await assert.rejects(write("repeat", "-1", "--position", repeat.position));
+  assert.deepEqual(await current(), repeat);
+  assert.ok((await write("repeat", "1", "--position", repeat.position)).stdout.includes(draft.stepId));
+  await write("schema", "report", "--position", (await current()).position, "--artifact", "Example");
+  assert.equal((await current()).phase, "awaiting_finalization");
+  await f.call("continue", "report");
+  const completed = await f.call("continue", "enter-schema", "--step", draft.stepId);
+  assert.equal(completed.phase, "submitted");
+  assert.ok((await f.invoke("continue", "step", "show", "--step", draft.stepId, ...output)).stdout.includes(draft.stepId));
+  const create = ["continue", "review", "create", "--artifact", draft.artifactId, "--comment", "Check evidence"];
+  const stored = () => f.service.inspect(run);
+  const original = await stored();
+  await assert.rejects(f.invoke(...create, "--reviewer", "invalid", ...output));
+  assert.deepEqual(await stored(), original);
+  const result = await f.invoke(...create, "--reviewer", "agent", ...output);
+  const review = (await stored()).reviews.find(r => r.artifactId === draft.artifactId)!;
+  assert.ok(result.stdout.includes(review.id));
+  for (const options of [[], ["--progressive"]]) {
+    const page = await f.invoke("continue", "review", "list", "--artifact", draft.artifactId, ...options, ...output);
+    if (!options.length) assert.ok(page.stdout.includes(review.id));
+    else assert.ok(page.stdout.length);
+  }
+  await f.call("run", "enter", "--run", run, "--review", review.id);
+  assert.ok((await f.invoke("continue", "review", "show", ...output)).stdout.includes("Check evidence"));
+});
+
+test("omitting the final optional field and choosing zero final repeats finish the same scoped draft", async t => {
+  const f = await fixture(t);
+  const run = (await f.call("run", "start", "--name", "Final field")).runId;
+  const base = (await readFile(f.schema, "utf8")).split("fields:")[0];
+  for (const [operation, field] of [
+    [["skip"], "  - !schema {name: Notes, optional: true}"],
+    [["repeat", "0"], "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]"]
+  ] as const) {
+    await writeFile(f.schema, base + "fields:\n" + field + "\n");
+    for (const route of ["run", "continue"]) {
+      const draft = await f.call("continue", "enter-schema", "report", "--name", "Record", "--content-type", "text/markdown");
+      const field = await f.call("continue", "schema", "report", "--position", draft.position, "--artifact", "# Record");
+      const target = route === "run" ? ["--run", run, "--step", draft.stepId] : [];
+      const receipt = await f.call(route, ...operation, ...target, "--position", field.position);
+      assert.equal(receipt.phase, "awaiting_finalization");
+      assert.equal(receipt.artifactId, draft.artifactId);
+      assert.equal((await f.call("continue", "schema", "show")).phase, receipt.phase);
+    }
+  }
 });

@@ -43,6 +43,7 @@ const app = acp
       process.stderr.write("provider diagnostic: reconnecting\n");
       throw new Error("synthetic provider failure");
     }
+    if (mode === "silent-prompt") await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
     if (mode === "idle") await delay(1_500);
     if (mode === "progress") {
       for (let index = 0; index < 8; index += 1) {

@@ -364,9 +364,10 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     onSession: async () => undefined
   }), /agent_startup_timeout: startup exceeded 500ms/);
 
+  let idleSessionReady = false;
   await assert.rejects(runAgentReviewAcpSession({
-    launch: fakeClientLaunch("idle", {
-      startupTimeoutMs: 1_000,
+    launch: fakeClientLaunch("silent-prompt", {
+      startupTimeoutMs: 10_000,
       idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
@@ -374,13 +375,14 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     reminder: "Submit",
     workspaceRoot: tmpdir(),
     isSubmitted: async () => false,
-    onSession: async () => undefined
+    onSession: async () => { idleSessionReady = true; }
   }), /agent_idle_timeout: no ACP activity for 500ms/);
+  assert.equal(idleSessionReady, true, "idle expiration follows the completed ACP handshake");
 
   const progressUpdates: string[] = [];
   const activeWithoutMaximum = await runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress", {
-      startupTimeoutMs: 1_000,
+      startupTimeoutMs: 10_000,
       idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
@@ -631,7 +633,7 @@ test("Windows queue passes complete multiline messages through direct and npm No
   const script = join(directory, "queue.mjs"), output = join(directory, "args.json"), shim = join(directory, "codex.cmd");
   await writeFile(script, `import { writeFileSync } from 'node:fs'; if (process.argv.includes('--help')) console.log('queue --thread --message'); else writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));`);
   const { reviewResumeNotification } = await import("../../../src/daemon/review.js");
-  const message = reviewResumeNotification("test-project", 'review "quoted" %percent% & | ^ !', { roundId: 'round-1' });
+  const message = reviewResumeNotification("test-project", 'review "quoted" %percent% & | ^ !', { roundId: 'round-1' }, 'zh-CN');
   const expected = '[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project \'test-project\' run review wait --review \'review "quoted" %percent% & | ^ !\' --notification-round \'round-1\'';
   for (const source of [
     `@"${process.execPath}" "${script}" %*\r\n`,

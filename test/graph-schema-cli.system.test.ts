@@ -71,8 +71,10 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   assert.equal(submitted.artifactId, initial.artifactId); assert.equal(submitted.status, "done");
   for (const operation of mutations) {
     await assert.rejects(call("run", ...operation, ...target, "--position", initial.position), /STEP_NOT_RUNNING|RUN_FINISHED/);
+    await assert.rejects(call("continue", ...operation, "--position", initial.position), /RUN_FINISHED/);
   }
   assert.equal((await call("run", "schema", "show", ...target)).phase, "submitted");
+  assert.equal((await call("continue", "schema", "show")).phase, "submitted");
 });
 
 test("Schema native entry and Continue retain all rule scopes, input links and Human responsibility", { timeout: 90000 }, async t => {

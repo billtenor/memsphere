@@ -1,3 +1,4 @@
+import { invalidCliOptions } from "./cli-errors.js";
 import { fixedReviewContract } from "./reviewer-output.js";
 import { authoredArtifact, flowArtifactDetail, flowBindings, flowBindingUpdate, flowContractDetail, flowStepDetail,
   legacySchemaWriting, reviewAssignmentReceipt, reviewerAssignment, reviewerCandidate } from "./flow-output.js";
@@ -449,13 +450,13 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
 export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<void> {
   const reviewId = options.review?.trim();
   const roundId = options.round?.trim();
-  if (!reviewId) throw new Error("--review <id> is required");
-  if (!roundId) throw new Error("--round <id> is required");
+  if (!reviewId) throw invalidCliOptions("required", "--review");
+  if (!roundId) throw invalidCliOptions("required", "--round");
   if (options.vote !== "approve" && options.vote !== "request_changes") {
-    throw new Error("--vote must be approve or request_changes");
+    throw invalidCliOptions("invalid_value", "--vote");
   }
   if (options.comment !== undefined && options.commentFile !== undefined) {
-    throw new Error("use only one of --comment or --comment-file");
+    throw invalidCliOptions("mutually_exclusive", "--comment", "--comment-file");
   }
   const comment = options.commentFile
     ? await readFile(options.commentFile, "utf8")
@@ -477,10 +478,10 @@ export async function runReviewVoteCommand(options: ReviewVoteOptions): Promise<
 
 export async function runReviewRetryCommand(options: ReviewRetryOptions): Promise<void> {
   const reviewId = options.review?.trim();
-  if (!reviewId) throw new Error("--review <id> is required");
+  if (!reviewId) throw invalidCliOptions("required", "--review");
   const exploration = explorationReviewIdentity(reviewId);
-  if (!exploration && !options.assignment?.trim()) throw new Error("--assignment <actor-or-assignment-id> is required");
-  if (exploration && options.assignment !== undefined) throw new Error("This Review fixes its assigned Project reviewer");
+  if (!exploration && !options.assignment?.trim()) throw invalidCliOptions("required", "--assignment");
+  if (exploration && options.assignment !== undefined) throw invalidCliOptions("not_allowed", "--assignment");
   const config = await readConfig();
   const located = await findArtifactReview({ runsRoot: config.runsRoot, reviewId });
   const assignment = exploration ? located.review.rounds[0]?.assignments[0]?.actorId : options.assignment?.trim();
@@ -501,18 +502,18 @@ export async function runReviewSubmitForHumanCommand(options: ReviewSubmitForHum
   const reviewId = options.review?.trim();
   const roundId = options.round?.trim();
   const assignmentId = options.assignment?.trim();
-  if (!reviewId) throw new Error("--review <id> is required");
-  if (!roundId) throw new Error("--round <id> is required");
-  if (!assignmentId) throw new Error("--assignment <actor-or-assignment-id> is required");
+  if (!reviewId) throw invalidCliOptions("required", "--review");
+  if (!roundId) throw invalidCliOptions("required", "--round");
+  if (!assignmentId) throw invalidCliOptions("required", "--assignment");
   if (!options.vote || !["approve", "request_changes", "abstain"].includes(options.vote)) {
-    throw new Error("--vote must be approve, request_changes, or abstain");
+    throw invalidCliOptions("invalid_value", "--vote");
   }
-  if (!options.commentsFile) throw new Error("--comments-file <path> is required");
+  if (!options.commentsFile) throw invalidCliOptions("required", "--comments-file");
   if (options.summary !== undefined && options.summaryFile !== undefined) {
-    throw new Error("use only one of --summary or --summary-file");
+    throw invalidCliOptions("mutually_exclusive", "--summary", "--summary-file");
   }
   if ((options.authorizationNote === undefined) === (options.authorizationNoteFile === undefined)) {
-    throw new Error("provide exactly one of --authorization-note or --authorization-note-file");
+    throw invalidCliOptions("exactly_one_required", "--authorization-note", "--authorization-note-file");
   }
   const comments = parseRunnerDelegatedComments(JSON.parse(await readFile(options.commentsFile, "utf8")));
   const summary = options.summaryFile ? await readFile(options.summaryFile, "utf8") : options.summary;
