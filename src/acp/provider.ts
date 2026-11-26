@@ -145,11 +145,8 @@ registerAgentReviewProvider({
   id: "claude",
   buildLaunch(input) {
     const env: NodeJS.ProcessEnv = {};
-    for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CONFIG_DIR"] as const) {
-      if (process.env[name]) env[name] = process.env[name];
-    }
-    if (!input.actor.agent.env.ANTHROPIC_BASE_URL && process.env.ANTHROPIC_BASE_URL) {
-      env.ANTHROPIC_BASE_URL = process.env.ANTHROPIC_BASE_URL;
+    for (const name of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CONFIG_DIR"] as const) {
+      if (!input.actor.agent.env[name] && process.env[name]) env[name] = process.env[name];
     }
     return commonLaunch("claude", input, configuredArgs("claude", input), {
       ...env,

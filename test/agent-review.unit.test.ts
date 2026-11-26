@@ -111,6 +111,24 @@ test("Qwen, Kimi, and Codex Providers build their managed ACP launches", () => {
   assert.deepEqual(JSON.parse(codex.env.CODEX_CONFIG ?? "{}"), { model: "gpt-5.5" });
 });
 
+test("Claude Provider forwards the configured profile directory or inherits it from the process", () => {
+  const provider = getAgentReviewProvider("claude");
+  const previous = process.env.CLAUDE_CONFIG_DIR;
+  process.env.CLAUDE_CONFIG_DIR = "/inherited/profile";
+  try {
+    const launch = (env: Record<string, string>) => provider.buildLaunch({
+      actor: agentIdentity("claude", [], { command: "claude-agent-acp", env }),
+      workspaceRoot: "/workspace",
+      sessionEnv: {}
+    });
+    assert.equal(launch({ CLAUDE_CONFIG_DIR: "/configured/profile" }).env.CLAUDE_CONFIG_DIR, "/configured/profile");
+    assert.equal(launch({}).env.CLAUDE_CONFIG_DIR, "/inherited/profile");
+  } finally {
+    if (previous === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+    else process.env.CLAUDE_CONFIG_DIR = previous;
+  }
+});
+
 
 test("ACP Client approves Provider tool requests for the Agent-managed sandbox", () => {
   const response = approveAgentPermission([
@@ -135,7 +153,7 @@ test("ACP Client approves Provider tool requests for the Agent-managed sandbox",
 
 
 function agentIdentity(
-  providerType: "traex" | "qwen" | "kimi" | "codex",
+  providerType: "traex" | "qwen" | "kimi" | "codex" | "claude",
   args: string[],
   overrides: Partial<Extract<ControlPlaneActor, { kind: "agent" }>["agent"]> = {}
 ): Extract<ControlPlaneActor, { kind: "agent" }> {
