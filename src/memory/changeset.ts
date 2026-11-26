@@ -2702,13 +2702,13 @@ async function forwardEmbeddedViewBase(
 export async function recoverMemory(
   reference: string,
   mode: "restore" | "create-change"
-): Promise<{ change?: MemoryChangeSet; candidateRoot?: string }> {
+): Promise<{ project: string; change?: MemoryChangeSet; candidateRoot?: string }> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
   return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
-    return recoverMemoryLocked(context.primary, reference, mode);
+    return { project: context.primary.name, ...await recoverMemoryLocked(context.primary, reference, mode) };
   });
 }
 
@@ -2788,14 +2788,14 @@ export async function pushMemory(): Promise<string> {
 
 export async function syncMemory(
   options: { onLockWait?: () => void } = {}
-): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
+): Promise<{ project: string; revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
   const source = await prepareSync(initialContext.primary);
   return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
-    return syncMemoryLocked(context.primary, source, context);
+    return { project: context.primary.name, ...await syncMemoryLocked(context.primary, source, context) };
   });
 }
 

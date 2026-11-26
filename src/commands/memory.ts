@@ -289,12 +289,15 @@ export async function memoryEditCommand(references: string[], options: { change?
   if (context.primary.config.store.type === "embedded") {
     if (options.change) throw new Error("--change is only available for a Managed Project");
     const result = await editEmbeddedMemories(references);
+    const created = result.targets.filter(target => target.operation === "create");
+    const saved = created.length ? savedResult(created.length === 1 ? join(result.memoryRoot, created[0].path) : result.memoryRoot,
+      ["validate", "--memory-root", result.memoryRoot]) : undefined;
     publishResult("memory edit", () => changeReceipt.parse({
       status: "ready", storeType: "embedded", targets: result.targets.map(({ reference, operation, path }) => ({
         reference, operation, path: join(result.memoryRoot, path)
       })),
       nextAction: cliCommand(["memory", "change", "validate"])
-    }));
+    }), { saved });
     return;
   }
   const result = await editMemories({ references, changeId: options.change });
@@ -408,7 +411,7 @@ export async function memoryRecoverCommand(reference: string, options: { restore
   if (result.change) {
     emitCandidate("memory recover", result.change.id, result.candidateRoot);
   } else {
-    publishResult("memory recover", () => changeReceipt.parse({ status: "restored", reference }), { saved: savedResult(reference) });
+    publishResult("memory recover", () => changeReceipt.parse({ status: "restored", reference }), { saved: savedResult(reference, ["project", "show", result.project]) });
   }
 }
 
@@ -421,7 +424,7 @@ export async function memoryPushCommand(): Promise<void> {
 export async function memorySyncCommand(): Promise<void> {
   const result = await syncMemory();
   if (result.change) emitCandidate("memory sync", result.change.id, result.candidateRoot);
-  else publishResult("memory sync", () => changeReceipt.parse({ status: "synchronized", revision: result.revision }), { saved: result.revision ? savedResult(result.revision) : undefined });
+  else publishResult("memory sync", () => changeReceipt.parse({ status: "synchronized", revision: result.revision }), { saved: result.revision ? savedResult(result.revision, ["project", "show", result.project]) : undefined });
 }
 
 export async function memorySyncPublishCommand(options: { change?: string; message?: string }): Promise<void> {

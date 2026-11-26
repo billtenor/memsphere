@@ -4,7 +4,8 @@ import { receipt } from "./types.js";
 
 export const migrateContracts = {
   "migrate syntax": [
-    receipt("cli-migrate-syntax-1", "成功", {
+    receipt("cli-migrate-syntax-1", "成功",
+      { rule: "check/write 明示，按发生情况给诊断和备份路径；禁止迁移器内部状态。" }, {
       mode: oneOf("check", "write"),
       migration: oneOf("memory-syntax", "artifact-contract-v2", "schema-contract-v2"),
       status: oneOf("ready", "blocked"),
@@ -17,7 +18,8 @@ export const migrateContracts = {
     }),
   ],
   "migrate artifact-contract-v2": [
-    receipt("cli-migrate-artifact-contract-v2-1", "成功", {
+    receipt("cli-migrate-artifact-contract-v2-1", "成功",
+      { rule: "check/write 明示，按发生情况给诊断和备份路径；禁止迁移器内部状态。" }, {
       mode: oneOf("check", "write"),
       migration: oneOf("memory-syntax", "artifact-contract-v2", "schema-contract-v2"),
       status: oneOf("ready", "blocked"),
@@ -30,7 +32,8 @@ export const migrateContracts = {
     }),
   ],
   "migrate schema-contract-v2": [
-    receipt("cli-migrate-schema-contract-v2-1", "成功", {
+    receipt("cli-migrate-schema-contract-v2-1", "成功",
+      { rule: "check/write 明示，按发生情况给诊断和备份路径；禁止迁移器内部状态。" }, {
       mode: oneOf("check", "write"),
       migration: oneOf("memory-syntax", "artifact-contract-v2", "schema-contract-v2"),
       status: oneOf("ready", "blocked"),

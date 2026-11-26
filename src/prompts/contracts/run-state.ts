@@ -4,13 +4,15 @@ import { receipt } from "./types.js";
 
 export const runStateContracts = {
   "run start": [
-    receipt("cli-run-start-1", "探索 Run 已创建", {
+    receipt("cli-run-start-1", "探索 Run 已创建",
+      { rule: "绑定成功可继续，否则给查看入口。" }, {
       runId: text,
       name: text,
       status: text,
       nextAction: action,
     }),
-    receipt("cli-run-start-2", "待选步骤或当前尚无可执行步骤", {
+    receipt("cli-run-start-2", "待选步骤或当前尚无可执行步骤",
+      { rule: "有可选步骤给合法选择；只允许当前目标的计数、原因及动作。" }, {
       runId: text,
       name: text,
       status: text,
@@ -21,7 +23,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-start-3", "当前步骤可执行或需 Human 操作", {
+    receipt("cli-run-start-3", "当前步骤可执行或需 Human 操作",
+      { rule: "只列该步骤的材料与规则。Human 步骤的动作须请求确认。" }, {
       runId: text,
       name: text,
       status: text,
@@ -39,7 +42,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-start-4", "等待评审", {
+    receipt("cli-run-start-4", "等待评审",
+      { rule: "只读本轮摘要；登记或恢复等待时给等待动作。", omit: ["comments", "assignments"] }, {
       runId: text,
       name: text,
       status: text,
@@ -51,7 +55,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-start-5", "Schema 写作／重复项", {
+    receipt("cli-run-start-5", "Schema 写作／重复项",
+      { rule: "阶段、进度及界限仅在本阶段有定义时出现。" }, {
       runId: text,
       name: text,
       status: text,
@@ -68,7 +73,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-start-6", "已完成或放弃", {
+    receipt("cli-run-start-6", "已完成或放弃",
+      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,
@@ -77,7 +83,8 @@ export const runStateContracts = {
       reason: text.optional(),
       details: publicAction.optional(),
     }),
-    receipt("cli-run-start-7", "启动前缺少评审配置", {
+    receipt("cli-run-start-7", "启动前缺少评审配置",
+      { rule: "缺 Review 配置使用 preflightSchema；启动成功给当前 Run、可执行步骤及其动作，禁止把整份预检混到成功结果。" }, {
       status: literal("review_configuration_required"),
       reviews: list(publicRunStartReviewsItem),
       slots: list(publicRunStartSlotsItem),
@@ -87,7 +94,8 @@ export const runStateContracts = {
     }),
   ],
   "run report": [
-    receipt("cli-run-report-1", "graph · 提交产物", {
+    receipt("cli-run-report-1", "graph · 提交产物",
+      { rule: "已发起评审才给轮次；业务写入才给目的地；只有实际后继才给 next*。" }, {
       runId: text,
       stepId: text,
       artifactId: text,
@@ -107,7 +115,8 @@ export const runStateContracts = {
       nextDetails: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-report-2", "探索 · 本次已保存产物", {
+    receipt("cli-run-report-2", "探索 · 本次已保存产物",
+      { rule: "只给已存对象与候选引用，禁止回显报告正文。" }, {
       runId: text,
       stepId: text,
       artifactId: text,
@@ -119,7 +128,8 @@ export const runStateContracts = {
       nextAction: action.optional(),
       tags: list(text).optional(),
     }),
-    receipt("cli-run-report-3", "历史 flow · 操作后的当前进度", {
+    receipt("cli-run-report-3", "历史 flow · 操作后的当前进度",
+      { rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
       runId: text,
       name: text,
       status: text,
@@ -147,7 +157,8 @@ export const runStateContracts = {
     }),
   ],
   "run abandon": [
-    receipt("cli-run-abandon-1", "已完成或放弃", {
+    receipt("cli-run-abandon-1", "已完成或放弃",
+      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,
@@ -158,7 +169,8 @@ export const runStateContracts = {
     }),
   ],
   "run show": [
-    receipt("cli-run-show-1", "按 Run 分页查看", {
+    receipt("cli-run-show-1", "按 Run 分页查看",
+      { rule: "普通调用分页给步骤/输出摘要；Reviewer 只给冻结可见的步骤。" }, {
       run: publicRunShowRun,
       steps: list(publicRunShowStepsItem),
       stepCount: integer,
@@ -168,12 +180,14 @@ export const runStateContracts = {
     }),
   ],
   "run binding show": [
-    receipt("cli-run-binding-show-1", "graph · 当前及下轮绑定", {
+    receipt("cli-run-binding-show-1", "graph · 当前及下轮绑定",
+      { rule: "graph 只给当前轮及下轮绑定；flow 给可读角色、权限和槽。" }, {
       runId: text,
       nextRound: map(publicRunBindingShowNextroundValue),
       rounds: list(publicRunBindingShowRoundsItem),
     }),
-    receipt("cli-run-binding-show-2", "历史 flow 绑定", {
+    receipt("cli-run-binding-show-2", "历史 flow 绑定",
+      { rule: "graph 只给当前轮及下轮绑定；flow 给可读角色、权限和槽。" }, {
       runId: text,
       status: text,
       readOnly: bool,
@@ -182,12 +196,14 @@ export const runStateContracts = {
     }),
   ],
   "run binding update": [
-    receipt("cli-run-binding-update-1", "graph · 当前及下轮绑定", {
+    receipt("cli-run-binding-update-1", "graph · 当前及下轮绑定",
+      { rule: "graph 显示生效轮次；flow 增加 changeId、slot、nextBinding。" }, {
       runId: text,
       nextRound: map(publicRunBindingShowNextroundValue),
       rounds: list(publicRunBindingShowRoundsItem),
     }),
-    receipt("cli-run-binding-update-2", "历史 flow 绑定更新", {
+    receipt("cli-run-binding-update-2", "历史 flow 绑定更新",
+      { rule: "graph 显示生效轮次；flow 增加 changeId、slot、nextBinding。" }, {
       changeId: text,
       slot: text,
       nextBinding: either(publicBinding, publicSlotsValue2),
@@ -195,13 +211,15 @@ export const runStateContracts = {
     }),
   ],
   "run try-run": [
-    receipt("cli-run-try-run-1", "成功", {
+    receipt("cli-run-try-run-1", "成功",
+      { rule: "给 runId 与为各 assignment 实际生成的 promptPath、launchPath。只给打开产物所需位置，禁止内嵌文件、环境和启动凭据。" }, {
       runId: text,
       items: list(publicRunTryRunEntryItem),
     }),
   ],
   "run step enter": [
-    receipt("cli-run-step-enter-1", "当前步骤可执行或需 Human 操作", {
+    receipt("cli-run-step-enter-1", "当前步骤可执行或需 Human 操作",
+      { rule: "只列该步骤的材料与规则。Human 步骤的动作须请求确认。" }, {
       runId: text,
       name: text,
       status: text,
@@ -219,7 +237,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-step-enter-2", "等待评审", {
+    receipt("cli-run-step-enter-2", "等待评审",
+      { rule: "只读本轮摘要；登记或恢复等待时给等待动作。", omit: ["comments", "assignments"] }, {
       runId: text,
       name: text,
       status: text,
@@ -231,7 +250,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-step-enter-3", "Schema 写作／重复项", {
+    receipt("cli-run-step-enter-3", "Schema 写作／重复项",
+      { rule: "阶段、进度及界限仅在本阶段有定义时出现。" }, {
       runId: text,
       name: text,
       status: text,
@@ -250,7 +270,8 @@ export const runStateContracts = {
     }),
   ],
   "run step store retry": [
-    receipt("cli-run-step-store-retry-1", "重试保存回执", {
+    receipt("cli-run-step-store-retry-1", "重试保存回执",
+      { rule: "只公开核验后的业务目的地、产物、状态和可执行后续；禁止原始 Store 回执。" }, {
       runId: text,
       stepId: text,
       status: text,
@@ -262,7 +283,8 @@ export const runStateContracts = {
     }),
   ],
   "run step rewind": [
-    receipt("cli-run-step-rewind-1", "--dry-run", {
+    receipt("cli-run-step-rewind-1", "--dry-run",
+      { rule: "预演给目标及影响范围；正式回溯增加 rewindId、replacementStepId、进入动作。禁止调度触发器和索引。", omit: ["rewindId", "replacementStepId", "nextAction"] }, {
       runId: text,
       dryRun: bool,
       targetStepId: text,
@@ -271,7 +293,8 @@ export const runStateContracts = {
       affectedArtifactIds: list(text),
       retainedStepIds: list(text),
     }),
-    receipt("cli-run-step-rewind-2", "已回溯", {
+    receipt("cli-run-step-rewind-2", "已回溯",
+      { rule: "预演给目标及影响范围；正式回溯增加 rewindId、replacementStepId、进入动作。禁止调度触发器和索引。" }, {
       runId: text,
       dryRun: bool,
       targetStepId: text,
@@ -285,7 +308,8 @@ export const runStateContracts = {
     }),
   ],
   "run step show": [
-    receipt("cli-run-step-show-1", "graph 步骤", {
+    receipt("cli-run-step-show-1", "graph 步骤",
+      { rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
       runId: text,
       step: publicRunStepShowStep,
       instruction: text,
@@ -295,14 +319,16 @@ export const runStateContracts = {
       contentType: text.optional(),
       model: text.optional(),
     }),
-    receipt("cli-run-step-show-2", "历史 flow 步骤", {
+    receipt("cli-run-step-show-2", "历史 flow 步骤",
+      { rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
       ref: text,
       procedureName: text,
       current: bool,
       procedureAsserts: list(content),
       step: publicRunStepShowStep2,
     }),
-    receipt("cli-run-step-show-3", "自由探索步骤", {
+    receipt("cli-run-step-show-3", "自由探索步骤",
+      { rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
       runId: text,
       stepId: text,
       stepStatus: text,
@@ -314,7 +340,8 @@ export const runStateContracts = {
     }),
   ],
   "run step configure": [
-    receipt("cli-run-step-configure-1", "自由探索步骤", {
+    receipt("cli-run-step-configure-1", "自由探索步骤",
+      { rule: "给实际生效的步骤配置、缺项与合法 Reviewer 选项。" }, {
       runId: text,
       stepId: text,
       stepStatus: text,
@@ -326,7 +353,8 @@ export const runStateContracts = {
     }),
   ],
   "run status": [
-    receipt("cli-run-status-1", "探索 Run · 指定 --run", {
+    receipt("cli-run-status-1", "探索 Run · 指定 --run",
+      { rule: "有打开的 Step 才给 stepId、stepStatus；上下文可继续才给 nextAction。" }, {
       runId: text,
       name: text,
       status: text,
@@ -336,7 +364,8 @@ export const runStateContracts = {
       stepStatus: text.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-status-2", "待选步骤或当前尚无可执行步骤", {
+    receipt("cli-run-status-2", "待选步骤或当前尚无可执行步骤",
+      { rule: "有可选步骤给合法选择；只允许当前目标的计数、原因及动作。" }, {
       runId: text,
       name: text,
       status: text,
@@ -347,7 +376,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-status-3", "当前步骤可执行或需 Human 操作", {
+    receipt("cli-run-status-3", "当前步骤可执行或需 Human 操作",
+      { rule: "只列该步骤的材料与规则。Human 步骤的动作须请求确认。" }, {
       runId: text,
       name: text,
       status: text,
@@ -365,7 +395,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-status-4", "等待评审", {
+    receipt("cli-run-status-4", "等待评审",
+      { rule: "只读本轮摘要；登记或恢复等待时给等待动作。", omit: ["comments", "assignments"] }, {
       runId: text,
       name: text,
       status: text,
@@ -377,7 +408,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-status-5", "Schema 写作／重复项", {
+    receipt("cli-run-status-5", "Schema 写作／重复项",
+      { rule: "阶段、进度及界限仅在本阶段有定义时出现。" }, {
       runId: text,
       name: text,
       status: text,
@@ -394,7 +426,8 @@ export const runStateContracts = {
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
-    receipt("cli-run-status-6", "已完成或放弃", {
+    receipt("cli-run-status-6", "已完成或放弃",
+      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,
@@ -403,34 +436,39 @@ export const runStateContracts = {
       reason: text.optional(),
       details: publicAction.optional(),
     }),
-    receipt("cli-run-status-7", "不指定 Run · 列表页", {
+    receipt("cli-run-status-7", "不指定 Run · 列表页",
+      { rule: "无 --run 返回 Run 列表页。指定 Run 按下文状态规则选择当前事实。" }, {
       runs: list(publicRunStatusRunsItem),
       nextCursor: text.optional(),
     }),
   ],
   "run enter": [
-    receipt("cli-run-enter-1", "成功", {
+    receipt("cli-run-enter-1", "成功",
+      { rule: "给绑定的 runId，可选 reviewId 与后续动作。" }, {
       runId: text,
       reviewId: text.optional(),
       nextAction: action.optional(),
     }),
   ],
   "run outputs list": [
-    receipt("cli-run-outputs-list-1", "成功", {
+    receipt("cli-run-outputs-list-1", "成功",
+      { rule: "当前输出集合；每项只给 id/name/status。" }, {
       runId: text,
       items: list(publicRunShowRun),
       nextCursor: text.optional(),
     }),
   ],
   "run outputs update": [
-    receipt("cli-run-outputs-update-1", "成功", {
+    receipt("cli-run-outputs-update-1", "成功",
+      { rule: "当前输出集合；每项只给 id/name/status。" }, {
       runId: text,
       items: list(publicRunShowRun),
       nextCursor: text.optional(),
     }),
   ],
   "run finish": [
-    receipt("cli-run-finish-1", "已完成或放弃", {
+    receipt("cli-run-finish-1", "已完成或放弃",
+      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,

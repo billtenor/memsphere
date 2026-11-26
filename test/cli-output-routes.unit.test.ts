@@ -7,6 +7,12 @@ import { createCliProgram } from "../src/cli-program.js";
 import { cliOutputRouter, requestedCliOutput } from "../src/commands/cli-errors.js";
 import { createReviewerContinueRouter } from "../src/commands/review-nodes.js";
 
+const inheritedAssignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
+test.beforeEach(() => { delete process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID; });
+test.afterEach(() => {
+  if (inheritedAssignment !== undefined) process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID = inheritedAssignment;
+});
+
 const contracts = JSON.parse(readFileSync(new URL("./fixtures/cli-output-routes.json", import.meta.url), "utf8"));
 type NativeAction = Command & { _actionHandler?: unknown; _hidden?: boolean };
 function actions(command: NativeAction, path: string[] = []): Array<{ command: NativeAction; path: string[] }> {
@@ -88,11 +94,23 @@ test("every reviewed scenario preserves its public field types and visibility", 
     if (schema === t.command) return "Command";
     if (schema === t.content) return "content";
     if (schema instanceof z.ZodLazy) return signature(schema.schema, new Set([...ancestors, schema]));
-    if (schema instanceof z.ZodEffects) return signature(schema.innerType(), ancestors);
+    if (schema instanceof z.ZodEffects) {
+      assert.equal(schema._def.effect.type, "preprocess", "unreviewed public refinement");
+      assert.ok(schema.innerType() instanceof z.ZodObject, "only the public object projection uses preprocessing");
+      return signature(schema.innerType(), ancestors);
+    }
     if (schema instanceof z.ZodOptional) return signature(schema.unwrap(), ancestors);
-    if (schema instanceof z.ZodString) return "string";
+    if (schema instanceof z.ZodString) {
+      assert.deepEqual(schema._def.checks, [], "declare the public string constraints before changing the signature");
+      return "string";
+    }
     if (schema instanceof z.ZodBoolean) return "boolean";
-    if (schema instanceof z.ZodNumber) return schema.isInt ? "int" : "number";
+    if (schema instanceof z.ZodNumber) {
+      const expected = schema.isInt ? [{ kind: "finite" }, { kind: "int" }, { kind: "min", value: 0, inclusive: true }]
+        : [{ kind: "finite" }];
+      assert.deepEqual(JSON.parse(JSON.stringify(schema._def.checks)), expected, "public numeric bounds");
+      return schema.isInt ? "int" : "number";
+    }
     if (schema instanceof z.ZodNull) return "null";
     if (schema instanceof z.ZodLiteral) return JSON.stringify(schema.value);
     if (schema instanceof z.ZodEnum) return schema.options.map((v: string) => JSON.stringify(v)).sort().join("|");
@@ -163,4 +181,10 @@ test("duplicate eligible contract cases fail closed", async () => {
     assert.throws(() => selectReceipt({ role: "native", route: "runner detect", args: [], options: {} },
       { items: [] }), /Ambiguous CLI contract/);
   } finally { cases.pop(); }
+});
+
+test("a public field cannot be introduced against the approved disclosure rule", async () => {
+  const { receipt, text } = await import("../src/prompts/contracts/types.js");
+  assert.throws(() => receipt("tool", "read", { rule: "Only public identity", omit: ["invocation"] },
+    { id: text, invocation: text }), /Invalid public field policy/);
 });

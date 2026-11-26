@@ -5,14 +5,16 @@ import { receipt } from "./types.js";
 
 export const dataContracts = {
   "data store list": [
-    receipt("cli-data-store-list-1", "成功", {
+    receipt("cli-data-store-list-1", "成功",
+      { rule: "list 只给绑定摘要；read 增加 ID 规则、能力与内容类型映射。错误只给稳定码。" }, {
       items: list(publicDataStoreListEntryItem),
       project: text.optional(),
       nextCursor: text.optional(),
     }),
   ],
   "data store read": [
-    receipt("cli-data-store-read-1", "成功", {
+    receipt("cli-data-store-read-1", "成功",
+      { rule: "list 只给绑定摘要；read 增加 ID 规则、能力与内容类型映射。错误只给稳定码。" }, {
       storeId: text,
       model: text,
       kind: oneOf("value", "data"),
@@ -26,7 +28,8 @@ export const dataContracts = {
     }),
   ],
   "data store create": [
-    receipt("cli-data-store-create-1", "执行", {
+    receipt("cli-data-store-create-1", "执行",
+      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       model: text,
@@ -35,7 +38,8 @@ export const dataContracts = {
       project: text.optional(),
       pendingCleanup: bool.optional(),
     }),
-    receipt("cli-data-store-create-2", "预演", {
+    receipt("cli-data-store-create-2", "预演",
+      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       dryRun: bool,
@@ -47,13 +51,15 @@ export const dataContracts = {
     }),
   ],
   "data store remove": [
-    receipt("cli-data-store-remove-1", "执行", {
+    receipt("cli-data-store-remove-1", "执行",
+      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       dataRetained: bool,
       project: text.optional(),
     }),
-    receipt("cli-data-store-remove-2", "预演", {
+    receipt("cli-data-store-remove-2", "预演",
+      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       dryRun: bool,
@@ -62,7 +68,8 @@ export const dataContracts = {
     }),
   ],
   "data list": [
-    receipt("cli-data-list-1", "本页记录 ID", {
+    receipt("cli-data-list-1", "本页记录 ID",
+      { rule: "items 的元素只含 id；即使空页也保留有效游标。", omit: ["value"] }, {
       storeId: text,
       items: list(publicDataListEntryItem),
       project: text.optional(),
@@ -70,13 +77,18 @@ export const dataContracts = {
     }),
   ],
   "data read": [
-    receipt("cli-data-read-1", "正常读取", { ...dataReadFields, value: content }),
-    receipt("cli-data-read-2", "--path 选择内容", { ...dataReadFields, value: content }),
-    receipt("cli-data-read-3", "--metadata-only", dataReadFields),
-    receipt("cli-data-read-4", "删除标记", { ...dataReadFields, deleted: bool }),
+    receipt("cli-data-read-1", "正常读取",
+      { rule: "value 是授权读取的记录值；其值为 null 时仍保留该键。" }, { ...dataReadFields, value: content }),
+    receipt("cli-data-read-2", "--path 选择内容",
+      { rule: "value 仅含路径匹配结果，不包含未选中的同记录内容。" }, { ...dataReadFields, value: content }),
+    receipt("cli-data-read-3", "--metadata-only",
+      { rule: "只返回此 Store 能提供的公开元数据；即使 value 为 null 也禁止出现。", omit: ["value"] }, dataReadFields),
+    receipt("cli-data-read-4", "删除标记",
+      { rule: "deleted 固定为 true。对已删除记录指定 --path 返回 DATA_DELETED。", omit: ["value"] }, { ...dataReadFields, deleted: bool }),
   ],
   "data has": [
-    receipt("cli-data-has-1", "命中或未命中", {
+    receipt("cli-data-has-1", "命中或未命中",
+      { rule: "未命中保留 exists=false，成功退出。", omit: ["value", "revision"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -85,7 +97,8 @@ export const dataContracts = {
     }),
   ],
   "data create": [
-    receipt("cli-data-create-1", "执行", {
+    receipt("cli-data-create-1", "执行",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -97,7 +110,8 @@ export const dataContracts = {
       updatedAt: number.optional(),
       deleted: bool.optional(),
     }),
-    receipt("cli-data-create-2", "预演 --dry-run", {
+    receipt("cli-data-create-2", "预演 --dry-run",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -112,7 +126,8 @@ export const dataContracts = {
     }),
   ],
   "data update": [
-    receipt("cli-data-update-1", "执行", {
+    receipt("cli-data-update-1", "执行",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -125,7 +140,8 @@ export const dataContracts = {
       deleted: bool.optional(),
       expectedRevision: text.optional(),
     }),
-    receipt("cli-data-update-2", "预演 --dry-run", {
+    receipt("cli-data-update-2", "预演 --dry-run",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -141,7 +157,8 @@ export const dataContracts = {
     }),
   ],
   "data upsert": [
-    receipt("cli-data-upsert-1", "执行", {
+    receipt("cli-data-upsert-1", "执行",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -153,7 +170,8 @@ export const dataContracts = {
       updatedAt: number.optional(),
       deleted: bool.optional(),
     }),
-    receipt("cli-data-upsert-2", "预演 --dry-run", {
+    receipt("cli-data-upsert-2", "预演 --dry-run",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -168,7 +186,8 @@ export const dataContracts = {
     }),
   ],
   "data delete": [
-    receipt("cli-data-delete-1", "执行", {
+    receipt("cli-data-delete-1", "执行",
+      { rule: "预演时 deleted 表示若执行能否删除；实际执行时表示本次是否删除。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -176,7 +195,8 @@ export const dataContracts = {
       deleted: bool,
       project: text.optional(),
     }),
-    receipt("cli-data-delete-2", "预演 --dry-run", {
+    receipt("cli-data-delete-2", "预演 --dry-run",
+      { rule: "预演时 deleted 表示若执行能否删除；实际执行时表示本次是否删除。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -187,7 +207,8 @@ export const dataContracts = {
     }),
   ],
   "data edit": [
-    receipt("cli-data-edit-1", "执行", {
+    receipt("cli-data-edit-1", "执行",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -200,7 +221,8 @@ export const dataContracts = {
       deleted: bool.optional(),
       expectedRevision: text.optional(),
     }),
-    receipt("cli-data-edit-2", "预演 --dry-run", {
+    receipt("cli-data-edit-2", "预演 --dry-run",
+      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -216,7 +238,8 @@ export const dataContracts = {
     }),
   ],
   "data export": [
-    receipt("cli-data-export-1", "--out 文件", {
+    receipt("cli-data-export-1", "--out 文件",
+      { rule: "文件回执只给定位、大小及适用元数据。", omit: ["value"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -230,12 +253,14 @@ export const dataContracts = {
       updatedAt: number.optional(),
       deleted: bool.optional(),
     }),
-    receipt("cli-data-export-2", "--out - 原始字节", {
+    receipt("cli-data-export-2", "--out - 原始字节",
+      { rule: "只写指定数据的原始字节；与 JSON 回执互斥。" }, {
 
     }),
   ],
   "data validate": [
-    receipt("cli-data-validate-1", "校验已有记录", {
+    receipt("cli-data-validate-1", "校验已有记录",
+      { rule: "只给结论。", omit: ["value"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -243,7 +268,8 @@ export const dataContracts = {
       valid: bool,
       project: text.optional(),
     }),
-    receipt("cli-data-validate-2", "校验候选值", {
+    receipt("cli-data-validate-2", "校验候选值",
+      { rule: "输入值不回显。", omit: ["id", "storeId", "value"] }, {
       modelRef: text,
       operation: text,
       valid: bool,

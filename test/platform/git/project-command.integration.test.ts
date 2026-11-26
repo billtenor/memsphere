@@ -1,3 +1,4 @@
+import { invokeCliModule } from "../../helpers/cli-module.js";
 import { withFileLock } from "../../../src/persistence.js";
 
 import assert from "node:assert/strict";
@@ -49,6 +50,26 @@ test("Project lifecycle keeps creation separate from Workspace binding", async (
       "evals",
       ".runtime"
     ].map((directory) => access(join(primary.root, directory))));
+    for (const format of ["json", "text"] as const) {
+      const env = { ...process.env, MEMSPHERE_HOME: join(fixture, "separate-" + format) };
+      const call = (...args: string[]) => invokeCliModule(["project", ...args, "--output", format], workspace, env, "memsphere");
+      const registration = await call("register", primary.root);
+      assert.equal(registration.stderr, "");
+      const shown = await call("show", "primary");
+      assert.equal(shown.stderr, "");
+      if (format === "json") {
+        assert.deepEqual(JSON.parse(registration.stdout), { project: "primary", root: await realpath(primary.root), storeType: "managed",
+          bound: false, nextAction: { kind: "command", launcher: "memsphere", args: ["project", "show", "primary"] } });
+        const details = JSON.parse(shown.stdout);
+        assert.equal(details.name, "primary");
+        assert.equal(details.revision, (await runGit(["rev-parse", "HEAD"], { cwd: join(primary.root, "memory") })).stdout);
+      } else {
+        assert.match(registration.stdout, /memsphere project show primary/);
+        assert.ok(shown.stdout.includes("primary") && shown.stdout.includes("managed"));
+      }
+      await assert.rejects(call("register", primary.root), (error: Error & { stdout?: string; stderr?: string; code?: number }) =>
+        error.code === 1 && error.stdout === "" && Boolean(error.stderr?.includes("INTERNAL_ERROR")));
+    }
     const projectConfig = JSON.parse(await readFile(join(primary.root, "config.json"), "utf8")) as {
       store: { published_revision: string };
     };

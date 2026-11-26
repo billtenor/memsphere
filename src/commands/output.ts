@@ -98,7 +98,7 @@ export function previewText(value: string, maximum: number): { text: string; tru
   return { text: truncated ? characters.slice(0, maximum).join("") : value, truncated };
 }
 
-function escapeDisplayControls(value: string): string {
+export function escapeDisplayControls(value: string): string {
   return value.replace(/[\x7f-\x9f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/gu,
     char => "\\u" + char.charCodeAt(0).toString(16).padStart(4, "0"));
 }

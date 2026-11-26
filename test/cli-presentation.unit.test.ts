@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
 import { CliOutputError, cliCommand, formatCliCommand, renderCliError, renderCliResult } from "../src/commands/output.js";
+import { unpackCliArgv } from "../src/prompts/cli-command.js";
 import { nextAction } from "../src/prompts/cli-output.js";
 
 const resultSchema = z.object({
@@ -76,4 +77,13 @@ test("a post-save error preserves its receipt while rejecting a second mutation"
   const saved = { code: "OUTPUT_RENDER_FAILED", details: { savedId: "record-1" } };
   const command = cliCommand(["data", "delete", "record-1", "--store", "records"]);
   assert.deepEqual(JSON.parse(renderCliError({ ...saved, nextAction: command }, "json", "en")), { error: saved });
+});
+
+test("Windows receipt transport restores its vector exactly once before command parsing", () => {
+  const args = ["run", "start", "--name", '50% "complete" & ready!', "folder name\\", ""];
+  const line = formatCliCommand(cliCommand(args), "cmd");
+  assert.match(line, /^memsphere --windows-argv run start --name (?:msarg_[A-Za-z0-9_-]+ ?)+$/);
+  assert.deepEqual(unpackCliArgv(["node", ...line.split(" ")]).slice(2), args);
+  assert.deepEqual(unpackCliArgv(["node", "cli", "data", "read", "--windows-argv"]),
+    ["node", "cli", "data", "read", "--windows-argv"]);
 });

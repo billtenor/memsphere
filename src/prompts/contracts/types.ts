@@ -35,13 +35,23 @@ export function object(shape: z.ZodRawShape) {
   }, z.object(shape).strict());
 }
 
-export function receipt(id: string, scenario: string, fields: z.ZodRawShape) {
-  return { id, sourceId: id, scenario, fields, schema: object(fields) };
+type Disclosure = { rule: string; omit?: readonly string[] };
+
+function verifyDisclosure(id: string, policy: Disclosure, fields: z.ZodRawShape) {
+  if (!policy.rule.trim() || policy.omit?.some(key => Object.hasOwn(fields, key))) {
+    throw new Error("Invalid public field policy for " + id);
+  }
+}
+
+export function receipt(id: string, scenario: string, policy: Disclosure, fields: z.ZodRawShape) {
+  verifyDisclosure(id, policy, fields);
+  return { id, sourceId: id, scenario, policy, fields, schema: object(fields) };
 }
 export type ReceiptCase = ReturnType<typeof receipt>;
 
-export function inherit(cases: ReceiptCase[], sourceId: string, id: string): ReceiptCase {
+export function inherit(cases: ReceiptCase[], sourceId: string, id: string, policy: Disclosure): ReceiptCase {
   const source = cases.find(entry => entry.id === sourceId);
   if (!source) throw new Error("Missing source CLI contract " + sourceId);
-  return { ...source, id };
+  verifyDisclosure(id, policy, source.fields);
+  return { ...source, id, policy };
 }

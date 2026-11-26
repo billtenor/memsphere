@@ -228,6 +228,22 @@ test("memory edit uses the current Embedded worktree without a ChangeSet", async
     assert.equal(existing.code, 0, existing.stderr);
     assert.match(existing.stdout, /"operation":"update"/);
 
+    const references = Array.from({ length: 95 }, (_, index) => "concepts/batch-" + index);
+    const oversized = await runNativeCli(nested, ["memory", "edit", ...references, "--output", "json"]);
+    assert.equal(oversized.code, 1);
+    assert.equal(oversized.stdout, "");
+    const failure = JSON.parse(oversized.stderr).error;
+    const savedRoot = failure.details.savedId;
+    assert.equal(await realpath(savedRoot), await realpath(memoryRoot));
+    assert.deepEqual(failure, { code: "OUTPUT_RENDER_FAILED", details: { savedId: savedRoot },
+      nextAction: { kind: "command", launcher: "memsphere", args: ["validate", "--memory-root", savedRoot] } });
+    const inspect = await runNativeCli(nested, [...failure.nextAction.args, "--output", "json"]);
+    assert.equal(inspect.code, 0, inspect.stderr);
+    assert.equal(JSON.parse(inspect.stdout).valid, true);
+    for (const reference of references) {
+      const bytes = await readFile(join(memoryRoot, reference + ".yaml"), "utf8");
+      assert.deepEqual((parseMemoryYaml(bytes) as { names: string[] }).names, [reference.slice("concepts/".length)]);
+    }
     const rejected = await runCli(nested, ["memory", "edit", "concepts/new-memory", "--change", "change-demo"]);
     assert.equal(rejected.code, 1);
     assert.match(rejected.stderr, /INTERNAL_ERROR|INVALID_ARGUMENT/);

@@ -262,3 +262,28 @@ test("CLI registry commands publish only public registration fields in text and 
     }
   }
 });
+
+test("update and edit dry-runs preserve the stored record in both representations", async t => {
+  const f = await fixture(t);
+  const before = await snapshotTree(f.root);
+  for (const format of ["json", undefined] as const) {
+    for (const [verb, options] of [["update", ["--value", JSON.stringify(value)]],
+      ["edit", ["--patch", '[{"op":"replace","path":"/nested/zero","value":1}]']]] as const) {
+      const result = cli(f, ["data", verb, "a", "--store", "records", ...options, "--dry-run"], format);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stderr, "");
+      if (format) {
+        const receipt = JSON.parse(result.stdout);
+        assert.equal(receipt.operation, "data." + verb);
+        assert.equal(receipt.dryRun, true);
+        assert.equal(receipt.id, "a");
+        assert.equal(receipt.storeId, "records");
+        assert.equal(receipt.value, undefined);
+      } else {
+        assert.ok(result.stdout.includes("data." + verb));
+        assert.match(result.stdout, /dryRun[:：] ?true/);
+      }
+    }
+  }
+  assert.deepEqual(await snapshotTree(f.root), before);
+});

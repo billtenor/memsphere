@@ -10,7 +10,7 @@ import { assertEtag } from "../data/extensions/tos-datastore/revision.js";
 import { validateTosWriteOptions } from "../data/extensions/tos-datastore/write-policy.js";
 import { getBusinessBinding, openBusinessStore, serviceError } from "../project/business-stores.js";
 import { listData, readDataOutcome, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } from "../project/data-service.js";
-import { addCliOutput, cliCommand, commandFromContract, publishResult, cliLocale, CliOutputError, inline, validateCommandResult, type CliFormat } from "./output.js";
+import { addCliOutput, cliCommand, commandFromContract, publishResult, cliLocale, CliOutputError, escapeDisplayControls, inline, validateCommandResult, type CliFormat } from "./output.js";
 import { emitDataPage, dataExistsResult, dataWriteResult } from "./business-output.js";
 import { assertInputOptions, readDataInput, readJsonInput, readInputText, parseJsonInput, parseRevision } from "./input.js";
 import { registerDataStoreCommands } from "./data-store.js";
@@ -171,6 +171,6 @@ async function writeDataRead(branch: ReadBranch, value: unknown, format: CliForm
   for await (const chunk of encodeJsonChunks({}, body)) {
     if (first && header) await writeCliChunk(header);
     first = false;
-    await writeCliChunk(chunk);
+    await writeCliChunk(format === "json" ? chunk : escapeDisplayControls(Buffer.from(chunk).toString("utf8")));
   }
 }

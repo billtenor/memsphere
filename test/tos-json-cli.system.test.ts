@@ -61,5 +61,18 @@ test("TOS ValueStore CLI supports JSON operations, CAS, tombstone recreation and
   assert.equal((await run(['has', 'a', '--store', 'values'])).exists, false);
   await run(['create', 'a', '--store', 'values', '--value-file', valueFile]);
   assert.notEqual((await run(['read', 'a', '--store', 'values'])).revision, current.revision);
+  const visibleName = "Line\u0085split\u2028RTL\u202eend";
+  await run(["upsert", "display", "--store", "values", "--value", JSON.stringify({ name: visibleName, count: 3 })]);
+  for (const language of ["zh-CN", "en"]) {
+    await write(join(f.home, "config.json"), JSON.stringify({ language }));
+    for (const flags of [[], ["--output", "text"]]) {
+      const receipt = await invokeCliModule(["--project", "test-project", "data", "read", "display", "--store", "values", ...flags],
+        f.cwd, env, "memsphere", t.signal);
+      assert.equal(receipt.stderr, "");
+      assert.ok(receipt.stdout.includes("Line\\u0085split\\u2028RTL\\u202eend"));
+      assert.ok(!receipt.stdout.includes(visibleName));
+    }
+  }
+  assert.equal((await run(["read", "display", "--store", "values"])).value.name, visibleName);
   await run(['store', 'remove', 'values']); assert.ok(service.objects.has('json/a.json'));
 });

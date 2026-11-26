@@ -4,26 +4,30 @@ import { receipt } from "./types.js";
 
 export const memoryContracts = {
   "memory list": [
-    receipt("cli-memory-list-1", "指定 Memory 节点范围", {
+    receipt("cli-memory-list-1", "指定 Memory 节点范围",
+      { rule: "无引用查 Memory 摘要；有引用查节点、父节点及可继续读取的 node_ref。显式 YAML 表达同一页。" }, {
       memory: publicMemoryListMemory,
       items: list(publicMemoryListEntryItem),
       parent_node_ref: text.optional(),
       nextCursor: text.optional(),
     }),
-    receipt("cli-memory-list-2", "未指定引用 · Memory 摘要页", {
+    receipt("cli-memory-list-2", "未指定引用 · Memory 摘要页",
+      { rule: "无引用查 Memory 摘要；有引用查节点、父节点及可继续读取的 node_ref。显式 YAML 表达同一页。" }, {
       items: list(publicMemoryListEntryItem2),
       nextCursor: text.optional(),
     }),
   ],
   "memory read": [
-    receipt("cli-memory-read-1", "完整 concept", {
+    receipt("cli-memory-read-1", "完整 concept",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。" }, {
       syntax: text,
       tag: text,
       names: list(text),
       defines: list(text),
       extends: list(text).optional(),
     }),
-    receipt("cli-memory-read-2", "完整 statement", {
+    receipt("cli-memory-read-2", "完整 statement",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -32,7 +36,8 @@ export const memoryContracts = {
       suggests: content.optional(),
       sections: content.optional(),
     }),
-    receipt("cli-memory-read-3", "完整 schema", {
+    receipt("cli-memory-read-3", "完整 schema",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -46,7 +51,8 @@ export const memoryContracts = {
       item: content.optional(),
       items: content.optional(),
     }),
-    receipt("cli-memory-read-4", "完整 procedure flow", {
+    receipt("cli-memory-read-4", "完整 procedure flow",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -56,7 +62,8 @@ export const memoryContracts = {
       mode: text.optional(),
       asserts: content.optional(),
     }),
-    receipt("cli-memory-read-5", "完整 procedure graph", {
+    receipt("cli-memory-read-5", "完整 procedure graph",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -66,26 +73,30 @@ export const memoryContracts = {
       actions: content,
       asserts: content.optional(),
     }),
-    receipt("cli-memory-read-6", "--node", {
+    receipt("cli-memory-read-6", "--node",
+      { rule: "只交付指定节点及导航上下文。" }, {
       memory: publicMemoryReadMemory,
       node_ref: text,
       node_type: text,
       context: publicMemoryReadContext,
       fragment: content,
     }),
-    receipt("cli-memory-read-7", "--effective（整份或 --node）", {
+    receipt("cli-memory-read-7", "--effective（整份或 --node）",
+      { rule: "declared 为对应完整 Memory 或节点；能解析规则时给 effective。" }, {
       declared: content,
       effective: content.optional(),
     }),
   ],
   "memory edit": [
-    receipt("cli-memory-edit-1", "Embedded 可编辑", {
+    receipt("cli-memory-edit-1", "Embedded 可编辑",
+      { rule: "Embedded 只给 status/storeType/targets/nextAction；Managed 给 changeId/status/candidateRoot/nextAction。路径只用于实际编辑。", omit: ["candidateRoot"] }, {
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       storeType: oneOf("managed", "embedded"),
       targets: list(publicMemoryEditTargetsItem),
       nextAction: action,
     }),
-    receipt("cli-memory-edit-2", "可编辑候选", {
+    receipt("cli-memory-edit-2", "可编辑候选",
+      { rule: "Embedded 只给 status/storeType/targets/nextAction；Managed 给 changeId/status/candidateRoot/nextAction。路径只用于实际编辑。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -93,7 +104,8 @@ export const memoryContracts = {
     }),
   ],
   "memory delete": [
-    receipt("cli-memory-delete-1", "可编辑候选", {
+    receipt("cli-memory-delete-1", "可编辑候选",
+      { rule: "只给 changeId、status、candidateRoot?、nextAction。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -101,7 +113,8 @@ export const memoryContracts = {
     }),
   ],
   "memory rename": [
-    receipt("cli-memory-rename-1", "可编辑候选", {
+    receipt("cli-memory-rename-1", "可编辑候选",
+      { rule: "只给 changeId、status、candidateRoot?、nextAction。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -109,7 +122,8 @@ export const memoryContracts = {
     }),
   ],
   "memory publish": [
-    receipt("cli-memory-publish-1", "操作成功", {
+    receipt("cli-memory-publish-1", "操作成功",
+      { rule: "changeId/status、可用 revision，publish 可给 storeType 及需 Human 集成的动作。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       storeType: oneOf("managed", "embedded"),
@@ -118,11 +132,13 @@ export const memoryContracts = {
     }),
   ],
   "memory recover": [
-    receipt("cli-memory-recover-1", "直接恢复", {
+    receipt("cli-memory-recover-1", "直接恢复",
+      { rule: "已恢复给 status/reference；产生候选时给 changeId/status/candidateRoot?/nextAction。", omit: ["changeId"] }, {
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       reference: text,
     }),
-    receipt("cli-memory-recover-2", "可编辑候选", {
+    receipt("cli-memory-recover-2", "可编辑候选",
+      { rule: "已恢复给 status/reference；产生候选时给 changeId/status/candidateRoot?/nextAction。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -130,17 +146,20 @@ export const memoryContracts = {
     }),
   ],
   "memory push": [
-    receipt("cli-memory-push-1", "操作成功", {
+    receipt("cli-memory-push-1", "操作成功",
+      { rule: "push 只给 status/storeType；sync 给 status/revision 或候选编辑回执。" }, {
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       storeType: oneOf("managed", "embedded"),
     }),
   ],
   "memory sync": [
-    receipt("cli-memory-sync-1", "已同步", {
+    receipt("cli-memory-sync-1", "已同步",
+      { rule: "push 只给 status/storeType；sync 给 status/revision 或候选编辑回执。", omit: ["changeId"] }, {
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       revision: text,
     }),
-    receipt("cli-memory-sync-2", "可编辑候选", {
+    receipt("cli-memory-sync-2", "可编辑候选",
+      { rule: "push 只给 status/storeType；sync 给 status/revision 或候选编辑回执。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -148,14 +167,16 @@ export const memoryContracts = {
     }),
   ],
   "memory sync publish": [
-    receipt("cli-memory-sync-publish-1", "操作成功", {
+    receipt("cli-memory-sync-publish-1", "操作成功",
+      { rule: "changeId/status、可用 revision，publish 可给 storeType 及需 Human 集成的动作。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       revision: text.optional(),
     }),
   ],
   "memory change show": [
-    receipt("cli-memory-change-show-1", "--part summary", {
+    receipt("cli-memory-change-show-1", "--part summary",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
@@ -163,13 +184,15 @@ export const memoryContracts = {
       baseRevision: text,
       files: list(publicMemoryChangeShowFilesItem),
     }),
-    receipt("cli-memory-change-show-2", "--part validation", {
+    receipt("cli-memory-change-show-2", "--part validation",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
       validation: publicMemoryChangeShowValidation,
     }),
-    receipt("cli-memory-change-show-3", "--part memory", {
+    receipt("cli-memory-change-show-3", "--part memory",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
@@ -178,7 +201,8 @@ export const memoryContracts = {
       operation: text,
       content: either(text, nil),
     }),
-    receipt("cli-memory-change-show-4", "--part diff", {
+    receipt("cli-memory-change-show-4", "--part diff",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
@@ -186,7 +210,8 @@ export const memoryContracts = {
     }),
   ],
   "memory change resume": [
-    receipt("cli-memory-change-resume-1", "可编辑候选", {
+    receipt("cli-memory-change-resume-1", "可编辑候选",
+      { rule: "只给 changeId、status、candidateRoot?、nextAction。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -194,7 +219,8 @@ export const memoryContracts = {
     }),
   ],
   "memory change claim": [
-    receipt("cli-memory-change-claim-1", "可编辑候选", {
+    receipt("cli-memory-change-claim-1", "可编辑候选",
+      { rule: "同一候选，增加 commentCount/warningCount；不回传处理者私有状态。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -204,20 +230,23 @@ export const memoryContracts = {
     }),
   ],
   "memory change finish": [
-    receipt("cli-memory-change-finish-1", "操作成功", {
+    receipt("cli-memory-change-finish-1", "操作成功",
+      { rule: "只给 changeId/status，finish 增加 commentCount。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       commentCount: integer,
     }),
   ],
   "memory change complete": [
-    receipt("cli-memory-change-complete-1", "操作成功", {
+    receipt("cli-memory-change-complete-1", "操作成功",
+      { rule: "只给 changeId/status，finish 增加 commentCount。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
     }),
   ],
   "memory change validate": [
-    receipt("cli-memory-change-validate-1", "成功", {
+    receipt("cli-memory-change-validate-1", "成功",
+      { rule: "绑定 changeId、checkpointDigest、baseRevision 和校验结果。View 给可读位置；正文按固定 checkpoint 查。" }, {
       valid: bool,
       changeId: text,
       storeType: oneOf("managed", "embedded"),

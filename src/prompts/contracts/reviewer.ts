@@ -4,13 +4,15 @@ import { receipt } from "./types.js";
 
 export const reviewerContracts = {
   "run show": [
-    receipt("reviewer-run-show-1", "graph · 本轮冻结可见步骤", {
+    receipt("reviewer-run-show-1", "graph · 本轮冻结可见步骤",
+      { rule: "指定 Step 时仅给该 Step。" }, {
       id: text,
       name: text,
       status: text,
       steps: list(publicRunShowStepsItem2),
     }),
-    receipt("reviewer-run-show-2", "flow · 本轮冻结可见步骤", {
+    receipt("reviewer-run-show-2", "flow · 本轮冻结可见步骤",
+      { rule: "只列固定候选与上下文关联步骤。" }, {
       id: text,
       name: text,
       status: text,
@@ -18,13 +20,15 @@ export const reviewerContracts = {
     }),
   ],
   "run step show": [
-    receipt("reviewer-run-step-show-1", "graph · 本轮冻结可见步骤", {
+    receipt("reviewer-run-step-show-1", "graph · 本轮冻结可见步骤",
+      { rule: "指定 Step 时仅给该 Step。" }, {
       id: text,
       name: text,
       status: text,
       steps: list(publicRunShowStepsItem2),
     }),
-    receipt("reviewer-run-step-show-2", "flow · 本轮冻结可见步骤", {
+    receipt("reviewer-run-step-show-2", "flow · 本轮冻结可见步骤",
+      { rule: "只列固定候选与上下文关联步骤。" }, {
       id: text,
       name: text,
       status: text,
@@ -32,12 +36,14 @@ export const reviewerContracts = {
     }),
   ],
   "run artifact show": [
-    receipt("reviewer-run-artifact-show-1", "Reviewer flow · 冻结候选", {
+    receipt("reviewer-run-artifact-show-1", "Reviewer flow · 冻结候选",
+      { rule: "按 Step 列 graph 产物；按 ID 给预览/导出；旧 flow 查已上报材料；Reviewer 按协议取固定候选或明确选择的材料。" }, {
       artifact: publicRunArtifactShowArtifact,
       contextArtifacts: list(publicRunArtifactShowContextartifactsItem).optional(),
       revisionSummary: publicRunArtifactShowRevisionsummary.optional(),
     }),
-    receipt("reviewer-run-artifact-show-2", "Reviewer graph · 当前冻结候选及其固定上下文", {
+    receipt("reviewer-run-artifact-show-2", "Reviewer graph · 当前冻结候选及其固定上下文",
+      { rule: "按 Step 列 graph 产物；按 ID 给预览/导出；旧 flow 查已上报材料；Reviewer 按协议取固定候选或明确选择的材料。" }, {
       artifactId: text,
       artifact: publicRunArtifactShowArtifact2,
       contextArtifacts: list(publicRunArtifactShowContextartifactsItem2),
@@ -45,7 +51,8 @@ export const reviewerContracts = {
       confirmations: list(publicRunArtifactShowConfirmationsItem),
       revisionSummary: publicRunArtifactShowRevisionsummary.optional(),
     }),
-    receipt("reviewer-run-artifact-show-3", "冻结材料 · 文本预览", {
+    receipt("reviewer-run-artifact-show-3", "冻结材料 · 文本预览",
+      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -55,7 +62,8 @@ export const reviewerContracts = {
       dependencies: list(publicRunReportDependenciesItem).optional(),
       business: publicRunArtifactShowBusiness.optional(),
     }),
-    receipt("reviewer-run-artifact-show-4", "冻结材料 · 二进制内容定位", {
+    receipt("reviewer-run-artifact-show-4", "冻结材料 · 二进制内容定位",
+      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -63,26 +71,30 @@ export const reviewerContracts = {
       dependencies: list(publicRunReportDependenciesItem).optional(),
       business: publicRunArtifactShowBusiness.optional(),
     }),
-    receipt("reviewer-run-artifact-show-5", "冻结材料 · --out 完整导出", {
+    receipt("reviewer-run-artifact-show-5", "冻结材料 · --out 完整导出",
+      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["content"] }, {
       runId: text,
       id: text,
       contentType: text,
       out: text,
       dependencies: list(publicRunReportDependenciesItem).optional(),
     }),
-    receipt("reviewer-run-artifact-show-6", "冻结候选文件导出", {
+    receipt("reviewer-run-artifact-show-6", "冻结候选文件导出",
+      { rule: "按 Step 列 graph 产物；按 ID 给预览/导出；旧 flow 查已上报材料；Reviewer 按协议取固定候选或明确选择的材料。" }, {
       out: text,
     }),
   ],
   "run artifact contract show": [
-    receipt("reviewer-run-artifact-contract-show-1", "Reviewer · 冻结产物契约", {
+    receipt("reviewer-run-artifact-contract-show-1", "Reviewer · 冻结产物契约",
+      { rule: "仅所选产物的契约、来源与规则；Reviewer 绑定候选的冻结版本。" }, {
       procedure: publicRunArtifactContractShowProcedure,
       action: publicRunArtifactContractShowAction,
       artifact: publicRunArtifactContractShowArtifact,
     }),
   ],
   "run review assignment show": [
-    receipt("reviewer-run-review-assignment-show-1", "成功", {
+    receipt("reviewer-run-review-assignment-show-1", "成功",
+      { rule: "本人 assignment 的协议、权限、候选引用和受限读取方式。禁止同伴草稿或全部分派状态。" }, {
       protocol: oneOf("flow", "graph"),
       memoryReads: publicRunReviewAssignmentShowMemoryreads,
       status: text,
@@ -98,7 +110,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review comment": [
-    receipt("reviewer-run-review-comment-1", "旧协议 · 本人提交回执", {
+    receipt("reviewer-run-review-comment-1", "旧协议 · 本人提交回执",
+      { rule: "旧协议提交本人意见的回执，只给任务、轮次、意见数量和完成状态。" }, {
       reviewId: text,
       roundId: text,
       assignmentId: text,
@@ -108,7 +121,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review submit": [
-    receipt("reviewer-run-review-submit-1", "旧协议 · 本人提交回执", {
+    receipt("reviewer-run-review-submit-1", "旧协议 · 本人提交回执",
+      { rule: "旧 flow 返回提交回执；节点协议只给本人提交状态、vote 及必要 ID。" }, {
       reviewId: text,
       roundId: text,
       assignmentId: text,
@@ -117,7 +131,8 @@ export const reviewerContracts = {
       completed: bool,
       vote: text,
     }),
-    receipt("reviewer-run-review-submit-2", "本人最终提交", {
+    receipt("reviewer-run-review-submit-2", "本人最终提交",
+      { rule: "只回本人提交状态；不再给写动作。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["nextAction", "tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       vote: either(text, publicVote),
@@ -126,10 +141,12 @@ export const reviewerContracts = {
     }),
   ],
   "run review list": [
-    receipt("reviewer-run-review-list-1", "Reviewer graph · 上游固定确认列表", {
+    receipt("reviewer-run-review-list-1", "Reviewer graph · 上游固定确认列表",
+      { rule: "light 和 progressive 分别分页；轻量列表只给意见数与详情入口，正文移到 show。Reviewer 只列当前材料的固定确认。" }, {
       items: list(publicRunArtifactShowConfirmationsItem),
     }),
-    receipt("reviewer-run-review-list-2", "本人评审 · 节点树目录", {
+    receipt("reviewer-run-review-list-2", "本人评审 · 节点树目录",
+      { rule: "tree 递归只给节点摘要、计数和 children；禁止 node.comments、ruleResults 或草稿正文。" }, {
       progress: publicRunReviewAssignmentShowReviewprogress,
       tree: publicRunReviewListTree,
       status: text.optional(),
@@ -139,7 +156,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review show": [
-    receipt("reviewer-run-review-show-1", "Reviewer graph · 一条上游固定确认", {
+    receipt("reviewer-run-review-show-1", "Reviewer graph · 一条上游固定确认",
+      { rule: "按轻量、节点、轮次、固定确认选择形态。--all 才展开授权全文；节点只读本人允许的范围。" }, {
       id: text,
       artifactId: text,
       status: text,
@@ -149,7 +167,8 @@ export const reviewerContracts = {
       kind: text.optional(),
       vote: publicVote.optional(),
     }),
-    receipt("reviewer-run-review-show-2", "当前节点或 --node", {
+    receipt("reviewer-run-review-show-2", "当前节点或 --node",
+      { rule: "显式 --node 只给指定节点，无选项时给当前节点。已提交后禁止写动作。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       node: publicRunReviewShowNode.optional(),
@@ -157,7 +176,8 @@ export const reviewerContracts = {
       summary: text.optional(),
       nextAction: action.optional(),
     }),
-    receipt("reviewer-run-review-show-3", "--all · 本人完整评审树", {
+    receipt("reviewer-run-review-show-3", "--all · 本人完整评审树",
+      { rule: "显式 --all 可看本人各节点已存判断及该节点意见。 绑定身份隐式确定目标；动作使用 Session launcher。" }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       nodes: list(publicRunReviewShowNode),
@@ -165,7 +185,8 @@ export const reviewerContracts = {
       summary: text.optional(),
       nextAction: action.optional(),
     }),
-    receipt("reviewer-run-review-show-4", "本人无当前节点 · 已存判断", {
+    receipt("reviewer-run-review-show-4", "本人无当前节点 · 已存判断",
+      { rule: "只给可见节点结果和获准的已存意见。 绑定身份隐式确定目标；动作使用 Session launcher。" }, {
       progress: publicRunReviewAssignmentShowReviewprogress,
       nodes: list(publicRunReviewShowNode),
       status: text.optional(),
@@ -175,7 +196,8 @@ export const reviewerContracts = {
     }),
   ],
   "run external show": [
-    receipt("reviewer-run-external-show-1", "冻结材料 · 文本预览", {
+    receipt("reviewer-run-external-show-1", "冻结材料 · 文本预览",
+      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -185,7 +207,8 @@ export const reviewerContracts = {
       source: text.optional(),
       viaArtifactIds: list(text).optional(),
     }),
-    receipt("reviewer-run-external-show-2", "冻结材料 · 二进制内容定位", {
+    receipt("reviewer-run-external-show-2", "冻结材料 · 二进制内容定位",
+      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -193,7 +216,8 @@ export const reviewerContracts = {
       source: text.optional(),
       viaArtifactIds: list(text).optional(),
     }),
-    receipt("reviewer-run-external-show-3", "冻结材料 · --out 完整导出", {
+    receipt("reviewer-run-external-show-3", "冻结材料 · --out 完整导出",
+      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["content"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -203,26 +227,30 @@ export const reviewerContracts = {
     }),
   ],
   "memory list": [
-    receipt("reviewer-memory-list-1", "指定 Memory 节点范围", {
+    receipt("reviewer-memory-list-1", "指定 Memory 节点范围",
+      { rule: "无引用查 Memory 摘要；有引用查节点、父节点及可继续读取的 node_ref。显式 YAML 表达同一页。 使用本身份授权的 Project 或显式冻结范围。" }, {
       memory: publicMemoryListMemory,
       items: list(publicMemoryListEntryItem),
       parent_node_ref: text.optional(),
       nextCursor: text.optional(),
     }),
-    receipt("reviewer-memory-list-2", "未指定引用 · Memory 摘要页", {
+    receipt("reviewer-memory-list-2", "未指定引用 · Memory 摘要页",
+      { rule: "无引用查 Memory 摘要；有引用查节点、父节点及可继续读取的 node_ref。显式 YAML 表达同一页。 使用本身份授权的 Project 或显式冻结范围。" }, {
       items: list(publicMemoryListEntryItem2),
       nextCursor: text.optional(),
     }),
   ],
   "memory read": [
-    receipt("reviewer-memory-read-1", "完整 concept", {
+    receipt("reviewer-memory-read-1", "完整 concept",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。 使用本身份授权的 Project 或显式冻结范围。" }, {
       syntax: text,
       tag: text,
       names: list(text),
       defines: list(text),
       extends: list(text).optional(),
     }),
-    receipt("reviewer-memory-read-2", "完整 statement", {
+    receipt("reviewer-memory-read-2", "完整 statement",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。 使用本身份授权的 Project 或显式冻结范围。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -231,7 +259,8 @@ export const reviewerContracts = {
       suggests: content.optional(),
       sections: content.optional(),
     }),
-    receipt("reviewer-memory-read-3", "完整 schema", {
+    receipt("reviewer-memory-read-3", "完整 schema",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。 使用本身份授权的 Project 或显式冻结范围。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -245,7 +274,8 @@ export const reviewerContracts = {
       item: content.optional(),
       items: content.optional(),
     }),
-    receipt("reviewer-memory-read-4", "完整 procedure flow", {
+    receipt("reviewer-memory-read-4", "完整 procedure flow",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。 使用本身份授权的 Project 或显式冻结范围。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -255,7 +285,8 @@ export const reviewerContracts = {
       mode: text.optional(),
       asserts: content.optional(),
     }),
-    receipt("reviewer-memory-read-5", "完整 procedure graph", {
+    receipt("reviewer-memory-read-5", "完整 procedure graph",
+      { rule: "完整 JSON 的 tag 在 YAML 中呈现为类型标签。--run 只读冻结版本。 使用本身份授权的 Project 或显式冻结范围。" }, {
       syntax: text,
       tag: text,
       names: list(text),
@@ -265,20 +296,23 @@ export const reviewerContracts = {
       actions: content,
       asserts: content.optional(),
     }),
-    receipt("reviewer-memory-read-6", "--node", {
+    receipt("reviewer-memory-read-6", "--node",
+      { rule: "只交付指定节点及导航上下文。 使用本身份授权的 Project 或显式冻结范围。" }, {
       memory: publicMemoryReadMemory,
       node_ref: text,
       node_type: text,
       context: publicMemoryReadContext,
       fragment: content,
     }),
-    receipt("reviewer-memory-read-7", "--effective（整份或 --node）", {
+    receipt("reviewer-memory-read-7", "--effective（整份或 --node）",
+      { rule: "declared 为对应完整 Memory 或节点；能解析规则时给 effective。 使用本身份授权的 Project 或显式冻结范围。" }, {
       declared: content,
       effective: content.optional(),
     }),
   ],
   "memory change show": [
-    receipt("reviewer-memory-change-show-1", "--part summary", {
+    receipt("reviewer-memory-change-show-1", "--part summary",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。 使用本身份授权的 Project 或显式冻结范围。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
@@ -286,13 +320,15 @@ export const reviewerContracts = {
       baseRevision: text,
       files: list(publicMemoryChangeShowFilesItem),
     }),
-    receipt("reviewer-memory-change-show-2", "--part validation", {
+    receipt("reviewer-memory-change-show-2", "--part validation",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。 使用本身份授权的 Project 或显式冻结范围。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
       validation: publicMemoryChangeShowValidation,
     }),
-    receipt("reviewer-memory-change-show-3", "--part memory", {
+    receipt("reviewer-memory-change-show-3", "--part memory",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。 使用本身份授权的 Project 或显式冻结范围。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
@@ -301,7 +337,8 @@ export const reviewerContracts = {
       operation: text,
       content: either(text, nil),
     }),
-    receipt("reviewer-memory-change-show-4", "--part diff", {
+    receipt("reviewer-memory-change-show-4", "--part diff",
+      { rule: "只给选中 checkpoint 和 part；指定文件不存在的一侧用 null。 使用本身份授权的 Project 或显式冻结范围。" }, {
       changeId: text,
       project: text,
       checkpointDigest: text,
@@ -309,7 +346,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review comment add": [
-    receipt("reviewer-run-review-comment-add-1", "修改本人意见", {
+    receipt("reviewer-run-review-comment-add-1", "修改本人意见",
+      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -319,7 +357,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review comment update": [
-    receipt("reviewer-run-review-comment-update-1", "修改本人意见", {
+    receipt("reviewer-run-review-comment-update-1", "修改本人意见",
+      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -329,7 +368,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review comment delete": [
-    receipt("reviewer-run-review-comment-delete-1", "修改本人意见", {
+    receipt("reviewer-run-review-comment-delete-1", "修改本人意见",
+      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -339,7 +379,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review report": [
-    receipt("reviewer-run-review-report-1", "保存节点判断", {
+    receipt("reviewer-run-review-report-1", "保存节点判断",
+      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -349,7 +390,8 @@ export const reviewerContracts = {
     }),
   ],
   "run review update": [
-    receipt("reviewer-run-review-update-1", "保存节点判断", {
+    receipt("reviewer-run-review-update-1", "保存节点判断",
+      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
