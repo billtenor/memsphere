@@ -73,7 +73,7 @@ expense-project submit --id RECORD_ID --revision "STORE_ISSUED_REVISION"
 
 Run `expense-project` in the bound workspace. It resolves the current installer binding for each call. Amount must be positive, description nonempty, and only a draft at the expected revision may be submitted. Copy the revision string returned by `create` or `list` unchanged; it is a Store-issued token. Both entrypoints call `backend/business.mjs`. View lists up to 100 records; CLI `list --cursor <cursor>` continues pagination.
 
-Agent 必须带上 show 返回的固定参数和工作目录。金额为正、说明非空，只有 revision 匹配的草稿可提交。revision 是 Store 签发的字符串，须原样使用 create 或 list 返回的值。CLI 写入后点击页面刷新即可看到；View 写入后 CLI list 可查到。
+在已绑定的工作区中运行 `expense-project`。每次调用时，入口都会读取当前安装绑定。金额为正、说明非空，只有 revision 匹配的草稿可提交。revision 是 Store 签发的字符串，须原样使用 create 或 list 返回的值。CLI 写入后点击页面刷新即可看到；View 写入后 CLI list 可查到。
 
 Use a different ledger directory for each Project to isolate business data. Disablement blocks new App requests and removes View contributions after restart, while preserving data and readable Memory. It does not disable the standalone executable. Upgrade and uninstall are outside this version.
 
