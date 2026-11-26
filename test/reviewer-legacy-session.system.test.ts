@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import crossSpawn from "cross-spawn";
 import { reviewNodeFixture } from "./helpers/review-nodes.js";
 import * as reviews from "../src/context_control/review-repository.js";
@@ -45,6 +45,10 @@ test('legacy fixed Step reads reject targets outside the pinned submission',asyn
    assert.equal(text.status, 0, text.stderr);
    assert.ok(text.stdout.includes(value.stepIds[0]));
  }
+ const exported = cli(["run", "artifact", "show", "--out", "candidate.md", "--output", "json"]);
+ assert.equal(exported.status, 0, exported.stderr);
+ assert.deepEqual(JSON.parse(exported.stdout), {out: "candidate.md"});
+ assert.equal(await readFile(join(f.cwd, "candidate.md"), "utf8"), "Candidate");
  const wrong=cli(['run','artifact','show','--run',f.runId,'--step','outside','--output','json']);assert.equal(wrong.status,1);assert.equal(wrong.stdout,'');assert.match(wrong.stderr,/REVIEW_RESOURCE_DENIED/);
 
 });

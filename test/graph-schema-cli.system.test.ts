@@ -33,6 +33,12 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
     assert.equal(state.phase, "not_started");
     assert.ok(state.nextAction.args.includes("enter-schema"));
   }
+  const mutations = [["schema", "report", "--artifact", "{}"], ["repeat", "0"], ["skip"]];
+  for (const operation of mutations) {
+    await assert.rejects(call("run", ...operation, ...target, "--position", "unopened"), /STEP_NOT_RUNNING/);
+    await assert.rejects(call("continue", ...operation, "--position", "unopened"), /STEP_NOT_RUNNING/);
+  }
+  assert.equal((await call("run", "schema", "show", ...target)).phase, "not_started");
   const initial = await call("continue", "enter-schema");
   const saved = await call("continue", "schema", "report", "--position", initial.position, "--artifact", '{"summary":"draft"}');
   assert.equal(saved.artifactId, initial.artifactId); assert.equal(saved.phase, "awaiting_finalization");
@@ -47,6 +53,10 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const native = await call("run", "schema", "show", ...target);
   assert.equal(native.phase, "awaiting_finalization");
   assert.equal(native.artifactId, initial.artifactId);
+  for (const draft of [await call("run", "enter-schema", ...target), await call("continue", "enter-schema")]) {
+    assert.equal(draft.phase, "awaiting_finalization");
+    assert.equal(draft.artifactId, initial.artifactId);
+  }
   const nativeCopy = join(f.directory, "native-copy.json");
   const nativeExport = await call("run", "artifact", "export", ...target, "--file", nativeCopy);
   assert.equal(nativeExport.exported, nativeCopy);
@@ -59,6 +69,10 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   await writeFile(copy, '{"summary":"final"}');
   const submitted = await call(...exported.nextAction.args.slice(2));
   assert.equal(submitted.artifactId, initial.artifactId); assert.equal(submitted.status, "done");
+  for (const operation of mutations) {
+    await assert.rejects(call("run", ...operation, ...target, "--position", initial.position), /STEP_NOT_RUNNING|RUN_FINISHED/);
+  }
+  assert.equal((await call("run", "schema", "show", ...target)).phase, "submitted");
 });
 
 test("Schema native entry and Continue retain all rule scopes, input links and Human responsibility", { timeout: 90000 }, async t => {

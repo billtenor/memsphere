@@ -155,6 +155,14 @@ test("graph binding show and update distinguish the frozen round from the next r
   const f = await fixture(t, [action("deliver", "START", true)], ["first", "second"]);
   const produced = await f.seed("deliver", "candidate");
   const run = ["--run", f.runId], slot = "cli-evidence::check";
+  const step = ["--step", produced.stepId];
+  const items = JSON.parse(f.runner(["run", "artifact", "show", ...run, ...step, "--output", "json"]).stdout).items;
+  assert.deepEqual(items.map((a: {artifactId: string}) => a.artifactId), [produced.artifactId]);
+  const contract = JSON.parse(f.runner(["run", "artifact", "contract", "show", ...run, ...step, "--output", "json"]).stdout);
+  assert.equal(contract.name, "deliver");
+  assert.equal(contract.contentType, "text/plain");
+  const status = JSON.parse(f.runner(["run", "status", ...run, "--output", "json"]).stdout);
+  assert.equal(status.reviewId, reviews.graphReviewHandle(f.runId, produced.stepId));
   const show = ["run", "binding", "show", ...run], update = ["run", "binding", "update", ...run, "--slot", slot, "--actor", "first"];
   const original = JSON.parse(f.runner([...show, "--output", "json"]).stdout);
   assert.deepEqual(original.nextRound[slot].actorIds, ["first", "second"]);

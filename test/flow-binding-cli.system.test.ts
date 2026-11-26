@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 import { parseControlPlaneConfig } from "../src/control-plane/index.js";
@@ -29,7 +29,9 @@ flow:
       actors: Object.fromEntries(["original", "next"].map(id => [id,
         { kind: "human", name: id, permissions: ["artifact.read", "decision.decide"] }]))
     }), reviewConfiguration: reviewConfiguration({ procedure: "delivery", slots: { owner: ["original"] } }) });
-  const reported = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "Published candidate" } });
+  const sourceFile = join(f.directory, "original.md");
+  await writeFile(sourceFile, "Published candidate");
+  const reported = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "file", path: sourceFile } });
   const review = currentArtifactReview(reported)!;
   const roundId = review.currentRoundId;
   const env = { ...process.env, MEMSPHERE_HOME: f.home };
@@ -55,6 +57,10 @@ flow:
   assert.equal(receipt.source, "review_submission");
   assert.equal(receipt.artifact.value, "Published candidate");
   assert.ok((await call(["artifact", "show", ...target])).includes("Published candidate"));
+  const output = join(f.directory, "export.md");
+  const exported = JSON.parse(await call(["artifact", "export", ...target, "--file", output], true));
+  assert.equal(exported.exported, output);
+  assert.equal(await readFile(output, "utf8"), "Published candidate");
   for (const args of [["step", "show", ...target], ["artifact", "contract", "show", ...target]]) {
     const detail = JSON.parse(await call(args, true));
     assert.ok(JSON.stringify(detail).includes("delivery"));

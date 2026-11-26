@@ -218,6 +218,19 @@ test('submitted Assignments retain fixed reads and reject further writes', { tim
   let context = await reviews.readArtifactReviewForActor(input);
   while (currentReviewNode(context.assignment)) context = await reviews.mutateArtifactReviewNodes({ ...input, attemptId: first.attempt.id, mutation: { operation: "report", expectedNodeId: currentReviewNode(context.assignment)!.nodeId, artifact: { applicable: true } } });
   await reviews.submitArtifactReviewAgentAssignment({ ...input, attemptId: first.attempt.id, vote: "approve" });
+  for (const entry of [["run", "review"], ["continue"]]) {
+    const list = await cli([...entry, "list", "--output", "json"]);
+    assert.equal(list.status, 0, list.stderr);
+    assert.ok(JSON.parse(list.stdout).tree);
+    for (const flags of [[], ["--all"]]) {
+      const shown = await cli([...entry, "show", ...flags, "--output", "json"]);
+      assert.equal(shown.status, 0, shown.stderr);
+      const view = JSON.parse(shown.stdout);
+      assert.equal(view.progress.phase, "submitted");
+      assert.ok(view.nodes.length);
+      assert.equal(view.nextAction, undefined);
+    }
+  }
   const submitted = await cli(["run", "artifact", "show", "--output", "json"]); assert.equal(submitted.status, 0, submitted.stderr);
   const write = await cli(["continue", "report", "--artifact", '{"applicable":true}', "--output", "json"]); assert.notEqual(write.status, 0); assert.equal(write.stdout, "");
 

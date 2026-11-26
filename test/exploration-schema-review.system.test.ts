@@ -269,8 +269,13 @@ test("a restricted exploration Reviewer CLI reads only the materials bound to it
   const f = await fixture(t), run = await f.service.start("Restricted review materials", "en");
   const attached = await f.service.addExternal(run.id, "used", { content: textContent("authorized source") });
   const unattached = await f.service.addExternal(run.id, "not used", { content: textContent("unattached source") });
+  const body = "private\0payload";
+  const opaque = { model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "application/octet-stream", content: body } };
+  const binaryExternal = await f.service.addExternal(run.id, "opaque source", { content: opaque });
+  const binaryArtifact = await f.service.report(run.id, {name: "opaque artifact", content: opaque});
   const { artifact, step } = await f.service.report(run.id, {
-    name: "candidate", content: textContent("review this"), dependencies: [{ kind: "external", id: attached.id }]
+    name: "candidate", content: textContent("review this"), dependencies: [{ kind: "external", id: attached.id },
+      {kind: "external", id: binaryExternal.id}, {kind: "artifact", id: binaryArtifact.artifact.id}]
   });
   await f.service.configureExplorationStep(run.id, step.id, { asserts: ["statements/fact"], reviewer: "project:reader" });
   const pending = await new ExplorationReviews(f.service).start(delegatedReviewConfig(f.config), run.id, artifact.id);
@@ -305,6 +310,20 @@ test("a restricted exploration Reviewer CLI reads only the materials bound to it
   const external = (id: string) => read("run", "external", "show", "--run", run.id, "--external", id);
   assert.equal(JSON.parse((await external(attached.id)).stdout).source, "used");
   await assert.rejects(external(unattached.id), /REVIEW_RESOURCE_DENIED|outside this Review/);
+  for (const [kind, id] of [["artifact", binaryArtifact.artifact.id], ["external", binaryExternal.id]]) {
+    const args = ["run", kind, "show", "--run", run.id, "--" + kind, id];
+    const native = await f.call(...args);
+    const restricted = JSON.parse((await read(...args)).stdout);
+    for (const receipt of [native, restricted]) {
+      assert.equal(receipt.id, id);
+      assert.equal(receipt.contentType, "application/octet-stream");
+      assert.equal(receipt.content, undefined);
+      assert.ok(receipt.nextAction.args.includes("--out"));
+    }
+    const out = "copy-" + kind + ".bin";
+    await read(...args, "--out", out);
+    assert.deepEqual(await readFile(join(f.cwd, out)), Buffer.from(body));
+  }
 });
 
 test("delegated exploration Review retries in the same round after saving a node and the Worker exits", { timeout: 60000 }, async t => {
