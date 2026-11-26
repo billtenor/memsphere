@@ -120,3 +120,24 @@ test("Runner follows a completed review receipt to its authorized round details"
   assert.equal(detail.assignments[0].actorId, "reader");
   assert.equal(detail.assignments[0].vote, "approve");
 });
+
+test("a large authorized round keeps its total and bounds assignment summaries", async t => {
+  const f = await fixture(t, [action("deliver", "START", true)]);
+  const candidate = await f.produce("deliver", "candidate");
+  const reviewer = await f.claim(candidate.stepId);
+  const context = await reviews.readArtifactReviewForRunner(reviewer.input);
+  const assignments = Array.from({ length: 12 }, (_, index) => ({
+    ...context.round.assignments[0], id: "assignment-" + index, actorId: "actor-" + index
+  }));
+  const { reviewReceipt } = await import("../src/commands/review-output.js");
+  let output = "";
+  const capture = t.mock.method(process.stdout, "write", (chunk: string) => { output += chunk; return true; });
+  try {
+    reviewReceipt("run review show", { ...context, round: { ...context.round, assignments },
+      format: "json", fullComments: true, statusOnly: true });
+  } finally { capture.mock.restore(); }
+  const result = JSON.parse(output);
+  assert.equal(result.assignmentCount, 12);
+  assert.deepEqual(result.assignments.map((entry: { assignmentId: string }) => entry.assignmentId),
+    assignments.slice(0, 10).map(entry => entry.id));
+});

@@ -87,7 +87,7 @@ export function reviewReceipt(command: ReviewReceiptCommand, input: {
       disposition: round.commentDispositions?.find(d => d.commentId === commentId)?.disposition
     };
   }));
-  const assignments = input.fullComments ? round.assignments : round.assignments.slice(0, 10);
+  const assignments = round.assignments.slice(0, 10);
   publishResult(command, () => reviewReceipts[command].parse({
     ...receipt,
     assignments: assignments.map(assignment => ({
