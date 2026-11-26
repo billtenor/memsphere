@@ -15,7 +15,7 @@ async function schemaCliFixture(t: test.TestContext) {
   config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
   await writeFile(join(f.root, "config.json"), JSON.stringify(config));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
-  const env = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "", MEMSPHERE_REVIEW_SESSION_ID: "", CODEX_THREAD_ID: "schema-cli", TRAECLI_THREAD_ID: "" };
+  const env = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "", MEMSPHERE_REVIEW_SESSION_ID: "", CODEX_THREAD_ID: "schema-cli", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
   const call = async (...args: string[]) => JSON.parse((await exec(process.execPath, [cli, "--project", "test-project", ...args, "--output", "json"], { cwd: f.root, env, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" })).stdout);
   const raw = async (...args: string[]) => (await exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" })).stdout;
   return { f, call, raw };

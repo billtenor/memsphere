@@ -16,7 +16,7 @@ async function fixture(t: test.TestContext, processBoundary = false) {
   const f = await initializedContextFixture(t);
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   const invoke = (...args: string[]) => {
-    const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "cli-test-session", TRAECLI_THREAD_ID: "" };
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "cli-test-session", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
     return processBoundary
       ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.cwd, env })
       : invokeCliModule(["--project", "test-project", ...args], f.cwd, env, cli);

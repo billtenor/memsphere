@@ -40,7 +40,7 @@ async function fixture(t: test.TestContext, multiple = false, prepared = true, p
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [cli-graph]\ndefines: [CLI graph]\nmode: graph\nactions:\n${action("A")}${multiple ? action("B") : ""}`);
   const invokeUsing = (native: boolean, args: string[]) => {
     t.signal.throwIfAborted();
-    const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "" };
+    const env = { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: "graph-session", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
     const result = native
       ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
       : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
@@ -141,6 +141,57 @@ test("independent CLI processes enter idempotently and complete different Steps 
   assert.deepEqual(result.steps.map((s: any) => s.status), ["done", "done"]);
   assert.equal(new Set(result.steps.map((s: any) => s.completionSequence)).size, 2);
   assert.equal(result.run.frames[0].graphFrame.processedStepIds.length, 2);
+});
+
+test("CLI isolates invalid ACP Providers and Actors until a Review Slot binds them", { timeout: 60000 }, async t => {
+  const f = await fixture(t);
+  const configPath = join(f.root, "config.json"), homeConfigPath = join(f.home, "config.json");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  const homeConfig = JSON.parse(await readFile(homeConfigPath, "utf8"));
+  const permissions = ["artifact.read", "decision.assess"];
+  config.control_plane = {
+    runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] },
+    actors: {
+      good: { kind: "agent", permissions, agent: { provider: "kimi" } },
+      unknown: { kind: "agent", permissions, agent: { provider: "future-provider" } },
+      damaged: { kind: "agent", permissions, agent: { provider: "codex" } },
+      malformed: { kind: "human", permissions: "artifact.read" },
+      runner: { kind: "human", permissions }
+    }
+  };
+  const home = { ...homeConfig, acp_providers: { claude: {}, codex: { startup_timeout_ms: 0 }, kimi: { startup_timeout_ms: 1000 } } };
+  await writeFile(configPath, JSON.stringify(config));
+  await writeFile(homeConfigPath, JSON.stringify(home));
+  await writeFile(f.procedure, (await readFile(f.procedure, "utf8")).replace("      payload:", "      review: [approval]\n      payload:"));
+  const binding = join(f.directory, "review.json");
+  const start = async (actorId: string) => {
+    await writeFile(binding, JSON.stringify({
+      reviews: { "cli-graph#actions[A]": { policy: "artifact_acceptance.unanimous" } },
+      slots: { "cli-graph::approval": { actors: [actorId] } }
+    }));
+    return f.call("run", "start", "--file", f.procedure, "--review-config", binding, "--name", "Review");
+  };
+
+  const { runId } = await start("good");
+  await f.call("run", "status", "--run", runId);
+  const overview = await f.call("run", "show", "--run", runId);
+  assert.equal(overview.run.id, runId);
+  assert.doesNotMatch(JSON.stringify(overview), /permissionConfig|startupTimeoutMs/);
+  const snapshot = await f.inspect(runId);
+  assert.deepEqual(Object.keys(snapshot.run.permissionConfig.actors), ["good"]);
+  assert.equal(snapshot.run.permissionConfig.actors.good.agent.startupTimeoutMs, 1000);
+  const beforeFailedStarts = (await f.invoke("run", "status")).stdout;
+  await assert.rejects(start("unknown"), /INVALID_ARGUMENT/);
+  await assert.rejects(start("damaged"), /INVALID_ARGUMENT/);
+  await assert.rejects(start("malformed"), /INVALID_ARGUMENT/);
+  await assert.rejects(start("runner"), /INVALID_ARGUMENT/);
+  assert.equal((await f.invoke("run", "status")).stdout, beforeFailedStarts);
+
+  home.acp_providers.kimi.startup_timeout_ms = 0;
+  await writeFile(homeConfigPath, JSON.stringify(home));
+  await f.call("run", "status", "--run", runId);
+  const historical = await f.inspect(runId);
+  assert.deepEqual(historical.run.permissionConfig, snapshot.run.permissionConfig);
 });
 
 test("CLI module Continue binds Human authorization and advisory resolution to its Step and closes after Runner acceptance", { timeout: 120000 }, async t => {
@@ -299,7 +350,7 @@ test('rewind JSON argument and superseded errors use the structured stderr contr
     [['run', 'step', 'rewind', '--run', start.runId, '--step', old, '--dry-run'], 'STEP_SUPERSEDED']
   ];
   for (const [args, code] of cases) {
-    await assert.rejects(exec(process.execPath, [cli, '--project', 'test-project', ...args, '--output', 'json'], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: 'graph-session', TRAECLI_THREAD_ID: '' } }), (error: any) => {
+    await assert.rejects(exec(process.execPath, [cli, '--project', 'test-project', ...args, '--output', 'json'], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home, XDG_RUNTIME_DIR: f.directory, CODEX_THREAD_ID: 'graph-session', TRAECLI_THREAD_ID: '', CLAUDE_CODE_SESSION_ID: '' } }), (error: any) => {
       assert.equal(error.code, 1); assert.equal(error.stdout, '');
       const result = JSON.parse(error.stderr);
       assert.equal(result.error.code, code);

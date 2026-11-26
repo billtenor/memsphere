@@ -11,7 +11,7 @@ export const runnerContracts = {
   "runner identity": [
     receipt("cli-runner-identity-1", "识别成功", {
       identified: bool,
-      agentType: oneOf("codex", "traex"),
+      agentType: oneOf("codex", "traex", "claude"),
     }),
     receipt("cli-runner-identity-2", "未识别", {
       identified: bool,

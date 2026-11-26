@@ -1636,7 +1636,7 @@
     },
     "cli-runner-identity-1": {
       "identified": "boolean",
-      "agentType": "\"codex\"|\"traex\""
+      "agentType": "\"claude\"|\"codex\"|\"traex\""
     },
     "cli-runner-identity-2": {
       "identified": "boolean"

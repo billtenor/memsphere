@@ -1,5 +1,5 @@
 import type { PermissionId } from "./catalog.js";
-import type { AcpProviderInstance, AcpProviderType } from "../acp/catalog.js";
+import type { AcpProviderInstance } from "../acp/catalog.js";
 
 export type PermissionLocale = "zh-CN" | "en";
 
@@ -13,7 +13,7 @@ export type AgentActorRuntime = {
   kind: "agent";
   agent: {
     provider: string;
-    providerType: AcpProviderType;
+    providerType: string;
     command: string;
     args: string[];
     env: Record<string, string>;
@@ -38,6 +38,7 @@ export type ControlPlaneConfig = {
   runner: RunnerAuthority;
   acpProviders: Record<string, AcpProviderInstance>;
   actors: Record<string, ControlPlaneActor>;
+  actorErrors?: ReadonlyMap<string, string>;
 };
 
 export type SlotBindings = Record<string, { actorIds: string[]; source: string; skipped?: boolean }>;

@@ -25,7 +25,7 @@ const operations: Array<[string[], string, string[]]> = [
   [["skip"], "schema-skip", ["position", "output"]],
   [["repeat"], "schema-repeat", ["position", "output"]],
   [["artifact", "export"], "schema-export", ["file", "force", "output"]],
-  [["review", "wait"], "review-wait", ["output"]],
+  [["review", "wait"], "review-wait", ["callback", "output"]],
   [["review", "vote"], "review-vote", ["vote", "comment", "commentFile", "output"]],
   [["review", "resolve"], "review-resolve", ["comment", "disposition", "note", "noteFile", "validationSummary", "validationSummaryFile", "output"]],
   [["review", "submit-for-human"], "review-submit-for-human", ["assignment", "vote", "commentsFile", "summary", "summaryFile", "authorizationNote", "authorizationNoteFile", "output"]],
@@ -74,7 +74,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     });
     await writeCliChunk(renderPrompt("cli.continue", cliLocale(), cliContinueSchema.parse(receipt)) + "\n");
   };
-  const load = async () => {
+  const loadContext = async () => {
     const row = (await currentCommandState(true))!;
     const project = row.value.parameters.project;
     if (!project) throw failure("INVALID_STATE", "CommandState has no project");
@@ -84,16 +84,19 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     const config = await readConfig();
     const service = await openContextControl(config.scopeRoot);
     const run = service && await service.findRun(row.value.groupId);
-    if (!run) throw failure("NOT_FOUND", "CommandState does not refer to a model-backed Run");
+    if (!service || !run) throw failure("NOT_FOUND", "CommandState does not refer to a model-backed Run");
     const stepId = row.value.parameters.step;
     const graph = isGraphRun(run);
     if (graph && !stepId) throw failure("INVALID_STATE", "Graph CommandState requires a fixed Step binding");
-    const step = stepId ? graph ? (await service!.inspect(run.id)).steps.find(s => s.id === stepId) : await service!.explorationStep(run.id, stepId) : undefined;
+    const step = stepId ? graph ? (await service.inspect(run.id)).steps.find(s => s.id === stepId) : await service.explorationStep(run.id, stepId) : undefined;
     if (stepId && !step) throw failure("NOT_FOUND", "CommandState Step not found");
     if (graph && stepId) requireEffectiveStep(run, stepId);
-    return { ...row.value, row, graph, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: graph ? step?.status ?? run.status : run.status, available: row.value.status === "active" && run.status === "running" && (!graph || step?.status !== "done") };
+    return { ...row.value, row, graph, scope: { config, service }, roundId: step?.reviewRounds?.at(-1)?.id, runStatus: graph ? step?.status ?? run.status : run.status, available: row.value.status === "active" && run.status === "running" && (!graph || step?.status !== "done") };
   };
+  let context: ReturnType<typeof loadContext> | undefined;
+  const load = () => context ??= loadContext();
   continuation.action(async () => {
+    context = undefined;
     const tail = continuation.args;
     if (reviewerRouter) {
       await parseCli(reviewerRouter, [process.execPath, "continue", ...(tail.length ? tail : ["--help"])], { rethrow: true });
@@ -124,21 +127,23 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
     if (operation === "schema-repeat") command.argument("<count>", "Repeat count");
     if (operation === "schema-enter") command.argument("[schema-name]", "Schema for a new free exploration draft");
     command.action(async (...args: unknown[]) => {
-      const options = (operation === "schema-repeat" ? { ...(args[1] as Options), count: args[0] as string } : operation === "schema-enter" ? { ...(args[1] as Options), schemaName: args[0] as string } : args[0]) as Options & { help?: boolean };
+      const options = (operation === "schema-repeat" ? { ...(args[1] as Options), count: args[0] as string } : operation === "schema-enter" ? { ...(args[1] as Options), schemaName: args[0] as string } : args[0]) as Options & { help?: boolean; callback?: string };
       if (options.help) { await help(target); return; }
       const context = await load();
       const reviewId = context.parameters.review;
       if (!context.graph && ["review-show", "review-list"].includes(operation)) {
         if (operation === "review-show" && !reviewId) throw failure("INVALID_ARGUMENT", "Enter a Review with run enter --run R --review V");
-        await contextOnlyCommand(operation, { ...options, run: context.groupId, review: reviewId });
+        await contextOnlyCommand(operation, { ...options, run: context.groupId, review: reviewId }, context.scope);
         return;
       }
-      if (!context.available) throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
+      if (!context.available && !(operation === "review-wait" && options.callback !== undefined)) {
+        throw failure("RUN_FINISHED", `No transitions available (${context.runStatus})`);
+      }
       if (reviewId) {
         if (operation === "review-wait") await (await import("./run.js")).runReviewWaitCommand({ review: reviewId, ...options, sessionRow: context.row });
         else if (operation === "review-retry") await (await import("./run.js")).runReviewRetryCommand({ ...options, review: reviewId });
         else if (["review-report", "review-update", "review-comment-add", "review-comment-update", "review-comment-delete", "review-submit"].includes(operation))
-          await reviewNodeCommand(operation.slice(7), { ...(options as ReviewNodeOptions), run: context.groupId, review: reviewId, sessionRow: context.row });
+          await reviewNodeCommand(operation.slice(7), { ...(options as ReviewNodeOptions), run: context.groupId, review: reviewId, sessionRow: context.row }, context.scope);
         else throw failure("SESSION_CONTEXT_CONFLICT", "Return to the general Run context with run enter --run R");
         return;
       }
@@ -160,7 +165,7 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       if (!step && operation.startsWith("schema-") && operation !== "schema-enter") throw failure("INVALID_ARGUMENT", "Enter a Schema draft first with run enter-schema --run R --step S");
       if (!context.graph && ["review-report", "review-update", "review-comment-add", "review-comment-update", "review-comment-delete", "review-submit"].includes(operation))
         throw failure("INVALID_ARGUMENT", "Enter a Review with run enter --run R --review V");
-      await contextOnlyCommand(operation, { ...options, run: context.groupId, step, sessionStateId: context.id, sessionRow: context.row });
+      await contextOnlyCommand(operation, { ...options, run: context.groupId, step, sessionStateId: context.id, sessionRow: context.row }, context.scope);
     });
   }
 }

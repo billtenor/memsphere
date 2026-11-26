@@ -305,11 +305,11 @@ export function renderCliError(result: PublicCliError, format: CliFormat, locale
   }
 }
 
-export async function emitCliError(error: CliOutputError | PublicCliError): Promise<void> {
+export async function emitCliError(error: CliOutputError | PublicCliError, options: { nonfatal?: boolean } = {}): Promise<void> {
   const result = error instanceof CliOutputError
     ? { code: error.code, details: error.saved ? { savedId: error.saved.id } : undefined, nextAction: error.saved?.inspect }
     : error;
-  process.exitCode = 1;
+  if (!options.nonfatal) process.exitCode = 1;
   try { await writeCliChunk(renderCliError(result, cliFormat(), cliLocale()), process.stderr); }
   catch { /* Both channels may have closed. The exit status still records failure. */ }
 }

@@ -17,20 +17,25 @@ export async function ownedProcessObserver(child: ChildProcessWithoutNullStreams
   const closed = once(child, "close");
   let stderr = "";
   child.stderr.on("data", value => { stderr += String(value); });
-  let failTransport!: (error: Error) => void;
+  let failTransport!: (reason: unknown) => void;
   const transportFailure = new Promise<never>((_, reject) => { failTransport = reject; });
   void transportFailure.catch(() => {});
   child.stdin.on("error", error => { stderr += String(error); failTransport(error); });
   const lines = createInterface({ input: child.stdout });
   const messages: string[] = [];
   let deliver: ((line: string) => void) | undefined;
-  let failed: unknown;
+  let failed: { reason: unknown } | undefined;
   lines.on("line", line => {
     if (failed) return;
     if (deliver) { const resolve = deliver; deliver = undefined; resolve(line); } else messages.push(line);
   });
-  const abort = () => { if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL"); };
+  const abort = () => {
+    failed ??= { reason: signal!.reason };
+    failTransport(failed.reason);
+    if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+  };
   signal?.addEventListener("abort", abort, { once: true });
+  if (signal?.aborted) abort();
   let disposing: Promise<void> | undefined;
   const dispose = () => disposing ??= (async () => {
     signal?.removeEventListener("abort", abort);
@@ -41,13 +46,15 @@ export async function ownedProcessObserver(child: ChildProcessWithoutNullStreams
   })();
   const next = async (timeoutMs = 15_000) => {
     try {
-      return await bounded(Promise.race([
+      const line = await bounded(Promise.race([
         messages.length ? Promise.resolve(messages.shift()!) : new Promise<string>(resolve => { deliver = resolve; }),
         transportFailure,
         closed.then(([code]) => { throw Error(`CIM observer closed (${code}): ${stderr}`); })
       ]), "fresh fixture CIM response", timeoutMs);
+      signal?.throwIfAborted();
+      return line;
     } catch (error) {
-      failed = error;
+      failed ??= { reason: error };
       try { await dispose(); } catch (cleanupError) { throw new AggregateError([error, cleanupError], "CIM observer failure and cleanup"); }
       throw error;
     }
@@ -59,7 +66,7 @@ export async function ownedProcessObserver(child: ChildProcessWithoutNullStreams
     return {
       query(pids: number[]) {
         const response = queue.then(async () => {
-          if (failed) throw failed;
+          if (failed) throw failed.reason;
           if (stopped) throw Error("CIM observer is closed");
           if (!pids.length || pids.some(pid => !Number.isSafeInteger(pid) || pid < 1)) throw Error("Invalid fixture PIDs");
           const result = next(responseTimeoutMs); // Attach the reader before sending the request.
@@ -78,7 +85,7 @@ export async function ownedProcessObserver(child: ChildProcessWithoutNullStreams
           await queue;
           child.stdin.end('{"close":true}\n');
           const [code] = await bounded(closed, "owned CIM observer exit");
-          if (code !== 0) throw Error(`CIM observer failed (${code}): ${stderr}`);
+          if (code !== 0 && !signal?.aborted) throw Error(`CIM observer failed (${code}): ${stderr}`);
         } finally { await dispose(); }
       }
     };

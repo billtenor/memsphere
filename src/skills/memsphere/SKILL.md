@@ -173,7 +173,7 @@ Agent Reviewer 收到节点提示时，系统已冻结材料并建树，按当�
 
 
 - report 返回正式 `review_id` 后执行 `run review wait --review <id>`。评审未决不执行后续 Action。Agent Reviewer 通过 ACP 自动派发，必须通过本 Attempt 注入的 Session launcher 提交意见和 Vote；普通文本回复不是正式投票。
-- `review wait` 先判断当前结果是否可返回；可返回时给出轮次、分派与意见计数及下一步；有权读取明细时，按回执的 `details` 命令读取该轮结果，否则按当前 Runner 配置选择异步或同步，不使用 `--sync`。异步开启后，只复用 queued/running 活动任务；历史终态记录保留，新的必要等待创建新任务。登记成功后可以结束当前回合直到 queue 通知唤醒。通知格式固定为 `[Memsphere 自动消息]`、`请执行命令以继续：`、显式定位 Project/Review 的 wait 命令三行，不携带结果，也不是 Human 指令、授权或投票；执行该命令读取当前正式结果并继续同一个 Run，旧通知不得覆盖当前会话绑定。任务状态用原生 `run review wait status --review R` 查询，failed 可用 `retry --review R --round ROUND` 显式重试发送，可能重复投递；通知发送失败不再自动发送第二条。身份模式 wait/status 不进入后继 Step，按工具响应的原生 enter 命令继续。同步 `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
+- `review wait` 先判断当前结果是否可返回；可返回时给出轮次、分派与意见计数及下一步，按回执的 details 命令读取获授权的明细，否则按当前 Runner 配置选择异步或同步，不使用 `--sync`。异步开启后，只复用 queued/running 活动任务；历史终态记录保留，新的必要等待创建新任务。登记成功后可以结束当前回合直到后台通知唤醒。Claude Code 的收件箱写成功后标记发送完成，原会话执行带投递标识的 wait 并读取固定轮次时独立记录回读。当前会话没有可用收件箱时，可关闭该 Runner 的异步开关并同步等待。通知格式固定为 `[Memsphere 自动消息]`、`请执行命令以继续：`、显式定位 Project/Review 的 wait 命令三行，不携带结果，也不是 Human 指令、授权或投票；执行该命令读取当前正式结果并继续同一个 Run，旧通知不得覆盖当前会话绑定。任务状态用原生 `run review wait status --review R` 查询，failed 可用 `retry --review R --round ROUND` 显式重试发送，可能重复投递；通知发送失败不再自动发送第二条。身份模式 wait/status 不进入后继 Step，按工具响应的原生 enter 命令继续。同步 `review wait` 会阻塞等待结果；宿主返回运行中句柄时，使用宿主等待工具继续等待同一调用，不重复启动 wait 或额外轮询状态。等待期间不得为填充时间自行增加自查、测试、文档、重构、重复读取材料或预先修订已提交产物。收到正式结果、明确失败或用户新指令后再采取相应行动；当前轮次要求的 Human 投票仍按下文收集。
 - Agent Assignment 首次失败时，Runner 用 `run review retry --review <id> --assignment <id>` 重试一次并继续 wait；再次失败时报告 Provider/Attempt/错误，取得 Human 对继续重试的授权后再执行。调试启动可按需使用 `debug.agent_review` 与 `run try-run`，后者只生成启动材料，不执行 Reviewer 或认领 Assignment。
 - 同步和异步 `review wait` 只等待 Agent：全部 Agent 提交或任一 Agent 失败即返回/通知；没有 Agent 时立即返回，Human 草稿和投票不影响等待。Agent 等待就绪不表示整体评审通过；Human 的最终验收门禁单独保留。
 - Agent 意见收齐后，阅读、处置全部 Agent 意见，由 Runner 按提示显式 `run review vote --review <id> --round <id> --vote approve`，或 `--vote request_changes --comment <reason>`，无需等待 Human。整体状态可以仍为 pending。Runner 要求修改时直接进入修订，不要求 Human 先为旧候选补票；修正后用完整 Artifact 和 `--revision-summary-file <file>` 原子重报。建议票不能替代 Runner 决定，也不扩大 Human 授权或豁免适用规则；处置用 `run review resolve`。
@@ -278,13 +278,15 @@ View 的模型市场提供精选模型的显式导入；未导入模型不在 Pr
 
 ## 配置运行环境与 View
 
-每个 Memsphere Home 运行统一 daemon，用 `daemon start/status/stop/restart` 管理。View 用 `view start/status/restart/stop` 管理，启停意图持久化，daemon 重启恢复；停止 View 不影响异步任务。首次启动 daemon 不开启 View；未安装 OS 自启动服务。Home 配置中的 Runner Agent 可探测 Codex/Traex，分别开启身份和异步执行，缺省关闭。Project 选择器切换展示目标。
+每个 Memsphere Home 运行统一 daemon，用 `daemon start/status/stop/restart` 管理。View 用 `view start/status/restart/stop` 管理，启停意图持久化，daemon 重启恢复；停止 View 不影响异步任务。首次启动 daemon 不开启 View；未安装 OS 自启动服务。Home 配置中的 Runner Agent 可探测 Codex、Traex 和 Claude Code，分别开启身份和异步执行，缺省关闭。Project 选择器切换展示目标。
 
 Home config.json 的 language 支持 zh-CN/en，缺省 zh-CN，同时影响 Agent 工作语言和固定 UI 文案；Run 冻结启动时工作语言，配置保存后的新页面使用新 UI 语言。
 
 配置中心分 Home 与当前 Project：Home 维护语言、View 服务、ACP Provider、主题/界面组合；Project 维护 Store、Control Plane、Runner 和 Human/Agent Actor。按 scope 审阅 diff 后保存；host/port 或界面组合变化需重启 View，语言保存后下一次加载生效。Actor 权限使用 Catalog，Memsphere Permission 不等于操作系统或网络授权。 设置页删除和卸载先弹出确认，取消不修改草稿。
 
-Agent Actor 指向 Home ACP Provider 实例和可选 model，Provider 当前支持 traex/qwen/kimi/codex；安装、认证和账户由 Provider 自己负责。Human Actor 不配置 system_prompt。Provider 的非托管参数、非敏感环境变量及 timeout 在 Home 配置，工作目录与托管安全参数由运行时管理。
+Agent Actor 指向 Home ACP Provider 实例和可选 model，Provider 当前支持 traex/qwen/kimi/codex/claude；安装、认证和账户由 Provider 自己负责。Human Actor 不配置 system_prompt。Provider 的非托管参数、非敏感环境变量及 timeout 在 Home 配置，工作目录与托管安全参数由运行时管理。
+
+单个 Provider 或 Actor 配置无效时，Run 查询、其他 Actor 和无关设置仍可用。显式绑定或启动受影响的评审时，按诊断修复相关条目。设置保存无关修改时保留已有的无效条目，新提交的条目仍需通过校验。旧 Run 使用冻结配置，CLI 不支持其中的 Provider 类型时仍可查询该 Run，启动对应 Agent 才报错。
 
 在“设置 → App 配置”中选择已安装的 App，可编辑其持久化配置，停用的 App 也可配置。View 与 `app configure` 共用安装状态，`app show` 返回当前配置和配置版本；版本冲突保留草稿，先重新读取核对，不自动覆盖。无效 JSON 会阻止校验/保存；保存超时仅表示结果未确认，重新读取核实。写盘成功与运行中 View 应用分开，按提示重启。
 

@@ -4,15 +4,16 @@ import { authoredArtifact, flowArtifactDetail, flowBindings, flowBindingUpdate, 
 import { runOverviewSchema } from "./run-result.js";
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
-import { cliCommand, publishResult, paginateCliItems, previewText } from "./output.js";
+import { cliCommand, emitCliError, flushCliOutput, publishResult, paginateCliItems, previewText } from "./output.js";
 import { reviewReceipt } from "./review-output.js";
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
-import { currentIdentity, readRunnerAgents, detectRunnerAgents, checkQueueCapability } from "../runner/identity.js";
+import { currentIdentity, readRunnerAgents, detectRunnerAgent, checkQueueCapability } from "../runner/identity.js";
 import { currentCommandState, assertSessionTarget, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 import { explorationReviewIdentity } from "../context_control/exploration-review.js";
 import { inspectReview, reviewReady } from "../daemon/review.js";
-import { ensureDaemon, daemonControl } from "../daemon/service.js";
-import { registerTask } from "../daemon/tasks.js";
+import { ensureDaemon, ensureClaudeNotificationDaemon, daemonControl } from "../daemon/service.js";
+import { registerTask, type DaemonTask } from "../daemon/tasks.js";
+import { prepareClaudeReviewRecipient, readClaudeReviewCallback } from "../daemon/claude-review-callback.js";
 import { tryContextCommand, startExploration, contextRunList } from "./context-control.js";
 import { graphCommand, startGraphIfApplicable, printGraphStart, printGraphReviewOutput } from "./procedure-graph.js";
 import type { Snapshot as GraphSnapshot } from "../context_control/types.js";
@@ -100,7 +101,7 @@ type RunStartOptions = {
   output?: "text" | "json";
 };
 
-type ReviewWaitOptions = OutputOptions & { review?: string; sessionRow?: CommandStateRow };
+type ReviewWaitOptions = OutputOptions & { review?: string; callback?: string; sessionRow?: CommandStateRow };
 
 type ReviewVoteOptions = OutputOptions & {
   review?: string;
@@ -363,6 +364,17 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
   const reviewId = options.review?.trim();
   if (!reviewId) throw new Error("--review <id> is required");
   const config = await readConfig();
+  if (options.callback !== undefined) {
+    const { context, acknowledge } = await readClaudeReviewCallback(config, reviewId, options.callback);
+    if (!await printGraphReviewOutput("run review wait", context.review, context.round, context.run.id,
+      { readOnly: true, enter: false, output: options.output })) {
+      reviewReceipt("run review wait", { project: config.project?.name, ...context, format: options.output });
+    }
+    await flushCliOutput();
+    try { await acknowledge(); }
+    catch { await emitCliError({ code: "NOTIFICATION_READ_RECEIPT_FAILED" }, { nonfatal: true }); }
+    return;
+  }
   const exploration = explorationReviewIdentity(reviewId), session = exploration ? options.sessionRow ?? await currentCommandState() : undefined;
   const located = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
   if (exploration && !located.round.assignments.length) throw new Error("Use run review show for a Runner Review");
@@ -396,12 +408,24 @@ export async function runReviewWaitCommand(options: ReviewWaitOptions): Promise<
     return;
   }
   const runner = identity && (await readRunnerAgents())[identity.agentType];
-  if (runner?.async_enabled) {
-    const detected = (await detectRunnerAgents()).find(d => d.type === identity!.agentType);
-    if (!detected?.path || detected.status !== "installed") throw new Error("RUNNER_UNAVAILABLE: install the Runner Agent or disable asynchronous execution in settings");
-    await checkQueueCapability(detected.path);
-    await ensureDaemon();
-    const task = await registerTask({ input: { project: config.project!.name, runId: context.run.id, ...(reviewId.startsWith("graph-review-") ? { stepId: context.review.stepId } : {}), reviewId, roundId: context.round.id, configPath: config.configPath, cwd: process.cwd() }, recipient: { agentType: identity!.agentType, sessionId: identity!.sessionId, agentCommand: detected.path } });
+  if (identity && runner?.async_enabled) {
+    const taskInput: DaemonTask["input"] = {
+      project: config.project!.name, runId: context.run.id,
+      ...(reviewId.startsWith("graph-review-") ? { stepId: context.review.stepId } : {}),
+      reviewId, roundId: context.round.id, configPath: config.configPath, cwd: process.cwd()
+    };
+    let recipient: DaemonTask["recipient"];
+    if (identity.agentType === "claude") {
+      recipient = await prepareClaudeReviewRecipient(identity.sessionId, taskInput);
+      await ensureClaudeNotificationDaemon();
+    } else {
+      const detected = await detectRunnerAgent(identity.agentType);
+      if (!detected.path || detected.status !== "installed") throw new Error("RUNNER_UNAVAILABLE: install the Runner Agent or disable asynchronous execution in settings");
+      await checkQueueCapability(detected.path);
+      await ensureDaemon();
+      recipient = { agentType: identity.agentType, sessionId: identity.sessionId, agentCommand: detected.path };
+    }
+    const task = await registerTask({ input: taskInput, recipient });
     await daemonControl("notify");
     reviewReceipt("run review wait", { project: config.project?.name, ...context, taskId: task.id, format: options.output });
     return;

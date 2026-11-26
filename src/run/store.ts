@@ -1067,7 +1067,8 @@ export async function startRun(input: {
   const reviewConfiguration = validateRunReviewConfiguration(
     preflight,
     input.reviewConfiguration,
-    controlPlane
+    controlPlane,
+    input.controlPlane?.actorErrors
   );
   const steps = instantiateProcedureTemplate(rootTemplate, controlPlane, reviewConfiguration);
   if (!steps.length) {
@@ -3627,7 +3628,8 @@ export function buildRunReviewPreflight(
 export function validateRunReviewConfiguration(
   preflight: RunReviewPreflight,
   configuration: RunReviewConfiguration | undefined,
-  snapshot: ControlPlaneSnapshot | undefined
+  snapshot: ControlPlaneSnapshot | undefined,
+  actorErrors?: ReadonlyMap<string, string>
 ): RunReviewConfiguration | undefined {
   if (!preflight.reviews.length) return undefined;
   if (!configuration) throw new RunReviewConfigurationRequired(preflight);
@@ -3664,14 +3666,16 @@ export function validateRunReviewConfiguration(
           continue;
         }
         seenActorIds.add(actorId);
-        if (snapshot && !snapshot.actors[actorId]) issues.push(`slots.${key}.actors: unknown Actor id ${actorId}`);
+        if (snapshot && !Object.hasOwn(snapshot.actors, actorId)) {
+          issues.push(`slots.${key}.actors: ${actorErrors?.get(actorId) ?? `unknown Actor id ${actorId}`}`);
+        }
       }
     }
   }
   for (const key of Object.keys(configuration.slots)) {
     if (!requiredSlots.has(key)) issues.push(`slots.${key}: unknown Review Slot`);
   }
-  if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
+  if (issues.length) throw Object.assign(new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`), { code: "INVALID_ARGUMENT" });
   if (!snapshot && actorBoundSlots.length) {
     throw new RunReviewControlPlaneRequired(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
   }

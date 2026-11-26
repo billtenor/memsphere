@@ -4,20 +4,28 @@ import { invokeCliModule } from "../../helpers/cli-module.js";
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { execFile, spawn } from "node:child_process";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
+import { createServer } from "node:net";
 import { watch } from "node:fs";
 import { promisify } from "node:util";
 import { setTimeout as delay } from "node:timers/promises";
-import { mkdtemp, mkdir, readFile, rm, writeFile, chmod, stat } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile, chmod, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { businessFixture } from "../../helpers/business-data.js";
 import { initializedContextFixture } from "../../helpers/initialized-context.js";
+import { withCurrentMemorySyntax } from "../../helpers/memory.js";
+import { ExplorationReviews, explorationReviewHandle } from "../../../src/context_control/exploration-review.js";
+import { textContent } from "../../../src/context_control/types.js";
 import { openContextControl } from "../../../src/project/context-control.js";
 import { readProjectConfig } from "../../../src/config.js";
-import { openCommandStates } from "../../../src/home/command-state-store.js";
+import { openCommandStates, requireCommandState } from "../../../src/home/command-state-store.js";
+import { FILESYSTEM_JSON_METADATA_DIRECTORY, recordStateKey } from "../../../src/data/extensions/shared/filesystem.js";
+import { withNativeFileLock } from "../../../src/file-lock.js";
+import { randomUUID } from "node:crypto";
 import type { GraphProcedureMemory } from "../../../src/memory/ast.js";
 import { completeReview } from "../../helpers/review-node-materials.js";
+import { stripRunnerEnvironment } from "../../../src/runner/agent-types.js";
 const exec = promisify(execFile);
 const cli = resolve("dist/cli.js");
 const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project 'test-project' run review wait --review '${reviewId}'`;
@@ -94,12 +102,12 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false) {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex", mode: "graph" | "exploration" = "graph") {
   // Installation and Embedded worktree discovery are not part of daemon
   // delivery. Reuse installed models in separate Managed filesystem Stores.
   const f = await initializedContextFixture(t);
   const bin = join(f.directory, "bin"); await mkdir(bin);
-  const runnerAgents = { codex: { identity_enabled: true, async_enabled: true } };
+  const runnerAgents = { [runnerType]: { identity_enabled: true, async_enabled: true } };
   const provider = join(bin, "codex-acp");
   await writeTestCommand(provider, `#!${process.execPath}\nif (process.argv.includes("--version")) console.log("controlled reviewer fixture"); else { console.error("ACP dispatch is outside this test boundary"); process.exitCode = 1; }\n`);
   const queue = join(f.directory, "queue.json");
@@ -107,21 +115,47 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const fake = join(bin, "codex");
   await writeTestCommand(fake, `#!${process.execPath}\nimport('node:fs').then(fs => { const args=process.argv.slice(2); if(args[0]==='--version') console.log('codex test'); else if(args.includes('--help')) console.log('queue --thread --message'); else { fs.writeFileSync(${JSON.stringify(queue)},JSON.stringify(args)); fs.appendFileSync(${JSON.stringify(queueLog)},JSON.stringify(args)+"\\n"); if(${JSON.stringify(queueMode)}==="all-fail") process.exitCode=1; } });\n`);
   await exec("git", ["init", "-b", "master"], { cwd: f.root });
-  await writeFile(join(f.root, "config.json"), JSON.stringify({ ...JSON.parse(await readFile(join(f.root, "config.json"), "utf8")), control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
+  const configPath = join(f.root, "config.json");
+  const project = JSON.parse(await readFile(configPath, "utf8"));
+  if (mode === "exploration") {
+    // Statement resolution reads the Project's Memory through a real Workspace.
+    await exec("git", ["-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-qm", "Exploration fixture"], { cwd: f.root, signal: t.signal });
+    project.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+  }
+  await writeFile(configPath, JSON.stringify({ ...project, control_plane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { human: { kind: "human", permissions: ["artifact.read", "decision.decide"] }, ...(includeAgent ? { agent: { kind: "agent", permissions: ["artifact.read", "decision.assess"], agent: { provider: "codex" } } } : {}) } } }));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: runnerAgents }));
-  const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "origin-session", TRAECLI_THREAD_ID: "", PATH: `${bin}${delimiter}${process.env.PATH}` };
+  const env: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: f.home, PATH: `${bin}${delimiter}${process.env.PATH}` };
+  stripRunnerEnvironment(env);
+  env[runnerType === "claude" ? "CLAUDE_CODE_SESSION_ID" : "CODEX_THREAD_ID"] = "origin-session";
   // These commands still communicate with the real daemon process. Keep
   // native entry/exit and simultaneous registrations in dedicated scenarios.
+  const cliLifetime = new AbortController();
+  const cliSignal = AbortSignal.any([t.signal, cliLifetime.signal]);
+  const cliClosures = new Set<Promise<void>>();
+  const nativeCall = (commandEnv: NodeJS.ProcessEnv, ...args: string[]) => {
+    cliSignal.throwIfAborted();
+    const result = exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env: commandEnv, signal: cliSignal });
+    // An aborted execFile can reject before its child has released the streams.
+    const closed = new Promise<void>(resolve => { result.child.once("close", () => resolve()); });
+    cliClosures.add(closed);
+    void closed.then(() => cliClosures.delete(closed));
+    return result;
+  };
+  f.beforeCleanup(async () => {
+    cliLifetime.abort();
+    await Promise.all(cliClosures);
+  });
   const call = (...args: string[]) => processBoundary
-    ? exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env })
-    : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli);
+    ? nativeCall(env, ...args)
+    : invokeCliModule(["--project", "test-project", ...args], f.root, env, cli, t.signal);
   const { daemonStatus, stopDaemon: stop } = await import("../../../src/daemon/service.js");
   let daemon: ReturnType<typeof spawn> | undefined;
-  const startDaemon = async () => {
+  const startDaemon = async (preload?: string) => {
     assert.equal(daemon, undefined);
     await mkdir(join(f.home, ".runtime"), { recursive: true });
     const lifetime = new AbortController();
-    daemon = spawn(process.execPath, [cli, "daemon", "serve"], { cwd: f.root, env, stdio: "ignore" });
+    const nodeArgs = preload ? ["--import", preload] : [];
+    daemon = spawn(process.execPath, [...nodeArgs, cli, "daemon", "serve"], { cwd: f.root, env, stdio: "ignore" });
     daemon.once("error", error => lifetime.abort(error));
     daemon.once("exit", (code, signal) => lifetime.abort(new Error(`Fixture daemon exited: ${code ?? signal}`)));
     try {
@@ -154,6 +188,13 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
     }
     daemon = undefined;
   };
+  const interruptDaemon = async () => {
+    assert.ok(daemon?.pid);
+    const exited = once(daemon, "exit", { signal: t.signal });
+    daemon.kill("SIGKILL");
+    await exited;
+    daemon = undefined;
+  };
   f.beforeCleanup(stopDaemon);
   const waitForTask = async (status: string, id?: string) => {
     const { listTasks } = await import("../../../src/daemon/tasks.js");
@@ -166,27 +207,15 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   // not the CLI boundary under test. Construct them through domain APIs/Stores.
   const config = await readProjectConfig("test-project", f.home);
   const service = (await openContextControl(f.root))!;
-  const procedure: GraphProcedureMemory = {
-    tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
-    actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
-      artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
-  };
-  const initial = await service.withGraph(g => g.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
-    reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
-      slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } }));
-  const started = { runId: initial.run.id };
-  const work = initial.steps[0];
-  await service.withGraph(async graph => {
-    await graph.enter(started.runId, work.id);
-    await graph.report(started.runId, work.id, { text: "candidate" });
+  const { runId, reviewId, target, otherReviewId } = mode === "exploration"
+    ? await explorationReviewTarget(service, config)
+    : await graphReviewTarget(service, config, includeAgent);
+  const started = { runId };
+  const stateId = `${runnerType}-origin-session`;
+  await (await openCommandStates(true, f.home))!.create({}, stateId, {
+    id: stateId, agentType: runnerType, sessionId: "origin-session", updatedAt: new Date().toISOString(),
+    commandGroup: "run", groupId: runId, status: "active", parameters: { project: "test-project", ...target }, state: { reads: {} }
   });
-  await (await openCommandStates(true, f.home))!.create({}, "codex-origin-session", {
-    id: "codex-origin-session", agentType: "codex", sessionId: "origin-session", updatedAt: new Date().toISOString(),
-    commandGroup: "run", groupId: started.runId, status: "active", parameters: { project: "test-project", step: work.id }, state: { reads: {} }
-  });
-  const snapshot = await service.snapshot(started.runId);
-  const step = snapshot.steps.find(s => s.reviewRounds?.length)!;
-  const reviewId = `graph-review-${started.runId}__${step.id}`;
   // Reuse this fixture's opened model service. Each query still reads current
   // records; reopening and revalidating all model bindings is not under test.
   const reviewInput = { runsRoot: join(f.root, "runs"), reviewId, service };
@@ -219,9 +248,448 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
       comments: vote === "approve" ? [] : [{ body: "Test fixture requests revision", severity: "blocking" }],
       authorizationNote: "Isolated fixture vote" });
   };
-  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: enabled } } }));
-  return { ...f, call, env, queue, queueLog, queueCommand:fake, started, reviewId, reviewState, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, waitForTask };
+  const setAsync = (enabled: boolean) => writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { [runnerType]: { identity_enabled: true, async_enabled: enabled } } }));
+  return { ...f, call, nativeCall, env, queue, queueLog, queueCommand:fake, started, reviewId, otherReviewId, reviewState, service, voteHuman, setAsync, completeAgent, startDaemon, stopDaemon, interruptDaemon, waitForTask };
 }
+
+type FixtureService = NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
+type FixtureConfig = Awaited<ReturnType<typeof readProjectConfig>>;
+
+async function graphReviewTarget(service: FixtureService, config: FixtureConfig, includeAgent: boolean) {
+  const procedure: GraphProcedureMemory = {
+    tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
+    actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
+      artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
+  };
+  return service.withGraph(async graph => {
+    const initial = await graph.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
+      reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
+        slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } });
+    const runId = initial.run.id, step = initial.steps[0].id;
+    await graph.enter(runId, step);
+    await graph.report(runId, step, { text: "candidate" });
+    return { runId, reviewId: `graph-review-${runId}__${step}`, target: { step }, otherReviewId: undefined };
+  });
+}
+
+async function explorationReviewTarget(service: FixtureService, config: FixtureConfig) {
+  const statements = join(config.memoryRoot, "statements");
+  await mkdir(statements, { recursive: true });
+  await writeFile(join(statements, "candidate.yaml"), withCurrentMemorySyntax("!statement\nnames: [candidate]\nasserts: [Review the candidate]\n"));
+  const run = await service.start("Async exploration", "zh-CN");
+  const repository = new ExplorationReviews(service);
+  const prepare = async (name: string, reviewer: string) => {
+    const { artifact, step } = await service.report(run.id, { name, content: textContent("Candidate") });
+    await service.configureExplorationStep(run.id, step.id, { asserts: ["statements/candidate"], reviewer });
+    const review = await repository.start(config, run.id, artifact.id);
+    return explorationReviewHandle(run.id, review.id);
+  };
+  const reviewId = await prepare("Notified candidate", "project:agent");
+  const otherReviewId = await prepare("Other candidate", "runner");
+  return { runId: run.id, reviewId, target: { review: reviewId }, otherReviewId };
+}
+
+function daemonTaskLock(home: string, taskId: string) {
+  return join(home, "data", "daemon-tasks", FILESYSTEM_JSON_METADATA_DIRECTORY, `${recordStateKey(`${taskId}.json`)}.lock`);
+}
+
+async function claudeNotificationFixture(t: TestContext, beforeRoster = "", mode: "graph" | "exploration" = "graph") {
+  const f = await reviewFixture(t, "success", true, true, "claude", mode);
+  const path = join(f.directory, `${process.pid}.sock`);
+  const roster = [{ sessionId: "origin-session", pid: process.pid, startedAt: 1795350000000, kind: "interactive", status: "idle", cwd: f.root }];
+  await writeTestCommand(join(dirname(f.queueCommand), "claude"), `#!${process.execPath}
+if (process.argv[2] === "--version") console.log("2.1.330 (Claude Code)");
+else if (process.argv.slice(2).join(" ") === "agents --json") {
+  (async () => {
+    ${beforeRoster}
+    console.log(${JSON.stringify(JSON.stringify(roster))});
+  })().catch(() => { process.exitCode = 1; });
+}
+else process.exitCode = 1;
+`);
+  const messages: string[] = [];
+  const received = new EventEmitter();
+  const server = createServer(socket => {
+    let contents = "";
+    socket.setEncoding("utf8");
+    socket.on("data", data => { contents += data; });
+    socket.on("end", () => {
+      messages.push(JSON.parse(contents).message.content);
+      received.emit("message");
+    });
+  });
+  f.beforeCleanup(async () => {
+    if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+  server.listen(path);
+  await once(server, "listening", { signal: t.signal });
+  f.env.CLAUDE_CODE_MESSAGING_SOCKET = path;
+  return { ...f, messages, async waitForMessages(count: number) {
+    while (messages.length < count) await once(received, "message", { signal: t.signal });
+    return [...messages];
+  } };
+}
+
+test("Claude notification is completed on socket write and only the bound session can record read-back", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const f = await claudeNotificationFixture(t);
+  await f.startDaemon();
+  assert.match((await f.call("continue", "review", "wait")).stdout, /taskId[:：]/);
+  await f.completeAgent();
+  const { value: sent } = await f.waitForTask("completed");
+  assert.ok(sent.claudeDelivery?.sentAt);
+  assert.equal(sent.claudeDelivery?.readAt, undefined);
+  const callback = `${sent.id}:${sent.claudeDelivery!.id}`;
+  assert.deepEqual(await f.waitForMessages(1), [`${notification(f.reviewId)} --callback '${callback}'`]);
+
+  const args = ["run", "review", "wait", "--review", f.reviewId, "--callback", callback];
+  const continueArgs = ["continue", "review", "wait", "--callback", callback];
+  const { listTasks, readTask, updateTask } = await import("../../../src/daemon/tasks.js");
+  const states = (await openCommandStates(false, f.home))!;
+  const stateId = "claude-origin-session";
+  const original = (await requireCommandState(stateId, f.home)).value;
+  await states.create({}, "claude-other-session", { ...original, id: "claude-other-session", sessionId: "other-session" });
+  const observableState = async () => ({
+    run: (await f.reviewState()).run,
+    review: (await f.reviewState()).review,
+    sessions: await Promise.all([states.get({}, stateId), states.get({}, "claude-other-session")]),
+    tasks: await listTasks(f.home),
+    dispatched: await readdir(join(f.root, ".runtime", "review-dispatch")).catch(error => {
+      if (error.code !== "ENOENT") throw error;
+      return [];
+    })
+  });
+  const rejectsWithoutSideEffects = async (diagnostic: RegExp, ...operations: Array<() => ReturnType<typeof f.call>>) => {
+    const before = await observableState();
+    for (const operation of operations) await assert.rejects(operation, (error: Error & { stdout?: string }) => {
+      assert.match(error.message, diagnostic);
+      assert.equal(error.stdout ?? "", "");
+      return true;
+    });
+    assert.deepEqual(await observableState(), before);
+  };
+  const fromOtherSession = (...commandArgs: string[]) => f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "other-session" }, ...commandArgs);
+  await rejectsWithoutSideEffects(/PERMISSION_DENIED/,
+    () => fromOtherSession(...args), () => fromOtherSession(...continueArgs));
+  await assert.rejects(f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...args), /PERMISSION_DENIED/);
+  await assert.rejects(f.call("run", "review", "wait", "--review", "different-review", "--callback", callback),
+    /PERMISSION_DENIED/);
+  await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${sent.id}:00000000-0000-4000-8000-000000000000`),
+    /PERMISSION_DENIED/);
+  for (const changed of [
+    { ...original, parameters: { ...original.parameters, project: "other-project" } },
+    { ...original, groupId: "other-run" },
+    { ...original, parameters: { ...original.parameters, step: "other-step" } }
+  ]) {
+    const previous = await requireCommandState(stateId, f.home);
+    await states.update({}, stateId, changed, { expectedRevision: previous.revision });
+    await rejectsWithoutSideEffects(/SESSION_CONTEXT_CONFLICT|INVALID_ARGUMENT|NOT_FOUND/,
+      () => f.call(...args), () => f.call(...continueArgs));
+  }
+  const changed = await requireCommandState(stateId, f.home);
+  await states.delete({}, stateId, { expectedRevision: changed.revision });
+  await rejectsWithoutSideEffects(/NOT_FOUND/, () => f.call(...args), () => f.call(...continueArgs));
+  await states.create({}, stateId, original);
+
+  const delivered = (await readTask(sent.id, f.home))!;
+  await updateTask(delivered, { input: { ...sent.input, roundId: "old-round" } }, f.home);
+  await rejectsWithoutSideEffects(/REVIEW_CONFLICT/, () => f.call(...args), () => f.call(...continueArgs));
+  await updateTask((await readTask(sent.id, f.home))!, { input: sent.input }, f.home);
+  await f.setAsync(false);
+  await rejectsWithoutSideEffects(/PERMISSION_DENIED/, () => f.call(...args), () => f.call(...continueArgs));
+  await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { claude: { identity_enabled: false } } }));
+  await rejectsWithoutSideEffects(/AGENT_SESSION_REQUIRED/, () => f.call(...args), () => f.call(...continueArgs));
+  await f.setAsync(true);
+
+  assert.equal((await f.waitForTask("completed")).value.claudeDelivery?.readAt, undefined);
+  if (process.getuid!() !== 0) {
+    // Fail only the read-back write on the existing row. The Review Store and
+    // atomic record data remain readable and the lock inode stays in place.
+    const lock = daemonTaskLock(f.home, sent.id);
+    await chmod(lock, 0o400);
+    try {
+      const before = await observableState();
+      const read = await f.call(...args);
+      assert.match(read.stdout, /roundId[:：]/);
+      assert.match(read.stderr, /NOTIFICATION_READ_RECEIPT_FAILED/);
+      assert.deepEqual(await observableState(), before);
+    } finally {
+      await chmod(lock, 0o600);
+    }
+  }
+  assert.match((await f.call(...continueArgs)).stdout, /roundId[:：]/);
+  const firstRead = (await f.waitForTask("completed")).value.claudeDelivery?.readAt;
+  assert.ok(firstRead);
+  assert.match((await f.call(...args)).stdout, /roundId[:：]/);
+  assert.equal((await f.waitForTask("completed")).value.claudeDelivery?.readAt, firstRead);
+});
+
+test("Claude exploration notifications return only the Review bound to the original session", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const f = await claudeNotificationFixture(t, "", "exploration");
+  const { listTasks, readTask, updateTask } = await import("../../../src/daemon/tasks.js");
+  const stateId = "claude-origin-session";
+  const states = (await openCommandStates(false, f.home))!;
+  const original = (await requireCommandState(stateId, f.home)).value;
+  const { runId } = f.started;
+  const native = ["run", "review", "wait", "--review", f.reviewId];
+  const continuation = ["continue", "review", "wait"];
+  const callback = (ref: string, args: string[]) => f.call(...args, "--callback", ref);
+  const context = async () => ({
+    run: await f.service.snapshot(runId),
+    state: await states.get({}, stateId),
+    dispatch: await readdir(join(f.root, ".runtime", "review-dispatch")).catch(error => {
+      if (error.code !== "ENOENT") throw error;
+      return [];
+    })
+  });
+  const failsWithoutChanges = async (diagnostic: RegExp, ...calls: Array<() => ReturnType<typeof f.call>>) => {
+    const before = { context: await context(), tasks: await listTasks(f.home) };
+    for (const call of calls) {
+      await assert.rejects(call, (error: Error & { stdout?: string }) => {
+        assert.match(error.message, diagnostic);
+        assert.equal(error.stdout ?? "", "");
+        return true;
+      });
+    }
+    assert.deepEqual({ context: await context(), tasks: await listTasks(f.home) }, before);
+  };
+  const bind = async (review?: string) => {
+    const previous = await requireCommandState(stateId, f.home);
+    const parameters = { project: "test-project", ...(review ? { review } : {}) };
+    await states.update({}, stateId, { ...original, parameters }, { expectedRevision: previous.revision });
+  };
+
+  await f.startDaemon();
+  assert.match((await f.call(...native)).stdout, /taskId[:：]/);
+  const registered = await f.waitForTask("running");
+  assert.match((await f.call(...continuation)).stdout, new RegExp(registered.id));
+  assert.deepEqual(registered.value.input, {
+    project: "test-project", runId, reviewId: f.reviewId, roundId: (await f.reviewState()).round.id,
+    configPath: join(f.root, "config.json"), cwd: f.root
+  });
+  assert.equal(registered.value.claudeDelivery, undefined);
+  // Reserve a delivery identity while the controlled Reviewer is still pending.
+  // The daemon cannot issue a notification until the result becomes ready.
+  const earlyId = randomUUID();
+  await updateTask(registered, { claudeDelivery: { id: earlyId } }, f.home);
+  const early = `${registered.id}:${earlyId}`;
+  await failsWithoutChanges(/REVIEW_NOT_READY/, () => callback(early, native), () => callback(early, continuation));
+  await updateTask((await readTask(registered.id, f.home))!, { claudeDelivery: undefined }, f.home);
+
+  await f.completeAgent();
+  const sent = await f.waitForTask("completed", registered.id);
+  assert.ok(sent.value.claudeDelivery?.sentAt);
+  assert.equal(sent.value.claudeDelivery.readAt, undefined);
+  const ref = `${sent.id}:${sent.value.claudeDelivery.id}`;
+  const expected = `${notification(f.reviewId)} --callback '${ref}'`;
+  assert.deepEqual(await f.waitForMessages(1), [expected]);
+  await failsWithoutChanges(/INVALID_ARGUMENT/,
+    () => callback("bogus", native), () => callback("bogus", continuation));
+  await failsWithoutChanges(/PERMISSION_DENIED/,
+    () => callback(early, native), () => callback(early, continuation),
+    () => f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...native, "--callback", ref));
+  await updateTask(sent, { input: { ...sent.value.input, roundId: "obsolete-round" } }, f.home);
+  await failsWithoutChanges(/REVIEW_NOT_READY/, () => callback(ref, native), () => callback(ref, continuation));
+  await updateTask((await readTask(sent.id, f.home))!, { input: sent.value.input }, f.home);
+
+  assert.ok(f.otherReviewId);
+  await bind(f.otherReviewId);
+  await failsWithoutChanges(/SESSION_CONTEXT_CONFLICT|PERMISSION_DENIED/, () => callback(ref, native), () => callback(ref, continuation));
+  await bind();
+  await failsWithoutChanges(/SESSION_CONTEXT_CONFLICT|INVALID_ARGUMENT/, () => callback(ref, native), () => callback(ref, continuation));
+  await bind(f.reviewId);
+
+  const beforeRead = await context();
+  const stdout = (await callback(ref, native)).stdout;
+  assert.ok(stdout.includes(f.reviewId));
+  assert.ok(stdout.includes(sent.value.input.roundId));
+  assert.match(stdout, /scope[:：] ?opinion/);
+  const read = (await readTask(sent.id, f.home))!;
+  assert.ok(read.value.claudeDelivery?.readAt);
+  assert.deepEqual(read.value, {
+    ...sent.value, updatedAt: read.value.updatedAt,
+    claudeDelivery: { ...sent.value.claudeDelivery, readAt: read.value.claudeDelivery.readAt }
+  });
+  const nativeReceipt = JSON.parse((await callback(ref, [...native, "--output", "json"])).stdout);
+  const continuedReceipt = JSON.parse((await callback(ref, [...continuation, "--output", "json"])).stdout);
+  assert.deepEqual(continuedReceipt, nativeReceipt);
+  assert.equal(nativeReceipt.roundId, sent.value.input.roundId);
+  assert.doesNotMatch(JSON.stringify(nativeReceipt), /--callback|claudeDelivery|inbox/);
+  assert.deepEqual(await context(), beforeRead);
+  assert.deepEqual(await listTasks(f.home), [read]);
+  assert.deepEqual(f.messages, [expected]);
+});
+
+test("Claude notification restart distinguishes interrupted attempts and never resends without retry", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const gates = await processGates(t.signal);
+  t.after(() => gates.close());
+  const gateModule = new URL("../../fixtures/process-gates.mjs", import.meta.url).href;
+  const f = await claudeNotificationFixture(t, `
+    const { existsSync } = require("node:fs");
+    const { processGate } = await import(${JSON.stringify(gateModule)});
+    if (existsSync(require("node:path").join(process.cwd(), "hold-claude-roster"))) {
+      await processGate(${JSON.stringify(gates.endpoint)}, "publish", "roster-held");
+      await processGate(${JSON.stringify(gates.endpoint)}, "wait", "release-roster");
+    }
+  `);
+  f.beforeCleanup(() => { gates.publish("release-roster"); });
+  await f.startDaemon();
+  await f.call("continue", "review", "wait");
+  const registered = (await f.waitForTask("running")).value;
+  assert.equal(registered.claudeDelivery, undefined);
+  const { readTask, updateTask } = await import("../../../src/daemon/tasks.js");
+  const earlyId = randomUUID();
+  await updateTask((await readTask(registered.id, f.home))!, { claudeDelivery: { id: earlyId } }, f.home);
+  const early = (await readTask(registered.id, f.home))!;
+  await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${registered.id}:${earlyId}`), /REVIEW_NOT_READY/);
+  await assert.rejects(f.call("continue", "review", "wait", "--callback", `${registered.id}:${earlyId}`), /REVIEW_NOT_READY/);
+  assert.deepEqual(await readTask(registered.id, f.home), early);
+  await updateTask(early, { claudeDelivery: undefined }, f.home);
+  await f.interruptDaemon();
+  await f.startDaemon();
+  const beforeSend = (await f.waitForTask("failed", registered.id)).value;
+  assert.equal(beforeSend.claudeDelivery, undefined);
+  assert.equal(beforeSend.error?.code, "execution_interrupted");
+  assert.match(beforeSend.error!.message, /before attempting to write/);
+  assert.equal(f.messages.length, 0);
+
+  const retry = () => f.call("run", "review", "wait", "retry", "--review", f.reviewId, "--round", registered.input.roundId);
+  await retry();
+  const holdRoster = join(f.root, "hold-claude-roster");
+  await writeFile(holdRoster, "");
+  await f.completeAgent();
+  await gates.wait("roster-held");
+  const inFlight = (await readTask(registered.id, f.home))!.value;
+  const interruptedDelivery = inFlight.claudeDelivery!.id;
+  assert.equal(inFlight.claudeDelivery?.sentAt, undefined);
+
+  let lockReady!: () => void, releaseLock!: () => void;
+  const locked = new Promise<void>(resolve => { lockReady = resolve; });
+  const unlocked = new Promise<void>(resolve => { releaseLock = resolve; });
+  const taskWriteLock = withNativeFileLock(daemonTaskLock(f.home, registered.id), async () => {
+    lockReady();
+    await unlocked;
+  }, { signal: t.signal });
+  try {
+    await Promise.race([locked, taskWriteLock]);
+    gates.publish("release-roster");
+    assert.deepEqual(await f.waitForMessages(1), [
+      `${notification(f.reviewId)} --callback '${registered.id}:${interruptedDelivery}'`
+    ]);
+    assert.equal((await readTask(registered.id, f.home))!.value.claudeDelivery?.sentAt, undefined);
+    await f.interruptDaemon();
+  } finally {
+    releaseLock();
+    await taskWriteLock;
+    await rm(holdRoster, { force: true });
+  }
+  await f.startDaemon();
+  const afterWrite = (await f.waitForTask("failed", registered.id)).value;
+  assert.deepEqual(afterWrite.claudeDelivery, { id: interruptedDelivery });
+  assert.match(afterWrite.error!.message, /may have been sent/);
+  assert.equal(f.messages.length, 1);
+
+  await retry();
+  const succeeded = (await f.waitForTask("completed", registered.id)).value;
+  const nextDelivery = succeeded.claudeDelivery!.id;
+  assert.notEqual(nextDelivery, interruptedDelivery);
+  const wait = (deliveryId: string) => f.call("continue", "review", "wait", "--callback", `${registered.id}:${deliveryId}`);
+  await assert.rejects(wait(interruptedDelivery), /PERMISSION_DENIED/);
+  assert.deepEqual((await readTask(registered.id, f.home))!.value, succeeded);
+  assert.match((await wait(nextDelivery)).stdout, /roundId[:：]/);
+  await f.waitForMessages(2);
+  await f.stopDaemon();
+  await f.startDaemon();
+  assert.ok((await readTask(registered.id, f.home))!.value.claudeDelivery?.readAt);
+  assert.equal(f.messages.length, 2);
+});
+
+test("Claude callback can read a ready Review before the daemon commits the send receipt", {
+  skip: process.platform !== "linux", timeout: 90000
+}, async t => {
+  const gates = await processGates(t.signal);
+  t.after(() => gates.close());
+  const f = await claudeNotificationFixture(t, `
+    const { copyFileSync, existsSync } = require("node:fs");
+    const { join } = require("node:path");
+    const target = join(process.cwd(), "send-receipt-lock");
+    if (existsSync(target)) copyFileSync(target, join(process.cwd(), "hold-send-receipt"));
+  `);
+  const gateModule = new URL("../../fixtures/process-gates.mjs", import.meta.url).href;
+  const trigger = join(f.root, "hold-send-receipt");
+  const preload = join(f.directory, "receive-before-send.mjs");
+  // Isolate the write barrier to the daemon's process. Review wait runs in
+  // another CLI process and can use the actual row lock while the daemon waits.
+  await writeFile(preload, `
+import fs from "node:fs/promises";
+import { existsSync, readFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { processGate } from ${JSON.stringify(gateModule)};
+const trigger = ${JSON.stringify(trigger)};
+const open = fs.open;
+let held = false;
+fs.open = async (path, ...args) => {
+  if (!held && existsSync(trigger) && String(path) === readFileSync(trigger, "utf8")) {
+    held = true;
+    await processGate(${JSON.stringify(gates.endpoint)}, "publish", "committing-send");
+    await processGate(${JSON.stringify(gates.endpoint)}, "wait", "finish-send");
+  }
+  return open(path, ...args);
+};
+syncBuiltinESMExports();
+`);
+  f.beforeCleanup(() => { gates.publish("finish-send"); });
+  await f.startDaemon(preload);
+  await f.call("continue", "review", "wait");
+  const registered = (await f.waitForTask("running")).value;
+  assert.equal(registered.claudeDelivery, undefined);
+  // The initial delivery identity and the send receipt use the same row lock.
+  // The roster fixture arms the barrier after the daemon records the identity.
+  await writeFile(join(f.root, "send-receipt-lock"), daemonTaskLock(f.home, registered.id));
+  const { readTask, listTasks } = await import("../../../src/daemon/tasks.js");
+  await f.completeAgent();
+  await gates.wait("committing-send");
+  const before = (await readTask(registered.id, f.home))!;
+  assert.equal(before.value.status, "running");
+  assert.equal(before.value.claudeDelivery?.sentAt, undefined);
+  const callback = `${registered.id}:${before.value.claudeDelivery!.id}`;
+  const expected = `${notification(f.reviewId)} --callback '${callback}'`;
+  assert.deepEqual(await f.waitForMessages(1), [expected]);
+  const contextBefore = await f.reviewState();
+  const stateBefore = await requireCommandState("claude-origin-session", f.home);
+  const dispatch = () => readdir(join(f.root, ".runtime", "review-dispatch")).catch(error => {
+    if (error.code !== "ENOENT") throw error;
+    return [];
+  });
+  const dispatchBefore = await dispatch();
+  try {
+    const result = await f.call("run", "review", "wait", "--review", f.reviewId, "--callback", callback);
+    assert.ok(result.stdout.includes(f.reviewId));
+    assert.match(result.stdout, /roundStatus[:：]/);
+    const early = (await readTask(registered.id, f.home))!;
+    assert.equal(early.value.status, "running");
+    assert.equal(early.value.claudeDelivery?.sentAt, undefined);
+    assert.ok(early.value.claudeDelivery?.readAt);
+    assert.match((await f.call("continue", "review", "wait", "--callback", callback)).stdout, /roundId[:：]/);
+    assert.deepEqual(await readTask(registered.id, f.home), early);
+    assert.deepEqual(await f.reviewState(), contextBefore);
+    assert.deepEqual(await requireCommandState("claude-origin-session", f.home), stateBefore);
+    assert.deepEqual(await dispatch(), dispatchBefore);
+    gates.publish("finish-send");
+    const completed = await f.waitForTask("completed", registered.id);
+    assert.ok(completed.value.claudeDelivery?.sentAt);
+    assert.equal(completed.value.claudeDelivery?.readAt, early.value.claudeDelivery?.readAt);
+    assert.deepEqual(await listTasks(f.home), [completed]);
+    assert.deepEqual(f.messages, [expected]);
+  } finally {
+    gates.publish("finish-send");
+  }
+});
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
   const f = await reviewFixture(t, "success", true, true);

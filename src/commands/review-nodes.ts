@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto";
 import { boundReviewNodeContext, boundReviewNodeView, mutateBoundReviewNode, submitBoundReviewNodes } from "../acp/review-session.js";
 import { currentReviewNode, nodeCommentInputSchema, nodeCommentUpdateSchema, nodeReportSchema, nodeSubmitSchema, nodeUpdateSchema, type NodeMutation } from "../review-nodes.js";
 import { emitReviewNodeResult } from "./review-node-output.js";
-import { contextOnlyCommand, type Options } from "./context-control.js";
+import { contextOnlyCommand, type ContextCommandScope, type Options } from "./context-control.js";
 import { readConfig } from "../config.js";
 import { openContextControl } from "../project/context-control.js";
 import { ExplorationReviews, explorationReviewIdentity, isModelReviewHandle, mutateModelReviewNode } from "../context_control/exploration-review.js";
@@ -17,7 +17,7 @@ import { failure } from "../context_control/errors.js";
 import { currentCommandState, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 
 export type ReviewNodeOptions = { run?: string; review?: string; assignment?: string; node?: string; comment?: string; all?: boolean; artifact?: string; artifactFile?: string; output?: "text" | "json"; sessionRow?: CommandStateRow };
-export async function reviewNodeCommand(operation: string, options: ReviewNodeOptions) {
+export async function reviewNodeCommand(operation: string, options: ReviewNodeOptions, scope?: ContextCommandScope) {
   for (const key of ["vote", "summary", "summaryFile", "body", "bodyFile", "bodyStdin", "severity", "target", "sourceHash", "submissionId", "context"]) {
     if ((options as Record<string, unknown>)[key] !== undefined) throw new Error(`review_node_content_must_use_artifact: ${key}`);
   }
@@ -30,7 +30,7 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
     if (options.artifact !== undefined || options.artifactFile !== undefined) throw new Error("review_no_artifact_expected");
   } else if ((options.artifact !== undefined) === (options.artifactFile !== undefined)) throw new Error("review_artifact_source_required_exclusive");
   const input = reading || operation === "comment-delete" ? undefined : JSON.parse(options.artifact ?? await readFile(options.artifactFile!, "utf8"));
-  if (!binding) { await explorationReviewNodes(operation, options, input); return; }
+  if (!binding) { await explorationReviewNodes(operation, options, input, scope); return; }
   const context = await boundReviewNodeContext();
   setReviewerOutputProtocol(isModelReviewHandle(context.review.id) ? "graph" : "flow");
   if (!context.assignment.nodeTree) throw failure("REVIEW_PROTOCOL_UNSUPPORTED", "This Assignment uses the historical Review protocol");
@@ -49,11 +49,12 @@ export async function reviewNodeCommand(operation: string, options: ReviewNodeOp
   emitReviewNodeResult(operation, result, { format: options.output, locale: context.run.language, reviewer: true });
 }
 
-async function explorationReviewNodes(operation: string, options: ReviewNodeOptions, input: unknown) {
+async function explorationReviewNodes(operation: string, options: ReviewNodeOptions, input: unknown, scope?: ContextCommandScope) {
   const session = options.sessionRow ?? await currentCommandState();
   const target = explorationReviewIdentity(options.review!);
   if (!target || target.runId !== options.run) throw failure("INVALID_ARGUMENT", "Review does not belong to this Run");
-  const config = await readConfig(), service = await openContextControl(config.scopeRoot);
+  const config = scope?.config ?? await readConfig();
+  const service = scope?.service ?? await openContextControl(config.scopeRoot);
   if (!service) throw failure("NOT_FOUND", "Context Control Stores not found");
   const repository = new ExplorationReviews(service);
   const { run, round, row, actor } = await repository.locate(target.runId, target.recordId);

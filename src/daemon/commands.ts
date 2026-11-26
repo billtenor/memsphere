@@ -1,16 +1,18 @@
+import { failure } from "../context_control/errors.js";
 import { Command } from "commander";
-import { ensureDaemon, daemonStatus, stopDaemon, runDaemon, daemonControl } from "./service.js";
-import { detectRunnerAgents, detectIdentity, currentIdentity } from "../runner/identity.js";
+import { ensureDaemon, ensureClaudeNotificationDaemon, daemonStatus, stopDaemon, runDaemon, daemonControl } from "./service.js";
+import { detectRunnerAgents, detectIdentity, currentIdentity, readRunnerAgents } from "../runner/identity.js";
 import { listTasks, retryFailedTask } from "./tasks.js";
 import { readConfig } from "../config.js";
 import { inspectReview } from "./review.js";
+import { prepareClaudeReviewRecipient } from "./claude-review-callback.js";
 import { readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { addCliOutput, cliCommand, publishResult, paginateCliItems, previewText } from "../commands/output.js";
 import { daemonStatusSchema, publicDaemonStatus } from "./public-status.js";
 import { z } from "zod";
 import { nextAction } from "../prompts/cli-output.js";
 
-const runnerSchema = z.object({ identified: z.boolean(), agentType: z.enum(["codex", "traex"]).optional() }).strict();
+const runnerSchema = z.object({ identified: z.boolean(), agentType: z.enum(["codex", "traex", "claude"]).optional() }).strict();
 const runnerListSchema = z.object({ items: z.array(z.object({
   type: z.string(), status: z.enum(["installed", "version_unknown", "missing", "failed"]), version: z.string().optional()
 }).strict()) }).strict();
@@ -81,8 +83,15 @@ export function registerWaitTaskCommands(wait: Command) {
     const row = (await listTasks()).filter(r => r.value.input.project === config.project!.name && r.value.input.reviewId === options.review && r.value.input.roundId === options.round && r.value.recipient.agentType === identity.agentType && r.value.recipient.sessionId === identity.sessionId)
       .sort((a, b) => b.value.createdAt.localeCompare(a.value.createdAt))[0];
     if (!row || row.value.status !== "failed") throw new Error("Only a failed task for the current session can be retried");
-    await ensureDaemon();
-    const task = await retryFailedTask(row.id);
+    let claudeRecipient;
+    if (identity.agentType === "claude") {
+      if (!(await readRunnerAgents()).claude?.async_enabled) throw failure("UNSUPPORTED_CAPABILITY", "Claude Code asynchronous execution is disabled");
+      claudeRecipient = await prepareClaudeReviewRecipient(identity.sessionId, row.value.input);
+      await ensureClaudeNotificationDaemon();
+    } else {
+      await ensureDaemon();
+    }
+    const task = await retryFailedTask(row.id, undefined, claudeRecipient);
     await daemonControl("notify");
     const resume = cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", options.review]);
     publishResult("run review wait retry", () => retrySchema.parse({

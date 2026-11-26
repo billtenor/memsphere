@@ -61,6 +61,8 @@ memsphere continue finish --authorization "用户已检查当前成果并明确�
 
 `--asserts` 与 `--suggests` 可重复，各自完整替换该通道。清空用 `--clear-asserts`、`--clear-suggests` 或 `--clear-reviewer`。修订创建的新 Step 会复制当时的配置。`--reviewer project:ID` 绑定 Project 中拥有材料读取和评审权限的 Agent，由系统派发。Runner 可以查看、等待和重试委派。
 
+单个 ACP 提供方或评审人的配置无效时，其他评审人和 Run 查询仍可用。选择受影响的评审人时，CLI 会报告对应的配置路径。已冻结的 Review 继续使用创建时的配置。
+
 发起时固定候选版本、其声明依赖及授权上游产物直接关联的 External、规则来源和执行者。只有登记到 Run 的 External 需先通过 `report --depends-on external:E` 关联到产物。同一候选和冻结配置已有未提交轮次时返回原 Review ID。Runner 渐进审查也可用 `review show --node NODE` 或 `--all` 回看，用 `review update` 和 `review comment add/update/delete` 编辑。节点和结论支持与委派相同的 JSON 输入。轻量评论仍从 `review create/list/show` 读取，渐进结果有独立轮次。
 
 Run 页提供流程视角与产物视角。两处均可打开同一 Step 的执行信息、草稿或已提交 Artifact，并从已提交版本查阅评审记录。

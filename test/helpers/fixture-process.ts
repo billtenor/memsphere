@@ -59,6 +59,9 @@ export function fixtureProcesses(read = identities) {
     // The native test already obtained these identities from its ready-time CIM
     // group snapshot; querying the same live barrier again adds no evidence.
     rememberSnapshot(...members: ProcessIdentity[]) { members.forEach(record); },
+    async matches(identity: ProcessIdentity) {
+      return sameProcess(identity, (await read([identity.pid])).get(identity.pid));
+    },
     async remember(...pids: number[]) {
       const rows = await read(pids);
       for (const pid of pids) {

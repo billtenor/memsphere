@@ -12,7 +12,7 @@ import { parseMemoryYaml } from "../memory/yaml.js";
 import { serializeMemoryYaml } from "../memory/serializer.js";
 import { openContextControl } from "../project/context-control.js";
 import { effectiveStep, supersedingRewind } from "../context_control/graph-rewind.js";
-import { isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.js";
+import { graphRunnerActorConflict, isGraphRun, type GraphRuntime } from "../context_control/graph-runtime.js";
 import { failure } from "../context_control/errors.js";
 import type { Run, Snapshot, Step } from "../context_control/types.js";
 import type { ControlPlaneConfig, RunReviewConfiguration } from "../control-plane/index.js";
@@ -24,7 +24,7 @@ import { assertSessionTarget, currentCommandState, createCommandState, findComma
 import { assertReportExecutionCapability } from "../report-execution.js";
 import { graphReviewHandle } from "../context_control/review-repository.js";
 import type { ArtifactReview, ArtifactReviewRound } from "../artifact-review.js";
-import type { Options } from "./context-control.js";
+import type { ContextCommandScope, Options } from "./context-control.js";
 import { appProcedureFileSource } from "../app/run.js";
 import { join } from "node:path";
 import { readRun as readLegacyRun } from "../run/store.js";
@@ -52,8 +52,16 @@ export async function startGraphIfApplicable(input: { catalog: MemoryCatalog; pr
     for (const ref of collectMemoryReferenceTargets(entity)) await freeze(ref);
   };
   await freeze(`procedures/${p.names[0]}`, true);
+  let controlPlane = input.controlPlane;
+  // An Actor can be valid in the Project while its ID is reserved in Graph.
+  if (controlPlane && Object.hasOwn(controlPlane.actors, "runner")) {
+    const { runner: _reserved, ...actors } = controlPlane.actors;
+    const actorErrors = new Map(controlPlane.actorErrors);
+    actorErrors.set("runner", graphRunnerActorConflict);
+    controlPlane = { ...controlPlane, actors, actorErrors };
+  }
   const service = (await openContextControl(input.root, true))!;
-  return service.withGraph(g => g.start({ name: input.name, language: input.language, procedure: p, memorySnapshot: { memories }, controlPlane: input.controlPlane, reviewConfiguration: input.reviewConfiguration, ...(input.memorySource ? { memorySource: input.memorySource } : {}) }));
+  return service.withGraph(g => g.start({ name: input.name, language: input.language, procedure: p, memorySnapshot: { memories }, controlPlane, reviewConfiguration: input.reviewConfiguration, ...(input.memorySource ? { memorySource: input.memorySource } : {}) }));
 }
 async function context(project: string, run: string, step: string) {
   let row; try { row = await currentCommandState(); } catch { return undefined; }
@@ -172,14 +180,14 @@ export async function printGraphReviewOutput(
   review: ArtifactReview<import("../run/store.js").RunEvent["artifact"]>,
   round: ArtifactReviewRound,
   runId: string,
-  options: { vote?: string; assignmentId?: string; output?: "text" | "json"; enter?: boolean } = {}
+  options: { vote?: string; assignmentId?: string; output?: "text" | "json"; enter?: boolean; readOnly?: boolean } = {}
 ) {
   if (!review.id.startsWith("graph-review-")) return false;
   const config = await readConfig();
   const project = config.project!.name;
   const service = (await openContextControl(config.scopeRoot))!;
   await service.withGraph(async g => {
-    const snapshot = await g.advance(runId);
+    const snapshot = options.readOnly ? await g.snapshot(runId) : await g.advance(runId);
     const step = snapshot.steps.find(s => s.id === review.stepId)!;
     let progress: RunProgress | undefined;
     if (step.status === "done") {
@@ -193,11 +201,12 @@ export async function printGraphReviewOutput(
   });
   return true;
 }
-export async function graphCommand(operation: string, input: object): Promise<boolean> {
+export async function graphCommand(operation: string, input: object, scope?: ContextCommandScope & { run: Run }): Promise<boolean> {
   const options = input as Options & { position?: string; count?: string; schemaName?: string; force?: boolean; slot?: string; skip?: boolean; dryRun?: boolean; reason?: string; reasonFile?: string };
   if (!options.run) return false;
-  const config = await readConfig(); const service = await openContextControl(config.scopeRoot);
-  const run = service && await service.findRun(options.run);
+  const config = scope?.config ?? await readConfig();
+  const service = scope?.service ?? await openContextControl(config.scopeRoot);
+  const run = scope?.run ?? (service && await service.findRun(options.run));
   if (!run || !isGraphRun(run)) return false;
   for (const root of [config.runsRoot, join(config.archiveRoot, "runs")]) {
     let legacy = false;

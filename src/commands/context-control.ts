@@ -17,7 +17,7 @@ import { CliOutputError, cliCommand, publishResult, paginateCliItems, previewTex
 import { runOverviewSchema, runPageSchema, runProgressSchema } from "./run-result.js";
 import { graphCommand } from "./procedure-graph.js";
 import { isGraphRun } from "../context_control/graph-runtime.js";
-import { explorationReviewerOptions, explorationRules, freezeExplorationSchema } from "../context_control/exploration-contract.js";
+import { explorationReviewerConfigError, explorationReviewerOptions, explorationRules, freezeExplorationSchema } from "../context_control/exploration-contract.js";
 import { ExplorationReviews, explorationReviewHandle, explorationReviewIdentity } from "../context_control/exploration-review.js";
 import { explorationReviewView, readArtifactReviewForRunner } from "../context_control/review-repository.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
@@ -25,6 +25,7 @@ import { reviewNodeProgress } from "../review-nodes.js";
 
 export type Options = { checkpoint?: string; position?: string; count?: string; force?: boolean; authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: string; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string;
   schemaName?: string; asserts?: string[]; suggests?: string[]; clearAsserts?: boolean; clearSuggests?: boolean; clearReviewer?: boolean; progressive?: boolean; node?: string; all?: boolean; commentId?: string; sessionRow?: CommandStateRow; limit?: string; cursor?: string };
+export type ContextCommandScope = { config: MemsphereConfig; service: ContextControl };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
 function strictObject(value: unknown, allowed: string[]): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw failure("INVALID_ARGUMENT", "Expected an object");
@@ -62,7 +63,9 @@ export async function explorationStepConfiguration(service: ContextControl, conf
 
 export async function configureExplorationStep(service: ContextControl, config: MemsphereConfig, runId: string, stepId: string, options: Options) {
   if ((options.asserts && options.clearAsserts) || (options.suggests && options.clearSuggests) || (options.reviewer !== undefined && options.clearReviewer)) throw failure("INVALID_ARGUMENT", "Choose setting or clearing each field");
-  if (options.reviewer !== undefined && !explorationReviewerOptions(config).some(r => r.value === options.reviewer)) throw failure("INVALID_REVIEWER", "Select an available reviewer from run step show");
+  if (options.reviewer !== undefined && !explorationReviewerOptions(config).some(r => r.value === options.reviewer)) {
+    throw failure("INVALID_REVIEWER", explorationReviewerConfigError(config, options.reviewer) ?? "Select an available reviewer from run step show");
+  }
   const rules = options.asserts || options.suggests ? await explorationRules(config, options) : undefined;
   await service.configureExplorationStep(runId, stepId, {
     ...(options.clearAsserts || options.asserts ? { asserts: rules?.asserts.references ?? [] } : {}),
@@ -114,15 +117,15 @@ async function explorationSchema(operation: string, s: ContextControl, config: M
 }
 
 /** Return false only for a proven legacy Run, never for a failed new Store. */
-export async function tryContextCommand(operation: string, options: object): Promise<boolean> {
+export async function tryContextCommand(operation: string, options: object, scope?: ContextCommandScope): Promise<boolean> {
   const o = options as Options;
   if (["artifact-show", "external-show", "review-show", "review-list"].includes(operation) && await tryReviewerResource(operation, o)) return true;
-  if (await graphCommand(operation, o)) return true;
   const newFlags = [o.target, o.for, o.out, o.root, o.revisedFrom, operation === "schema-export" ? undefined : o.file].some(v => v !== undefined) || !!o.dependsOn?.length || !!o.tag?.length || operation === "artifact-show" && o.artifact !== undefined;
   if (!o.run) { if (newFlags) throw failure("INVALID_ARGUMENT", "Free exploration options require --run"); return false; }
-  const config = await readConfig();
-  const service = await openContextControl(config.scopeRoot);
+  const config = scope?.config ?? await readConfig();
+  const service = scope?.service ?? await openContextControl(config.scopeRoot);
   const run = service && await service.findRun(o.run);
+  if (service && run && isGraphRun(run) && await graphCommand(operation, o, { config, service, run })) return true;
   let legacy = false;
   try { await readRun(config.runsRoot, o.run); legacy = true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   if (run && legacy) throw failure("AMBIGUOUS_RUN", "Run ID exists in both storage sources");
@@ -394,8 +397,8 @@ export async function tryContextCommand(operation: string, options: object): Pro
   return true;
 }
 
-export async function contextOnlyCommand(operation: string, options: object) {
-  if (!await tryContextCommand(operation, options)) throw failure("NOT_FOUND", "Free exploration Run not found");
+export async function contextOnlyCommand(operation: string, options: object, scope?: ContextCommandScope) {
+  if (!await tryContextCommand(operation, options, scope)) throw failure("NOT_FOUND", "Free exploration Run not found");
 }
 export async function startExploration(options: object) {
   const o = options as Options;

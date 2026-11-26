@@ -47,6 +47,15 @@ test("Runner and Reviewer Continue use the native choices and keep distinct rout
   }
 });
 
+test("public next actions exclude the private Claude delivery reference", async () => {
+  const { command } = await import("../src/prompts/contracts/types.js");
+  const base = { kind: "command", launcher: "memsphere", args: ["run", "review", "wait", "--review", "review"] };
+  assert.ok(command.safeParse(base).success);
+  for (const tail of [["--callback", "ref"], ["--callback=ref"]]) {
+    assert.equal(command.safeParse({ ...base, args: [...base.args, ...tail] }).success, false);
+  }
+});
+
 test("ordinary CLI handlers route output through the schema and template boundary", async () => {
   const { readdirSync } = await import("node:fs");
   const { default: ts } = await import("typescript");

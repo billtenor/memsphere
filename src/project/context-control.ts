@@ -7,7 +7,7 @@ import { JsonPayloadSerializer } from "../data/extensions/json-serializer/index.
 import { readAll } from "../data/extensions/shared/payload.js";
 import { ContextControl, failure, type Stores, type ContentReader } from "../context_control/service.js";
 import { ENTITIES, modelId, storeId, definitionHash, readContextControlModels } from "../context_control/model-assets.js";
-import { createBusinessStore, openBusinessStore, readBusinessProject } from "./business-stores.js";
+import { createBusinessStore, openBusinessStore, openBusinessStores, readBusinessProject } from "./business-stores.js";
 import { checkModelDefinition } from "./model-validation.js";
 import { mutateModel } from "./model-service.js";
 import { createProjectModelHost } from "./models.js";
@@ -52,11 +52,16 @@ async function openContextControlSnapshot(root: string, legacyUpgrade: boolean):
       if (!isDeepStrictEqual((await host.definition(asset.id)).definition, asset.definition)) throw failure("MODEL_INCOMPATIBLE", `Context control models need an explicit upgrade: memsphere project models initialize (${asset.id})`);
     }
   }
-  const stores = {} as Stores;
+  const runtimes = new Map<string, Awaited<ReturnType<typeof host.runtime>>>();
   for (const entity of ENTITIES) {
     const oldSource = legacyUpgrade ? (await host.source(modelId(entity))).source : undefined;
     const runtime = oldSource === undefined ? await host.runtime(modelId(entity)) : (await checkModelDefinition({}, { modelRef: modelId(entity), source: oldSource, definition: JSON.parse(oldSource.replace(/^\uFEFF/, "")) })).runtime;
-    const opened = await openBusinessStore({}, root, storeId(entity), { runtime });
+    runtimes.set(storeId(entity), runtime!);
+  }
+  const openedStores = await openBusinessStores({}, root, runtimes);
+  const stores = {} as Stores;
+  for (const entity of ENTITIES) {
+    const opened = openedStores.get(storeId(entity))!;
     if (opened.store.kind !== "ValueStore" || opened.binding.model !== modelId(entity)) throw failure("STORE_INCOMPATIBLE", `Wrong context control Store: ${storeId(entity)}`);
     stores[entity] = opened.store;
   }

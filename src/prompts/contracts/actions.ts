@@ -20,6 +20,8 @@ export function validPublicCommand(command: CliCommand): boolean {
   const context = scope.getStore();
   const args = command.args;
   if (!args.length || args.some(arg => /[\x00-\x1f\x7f-\x9f]/u.test(arg))) return false;
+  // A delivery reference belongs only to its addressed wake-up notification.
+  if (args.some(arg => arg === "--callback" || arg.startsWith("--callback="))) return false;
   if (!context) return true;
   if ((command.launcher === "reviewer") !== context.reviewer) return false;
   let current = roots.get(context.program) ?? context.program;

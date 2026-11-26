@@ -107,7 +107,8 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
       "traex",
       "qwen",
       "kimi",
-      "codex"
+      "codex",
+      "claude"
     ]);
 
     payload.config.acp_providers = { traex: {} };
@@ -128,7 +129,8 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
       "traex",
       "qwen",
       "kimi",
-      "codex"
+      "codex",
+      "claude"
     ]);
     assert(detection.results.every((result) =>
       ["installed", "version_unknown", "missing", "failed"].includes(result.status)
@@ -160,6 +162,54 @@ test("loopback Settings validates same-origin JSON and rejects cross-origin requ
     });
     assert.equal(valid.status, 200);
     assert.equal((await valid.json() as { valid: boolean }).valid, true);
+  });
+});
+
+test("Settings detects healthy ACP Providers alongside unavailable entries", async () => {
+  await withSettingsServer("127.0.0.1", async ({ origin, configPath, globalConfigPath }) => {
+    const home = JSON.parse(await readFile(globalConfigPath, "utf8"));
+    const project = JSON.parse(await readFile(configPath, "utf8"));
+    home.acp_providers = { claude: { args: ["--private-argument"] }, qwen: { args: ["--model=private-argument"] } };
+    project.control_plane.actors.broken = { kind: "agent", permissions: [], agent: { provider: "constructor" } };
+    project.control_plane.actors.malformed = null;
+    await writeFile(globalConfigPath, JSON.stringify(home));
+    await writeFile(configPath, JSON.stringify(project));
+    const settings = await fetch(`${origin}/api/settings/global`);
+    assert.equal(settings.status, 200);
+    const { diskRevision, config } = await settings.json() as { diskRevision: string; config: Record<string, unknown> };
+    const headers = { "content-type": "application/json", origin, "sec-fetch-site": "same-origin" };
+    const detected = await fetch(`${origin}/api/settings/global/acp-providers/detect`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ expectedRevision: diskRevision, config })
+    });
+    assert.equal(detected.status, 200);
+    const result = await detected.text();
+    assert.doesNotMatch(result, /private-argument/);
+    const { results, errors } = JSON.parse(result);
+    assert.deepEqual(results.map((entry: { id: string }) => entry.id), ["traex", "kimi", "codex"]);
+    assert.deepEqual(errors.map((entry: { path: string }) => entry.path), ["acp_providers.claude", "acp_providers.qwen"]);
+
+    const globalRejected = await fetch(`${origin}/api/settings/global`, {
+      method: "PUT", headers,
+      body: JSON.stringify({ expectedRevision: diskRevision, config: { ...config, acp_providers: null } })
+    });
+    assert.equal(globalRejected.status, 422);
+    assert.equal((await globalRejected.json()).errors[0].path, "acp_providers");
+    assert.equal(await readFile(globalConfigPath, "utf8"), JSON.stringify(home));
+    assert.equal((await (await fetch(`${origin}/api/settings/global`)).json()).diskRevision, diskRevision);
+
+    const projectUrl = `${origin}/api/projects/demo/settings/project`;
+    const projectSettings = await (await fetch(`${origin}/api/settings/project`)).json();
+    const projectRejected = await fetch(projectUrl, {
+      method: "PUT", headers,
+      body: JSON.stringify({ expectedRevision: projectSettings.diskRevision, config: {
+        ...projectSettings.config, control_plane: { ...projectSettings.config.control_plane, actors: [] }
+      } })
+    });
+    assert.equal(projectRejected.status, 422);
+    assert.equal((await projectRejected.json()).errors[0].path, "control_plane.actors");
+    assert.equal(await readFile(configPath, "utf8"), JSON.stringify(project));
   });
 });
 
