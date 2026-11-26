@@ -62,6 +62,16 @@ test('CI keeps PR cancellation separate from master and manual full histories', 
   assert.equal(workflow.jobs['full-result'].if,"always() && needs.plan.outputs.profile == 'full'");
 });
 
+test('Windows process suites check CIM readiness before running their tests', () => {
+  const steps = workflow.jobs['integration-tests'].steps;
+  const readiness = steps.find(step => step.run?.includes('Get-CimInstance Win32_Process'));
+  assert.ok(readiness);
+  assert.equal(readiness.if, "runner.os == 'Windows' && (matrix.suite == 'platform-process' || matrix.suite == 'platform-rewind')");
+  assert.equal(readiness.shell, 'powershell');
+  assert.equal(readiness['timeout-minutes'], 1);
+  assert.ok(steps.indexOf(readiness) < steps.findIndex(step => step.run === 'npm run test:ci -- --suite=${{ matrix.suite }}'));
+});
+
 
 test('module jobs run the full second layer on every OS, and full evidence requires all built layers', () => {
   for (const profile of ['default','full']) {
