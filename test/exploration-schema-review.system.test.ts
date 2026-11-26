@@ -367,18 +367,24 @@ test("delegated exploration Review retries in the same round after saving a node
       workspaceRoot: f.cwd, runtime: { nodeExecutable: process.execPath, cliEntrypoint: cli } });
     begin("first dispatch");
     assert.equal(await (dispatchWork = dispatch()), 1);
-    begin("first Reviewer CLI and failure");
+    begin("first Worker save and failure");
+    // Establish the unrelated writer session while the first Provider runs;
+    // both wait receipts and the retry must preserve this saved target.
+    const draft = await f.call("run", "enter-schema", "report", "--run", R, "--name", "Unrelated draft", "--content-type", "text/markdown");
+    const home = (await openCommandStates(false, f.home))!, session = "codex-free-schema-review";
+    const target = await home.get({}, session);
     const wait = () => reviews.waitForArtifactReview({ runsRoot: cfg.runsRoot, reviewId, signal: t.signal, pollIntervalMs: 150 });
     await wait();
     const failed = await reviews.readArtifactReviewForActor(common);
     assert.equal(failed.assignment.status, "failed");
-    const first = (await attempts())[0];
+    const firstAttempts = await attempts();
+    const first = firstAttempts[0];
     assert.ok(first.workerPid && first.workerPid !== process.pid && first.workerIdentity);
     begin("first Worker exit");
     await untilFixture(() => ownWorkerExited(first, t.signal), "first exploration Review worker exit");
     begin("read failed receipt");
     assert.equal(reviewNodeProgress(failed.assignment)?.processed, 1);
-    assert.equal((await attempts()).length, 1);
+    assert.equal(firstAttempts.length, 1);
     const failure = failed.assignment.attempts![0].failure!;
     const failedReceipt = await f.call("run", "review", "wait", "--review", reviewId);
     assert.equal(failedReceipt.assignments, undefined);
@@ -401,9 +407,6 @@ test("delegated exploration Review retries in the same round after saving a node
       assert.deepEqual(retained.assignment.nodeStates!.find(node => node.nodeId === saved.nodeId), saved);
     }
     await assert.rejects(reviews.mutateArtifactReviewNodes({ ...common, attemptId, mutation: { operation: "report", expectedNodeId: currentReviewNode(failed.assignment)!.nodeId, artifact: { applicable: true } } }), /not current and running/);
-    const draft = await f.call("run", "enter-schema", "report", "--run", R, "--name", "Unrelated draft", "--content-type", "text/markdown");
-    const home = (await openCommandStates(false, f.home))!, session = "codex-free-schema-review";
-    const target = await home.get({}, session);
     const result = await wait();
     assert.equal(result.round.assignments[0].submitted?.vote, "approve", JSON.stringify(result.round.assignments[0].attempts));
     const second = (await attempts())[1];

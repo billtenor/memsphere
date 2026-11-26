@@ -142,10 +142,24 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   }
   if (graph) {
     const reportNode = () => invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]);
-    if (crashMarker && !resuming) {
-      await reportNode();
-      await writeFile(crashMarker, "node saved\n", { flag: "wx" });
-      process.exit(7);
+    if (crashMarker) {
+      // Recovery owns two real Worker/Provider lifetimes. Save each node
+      // through the bound session inside that Provider; the final vote still
+      // crosses the restricted CLI process boundary.
+      const { boundReviewNodeView, mutateBoundReviewNode } = await import("../../dist/acp/review-session.js");
+      const report = () => mutateBoundReviewNode({ operation: "report", artifact: { applicable: true } });
+      if (!resuming) {
+        await report();
+        await writeFile(crashMarker, "node saved\n", { flag: "wx" });
+        process.exit(7);
+      }
+      let pending = await boundReviewNodeView();
+      while (pending.node) {
+        await sendProgress(client, sessionId, "resume-node");
+        pending = await report();
+      }
+      await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:"approve",summary:"Fake ACP review completed"}), "--output", "json"]);
+      return;
     }
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.progress.phase === "reviewing") {

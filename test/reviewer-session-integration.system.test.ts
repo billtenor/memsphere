@@ -358,7 +358,7 @@ test('graph sessions without a HANDLE hint discover External help and retain act
 });
 
 test('assignment references, preview export and node commands stay bound after shell PATH replacement',async t=>{
- const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);
+ const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json'], { MSYSTEM: 'MINGW64' });assert.equal(detail.status,0,detail.stderr);
  for(const reference of JSON.parse(detail.stdout).references){const r=run(reference.readCommand);assert.equal(r.status,0,reference.readCommand+': '+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
  const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const action=JSON.parse(preview.stdout).nextAction;assert.equal(action.launcher,'reviewer');action.args[action.args.indexOf('<file>')]='preview-body.txt';const exported=run(formatCliCommand(action, "bash"));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
  await reviews.markArtifactReviewAgentCliReady({...f.input,attemptId:f.first.attempt.id});
