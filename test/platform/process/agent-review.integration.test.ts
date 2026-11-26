@@ -263,10 +263,18 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     const after = await readRun(runsRoot, runId);
     assert.deepEqual(after, before);
     assert.equal(after.artifactReviews?.[0]?.rounds[0]?.assignments[0]?.status, "queued");
-    const generated = await tryRunArtifactReviewAgents({ config: debugConfig, run: before });
-    assert.equal(generated.length, 1);
-    const directory = generated[0].directory;
-    assert.equal(directory, join(debugRoot, "agent-review", review.id, round.id, artifactReviewAssignmentId(assignment)));
+    const globalConfigPath = join(config.homeRoot, "config.json");
+    const global = JSON.parse(await readFile(globalConfigPath, "utf8"));
+    await writeFile(globalConfigPath, JSON.stringify({ ...global, debug: { agent_review: true } }));
+    const entry = fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
+    const result = crossSpawn.sync(process.execPath, [entry, "--project", "review-fixture", "run", "try-run", "--run", runId,
+      "--output", "json"], { cwd: dirname(configPath), env: launcherEnv({ MEMSPHERE_HOME: config.homeRoot }), encoding: "utf8", timeout: 30000 });
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = JSON.parse(result.stdout);
+    const directory = join(config.debug.root, "agent-review", review.id, round.id, artifactReviewAssignmentId(assignment));
+    assert.deepEqual(receipt, { runId, items: [{ assignmentId: artifactReviewAssignmentId(assignment),
+      promptPath: join(directory, "prompt.md"), launchPath: join(directory, "launch.json") }] });
+    assert.deepEqual(await readRun(runsRoot, runId), before);
     const launch = JSON.parse(await readFile(join(directory, "launch.json"), "utf8")) as Record<string, unknown>;
     const prompt = normalizeNewlines(await readFile(join(directory, "prompt.md"), "utf8"));
     assert.equal(launch.processStarted, false);

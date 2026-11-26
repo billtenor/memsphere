@@ -165,7 +165,8 @@ for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201
 test("CLI output selection preserves manual removals after later production", { timeout: 30000 }, async t => {
   const f = await fixture(t); const r = await f.call("run", "start", "--name", "outputs");
   const a = await f.call("continue", "report", "--name", "A", "--artifact", "A");
-  await f.call("continue", "outputs", "update", "--remove", a.artifactId);
+  const removed = await f.call("run", "outputs", "update", "--run", r.runId, "--remove", a.artifactId);
+  assert.deepEqual(removed.items, []);
   const b = await f.call("continue", "report", "--name", "B", "--artifact", "B");
   const outputs = await f.call("run", "outputs", "list", "--run", r.runId); assert.deepEqual(outputs.items.map((a: any) => a.id), [b.artifactId]);
   await f.call("continue", "outputs", "update", "--remove", b.artifactId, "--add", a.artifactId);

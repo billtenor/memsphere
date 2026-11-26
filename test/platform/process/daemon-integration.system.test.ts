@@ -793,6 +793,11 @@ test("View desired running/stopped survives daemon restarts while View remains i
   const start = await call("view", "start", "--output", "json");
   const { url: origin } = JSON.parse(start.stdout).view;
   assert.equal((await fetch(origin)).status, 200);
+  const view = JSON.parse((await call("view", "status", "--output", "json")).stdout);
+  assert.equal(view.view.url, origin);
+  const refreshed = JSON.parse((await call("view", "restart", "--output", "json")).stdout);
+  assert.equal(refreshed.view.running, true);
+  assert.equal((await fetch(refreshed.view.url)).status, 200);
   const first = JSON.parse((await call("daemon", "status", "--output", "json")).stdout);
   assert.equal(first.view.desiredState, "running"); assert.equal(first.view.running, true);
   const restarted = JSON.parse((await call("daemon", "restart", "--output", "json")).stdout);
