@@ -5,7 +5,7 @@ import { CliOutputError, cliCommand, emitCliError, flushCliOutput, withCliOutput
 import { publicCodes } from "../prompts/contracts/errors.js";
 
 export function invalidCliOptions(code: "use_artifact" | "mutually_exclusive" | "not_allowed" | "exactly_one_required" | "required" | "invalid_value", ...path: string[]) {
-  return Object.assign(new Error(code), { code: "INVALID_ARGUMENT", issues: [{ code, path }] });
+  return Object.assign(new Error(`${code.replaceAll("_", " ")}: ${path.join(", ")}`), { code: "INVALID_ARGUMENT", issues: [{ code, path }] });
 }
 
 export function errorCode(error: unknown): string {

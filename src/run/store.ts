@@ -1,3 +1,4 @@
+import { failure } from "../context_control/errors.js";
 import { createFlowReviewNodes } from "./review-nodes.js";
 import { reviewSourceSchema, type ReviewSource, reviewNodeTreeSchema, reviewNodeStateSchema, assertReviewNodes, mutateReviewNode, reviewCommentId, type NodeMutation } from "../review-nodes.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -1072,7 +1073,7 @@ export async function startRun(input: {
   );
   const steps = instantiateProcedureTemplate(rootTemplate, controlPlane, reviewConfiguration);
   if (!steps.length) {
-    throw Object.assign(new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`), { code: "INVALID_ARGUMENT" });
+    throw failure("INVALID_ARGUMENT", `procedure has no flow steps: ${procedureMemory.names[0]}`);
   }
 
   const declarations: Array<{ store: string; model?: string }> = [];
@@ -2138,7 +2139,7 @@ export async function submitArtifactReviewAssignment(input: {
     const vote = assignment.draft.vote;
     if (!vote) throw new Error("Artifact Review vote is required before Submit Review");
     if ((vote === "request_changes" || vote === "abstain") && assignment.draft.comments.length === 0) {
-      throw new Error(`${vote} requires at least one Comment`);
+      throw failure("INVALID_ARGUMENT", `${vote} requires at least one Comment`);
     }
     const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewActor({
@@ -2209,7 +2210,7 @@ export async function submitArtifactReviewHumanAssignmentForRunner(input: {
       assignment.submitted?.comments ?? []
     );
     if ((input.vote === "request_changes" || input.vote === "abstain") && comments.length === 0) {
-      throw new Error(`${input.vote} requires at least one Comment`);
+      throw failure("INVALID_ARGUMENT", `${input.vote} requires at least one Comment`);
     }
 
     if (assignment.status === "submitted") {
@@ -2528,7 +2529,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
       && context.assignment.draft.comments.length === 0
       && !summary
     ) {
-      throw new Error(`${input.vote} requires at least one Comment or Summary`);
+      throw failure("INVALID_ARGUMENT", `${input.vote} requires at least one Comment or Summary`);
     }
     const permission = context.assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewActor({

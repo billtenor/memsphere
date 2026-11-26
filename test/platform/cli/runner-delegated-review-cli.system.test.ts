@@ -183,7 +183,8 @@ flow:
       "--output", "json"
     ]);
     assert.notEqual(failedResult.status, 0);
-    assert.match(failedResult.stderr, /INVALID_ARGUMENT|INTERNAL_ERROR/);
+    assert.equal(failedResult.stdout, "");
+    assert.equal(JSON.parse(failedResult.stderr).error.code, "INVALID_ARGUMENT");
     assert.equal(currentArtifactReview(await readRun(runsRoot, rejectedCase.started.id))!.rounds[0]!.assignments[0]!.submitted, undefined);
   } finally {
     process.chdir(previousCwd);
