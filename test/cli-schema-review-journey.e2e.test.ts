@@ -27,7 +27,7 @@ async function executable(path: string, body: string) {
   }
 }
 
-test("a Schema author receives the original Review wakeup, verifies the saved candidate and finishes the Run", { timeout: 120000 }, async t => {
+for (const sample of [1, 2, 3]) test(`Schema Review wakeup diagnostic sample ${sample}`, { timeout: 120000 }, async t => {
   const f = await initializedContextFixture(t);
   const service = (await openContextControl(f.root))!;
   const bin = join(f.directory, "bin"), gate = join(f.directory, "release");
