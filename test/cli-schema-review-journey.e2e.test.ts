@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile, spawn } from "node:child_process";
+import { execFile } from "node:child_process";
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -8,10 +8,10 @@ import { promisify } from "node:util";
 import test from "node:test";
 import { get_encoding } from "tiktoken";
 import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
-import { queryWindowsProcesses } from "../src/context_control/review-process.js";
 import { daemonStatus, stopDaemon } from "../src/daemon/service.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { stripRunnerEnvironment } from "../src/runner/agent-types.js";
+import { cleanupFixtureResources, createFixtureProcesses } from "./helpers/fixture-process.js";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { ownTestProcess } from "./helpers/owned-process.js";
 
@@ -55,14 +55,33 @@ test("a Schema author receives the original Review wakeup, verifies the saved ca
       import(${JSON.stringify(reviewer)});
     }`);
   const readerReview = async (runId: string) => (await service.inspect(runId)).reviews.find(row => row.reviewer.actorId === "reader");
-  f.beforeCleanup(async () => {
-    try {
-      await writeFile(gate, "release");
+  let processObserver: ReturnType<typeof createFixtureProcesses> | undefined;
+  const observeProcesses = () => processObserver ??= createFixtureProcesses();
+  f.beforeCleanup(() => cleanupFixtureResources([
+    () => writeFile(gate, "release"),
+    async () => {
+      let pid: number | undefined;
+      try {
+        const daemon = await daemonStatus(f.home);
+        if (daemon.running) {
+          await (await observeProcesses()).remember(daemon.pid);
+          pid = daemon.pid;
+        }
+      } finally {
+        await stopDaemon(f.home);
+      }
+      if (pid !== undefined) {
+        const processes = await observeProcesses();
+        const signal = AbortSignal.timeout(20_000);
+        while ((await processes.alive(pid))[0]) await delay(50, undefined, { signal });
+      }
+    },
+    async () => {
       if (process.platform === "win32" && activeRun) {
         const runId = activeRun;
         const signal = AbortSignal.timeout(20_000);
         let review = await readerReview(runId);
-        while (review && !review.attempts?.at(-1)?.workerJob) {
+        while (review?.attempts?.at(-1) && !review.attempts.at(-1)?.workerJob && !review.attempts.at(-1)?.completion) {
           await delay(50, undefined, { signal });
           review = await readerReview(runId);
         }
@@ -70,15 +89,17 @@ test("a Schema author receives the original Review wakeup, verifies the saved ca
         if (job) {
           while ((await inspectWindowsReviewJob(job)).exists) await delay(50, undefined, { signal });
           const members = (await readerReview(runId))?.attempts?.at(-1)?.workerMembers ?? [];
-          const hasMember = async () => (await queryWindowsProcesses()).some(row =>
-            members.some(member => row.pid === member.pid && row.started === member.started));
-          while (members.length && await hasMember()) await delay(50, undefined, { signal });
+          if (members.length) {
+            const processes = await observeProcesses();
+            processes.rememberSnapshot(...members);
+            const pids = members.map(member => member.pid);
+            while ((await processes.alive(...pids)).some(Boolean)) await delay(50, undefined, { signal });
+          }
         }
       }
-    } finally {
-      await stopDaemon(f.home);
-    }
-  });
+    },
+    async () => (await processObserver)?.close()
+  ]));
   await exec("git", ["init", "-b", "master"], { cwd: f.root, signal: t.signal });
   const configPath = join(f.root, "config.json");
   const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -131,27 +152,7 @@ actions:
   };
   const call = (...args: string[]) => invoke([entry], args);
 
-  // The notification journey starts with a ready, fixture-owned daemon.
-  // The daemon system suite covers lazy startup and restart separately.
-  const daemonStarted = performance.now();
-  const daemonEnv = { ...env };
-  stripRunnerEnvironment(daemonEnv);
-  const daemon = spawn(process.execPath, [entry, "daemon", "serve"], { cwd: f.root, env: daemonEnv, stdio: "ignore" });
-  const startup = new AbortController();
-  daemon.once("error", error => startup.abort(error));
-  daemon.once("exit", (code, signal) => startup.abort(new Error(`Fixture daemon exited (${signal ?? code})`)));
-  ownTestProcess(daemon, t.signal, f.beforeCleanup);
-  const startupSignal = AbortSignal.any([t.signal, startup.signal, AbortSignal.timeout(7500)]);
-  let running = await daemonStatus(f.home);
-  while (!running.running) {
-    await delay(25, undefined, { signal: startupSignal });
-    running = await daemonStatus(f.home);
-  }
-  assert.equal(running.pid, daemon.pid);
-  t.diagnostic(`Daemon readiness took ${Math.round(performance.now() - daemonStarted)} ms`);
-
   const { runId } = await call("run", "start", "--file", procedure, "--review-config", bindings, "--name", "Deliver one result");
-  activeRun = runId;
   const draft = await call("continue", "enter-schema");
   const body = '{"summary":"Checked by the reader"}';
   const written = await call("continue", "schema", "report", "--position", draft.position, "--artifact", body);
@@ -159,10 +160,14 @@ actions:
   const candidate = await call("continue", "report", "--artifact", body);
   assert.equal(candidate.artifactId, draft.artifactId);
   assert.equal(candidate.status, "awaiting_review");
+  assert.equal((await daemonStatus(f.home)).running, false);
+  assert.equal((await readerReview(runId))?.attempts?.at(-1)?.workerPid, undefined);
   // On failure preserve the internal cause from registering the wakeup.
+  activeRun = runId;
   const wait = await invoke([rethrowEntry, entry], candidate.nextAction.resume.args);
   assert.equal(wait.roundId, candidate.roundId);
   assert.ok(wait.taskId);
+  assert.equal((await daemonStatus(f.home)).running, true);
   const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60000)]);
   // The wait command can launch the Reviewer. Keep the gate closed until
   // both the wakeup registration and the ACP session are established.
