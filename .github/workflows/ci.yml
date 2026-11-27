@@ -198,34 +198,16 @@ jobs:
         run: node scripts/ci/windows-package-smoke.mjs
       - name: Windows PowerShell 5.1 smoke
         shell: powershell
-        run: |
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
-          Push-Location ".ci windows project"
-          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
-          Pop-Location
+        run: .\test\packaged-cli\windows-shell-smoke.ps1
       - name: PowerShell 7 smoke
         shell: pwsh
-        run: |
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --version
-          & ".\.ci-install\node_modules\.bin\memsphere.cmd" --help
-          Push-Location ".ci windows project"
-          & "..\.ci-install\node_modules\.bin\memsphere.cmd" view status
-          Pop-Location
+        run: .\test\packaged-cli\windows-shell-smoke.ps1
       - name: CMD smoke
         shell: cmd
-        run: |
-          .ci-install\node_modules\.bin\memsphere.cmd --version
-          .ci-install\node_modules\.bin\memsphere.cmd --help
-          cd /d ".ci windows project"
-          ..\.ci-install\node_modules\.bin\memsphere.cmd view status
+        run: call test\packaged-cli\windows-shell-smoke.cmd
       - name: Git Bash smoke
         shell: bash
-        run: |
-          ./.ci-install/node_modules/.bin/memsphere --version
-          ./.ci-install/node_modules/.bin/memsphere --help
-          cd ".ci windows project"
-          ../.ci-install/node_modules/.bin/memsphere view status
+        run: bash test/packaged-cli/windows-shell-smoke.sh
 
   full-result:
     name: Full cross-platform regression
