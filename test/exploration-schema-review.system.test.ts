@@ -10,8 +10,11 @@ import { openCommandStates } from "../src/home/command-state-store.js";
 import { currentReviewNode, reviewNodeProgress } from "../src/review-nodes.js";
 import { reviewResumeNotification } from "../src/daemon/review.js";
 import { invokeCliModule } from "./helpers/cli-module.js";
-import { delegatedReviewConfig, explorationFixture as fixture, explorationTestCli as cli, writeFixtureSchema } from "./helpers/exploration.js";
+import { delegatedReviewConfig, explorationFixture, explorationTestCli as cli, writeFixtureSchema } from "./helpers/exploration.js";
 import { withCurrentMemorySyntax } from "./helpers/memory.js";
+
+// Keep a real published revision without re-enumerating Embedded worktrees on every command.
+const fixture = (t: test.TestContext, isolatedCli = false) => explorationFixture(t, { store: "managed", isolatedCli });
 
 test("exploration reports a broken reviewer only when it is selected or started", { timeout: 30000 }, async t => {
   const f = await fixture(t);
@@ -40,8 +43,16 @@ test("exploration reports a broken reviewer only when it is selected or started"
 });
 
 test("free exploration Schema and Runner Review use explicit native targets and Continue bindings", { timeout: 60000 }, async t => {
-  const f = await fixture(t), R = (await f.call("run", "start", "--name", "Explore")).runId;
+  let stageStarted = performance.now();
+  const reportTime = (stage: string) => {
+    const now = performance.now();
+    t.diagnostic(`${stage} took ${Math.round(now - stageStarted)} ms`);
+    stageStarted = now;
+  };
+  const f = await fixture(t, true), R = (await f.call("run", "start", "--name", "Explore")).runId;
   await writeFile(f.schema, (await readFile(f.schema, "utf8")) + "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]\n");
+  await f.publishMemory();
+  reportTime("Fixture setup, Run start and Schema publication");
   const draft = await f.call("continue", "enter-schema", "report", "--name", "Findings", "--content-type", "text/markdown");
   const A = draft.artifactId, S = draft.stepId;
   const repository = new ExplorationReviews(f.service);
@@ -63,6 +74,7 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   const E = (await f.call("continue", "external", "add", "--source", "used", "--content", "fixed")).externalId;
   const unused = (await f.call("continue", "external", "add", "--source", "unattached", "--content", "unused")).externalId;
   assert.equal((await f.call("continue", "report", "--depends-on", `external:${E}`)).artifactId, A);
+  reportTime("Schema writing and Artifact submission");
   await assert.rejects(f.call("continue", "review", "start", "--artifact", A), /REVIEWER_REQUIRED/);
   await f.call("continue", "step", "configure", "--step", S, "--reviewer", "runner");
   await assert.rejects(f.call("continue", "review", "start", "--artifact", A), /REVIEW_RULES_REQUIRED/);
@@ -75,8 +87,10 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   assert.ok(!materials.some((ref: { id: string }) => ref.id === unused));
   await assert.rejects(f.call("continue", "review", "submit", "--artifact", '{"vote":"approve"}'), /REVIEW_CONFLICT/);
   await writeFile(f.statement, withCurrentMemorySyntax("!statement\nnames: [fact]\nasserts: [Check updated fact]\nsuggests: [Use plain language]\n"));
+  await f.publishMemory();
   const frozen = await f.call("run", "review", "show", "--run", R, "--review", V, "--all");
   assert.ok(frozen.nodes.some((n: { asserts: Array<{ text: string }> }) => n.asserts.some(rule => rule.text === "Check original fact")));
+  reportTime("Review setup and frozen rules");
   let progress = await f.call("continue", "review", "show");
   const ruleNode = progress.node.nodeId;
   const beforeInvalid = await f.service.inspect(R);
@@ -101,6 +115,7 @@ test("free exploration Schema and Runner Review use explicit native targets and 
     assert.ok(all.stdout.includes(ruleNode));
   }
   assert.deepEqual(await f.service.inspect(R), beforeInvalid);
+  reportTime("Review CLI argument matrix");
   progress = await f.call("run", "review", "report", "--run", R, "--review", V, "--artifact", '{"applicable":true}');
   await f.call("run", "review", "update", "--run", R, "--review", V, "--node", ruleNode, "--artifact", '{"applicable":true,"comments":[]}');
   const afterUpdate = await f.call("continue", "review", "update", "--node", ruleNode, "--artifact", '{"applicable":true,"comments":[]}');
@@ -128,6 +143,7 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   await assert.rejects(f.call("continue", "review", "show"), /INVALID_ARGUMENT/);
   const old = await f.call("run", "review", "show", "--run", R, "--review", V);
   assert.equal(old.vote.value, "approve");
+  reportTime("Review edits and vote");
   await f.call("run", "enter", "--run", R, "--review", V);
   assert.equal((await f.call("continue", "review", "show")).vote.value, "approve");
   await f.call("run", "enter", "--run", R);
@@ -142,6 +158,7 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   assert.notEqual(second.reviewId, V);
   assert.deepEqual((await f.call("run", "review", "list", "--run", R, "--artifact", A)).items.map((r: { id: string }) => r.id), []);
   assert.equal((await f.call("run", "review", "list", "--run", R, "--artifact", A, "--progressive")).items.length, 2);
+  reportTime("Revision and Review history");
 });
 
 test("exploration Schema CLI writes files and empty fields and preserves an incomplete draft", { timeout: 30000 }, async t => {
@@ -532,6 +549,7 @@ test("a late Schema submission cannot release a newer Home target", { timeout: 3
 for (const format of ["text", "json"]) test(`native Schema writes and Continue feedback use their bound targets in ${format}`, async t => {
   const f = await fixture(t);
   await writeFile(f.schema, (await readFile(f.schema, "utf8")) + "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]\n");
+  await f.publishMemory();
   const run = (await f.call("run", "start", "--name", "Scoped commands")).runId;
   const draft = await f.call("continue", "enter-schema", "report", "--name", "Record", "--content-type", "text/markdown");
   const target = ["--run", run, "--step", draft.stepId];
@@ -581,6 +599,7 @@ test("omitting the final optional field and choosing zero final repeats finish t
     [["repeat", "0"], "  - !repeat\n    limit: {min: 0, max: 2}\n    body: [Example]"]
   ] as const) {
     await writeFile(f.schema, base + "fields:\n" + field + "\n");
+    await f.publishMemory();
     for (const route of ["run", "continue"]) {
       const draft = await f.call("continue", "enter-schema", "report", "--name", "Record", "--content-type", "text/markdown");
       const field = await f.call("continue", "schema", "report", "--position", draft.position, "--artifact", "# Record");
