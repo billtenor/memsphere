@@ -1,20 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { execFile } from "node:child_process";
+import { once } from "node:events";
 import { promisify } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join } from "node:path";
-import { invokeCliModule } from "./helpers/cli-module.js";
+import { cliModuleProcess } from "./helpers/cli-module-process.js";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
 import { ownTestProcess } from "./helpers/owned-process.js";
 const exec = promisify(execFile), cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+const cliTimeout = 20_000;
 
-async function schemaCliFixture(t: test.TestContext, invocation: "process" | "module" = "process") {
+async function schemaCliFixture(t: test.TestContext, invocation: "process" | "worker" = "process") {
   const f = await initializedContextFixture(t);
   // Schema writing uses a real project and persisted Stores. A Managed Memory
   // baseline avoids enumerating Embedded worktrees on each unrelated Store read.
-  const processOptions = { timeout: 20000, killSignal: "SIGKILL" as const };
+  const processOptions = { timeout: cliTimeout, killSignal: "SIGKILL" as const };
   const runProcess = (file: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => {
     t.signal.throwIfAborted();
     const result = exec(file, args, { cwd, env, ...processOptions });
@@ -29,20 +31,17 @@ async function schemaCliFixture(t: test.TestContext, invocation: "process" | "mo
   config.store = { type: "managed", branch: "master", published_revision: revision.trim() };
   await writeFile(join(f.root, "config.json"), JSON.stringify(config));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
-  const env = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "", MEMSPHERE_REVIEW_SESSION_ID: "", CODEX_THREAD_ID: "schema-cli", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
-  let pending: ReturnType<typeof invokeCliModule> | undefined;
-  if (invocation === "module") {
-    f.beforeCleanup(async () => { await Promise.allSettled([pending]); });
-  }
+  const env: NodeJS.ProcessEnv = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "", MEMSPHERE_REVIEW_SESSION_ID: "", CODEX_THREAD_ID: "schema-cli", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
+  const worker = invocation === "worker" ? cliModuleProcess({
+    cwd: f.cwd, env, entrypoint: cli, signal: t.signal, timeout: cliTimeout, beforeCleanup: f.beforeCleanup
+  }) : undefined;
   const invoke = (...args: string[]) => {
     const command = ["--project", "test-project", ...args];
-    if (invocation === "process") return runProcess(process.execPath, [cli, ...command], f.cwd, env);
-    pending = invokeCliModule(command, f.cwd, env, cli, t.signal);
-    return pending;
+    return worker ? worker.invoke(command) : runProcess(process.execPath, [cli, ...command], f.cwd, env);
   };
   const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
   const raw = async (...args: string[]) => (await invoke(...args)).stdout;
-  return { f, call, raw };
+  return { f, env, call, raw };
 }
 
 async function startSchemaStep({ f, call }: Awaited<ReturnType<typeof schemaCliFixture>>) {
@@ -94,7 +93,7 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
 });
 
 test("graph Schema CLI preserves draft identity and enforces position and lifecycle boundaries", { timeout: 90000 }, async t => {
-  const fixture = await schemaCliFixture(t, "module");
+  const fixture = await schemaCliFixture(t, "worker");
   const { f, call } = fixture;
   const { run, target } = await startSchemaStep(fixture);
   for (const state of [await call("run", "schema", "show", ...target), await call("continue", "schema", "show")]) {
@@ -140,8 +139,66 @@ test("graph Schema CLI preserves draft identity and enforces position and lifecy
   assert.equal((await call("continue", "schema", "show")).phase, "submitted");
 });
 
+test("Graph Schema CLI cancellation and command deadline stop a waiting worker before it updates the draft", { timeout: 90000 }, async t => {
+  const fixture = await schemaCliFixture(t, "worker");
+  const { f, env, call } = fixture;
+  const { target } = await startSchemaStep(fixture);
+  const initial = await call("continue", "enter-schema");
+  const input = join(f.directory, "field.json");
+  await writeFile(input, '{"summary":"must not persist"}');
+  // Pause the actual command before it can write the field, then observe worker exit.
+  const preload = join(f.directory, "pause-schema-read.mjs");
+  await writeFile(preload, `
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
+const readFile = fs.readFile;
+fs.readFile = async (path, ...args) => {
+  if (path === process.env.MEMSPHERE_PAUSED_SCHEMA_INPUT) {
+    process.send({ type: "reading-schema-input" });
+    await new Promise(resolve => process.once("message", resolve));
+  }
+  return readFile(path, ...args);
+};
+syncBuiltinESMExports();
+`);
+  const workerEnv = {
+    ...env, NODE_OPTIONS: [env.NODE_OPTIONS, `--import=${pathToFileURL(preload).href}`].filter(Boolean).join(" "),
+    MEMSPHERE_PAUSED_SCHEMA_INPUT: input
+  };
+  for (const stop of ["abort", "deadline"] as const) {
+    const controller = new AbortController();
+    const worker = cliModuleProcess({
+      cwd: f.cwd, env: workerEnv, entrypoint: cli,
+      signal: AbortSignal.any([t.signal, controller.signal]), timeout: cliTimeout, beforeCleanup: f.beforeCleanup
+    });
+    const paused = once(worker.child, "message", { signal: t.signal });
+    if (stop === "deadline") t.mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      const writing = worker.invoke(["--project", "test-project", "continue", "schema", "report",
+        "--position", initial.position, "--artifact-file", input, "--output", "json"]);
+      const [event] = await Promise.race([paused, writing.then(() => { throw new Error("Schema write passed the input barrier"); })]);
+      assert.deepEqual(event, { type: "reading-schema-input" });
+      if (stop === "abort") {
+        const reason = new Error("Test cancelled while reading the field");
+        controller.abort(reason);
+        await assert.rejects(writing, error => error === reason);
+      } else {
+        t.mock.timers.tick(cliTimeout);
+        await assert.rejects(writing, /CLI command timed out after 20000 ms/);
+      }
+      assert.ok(worker.child.exitCode !== null || worker.child.signalCode !== null);
+    } finally {
+      if (stop === "deadline") t.mock.timers.reset();
+    }
+    const unchanged = await call("run", "schema", "show", ...target);
+    assert.equal(unchanged.phase, "writing");
+    assert.equal(unchanged.artifactId, initial.artifactId);
+    assert.equal(unchanged.position, initial.position);
+  }
+});
+
 test("Schema native entry and Continue retain all rule scopes, input links and Human responsibility", { timeout: 90000 }, async t => {
-  const { f, call, raw } = await schemaCliFixture(t, "module");
+  const { f, call, raw } = await schemaCliFixture(t, "worker");
   const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
   const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["schema-context"], defines: ["Report"], asserts: ["Workflow rule"], actions: [
     { tag: "!action", id: "input", description: "Prepare", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Input", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } } },
