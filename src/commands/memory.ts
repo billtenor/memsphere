@@ -43,6 +43,7 @@ import { parseListLimit, type PaginationOptions } from "../pagination.js";
 
 const memoryIdentity = z.object({ reference: z.string(), kind: z.enum(memoryKinds), names: z.array(z.string()).max(10) }).strict();
 const memoryPage = z.object({
+  project_name: z.string().optional(), revision: z.string().optional(),
   items: z.array(memoryIdentity.extend({
     summary: z.string().optional(), project_name: z.string().optional(), revision: z.string().optional(),
     app: z.object({ id: z.string(), version: z.string(), assetKey: z.string(), enabled: z.boolean() }).strict().optional()
@@ -162,8 +163,16 @@ export async function memoryListFacts(reference: string | undefined, options: Me
     }));
   }
   const page = await catalog.list({ kind, query: options.query, limit, cursor: options.cursor }, cliPageBudget("established", summarizeMemory));
+  const items = page.items.map(summarizeMemory);
+  const shared = (key: "project_name" | "revision") =>
+    items.length > 1 && items.every(item => item[key] === items[0][key]) ? items[0][key] : undefined;
+  const project = shared("project_name"), revision = shared("revision");
   return commandFacts(() => memoryPage.parse({
-    items: page.items.map(summarizeMemory),
+    project_name: project, revision,
+    items: items.map(item => ({
+      ...item, project_name: project === undefined ? item.project_name : undefined,
+      revision: revision === undefined ? item.revision : undefined
+    })),
     nextCursor: page.nextCursor
   }));
 }

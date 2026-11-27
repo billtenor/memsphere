@@ -104,3 +104,29 @@ test("schema mutation previews direct readers to the complete current instructio
     if (format === "json") assert.deepEqual(JSON.parse(output).current.instruction, instruction);
   }
 });
+
+test("branch labels stay paired with the intended commands at UTF-8 display limits", () => {
+  const labels = ["同名\n第一组\u202e", "同名\n第二组\u001b"];
+  const targets = ["step-first", "step-second"];
+  const choices = labels.map((label, i) => ({ ...cliCommand(["run", "step", "enter", "--run", "run-example", "--step", targets[i]]), label }));
+  const value = { status: "ready", items: [], nextAction: { kind: "choose", choices } };
+  for (const locale of ["en", "zh-CN"] as const) {
+    for (const format of ["json", "text"] as const) {
+      const options = { locale, format };
+      const output = renderCliResult("run status", resultSchema, value, options);
+      const bytes = Buffer.byteLength(output);
+      for (const maximumBytes of [bytes, bytes + 1]) assert.equal(renderCliResult("run status", resultSchema, value, { ...options, maximumBytes }), output);
+      assert.throws(() => renderCliResult("run status", resultSchema, value, { ...options, maximumBytes: bytes - 1 }), { code: "OUTPUT_RENDER_FAILED" });
+      if (format === "json") assert.deepEqual(JSON.parse(output).nextAction.choices, choices);
+      else {
+        const lines = output.trimEnd().split("\n");
+        for (const [index, id] of targets.entries()) {
+          const line = lines.findIndex(text => text.endsWith("--step " + id));
+          assert.ok(line > 0);
+          assert.ok(lines[line - 1].includes(index ? "第二组" : "第一组"));
+        }
+        assert.doesNotMatch(output, /[\u001b\u202e]/u);
+      }
+    }
+  }
+});

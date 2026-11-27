@@ -70,6 +70,7 @@ memsphere run artifact show --run <id> --artifact <artifact-id> --out <file>
 memsphere run outputs list --run <id>
 ```
 
+- 自由探索提交产物后，候选材料超过 20 项时，原会话可执行回执里的 candidateDetails 查看本次提交的完整引用清单。换到其他会话后无法使用这个入口。
 - 原始外部材料用 `run external add` 登记；由它形成的分析用 Artifact，声明真实依赖。`--depends-on artifact:<id>|external:<id>|tag:<name>` 与 `--tag` 可重复，标签依赖提交时固定为具体对象。正文可能只是短预览，完整阅读用 artifact/external show 的 `--out`，不为登记依赖重复读取材料。导出的是原始正文，不能把命令回执当成材料内容。
 - `--artifact`、`--artifact-file` 与结构化 `--file` 互斥。结构化 JSON 只接收 name、content/contentRef、dependencies、tags、revisedFrom、revisedSummary。
 

@@ -38,7 +38,7 @@ export function publicDaemonStatus(status: ServiceStatus): z.infer<typeof daemon
       ...(view.error ? { errorCode: "VIEW_UNAVAILABLE" } : {}),
       ...(view.settingsAccess ? { settingsAccess: view.settingsAccess } : {})
     },
-    ...(counts ? { tasks: {
+    ...(counts && ["queued", "running", "completed", "failed", "cancelled"].some(key => counts[key] > 0) ? { tasks: {
       queued: counts.queued, running: counts.running, completed: counts.completed,
       failed: counts.failed, cancelled: counts.cancelled
     } } : {}),

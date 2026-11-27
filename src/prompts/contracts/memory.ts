@@ -13,6 +13,7 @@ export const memoryContracts = {
     }),
     receipt("cli-memory-list-2", "未指定引用 · Memory 摘要页",
       { rule: "无引用查 Memory 摘要；有引用查节点、父节点及可继续读取的 node_ref。显式 YAML 表达同一页。" }, {
+      project_name: text.optional(), revision: text.optional(),
       items: list(publicMemoryListEntryItem2),
       nextCursor: text.optional(),
     }),
@@ -220,7 +221,7 @@ export const memoryContracts = {
   ],
   "memory change claim": [
     receipt("cli-memory-change-claim-1", "可编辑候选",
-      { rule: "同一候选，增加 commentCount/warningCount；不回传处理者私有状态。" }, {
+      { omitZero: ["warningCount"], rule: "同一候选，增加 commentCount/warningCount；不回传处理者私有状态。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       nextAction: action,
@@ -231,7 +232,7 @@ export const memoryContracts = {
   ],
   "memory change finish": [
     receipt("cli-memory-change-finish-1", "操作成功",
-      { rule: "只给 changeId/status，finish 增加 commentCount。" }, {
+      { omitZero: ["commentCount"], rule: "只给 changeId/status，finish 增加 commentCount。" }, {
       changeId: text,
       status: oneOf("ready", "applied", "published", "claimed", "completed", "restored", "pushed", "synchronized"),
       commentCount: integer,
@@ -246,7 +247,7 @@ export const memoryContracts = {
   ],
   "memory change validate": [
     receipt("cli-memory-change-validate-1", "成功",
-      { rule: "绑定 changeId、checkpointDigest、baseRevision 和校验结果。View 给可读位置；正文按固定 checkpoint 查。" }, {
+      { omitZero: ["issueCount"], omitEmpty: ["issues"], counts: { completedChangeCount: "completedChangeIds" }, rule: "绑定 changeId、checkpointDigest、baseRevision 和校验结果。View 给可读位置；正文按固定 checkpoint 查。" }, {
       valid: bool,
       changeId: text,
       storeType: oneOf("managed", "embedded"),

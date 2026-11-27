@@ -1,6 +1,15 @@
 import { bool, content, list, text, yes } from "./types.js";
 import { publicModelListEntryItem, publicModelReadRegistration, publicModelValidateChecks, publicModelValidateDataItem } from "./fields.js";
+import { projectedModelRegistration } from "./fields.js";
 import { receipt } from "./types.js";
+
+const registration = {
+  schema: projectedModelRegistration,
+  select(value: Record<string, unknown>, facts: Record<string, unknown>) {
+    const { modelRef, ...details } = value;
+    return modelRef === facts.modelRef ? details : value;
+  }
+};
 
 export const modelContracts = {
   "model list": [
@@ -19,14 +28,14 @@ export const modelContracts = {
       project: text.optional(),
     }),
     receipt("cli-model-read-2", "--part registration",
-      { rule: "只给所选部分。" }, {
+      { nested: { registration }, rule: "只给所选部分。" }, {
       modelRef: text,
       registration: publicModelReadRegistration,
       origin: text.optional(),
       project: text.optional(),
     }),
     receipt("cli-model-read-3", "--part all",
-      { rule: "只给所选部分。" }, {
+      { nested: { registration }, rule: "只给所选部分。" }, {
       modelRef: text,
       registration: publicModelReadRegistration,
       definition: content,
@@ -36,14 +45,14 @@ export const modelContracts = {
   ],
   "model create": [
     receipt("cli-model-create-1", "已执行",
-      { rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
+      { nested: { registration }, remove: ["operation"], rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
       operation: text,
       modelRef: text,
       project: text.optional(),
       registration: publicModelReadRegistration.optional(),
     }),
     receipt("cli-model-create-2", "预演",
-      { rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
+      { nested: { registration }, remove: ["operation"], rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
       operation: text,
       modelRef: text,
       dryRun: yes,
@@ -53,14 +62,14 @@ export const modelContracts = {
   ],
   "model update": [
     receipt("cli-model-update-1", "已执行",
-      { rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
+      { nested: { registration }, remove: ["operation"], rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
       operation: text,
       modelRef: text,
       project: text.optional(),
       registration: publicModelReadRegistration.optional(),
     }),
     receipt("cli-model-update-2", "预演",
-      { rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
+      { nested: { registration }, remove: ["operation"], rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
       operation: text,
       modelRef: text,
       dryRun: yes,
@@ -70,13 +79,13 @@ export const modelContracts = {
   ],
   "model delete": [
     receipt("cli-model-delete-1", "已执行",
-      { rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
+      { remove: ["operation"], rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
       operation: text,
       modelRef: text,
       project: text.optional(),
     }),
     receipt("cli-model-delete-2", "预演",
-      { rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
+      { remove: ["operation"], rule: "registration 仅在写入产生公开登记时返回。", omit: ["definition"] }, {
       operation: text,
       modelRef: text,
       dryRun: yes,
@@ -85,7 +94,7 @@ export const modelContracts = {
   ],
   "model validate": [
     receipt("cli-model-validate-1", "定义或运行时校验",
-      { rule: "data 只在 --check-data 时按授权 Store 给出计数。", omit: ["data"] }, {
+      { remove: ["operation"], rule: "data 只在 --check-data 时按授权 Store 给出计数。", omit: ["data"] }, {
       operation: text,
       modelRef: text,
       valid: bool,
@@ -93,7 +102,7 @@ export const modelContracts = {
       project: text.optional(),
     }),
     receipt("cli-model-validate-2", "--check-data",
-      { rule: "data 只在 --check-data 时按授权 Store 给出计数。" }, {
+      { remove: ["operation"], rule: "data 只在 --check-data 时按授权 Store 给出计数。" }, {
       operation: text,
       modelRef: text,
       valid: bool,

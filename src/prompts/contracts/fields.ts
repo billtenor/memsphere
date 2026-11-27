@@ -32,14 +32,15 @@ export const publicModelListEntryItem: z.ZodTypeAny = object({
   errorCode: text.optional()
 });
 
-export const publicModelReadRegistration: z.ZodTypeAny = object({
-  modelRef: text,
+const modelRegistrationFields = {
   name: text.optional(),
   description: text.optional(),
   package: text.optional(),
   package_name: text.optional(),
   tags: list(text).optional()
-});
+};
+export const publicModelReadRegistration: z.ZodTypeAny = object({ modelRef: text, ...modelRegistrationFields });
+export const projectedModelRegistration = object({ modelRef: text.optional(), ...modelRegistrationFields });
 
 export const publicModelValidateChecks: z.ZodTypeAny = object({
   definition: text,
@@ -84,32 +85,39 @@ export const publicProjectModelsInitializeContextcontrol: z.ZodTypeAny = object(
   records: integer
 });
 
-export const publicProjectListEntryItem: z.ZodTypeAny = object({
+const projectEntry = {
   name: text,
   root: text,
   missing: bool,
   relation: oneOf("primary", "mounted", "unbound")
-});
+};
+export const publicProjectListEntryItem: z.ZodTypeAny = object(projectEntry);
+export const projectListItem = object({ ...projectEntry, missing: projectEntry.missing.optional() });
 
 export const publicProjectShowHealth: z.ZodTypeAny = object({
   status: oneOf("ok", "unhealthy"),
   reason: oneOf("memory_missing", "wrong_branch", "revision_mismatch", "dirty", "unavailable").optional()
 });
 
-export const publicSystem: z.ZodTypeAny = object({
+const systemModelChanges = {
   status: oneOf("installed", "upgraded", "unchanged"),
   created: integer,
   updated: integer,
   retained: integer
-});
+};
+export const publicSystem: z.ZodTypeAny = object(systemModelChanges);
 
-export const publicProjectUpgradeModels: z.ZodTypeAny = object({
+const upgradeModels = {
   status: oneOf("upgraded", "unchanged", "failed", "not_run"),
   created: integer.optional(),
   updated: integer.optional(),
   retained: integer.optional(),
   system: publicSystem.optional()
-});
+};
+export const publicProjectUpgradeModels: z.ZodTypeAny = object(upgradeModels);
+export const projectedUpgradeModels = object({ ...upgradeModels, system: object({
+  ...systemModelChanges, created: integer.optional(), updated: integer.optional(), retained: integer.optional()
+}).optional() });
 
 export const publicChangeSet: z.ZodTypeAny = object({
   id: text,
@@ -280,6 +288,7 @@ export const publicRunStartRulesItem: z.ZodTypeAny = object({
 });
 
 export const publicRunStartMaterialsItem: z.ZodTypeAny = object({
+  group: text.optional(),
   kind: oneOf("artifact", "external"),
   id: text,
   read: publicAction.optional()
@@ -298,12 +307,14 @@ export const publicRunStartSlotsItem: z.ZodTypeAny = object({
   name: text
 });
 
-export const publicRunStartActorsItem: z.ZodTypeAny = object({
+const runActor = {
   id: text,
   name: text,
   kind: oneOf("human", "agent"),
   permissions: list(text)
-});
+};
+export const publicRunStartActorsItem: z.ZodTypeAny = object(runActor);
+export const bindingActor = object({ ...runActor, name: runActor.name.optional() });
 
 export const publicReviewsValue: z.ZodTypeAny = object({
   policy: text
@@ -457,13 +468,15 @@ export const publicRunStepShowReviewersItem: z.ZodTypeAny = object({
   label: text
 });
 
-export const publicRunArtifactShowEntryItem: z.ZodTypeAny = object({
+const stepArtifact = {
   artifactId: text,
   name: text,
   status: text,
   contentType: text.optional(),
   dependencies: list(publicInputGroupsValueItem)
-});
+};
+export const publicRunArtifactShowEntryItem: z.ZodTypeAny = object(stepArtifact);
+export const stepArtifactItem = object({ ...stepArtifact, dependencies: stepArtifact.dependencies.optional() });
 
 export const publicRunArtifactShowArtifact: z.ZodTypeAny = object({
   name: text,
@@ -611,7 +624,7 @@ export const publicRunArtifactContractShowArtifact: z.ZodTypeAny = object({
   modelTarget: publicModelTarget.optional()
 });
 
-export const publicRunSchemaShowCurrent: z.ZodTypeAny = object({
+const schemaField = {
   id: text,
   kind: text,
   path: text.optional(),
@@ -621,7 +634,9 @@ export const publicRunSchemaShowCurrent: z.ZodTypeAny = object({
   optional: bool.optional(),
   min: number.optional(),
   max: number.optional()
-});
+};
+export const publicRunSchemaShowCurrent: z.ZodTypeAny = object(schemaField);
+export const projectedSchemaField = object({ ...schemaField, instruction: text.optional() });
 
 export const publicRunSchemaShowProgress: z.ZodTypeAny = object({
   completed: integer,
@@ -629,7 +644,10 @@ export const publicRunSchemaShowProgress: z.ZodTypeAny = object({
   remaining: integer
 });
 
+export const schemaValidationReason = oneOf("CONTENT_DIGEST_MISMATCH", "MUTABLE_PAYLOAD_REFERENCE", "PAYLOAD_VALIDATION_FAILED");
+
 export const publicRunSchemaShowValidation: z.ZodTypeAny = object({
+  reason: schemaValidationReason.optional(),
   status: text,
   issueCount: integer
 });
@@ -701,7 +719,7 @@ export const publicRuleResultsItem: z.ZodTypeAny = object({
   commentIds: list(text)
 });
 
-export const publicRunReviewShowNode: z.ZodTypeAny = object({
+const reviewNodeFields = {
   nodeId: text,
   name: text,
   kind: literal("open_review").optional(),
@@ -722,7 +740,23 @@ export const publicRunReviewShowNode: z.ZodTypeAny = object({
   comments: list(publicCommentsItem).optional(),
   assertCount: integer.optional(),
   suggestCount: integer.optional()
-});
+};
+export const publicRunReviewShowNode: z.ZodTypeAny = object(reviewNodeFields);
+export const reviewNodeProjection = {
+  schema: object({ ...reviewNodeFields, commentIds: reviewNodeFields.commentIds.optional() }),
+  select(node: Record<string, unknown>) {
+    const result = { ...node };
+    for (const key of ["ruleResults", "comments", "commentIds"]) {
+      if (Array.isArray(result[key]) && result[key].length === 0) delete result[key];
+    }
+    if (Array.isArray(node.commentIds) && Array.isArray(node.comments) &&
+        node.commentIds.length === node.comments.length &&
+        node.comments.every((comment, index) => (comment.commentId ?? comment.id) === (node.commentIds as string[])[index])) {
+      delete result.commentIds;
+    }
+    return result;
+  }
+};
 
 export const publicRunReviewShowAssignmentsItem: z.ZodTypeAny = object({
   assignmentId: text,

@@ -943,7 +943,7 @@
     "cli-run-review-show-1": [
       "native",
       "run review show",
-      "cli-run-review-create-1"
+      "cli-run-review-show-1"
     ],
     "cli-run-review-show-2": [
       "native",
@@ -1478,7 +1478,7 @@
     "runner-continue-review-show-1": [
       "runnerContinue",
       "continue review show",
-      "cli-run-review-create-1"
+      "cli-run-review-show-1"
     ],
     "runner-continue-review-show-2": [
       "runnerContinue",
@@ -1614,6 +1614,11 @@
       "reviewerContinue",
       "continue submit",
       "reviewer-run-review-submit-2"
+    ],
+    "cli-run-step-show-4": [
+      "native",
+      "run step show",
+      "cli-run-step-show-4"
     ]
   },
   "fields": {
@@ -2030,7 +2035,9 @@
     },
     "cli-memory-list-2": {
       "items": "[{app?:{assetKey:string,enabled:boolean,id:string,version:string},kind:\"concepts\"|\"procedures\"|\"schemas\"|\"statements\",names:[string]≤10,project_name?:string,reference:string,revision?:string,summary?:string}]",
-      "nextCursor?": "string"
+      "nextCursor?": "string",
+      "project_name?": "string",
+      "revision?": "string"
     },
     "cli-memory-read-1": {
       "syntax": "string",
@@ -2226,9 +2233,11 @@
       "artifactFormat?": "string",
       "ruleCount?": "int",
       "rules?": "[{scope:string,text:string}]",
-      "materials?": "[{id:string,kind:\"artifact\"|\"external\",read?:Command}]",
+      "materials?": "[{group?:string,id:string,kind:\"artifact\"|\"external\",read?:Command}]",
       "details?": "Command",
-      "nextAction?": "Action"
+      "nextAction?": "Action",
+      "rulesTruncated?": "true",
+      "materialCount?": "int"
     },
     "cli-run-start-4": {
       "runId": "string",
@@ -2288,13 +2297,15 @@
       "storeId?": "string",
       "modelRef?": "string",
       "dataId?": "string",
-      "nextMaterials?": "[{id:string,kind:\"artifact\"|\"external\",read?:Command}]≤4",
+      "nextMaterials?": "[{group?:string,id:string,kind:\"artifact\"|\"external\",read?:Command}]≤4",
       "nextRules?": "[{scope:string,text:string}]≤5",
       "nextStep?": "string",
       "nextInstruction?": "string",
       "nextActor?": "\"agent\"|\"human\"",
       "nextDetails?": "Command",
-      "nextAction?": "Action"
+      "nextAction?": "Action",
+      "nextRulesTruncated?": "true",
+      "nextMaterialCount?": "int"
     },
     "cli-run-report-2": {
       "runId": "string",
@@ -2303,10 +2314,11 @@
       "stepStatus": "string",
       "artifactStatus": "string",
       "warningCount?": "int",
-      "candidates?": "[string]",
+      "candidates?": "[string]≤20",
       "candidateCount?": "int",
       "nextAction?": "Action",
-      "tags?": "[string]"
+      "tags?": "[string]",
+      "candidateDetails?": "Command"
     },
     "cli-run-report-3": {
       "runId": "string",
@@ -2418,10 +2430,11 @@
       "model?": "string"
     },
     "cli-run-step-show-2": {
-      "ref": "string",
-      "procedureName": "string",
       "current": "boolean",
       "procedureAsserts": "[content]",
+      "procedureName": "string",
+      "ref": "string",
+      "runId": "string",
       "step": "{actor:\"agent\"|\"human\",artifact?:{final:boolean,format?:{name:string,options?:map<content>},name:string,review?:string,schema?:content,type?:string},asserts:[content],details:[string],id:string,instruction:string,kind:string,suggests:[content]}"
     },
     "cli-run-step-show-3": {
@@ -2460,10 +2473,11 @@
       "out": "string"
     },
     "cli-run-artifact-show-5": {
-      "stepRef": "string",
-      "source": "\"not_reported\"|\"review_submission\"|\"run_event\"",
       "artifact": "null|{contentType?:string,fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content}",
-      "revisionSummary?": "{body:string,createdAt:string,digest:string,previousSubmissionId?:string}"
+      "revisionSummary?": "{body:string,createdAt:string,digest:string,previousSubmissionId?:string}",
+      "runId": "string",
+      "source": "\"not_reported\"|\"review_submission\"|\"run_event\"",
+      "stepRef": "string"
     },
     "reviewer-run-artifact-show-1": {
       "artifact": "{contentType?:string,fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content}",
@@ -2518,10 +2532,11 @@
       "schema?": "{definition:string,source:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string}}"
     },
     "cli-run-artifact-contract-show-2": {
-      "stepRef": "string",
-      "procedure": "{asserts:[content],name:string}",
       "action": "{asserts:[content],details:[string],instruction:string,suggests:[content]}",
-      "artifact?": "{final:boolean,format?:{name:string,options?:map<content>},name:string,review?:string,schema?:content,type?:string}"
+      "artifact?": "{final:boolean,format?:{name:string,options?:map<content>},name:string,review?:string,schema?:content,type?:string}",
+      "procedure": "{asserts:[content],name:string}",
+      "runId": "string",
+      "stepRef": "string"
     },
     "reviewer-run-artifact-contract-show-1": {
       "procedure": "{asserts:[content],name:string}",
@@ -2577,7 +2592,7 @@
       "artifactId": "string",
       "effective?": "boolean",
       "progress?": "{completed:int,remaining:int,total:int}",
-      "validation?": "{issueCount:int,status:string}",
+      "validation?": "{issueCount:int,reason?:\"CONTENT_DIGEST_MISMATCH\"|\"MUTABLE_PAYLOAD_REFERENCE\"|\"PAYLOAD_VALIDATION_FAILED\",status:string}",
       "nextAction?": "Action"
     },
     "cli-run-schema-show-4": {
@@ -2587,7 +2602,7 @@
       "artifactId?": "string",
       "effective?": "boolean",
       "progress?": "{completed:int,remaining:int,total:int}",
-      "validation?": "{issueCount:int,status:string}",
+      "validation?": "{issueCount:int,reason?:\"CONTENT_DIGEST_MISMATCH\"|\"MUTABLE_PAYLOAD_REFERENCE\"|\"PAYLOAD_VALIDATION_FAILED\",status:string}",
       "nextAction?": "Action"
     },
     "cli-run-schema-show-5": {
@@ -2632,15 +2647,17 @@
     },
     "cli-run-review-wait-status-1": {
       "items": "[{currentRound:boolean,id:string,roundId:string,stage?:\"cancel\"|\"recovery\"|\"render\"|\"send\"|\"wait\",status:\"cancelled\"|\"completed\"|\"failed\"|\"queued\"|\"running\"}]",
-      "total": "int",
-      "nextCursor?": "string"
+      "nextCursor?": "string",
+      "runId": "string",
+      "total": "int"
     },
     "cli-run-review-wait-retry-1": {
-      "taskId": "string",
-      "roundId": "string",
-      "status": "string",
       "mayRepeatNotification": "boolean",
-      "nextAction?": "Action"
+      "nextAction?": "Action",
+      "roundId": "string",
+      "runId": "string",
+      "status": "string",
+      "taskId": "string"
     },
     "cli-run-review-vote-1": {
       "runId": "string",
@@ -2692,11 +2709,12 @@
       "nextAction?": "Action"
     },
     "cli-run-review-resolve-1": {
-      "reviewId": "string",
-      "roundId": "string",
       "commentId": "string",
       "disposition": "string",
-      "nextAction?": "Action"
+      "nextAction?": "Action",
+      "reviewId": "string",
+      "roundId": "string",
+      "runId": "string"
     },
     "reviewer-run-review-assignment-show-1": {
       "protocol": "\"flow\"|\"graph\"",
@@ -2769,9 +2787,10 @@
       "reviewId": "string",
       "artifactId": "string",
       "status": "string",
-      "comments": "[{body:string,commentId:string}]",
       "runId": "string",
-      "source?": "\"agent\"|\"human\""
+      "source?": "\"agent\"|\"human\"",
+      "commentIds": "[string]",
+      "details": "Command"
     },
     "cli-run-review-list-1": {
       "runId": "string",
@@ -3025,6 +3044,509 @@
     },
     "cli-debug-thread-id-1": {
       "identified": "boolean"
+    },
+    "cli-run-step-show-4": {
+      "runId": "string",
+      "stepId": "string",
+      "candidates": "[string]"
+    },
+    "cli-run-review-show-1": {
+      "reviewId": "string",
+      "artifactId": "string",
+      "status": "string",
+      "comments": "[{body:string,commentId:string}]",
+      "runId": "string",
+      "source?": "\"agent\"|\"human\""
     }
-  }
+  },
+  "outputOverrides": [
+    {
+      "cases": [
+        "cli-model-read-2",
+        "cli-model-read-3"
+      ],
+      "fields": {
+        "registration": "{description?:string,modelRef?:string,name?:string,package?:string,package_name?:string,tags?:[string]}"
+      }
+    },
+    {
+      "cases": [
+        "cli-model-create-1",
+        "cli-model-create-2",
+        "cli-model-update-1",
+        "cli-model-update-2"
+      ],
+      "fields": {
+        "operation": null,
+        "registration": "?{description?:string,modelRef?:string,name?:string,package?:string,package_name?:string,tags?:[string]}"
+      }
+    },
+    {
+      "cases": [
+        "cli-model-delete-1",
+        "cli-model-delete-2",
+        "cli-model-validate-1",
+        "cli-model-validate-2",
+        "cli-data-store-create-1",
+        "cli-data-store-create-2",
+        "cli-data-store-remove-1",
+        "cli-data-store-remove-2",
+        "cli-data-create-1",
+        "cli-data-create-2",
+        "cli-data-update-1",
+        "cli-data-update-2",
+        "cli-data-upsert-1",
+        "cli-data-upsert-2",
+        "cli-data-delete-1",
+        "cli-data-delete-2",
+        "cli-data-edit-1",
+        "cli-data-edit-2",
+        "cli-data-export-1",
+        "cli-data-validate-1",
+        "cli-data-validate-2",
+        "cli-run-review-comment-add-1",
+        "cli-run-review-comment-update-1",
+        "cli-run-review-comment-delete-1",
+        "cli-run-review-submit-1",
+        "cli-run-review-report-1",
+        "cli-run-review-update-1",
+        "reviewer-run-review-submit-2",
+        "reviewer-run-review-comment-add-1",
+        "reviewer-run-review-comment-update-1",
+        "reviewer-run-review-comment-delete-1",
+        "reviewer-run-review-report-1",
+        "reviewer-run-review-update-1",
+        "runner-continue-review-report-1",
+        "runner-continue-review-update-1",
+        "runner-continue-review-comment-add-1",
+        "runner-continue-review-comment-update-1",
+        "runner-continue-review-comment-delete-1",
+        "runner-continue-review-submit-1",
+        "reviewer-continue-continue-report-1",
+        "reviewer-continue-continue-update-1",
+        "reviewer-continue-continue-comment-add-1",
+        "reviewer-continue-continue-comment-update-1",
+        "reviewer-continue-continue-comment-delete-1",
+        "reviewer-continue-continue-submit-1"
+      ],
+      "fields": {
+        "operation": null
+      }
+    },
+    {
+      "cases": [
+        "cli-project-models-initialize-1"
+      ],
+      "fields": {
+        "diagnosticCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-project-list-1"
+      ],
+      "fields": {
+        "items": "[{missing?:boolean,name:string,relation:\"mounted\"|\"primary\"|\"unbound\",root:string}]"
+      }
+    },
+    {
+      "cases": [
+        "cli-project-upgrade-1"
+      ],
+      "fields": {
+        "models": "{created?:int,retained?:int,status:\"failed\"|\"not_run\"|\"unchanged\"|\"upgraded\",system?:{created?:int,retained?:int,status:\"installed\"|\"unchanged\"|\"upgraded\",updated?:int},updated?:int}"
+      }
+    },
+    {
+      "cases": [
+        "cli-app-list-1"
+      ],
+      "fields": {
+        "pendingCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-app-show-1"
+      ],
+      "fields": {
+        "projectStores": "?[{key:string,kind:string,model:string,storeId:null|string}]"
+      }
+    },
+    {
+      "cases": [
+        "cli-app-configure-1",
+        "cli-app-enable-1",
+        "cli-app-disable-1"
+      ],
+      "fields": {
+        "restartRequired": "?boolean"
+      }
+    },
+    {
+      "cases": [
+        "cli-app-check-1",
+        "cli-cli-check-1",
+        "cli-run-review-wait-status-1"
+      ],
+      "fields": {
+        "total": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-cli-show-1"
+      ],
+      "fields": {
+        "apps": "?[string]"
+      }
+    },
+    {
+      "cases": [
+        "cli-validate-1"
+      ],
+      "fields": {
+        "issueCount": "?int",
+        "issues": "?[{code:\"INVALID_MEMORY\"|\"INVALID_STORE\"|\"MIGRATION_REQUIRED\"|\"REFERENCE_CYCLE\"|\"REFERENCE_INVALID\"|\"REFERENCE_KIND_MISMATCH\"|\"REFERENCE_NOT_FOUND\"|\"REFERENCE_RULES_MISSING\"|\"SCHEMA_OPTIONAL_INVALID\",column?:int,line?:int,path?:string}]≤10"
+      }
+    },
+    {
+      "cases": [
+        "cli-memory-change-claim-1"
+      ],
+      "fields": {
+        "warningCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-memory-change-finish-1"
+      ],
+      "fields": {
+        "commentCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-memory-change-validate-1"
+      ],
+      "fields": {
+        "completedChangeCount": "?int",
+        "issueCount": "?int",
+        "issues": "?[{code:\"INVALID_MEMORY\"|\"INVALID_STORE\"|\"MIGRATION_REQUIRED\"|\"REFERENCE_CYCLE\"|\"REFERENCE_INVALID\"|\"REFERENCE_KIND_MISMATCH\"|\"REFERENCE_NOT_FOUND\"|\"REFERENCE_RULES_MISSING\"|\"SCHEMA_OPTIONAL_INVALID\",column?:int,line?:int,path?:string}]≤10"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-report-1"
+      ],
+      "fields": {
+        "dependencyCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-report-3",
+        "cli-run-abandon-1",
+        "cli-run-status-4",
+        "cli-run-status-6",
+        "cli-run-finish-1",
+        "cli-run-enter-schema-5",
+        "cli-run-repeat-5",
+        "cli-run-skip-5"
+      ],
+      "fields": {
+        "name": null
+      }
+    },
+    {
+      "cases": [
+        "cli-run-show-1"
+      ],
+      "fields": {
+        "stepCount": "?int",
+        "outputArtifactCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-binding-show-2"
+      ],
+      "fields": {
+        "actors": "[{id:string,kind:\"agent\"|\"human\",name?:string,permissions:[string]}]"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-step-show-1"
+      ],
+      "fields": {
+        "rules": "?[{scope:string,text:string}]"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-step-show-2"
+      ],
+      "fields": {
+        "procedureAsserts": "?[content]"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-step-show-3",
+        "cli-run-step-configure-1"
+      ],
+      "fields": {
+        "missing": "?[string]"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-artifact-show-1"
+      ],
+      "fields": {
+        "items": "[{artifactId:string,contentType?:string,dependencies?:[{id:string,kind:\"artifact\"|\"external\"}],name:string,status:string}]"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-artifact-show-2",
+        "cli-run-external-show-1",
+        "reviewer-run-artifact-show-3",
+        "reviewer-run-external-show-1"
+      ],
+      "fields": {
+        "truncated": "?boolean"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-schema-show-2",
+        "cli-run-schema-report-2",
+        "cli-run-enter-schema-2",
+        "cli-run-repeat-2",
+        "cli-run-skip-2"
+      ],
+      "fields": {
+        "current": "{format?:string,id:string,instruction?:string,kind:string,max?:number,min?:number,optional?:boolean,path?:string,type?:string}",
+        "progress": "?{completed:int,total:int}"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-schema-show-3",
+        "cli-run-schema-show-4",
+        "cli-run-schema-report-3",
+        "cli-run-schema-report-4",
+        "cli-run-enter-schema-3",
+        "cli-run-enter-schema-4",
+        "cli-run-repeat-3",
+        "cli-run-repeat-4",
+        "cli-run-skip-3",
+        "cli-run-skip-4"
+      ],
+      "fields": {
+        "progress": "?{completed:int,total:int}",
+        "validation": "?{issueCount?:int,reason?:\"CONTENT_DIGEST_MISMATCH\"|\"MUTABLE_PAYLOAD_REFERENCE\"|\"PAYLOAD_VALIDATION_FAILED\",status:string}"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-review-wait-1",
+        "cli-run-review-wait-2",
+        "cli-run-review-wait-3",
+        "cli-run-review-vote-1",
+        "cli-run-review-retry-1",
+        "cli-run-review-submit-for-human-1"
+      ],
+      "fields": {
+        "stepId": "?string",
+        "candidateId": "?string"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-review-show-2",
+        "reviewer-run-review-show-2",
+        "runner-continue-review-show-2",
+        "reviewer-continue-continue-show-1"
+      ],
+      "fields": {
+        "node": "?{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds?:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}"
+      }
+    },
+    {
+      "cases": [
+        "cli-run-review-show-3",
+        "cli-run-review-show-5",
+        "reviewer-run-review-show-3",
+        "reviewer-run-review-show-4",
+        "runner-continue-review-show-3",
+        "runner-continue-review-show-4",
+        "reviewer-continue-continue-show-2",
+        "reviewer-continue-continue-show-3"
+      ],
+      "fields": {
+        "nodes": "[{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds?:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}]"
+      }
+    },
+    {
+      "cases": [
+        "cli-migrate-syntax-1",
+        "cli-migrate-artifact-contract-v2-1",
+        "cli-migrate-schema-contract-v2-1"
+      ],
+      "fields": {
+        "issueCount": "?int",
+        "issues": "?[{code:string,file:string,path:string}]≤10"
+      }
+    },
+    {
+      "cases": [
+        "reviewer-run-review-assignment-show-1"
+      ],
+      "fields": {
+        "comments": "?[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}]"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-enter-schema-1",
+        "runner-continue-schema-show-1",
+        "runner-continue-schema-report-1",
+        "runner-continue-skip-1",
+        "runner-continue-repeat-1",
+        "runner-continue-artifact-export-1",
+        "runner-continue-report-2"
+      ],
+      "fields": {
+        "runId": "?string",
+        "stepId": "?string"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-enter-schema-2",
+        "runner-continue-schema-show-2",
+        "runner-continue-schema-report-2",
+        "runner-continue-skip-2",
+        "runner-continue-repeat-2"
+      ],
+      "fields": {
+        "runId": "?string",
+        "stepId": "?string",
+        "current": "{format?:string,id:string,instruction?:string,kind:string,max?:number,min?:number,optional?:boolean,path?:string,type?:string}",
+        "progress": "?{completed:int,total:int}"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-enter-schema-3",
+        "runner-continue-enter-schema-4",
+        "runner-continue-schema-show-3",
+        "runner-continue-schema-show-4",
+        "runner-continue-schema-report-3",
+        "runner-continue-schema-report-4",
+        "runner-continue-skip-3",
+        "runner-continue-skip-4",
+        "runner-continue-repeat-3",
+        "runner-continue-repeat-4"
+      ],
+      "fields": {
+        "runId": "?string",
+        "stepId": "?string",
+        "progress": "?{completed:int,total:int}",
+        "validation": "?{issueCount?:int,reason?:\"CONTENT_DIGEST_MISMATCH\"|\"MUTABLE_PAYLOAD_REFERENCE\"|\"PAYLOAD_VALIDATION_FAILED\",status:string}"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-step-show-1"
+      ],
+      "fields": {
+        "runId": "?string",
+        "rules": "?[{scope:string,text:string}]"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-step-show-2",
+        "runner-continue-step-configure-1"
+      ],
+      "fields": {
+        "runId": "?string",
+        "stepId": "?string",
+        "missing": "?[string]"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-artifact-tag-1",
+        "runner-continue-review-list-1",
+        "runner-continue-review-list-2",
+        "runner-continue-external-add-1",
+        "runner-continue-external-add-2",
+        "runner-continue-outputs-update-1"
+      ],
+      "fields": {
+        "runId": "?string"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-review-wait-1",
+        "runner-continue-review-wait-2",
+        "runner-continue-review-vote-1",
+        "runner-continue-review-submit-for-human-1",
+        "runner-continue-review-retry-1"
+      ],
+      "fields": {
+        "runId": "?string",
+        "stepId": "?string",
+        "reviewId": "?string",
+        "candidateId": "?string"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-review-resolve-1",
+        "runner-continue-review-start-1"
+      ],
+      "fields": {
+        "runId": "?string",
+        "reviewId": "?string"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-review-show-1",
+        "runner-continue-review-create-1"
+      ],
+      "fields": {
+        "reviewId": "?string",
+        "runId": "?string"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-report-1"
+      ],
+      "fields": {
+        "runId": "?string",
+        "stepId": "?string",
+        "dependencyCount": "?int"
+      }
+    },
+    {
+      "cases": [
+        "runner-continue-finish-1",
+        "runner-continue-abandon-1"
+      ],
+      "fields": {
+        "runId": "?string",
+        "name": null
+      }
+    }
+  ]
 }

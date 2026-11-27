@@ -71,7 +71,7 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
       const stdout = process.stdout.write.bind(process.stdout);
       t.mock.method(process.stdout, "write", (text: string | Uint8Array, ...args: unknown[]) => {
         const line = typeof text === "string" ? text : Buffer.from(text).toString("utf8");
-        if (line.startsWith("{") && JSON.parse(line).operation === "comment-add") {
+        if (line.startsWith("{") && typeof JSON.parse(line).commentId === "string") {
           receipt = JSON.parse(line);
           const callback = args.at(-1);
           if (typeof callback === "function") callback();
@@ -98,10 +98,11 @@ for (const graph of [true, false]) for (const route of ["native", "continue"]) {
         assert.deepEqual(actual, afterReport, "rejected add preserves the concurrent report without any partial edit");
         assert.equal(receipt, undefined);
       } else {
-        assert.equal(receipt.operation, "comment-add");
+        assert.equal(Object.hasOwn(receipt, "operation"), false);
         const ids = actual.draft.comments.map(reviewCommentId);
         assert.equal(ids.length, 1);
-        assert.deepEqual(receipt.savedCommentIds, ids);
+        assert.deepEqual([receipt.commentId], ids);
+        assert.equal(receipt.savedCommentIds, undefined);
         const state = actual.nodeStates!.find(s => s.nodeId === node.nodeId)!;
         if (scenario === "rule") {
           assert.deepEqual(state.ruleResults, [{ rulePath: node.asserts[0].rulePath, result: "undetermined", commentIds: ids }]);

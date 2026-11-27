@@ -125,6 +125,11 @@ test("every reviewed scenario preserves its public field types and visibility", 
     }
     throw new Error("Missing contract assertion for " + schema.constructor.name);
   }
+  const overrides = new Map<string, Record<string, string | null>>();
+  for (const group of approved.outputOverrides) for (const id of group.cases) {
+    assert.ok(approved.cases[id] && !overrides.has(id), id);
+    overrides.set(id, group.fields);
+  }
   const seen = new Set<string>();
   for (const [role, routes] of Object.entries(commandContracts)) {
     for (const [route, cases] of Object.entries(routes)) for (const entry of cases) {
@@ -133,6 +138,16 @@ test("every reviewed scenario preserves its public field types and visibility", 
       const actual = Object.fromEntries(Object.entries(entry.fields).map(([key, field]) =>
         [key + (field.isOptional() ? "?" : ""), signature(field)]));
       assert.deepEqual(actual, approved.fields[id], entry.id);
+      const expected = { ...approved.fields[id] };
+      for (const [key, replacement] of Object.entries(overrides.get(entry.id) ?? {})) {
+        assert.ok(Object.hasOwn(expected, key) || Object.hasOwn(expected, key + "?"), entry.id + "." + key);
+        delete expected[key];
+        delete expected[key + "?"];
+        if (replacement !== null) expected[key + (replacement.startsWith("?") ? "?" : "")] = replacement.replace(/^\?/, "");
+      }
+      const output = Object.fromEntries(Object.entries(entry.outputFields).map(([key, field]) =>
+        [key + (field.isOptional() ? "?" : ""), signature(field)]));
+      assert.deepEqual(output, expected, entry.id + " output");
       assert.ok(!seen.has(entry.id), entry.id);
       seen.add(entry.id);
     }

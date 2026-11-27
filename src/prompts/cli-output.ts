@@ -8,7 +8,7 @@ export const cliCommandSchema = z.object({
 
 const cliActionSchema = z.discriminatedUnion("kind", [
   cliCommandSchema,
-  z.object({ kind: z.literal("choose"), choices: z.array(cliCommandSchema).max(10), more: cliCommandSchema.optional() }).strict(),
+  z.object({ kind: z.literal("choose"), choices: z.array(cliCommandSchema.extend({ label: z.string().min(1).optional() })).max(10), more: cliCommandSchema.optional() }).strict(),
   z.object({ kind: z.literal("wait"), resume: cliCommandSchema.optional() }).strict(),
   z.object({ kind: z.literal("human_confirmation"), resume: cliCommandSchema.optional() }).strict()
 ]);

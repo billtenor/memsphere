@@ -5,6 +5,7 @@ import { emitSchemaExport, emitSchemaWriting } from "./schema-output.js";
 import { tryReviewerResource } from "../acp/reviewer-resources.js";
 import { assertSessionTarget, currentCommandState, closeRunCommandStates, openCommandStates, createCommandState, findCommandStates, requireCommandState, updateCommandState, accountRead, releaseCommandTarget, type CommandStateRow } from "../home/command-state-store.js";
 import { join } from "node:path";
+import { readReportCandidates, saveReportCandidates } from "../home/report-candidates.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { Option } from "commander";
 import { readConfig, type MemsphereConfig } from "../config.js";
@@ -24,7 +25,7 @@ import { explorationReviewView, readArtifactReviewForRunner } from "../context_c
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
 import { reviewNodeProgress } from "../review-nodes.js";
 
-export type Options = { checkpoint?: string; position?: string; count?: string; force?: boolean; authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: string; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string;
+export type Options = { candidates?: boolean; checkpoint?: string; position?: string; count?: string; force?: boolean; authorization?: string; sessionStateId?: string; add?: string[]; remove?: string[]; run?: string; name?: string; target?: string; artifact?: string | string[]; artifactFile?: string; file?: string; content?: string; contentType?: string; revisedFrom?: string; tag?: string[]; dependsOn?: string[]; external?: string; review?: string; reviewer?: string; comment?: string[]; commentFile?: string; source?: string; reason?: string; reasonFile?: string; root?: string; for?: string; out?: string; output?: "text" | "json"; change?: string; reviewConfig?: string; step?: string; assignment?: string; writeOptions?: string; revisionSummary?: string; revisionSummaryFile?: string; actor?: string;
   schemaName?: string; asserts?: string[]; suggests?: string[]; clearAsserts?: boolean; clearSuggests?: boolean; clearReviewer?: boolean; progressive?: boolean; node?: string; all?: boolean; commentId?: string; sessionRow?: CommandStateRow; limit?: string; cursor?: string };
 export type ContextCommandScope = { config: MemsphereConfig; service: ContextControl };
 const requireOption = (value: string | undefined, name: string) => { if (!value?.trim()) throw failure("INVALID_ARGUMENT", `${name} is required`); return value; };
@@ -127,6 +128,7 @@ export async function tryContextCommand(operation: string, options: object, scop
   const config = scope?.config ?? await readConfig();
   const service = scope?.service ?? await openContextControl(config.scopeRoot);
   const run = service && await service.findRun(o.run);
+  if (o.candidates && (!run || isGraphRun(run))) throw failure("INVALID_ARGUMENT", "Candidate lists require a free exploration Step");
   const graphResult = service && run && isGraphRun(run) && await graphCommand(operation, o, { config, service, run });
   if (graphResult) return graphResult;
   let legacy = false;
@@ -170,6 +172,11 @@ export async function tryContextCommand(operation: string, options: object, scop
     }
 
   } else if (operation === "step-show") {
+    if (o.candidates) {
+      const step = await s.explorationStep(runId, requireOption(o.step, "--step"));
+      const candidates = await readReportCandidates(project, runId, step.id);
+      return commandFacts(() => ({ runId, stepId: step.id, candidates }), display);
+    }
     return emitExplorationStep("run step show", await explorationStepConfiguration(s, config, runId, requireOption(o.step, "--step")), display);
   } else if (operation === "step-configure") {
     await assertSessionTarget(config.project!.name, runId);
@@ -191,6 +198,8 @@ export async function tryContextCommand(operation: string, options: object, scop
     try {
       if (o.sessionStateId) window = await requireCommandState(o.sessionStateId);
       else window = await currentCommandState();
+      if (window && (window.value.status !== "active" || window.value.groupId !== runId ||
+          window.value.parameters.project !== project)) window = undefined;
     } catch { /* Auxiliary window never blocks submission. */ }
     let r: Awaited<ReturnType<typeof s.report>>;
     try { r = await s.report(runId, await reportInput(o)); }
@@ -203,18 +212,21 @@ export async function tryContextCommand(operation: string, options: object, scop
       throw error;
     }
     const warnings: string[] = [];
+    const inspect = invoke("step", "show", "--step", r.step.id);
     if (window) {
       r.candidates = [...new Set([...Object.keys(window.value.state.reads ?? {}), ...(window.value.state.lastArtifactId ? [`artifact:${window.value.state.lastArtifactId}`] : [])])].filter(key => !r.artifact.dependencies.some(ref => `${ref.kind}:${ref.id}` === key));
+      try { await saveReportCandidates(project, runId, r.step.id, window.value.id, r.candidates); }
+      catch (error) { throw new CliOutputError({ id: r.artifact.id, inspect }, error); }
       try { if (Object.keys(window.value.state.reads ?? {}).length) await s.productionReads(runId, r.step.id, window.value.state.reads); }
       catch { warnings.push("Artifact saved; auxiliary Step reads were not recorded"); }
       try { await updateCommandState(window, { ...window.value, state: { lastArtifactId: r.artifact.id, reads: {} } }); }
       catch { warnings.push("Artifact saved; auxiliary reading window was not advanced"); }
     }
     if (r.candidates.length) warnings.push("Some previous/read materials are not declared dependencies; review candidates if relevant");
-    const inspect = invoke("step", "show", "--step", r.step.id);
     return commandFacts(() => explorationReceipt.parse({
       runId, artifactId: r.artifact.id, stepId: r.step.id, artifactStatus: r.artifact.status, stepStatus: r.step.status,
       tags: r.artifact.tags, candidates: r.candidates.slice(0, 20), candidateCount: r.candidates.length,
+      candidateDetails: window && r.candidates.length > 20 ? invoke("step", "show", "--step", r.step.id, "--candidates") : undefined,
       warningCount: warnings.length, nextAction: inspect
     }), { ...display, saved: { id: r.artifact.id, inspect } });
   } else if (operation === "status" || operation === "show") {
@@ -291,7 +303,10 @@ export async function tryContextCommand(operation: string, options: object, scop
     const comments = o.commentFile ? [await readFile(o.commentFile, "utf8")] : o.comment ?? [];
     if (o.reviewer !== "human" && o.reviewer !== "agent") throw failure("INVALID_ARGUMENT", "Light feedback requires --reviewer human or agent");
     const review = await s.review(runId, requireOption(typeof o.artifact === "string" ? o.artifact : undefined, "--artifact"), o.reviewer, comments);
-    return commandFacts(() => lightReviewDetail.parse({ runId, ...publicLightReview(review) }), { ...display, saved: { id: review.id, inspect: invoke("review", "show", "--review", review.id) } });
+    const details = invoke("review", "show", "--review", review.id);
+    const { comments: savedComments, ...receipt } = publicLightReview(review);
+    return commandFacts(() => ({ runId, ...receipt, commentIds: savedComments.map(item => item.commentId), details }),
+      { ...display, saved: { id: review.id, inspect: details } });
   } else if (operation === "outputs-list" || operation === "outputs-update") {
     if (operation === "outputs-update") await s.updateOutputs(runId, o.add ?? [], o.remove ?? []);
     const snapshot = await s.snapshot(runId);

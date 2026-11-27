@@ -1,11 +1,19 @@
 import { action, bool, integer, list, oneOf, text } from "./types.js";
-import { publicProjectListEntryItem, publicProjectModelsInitializeContextcontrol, publicProjectModelsInitializeSystem, publicProjectShowHealth, publicProjectUpgradeFailure, publicProjectUpgradeMemory, publicProjectUpgradeModels } from "./fields.js";
+import { publicProjectListEntryItem, publicProjectModelsInitializeContextcontrol, publicProjectModelsInitializeSystem, publicProjectShowHealth, publicProjectUpgradeFailure, publicProjectUpgradeMemory, publicProjectUpgradeModels, projectedUpgradeModels, projectListItem } from "./fields.js";
 import { receipt } from "./types.js";
+
+function upgradePhase(phase: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...phase };
+  for (const key of ["created", "updated", "deleted", "retained"]) {
+    if (result[key] === 0) delete result[key];
+  }
+  return result;
+}
 
 export const projectContracts = {
   "project models initialize": [
     receipt("cli-project-models-initialize-1", "成功",
-      { rule: "只给对象、计数与相应 revision/处理状态；诊断以登记字段表现。" }, {
+      { omitZero: ["diagnosticCount"], rule: "只给对象、计数与相应 revision/处理状态；诊断以登记字段表现。" }, {
       project: text,
       created: integer,
       retained: integer,
@@ -46,7 +54,10 @@ export const projectContracts = {
   ],
   "project list": [
     receipt("cli-project-list-1", "成功",
-      { rule: "根路径用于识别登记对象；show 区分规范/有效 Memory Root。禁止 Home 注册表与其他工作区绑定。" }, {
+      { items: { items: { schema: projectListItem, select(row) {
+        const { missing, ...rest } = row;
+        return missing === false ? rest : row;
+      } } }, rule: "根路径用于识别登记对象；show 区分规范/有效 Memory Root。禁止 Home 注册表与其他工作区绑定。" }, {
       items: list(publicProjectListEntryItem),
       nextCursor: text.optional(),
     }),
@@ -66,7 +77,11 @@ export const projectContracts = {
   ],
   "project upgrade": [
     receipt("cli-project-upgrade-1", "成功",
-      { rule: "已执行、未执行、失败阶段分别记录；失败只给 stage/code 和同一候选的恢复动作。" }, {
+      { rule: "各阶段保留状态、非零计数及 system 范围；失败给 stage/code 和恢复动作。", nested: {
+        models: { schema: projectedUpgradeModels, select: phase => ({ ...upgradePhase(phase),
+          ...(phase.system ? { system: upgradePhase(phase.system as Record<string, unknown>) } : {}) }) },
+        memory: { schema: publicProjectUpgradeMemory, select: upgradePhase }
+      } }, {
       cliVersion: text,
       overall: oneOf("upgraded", "unchanged", "failed", "not_run"),
       models: publicProjectUpgradeModels,

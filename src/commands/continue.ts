@@ -1,7 +1,7 @@
 import { writeCliChunk } from "../cli-transport.js";
 import { publicReceipt } from "../prompts/contracts/dispatch.js";
 import { cliContinueSchema } from "../prompts/cli-output.js";
-import { registerResultAction, bindCliOutputs, completedCliProtocol } from "./output.js";
+import { registerResultAction, setContinueOutputBinding, bindCliOutputs, completedCliProtocol } from "./output.js";
 import { createReviewerContinueRouter, reviewNodeCommand, type ReviewNodeOptions } from "./review-nodes.js";
 import { Command, Option } from "commander";
 import { currentCommandState } from "../home/command-state-store.js";
@@ -131,6 +131,13 @@ export function registerContinueCommand(program: Command, nativeRun: Command) {
       if (options.help) { await help(target); return completedCliProtocol(); }
       const context = await load();
       const reviewId = context.parameters.review;
+      setContinueOutputBinding({
+        runId: context.groupId,
+        stepId: !options.step && (context.graph ||
+          operation.startsWith("schema-") && operation !== "schema-enter") ? context.parameters.step : undefined,
+        reviewId: reviewId ?? (context.graph && context.roundId && context.parameters.step && operation.startsWith("review-")
+          ? graphReviewHandle(context.groupId, context.parameters.step) : undefined)
+      });
       if (context.graph && operation === "step-show") {
         if (options.step && options.step !== context.parameters.step) throw failure("SESSION_CONTEXT_CONFLICT", "Step differs from the current binding");
         return contextOnlyCommand(operation, { ...options, run: context.groupId, step: context.parameters.step }, context.scope);

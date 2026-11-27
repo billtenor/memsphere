@@ -49,6 +49,7 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const failed = await call("continue", "schema", "show");
   assert.equal(failed.validation.status, "failed");
   assert.equal(failed.validation.issueCount, 1);
+  assert.equal(failed.validation.reason, "CONTENT_DIGEST_MISMATCH");
   assert.equal(Object.hasOwn(failed, "draft"), false);
   const native = await call("run", "schema", "show", ...target);
   assert.equal(native.phase, "awaiting_finalization");
@@ -63,11 +64,10 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   assert.deepEqual(JSON.parse(await readFile(nativeCopy, "utf8")), { summary: "draft" });
   const copy = join(f.directory, "copy.json");
   const exported = await call("continue", "artifact", "export", "--file", copy);
-  assert.deepEqual(exported.nextAction.args, ["--project", "test-project", "run", "report", "--run", run,
-    "--step", step, "--artifact-file", copy]);
+  assert.deepEqual(exported.nextAction.args, ["continue", "report", "--artifact-file", copy]);
   assert.deepEqual(JSON.parse(await readFile(copy, "utf8")), { summary: "draft" });
   await writeFile(copy, '{"summary":"final"}');
-  const submitted = await call(...exported.nextAction.args.slice(2));
+  const submitted = await call(...exported.nextAction.args);
   assert.equal(submitted.artifactId, initial.artifactId); assert.equal(submitted.status, "done");
   for (const operation of mutations) {
     await assert.rejects(call("run", ...operation, ...target, "--position", initial.position), /STEP_NOT_RUNNING|RUN_FINISHED/);
@@ -182,7 +182,7 @@ test("CLI status recovery replaces a previous failed diagnostic with the sealed 
   const state = await call("run", "schema", "show", "--run", identity.run, "--step", identity.step);
   assert.equal(state.phase, "submitted");
   assert.equal(state.validation.status, "passed");
-  assert.equal(state.validation.issueCount, 0);
+  assert.equal(Object.hasOwn(state.validation, "issueCount"), false);
   const verified = await service.withGraph(g => g.schemaShow(identity.run, identity.step));
   assert.equal(verified.validation?.artifactId, identity.artifactId);
   assert.equal(verified.validation?.sha256, createHash("sha256").update(final).digest("hex"));
