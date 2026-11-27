@@ -3,10 +3,13 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";
 
-test("installed Windows CLI completes a Run and exercises the View and daemon lifecycle", async () => {
+test("installed Windows CLI completes a Run and exercises the View and daemon lifecycle", async t => {
+  if (!process.env.MEMSPHERE_HOME) throw new Error("The packaged CLI test requires a dedicated MEMSPHERE_HOME");
   const workspace = process.cwd();
   const project = resolve(workspace, ".ci windows project");
   const cli = resolve(workspace, ".ci-install", "node_modules", ".bin", "memsphere.cmd");
+  const daemon = JSON.parse(run(["daemon", "status", "--output", "json"], workspace));
+  if (daemon.running !== false) throw new Error("The packaged CLI test requires a stopped daemon in its Home");
 
   await Promise.all(
     ["concepts", "statements", "schemas", "procedures"].map((kind) =>
@@ -40,13 +43,24 @@ flow:
   const completed = JSON.parse(run(["run", "show", "--run", runId, "--output", "json"]));
   if (completed.run?.status !== "done") throw new Error(`Windows smoke Run did not complete: ${completed.run?.status}`);
 
+  let daemonStopped = false;
+  t.after(() => {
+    if (daemonStopped) return;
+    try {
+      // Cleanup must still run after the test signal has been aborted.
+      invoke(["daemon", "stop"]);
+    } catch (error) {
+      t.diagnostic(`Could not stop the packaged test daemon: ${error}`);
+      throw error;
+    }
+  });
   run(["daemon", "start"]);
   run(["daemon", "status"]);
   const startedView = JSON.parse(run(["view", "start", "--output", "json"]));
   const origin = startedView.view?.url;
   if (!origin) throw new Error("View start did not return view.url");
   run(["view", "status"]);
-  const response = await fetch(origin);
+  const response = await fetch(origin, { signal: t.signal });
   if (!response.ok) throw new Error(`View request failed with HTTP ${response.status}`);
   run(["view", "restart"]);
   run(["view", "status"]);
@@ -55,8 +69,16 @@ flow:
   run(["view", "stop"]);
   run(["view", "status"]);
   run(["daemon", "stop"]);
+  daemonStopped = true;
 
   function run(args: string[], cwd = project) {
+    t.signal.throwIfAborted();
+    const output = invoke(args, cwd);
+    t.signal.throwIfAborted();
+    return output;
+  }
+
+  function invoke(args: string[], cwd = project) {
     const result = crossSpawn.sync(cli, args, {
       cwd,
       encoding: "utf8",
