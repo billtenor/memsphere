@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import { access, appendFile, writeFile } from "node:fs/promises";
+import { access, appendFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 
@@ -121,11 +121,6 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");
-  const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
-  const resuming = crashMarker && await access(crashMarker).then(() => true, error => {
-    if (error.code === "ENOENT") return false;
-    throw error;
-  });
   let commandIndex = 0;
   const invokeReviewCli = async (args) => {
     // Report actual work boundaries so a busy fixture does not look idle between CLI calls.
@@ -136,9 +131,7 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
     }
     return receipt;
   };
-  // The retry scenario is already bound to a progressive Review. Its first
-  // native command saves a node before the Provider deliberately exits.
-  let graph = graphAlreadyRead || Boolean(crashMarker);
+  let graph = graphAlreadyRead;
   if (!graph) {
     await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
     await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
@@ -147,25 +140,6 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   }
   if (graph) {
     const reportNode = () => invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]);
-    if (crashMarker) {
-      // Recovery owns two real Worker/Provider lifetimes. Save each node
-      // through the bound session inside that Provider; the final vote still
-      // crosses the restricted CLI process boundary.
-      const { boundReviewNodeView, mutateBoundReviewNode } = await import("../../dist/acp/review-session.js");
-      const report = () => mutateBoundReviewNode({ operation: "report", artifact: { applicable: true } });
-      if (!resuming) {
-        await report();
-        await writeFile(crashMarker, "node saved\n", { flag: "wx" });
-        process.exit(7);
-      }
-      let pending = await boundReviewNodeView();
-      while (pending.node) {
-        await sendProgress(client, sessionId, "resume-node");
-        pending = await report();
-      }
-      await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:"approve",summary:"Fake ACP review completed"}), "--output", "json"]);
-      return;
-    }
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
     while (view.progress.phase === "reviewing") {
       if (vote === "request_changes" && view.node?.kind === "open_review") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
