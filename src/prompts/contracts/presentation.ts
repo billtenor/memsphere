@@ -21,7 +21,7 @@ export function resultPresentation(scope: OutputScope, data: Record<string, unkn
     : "items";
   const contentField = route === "model read" ? "definition"
     : route === "run start" && "example" in data ? "example" : undefined;
-  const detail = Boolean(contentField) || ["run artifact contract show", "run schema show", "run step show"].includes(route)
+  const detail = Boolean(contentField) || ["run artifact contract show", "run review assignment show", "run schema show", "run step show"].includes(route)
     || route === "run artifact show" && ("artifact" in data || "contextArtifacts" in data)
     || route === "run review show" && (scope.options.all || "node" in data || "nodes" in data);
   const page = route.endsWith(" list") || "nextCursor" in data || Array.isArray(data.runs) || route === "run show" && Array.isArray(data.steps);
