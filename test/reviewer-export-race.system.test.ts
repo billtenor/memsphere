@@ -139,7 +139,7 @@ for (const phase of ['stage-open', 'published', 'after-write'] as const) {
       const result = await f.finish();
       assert.notEqual(result.code, 0, result.stderr);
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, phase === 'published' ? /REVIEW_RESOURCE_DENIED/ : phase === 'stage-open' ? /EEXIST/ : /controlled failure after complete write/);
+      assert.match(result.stderr, phase === 'published' ? /REVIEW_RESOURCE_DENIED/ : phase === 'stage-open' ? /ALREADY_EXISTS/ : /INTERNAL_ERROR/);
       assert.equal(await readFile(f.target, 'utf8'), 'REPLACEMENT_OWNED_BY_OTHER');
     } finally { await f.drain(); }
   });
@@ -153,7 +153,7 @@ for (const phase of ['zero', 'partial', 'after-write'] as const) {
       const result = await f.finish();
       assert.notEqual(result.code, 0, result.stderr);
       assert.equal(result.stdout, '');
-      assert.match(result.stderr, /controlled .*failure/);
+      assert.match(result.stderr, /INTERNAL_ERROR/);
       await assert.rejects(access(f.target), { code: 'ENOENT' });
       assert.deepEqual((await readdir(f.cwd)).filter(name => name.startsWith('.memsphere-export-')), []);
       const retry = await f.retry();

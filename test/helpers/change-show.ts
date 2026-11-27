@@ -18,7 +18,7 @@ export function assertChangeShowRejected(result: SpawnSyncReturns<string>, statu
   assert.equal(result.signal, null, "CLI rejection must not be a signal termination");
   assert.equal(result.status, status, result.stderr);
   assert.equal(result.stdout, "", "rejected reads must not emit material");
-  assert.match(result.stderr, /^error: /, "failure must be a handled CLI rejection");
+  assert.match(result.stderr, /^(Error|错误) [A-Z_]+/, "failure must be a handled CLI rejection");
   assert.match(result.stderr, diagnostic);
 }
 
@@ -68,8 +68,9 @@ export async function changeShowFixture(t: test.TestContext) {
   const read = (extra: string[] = []) => {
     const r = invoke(extra); assert.equal(r.status, 0, r.stderr); return JSON.parse(r.stdout);
   };
-  const readMaterial = async (extra: string[] = []) => {
-    const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, env, cli);
+  const readMaterial = async (extra: string[] = [], role: "runner" | "reviewer" = "reviewer") => {
+    const caller = role === "reviewer" ? env : { ...process.env, MEMSPHERE_HOME: home };
+    const receipt = await invokeCliModule(["memory", "change", "show", edit.change.id, "--checkpoint", digest, ...extra], workspace, caller, cli);
     return JSON.parse(receipt.stdout);
   };
   // Material stability exercises the real command tree without repeatedly

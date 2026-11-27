@@ -14,7 +14,7 @@ test("Checkpoint evidence stays fixed across unvalidated body, scope and target 
   assert.deepEqual(await f.snapshot(), original);
   await addMemoryChangeScope({ home: f.home, project: "project", changeId: f.edit.change.id, reference: "concepts/scope-only" });
   assert.deepEqual(await f.snapshot(), original);
-  assertChangeShowRejected(f.invoke(["--part", "memory", "--reference", "concepts/scope-only"]), 1, /reference not found or ambiguous/);
+  assertChangeShowRejected(f.invoke(["--part", "memory", "--reference", "concepts/scope-only"]), 1, /NOT_FOUND/);
   await editMemories({ references: ["concepts/later-target"], changeId: f.edit.change.id });
   assert.deepEqual(await f.snapshot(), original);
   await editMemories({ references: ["concepts/late-delete"], operation: "delete", changeId: f.edit.change.id });
@@ -23,7 +23,7 @@ test("Checkpoint evidence stays fixed across unvalidated body, scope and target 
   assert.deepEqual(await f.snapshot(), original);
   const newer = await validateMemoryChange(f.edit.change.id);
   assert.notEqual(newer.checkpointDigest, f.checkpoint.checkpointDigest);
-  assertChangeShowRejected(f.invoke(), 1, /checkpoint mismatch/);
+  assertChangeShowRejected(f.invoke(), 1, /CHECKPOINT_CONFLICT/);
   f.setDigest(newer.checkpointDigest);
   assert.ok((await f.readMaterial()).files.some((file: { reference: string }) => file.reference === "concepts/later-target"));
 });
@@ -44,7 +44,7 @@ test("Checkpoint validation identity changes with a non-target dependency and pr
   const failed = await validateMemoryChange(f.edit.change.id);
   assert.ok(failed.issues.length > 0);
   assert.notEqual(failed.checkpointDigest, first.checkpointDigest);
-  assertChangeShowRejected(f.invoke(), 1, /checkpoint mismatch/);
+  assertChangeShowRejected(f.invoke(), 1, /CHECKPOINT_CONFLICT/);
   f.setDigest(failed.checkpointDigest);
   const validation = (await f.readMaterial(["--part", "validation"])).validation;
   assert.equal(validation.valid, false); assert.ok(validation.issues.length > 0);

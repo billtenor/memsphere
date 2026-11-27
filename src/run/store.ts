@@ -1,3 +1,4 @@
+import { failure } from "../context_control/errors.js";
 import { createFlowReviewNodes } from "./review-nodes.js";
 import { reviewSourceSchema, type ReviewSource, reviewNodeTreeSchema, reviewNodeStateSchema, assertReviewNodes, mutateReviewNode, reviewCommentId, type NodeMutation } from "../review-nodes.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -418,6 +419,10 @@ export class RunReviewConfigurationRequired extends Error {
   constructor(readonly preflight: RunReviewPreflight) {
     super(`Review configuration is required:\n${JSON.stringify(preflight, null, 2)}`);
   }
+}
+
+class RunReviewControlPlaneRequired extends Error {
+  readonly code = "CONTROL_PLANE_REQUIRED";
 }
 
 const artifactFormatSpecSchema = z.object({
@@ -1068,7 +1073,7 @@ export async function startRun(input: {
   );
   const steps = instantiateProcedureTemplate(rootTemplate, controlPlane, reviewConfiguration);
   if (!steps.length) {
-    throw new Error(`procedure has no flow steps: ${procedureMemory.names[0]}`);
+    throw failure("INVALID_ARGUMENT", `procedure has no flow steps: ${procedureMemory.names[0]}`);
   }
 
   const declarations: Array<{ store: string; model?: string }> = [];
@@ -1337,8 +1342,10 @@ function assertArtifactReviewDelegationProvenance(run: RunState): RunState {
 }
 
 export async function listRuns(runsRoot: string): Promise<RunState[]> {
-  await ensureRunDirectory(runsRoot);
-  const entries = await readdir(runsRoot, { withFileTypes: true });
+  const entries = await readdir(runsRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
   const runsById = new Map<string, RunState>();
   for (const entry of entries) {
     if (entry.isDirectory()) {
@@ -1361,8 +1368,10 @@ export async function listRuns(runsRoot: string): Promise<RunState[]> {
 }
 
 export async function listRunSummaries(runsRoot: string): Promise<RunListSummary[]> {
-  await ensureRunDirectory(runsRoot);
-  const entries = await readdir(runsRoot, { withFileTypes: true });
+  const entries = await readdir(runsRoot, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  });
   const directoryIds = new Set(entries.filter(entry => entry.isDirectory()).map(entry => entry.name));
   const ids = [
     ...directoryIds,
@@ -2130,7 +2139,7 @@ export async function submitArtifactReviewAssignment(input: {
     const vote = assignment.draft.vote;
     if (!vote) throw new Error("Artifact Review vote is required before Submit Review");
     if ((vote === "request_changes" || vote === "abstain") && assignment.draft.comments.length === 0) {
-      throw new Error(`${vote} requires at least one Comment`);
+      throw failure("INVALID_ARGUMENT", `${vote} requires at least one Comment`);
     }
     const permission = assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewActor({
@@ -2201,7 +2210,7 @@ export async function submitArtifactReviewHumanAssignmentForRunner(input: {
       assignment.submitted?.comments ?? []
     );
     if ((input.vote === "request_changes" || input.vote === "abstain") && comments.length === 0) {
-      throw new Error(`${input.vote} requires at least one Comment`);
+      throw failure("INVALID_ARGUMENT", `${input.vote} requires at least one Comment`);
     }
 
     if (assignment.status === "submitted") {
@@ -2469,7 +2478,7 @@ export async function appendArtifactReviewAgentComment(input: {
   });
 }
 
-export async function mutateArtifactReviewNodes(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; mutation: NodeMutation }): Promise<ArtifactReviewAgentContext> {
+export async function mutateArtifactReviewNodes(input: { runsRoot: string; reviewId: string; roundId: string; actorId: string; attemptId: string; mutation: NodeMutation }): Promise<ArtifactReviewAgentContext & { savedCommentIds: string[] }> {
   const located = await findArtifactReview(input);
   return withRunWriteLock(input.runsRoot, located.run.id, async () => {
     const context = requireRunningAgentContext(await readRun(input.runsRoot, located.run.id), input);
@@ -2477,9 +2486,13 @@ export async function mutateArtifactReviewNodes(input: { runsRoot: string; revie
     const authorization = authorizeArtifactReviewActor({ controlPlane: artifactReviewRoundControlPlane(review, round), assignment, permission: assignment.binding === "decision" ? "decision.decide" : "decision.assess" });
     if (!authorization.allowed) throw new ArtifactAuthorizationFailure(authorization, []);
     if (!assignment.nodeTree || !assignment.nodeStates) throw new Error("review_nodes_not_enabled");
+    const previous = new Set(assignment.draft.comments.map(reviewCommentId));
     assignment.draft.comments = mutateReviewNode({ nodeTree: assignment.nodeTree, nodeStates: assignment.nodeStates }, assignment.draft.comments, input.mutation, item => normalizeArtifactReviewComments([{ body: item.body, severity: item.severity, ...(item.anchor ? { anchor: artifactReviewAnchorSchema.parse({ ...item.anchor, submissionId: item.anchor.submissionId ?? round.submissionId }) } : {}) }], reviewSubmission(review, round.submissionId), new Date().toISOString())[0]);
     const now = new Date().toISOString(); round.revision++; review.updatedAt = now; run.updatedAt = now;
-    await writeRun(input.runsRoot, run); return context;
+    await writeRun(input.runsRoot, run);
+    const savedCommentIds = input.mutation.operation === "comment-update" ? [input.mutation.commentId]
+      : assignment.draft.comments.map(reviewCommentId).filter(id => !previous.has(id));
+    return { ...context, savedCommentIds };
   });
 }
 
@@ -2516,7 +2529,7 @@ export async function submitArtifactReviewAgentAssignment(input: {
       && context.assignment.draft.comments.length === 0
       && !summary
     ) {
-      throw new Error(`${input.vote} requires at least one Comment or Summary`);
+      throw failure("INVALID_ARGUMENT", `${input.vote} requires at least one Comment or Summary`);
     }
     const permission = context.assignment.binding === "decision" ? "decision.decide" : "decision.assess";
     const authorization = authorizeArtifactReviewActor({
@@ -3667,9 +3680,9 @@ export function validateRunReviewConfiguration(
   for (const key of Object.keys(configuration.slots)) {
     if (!requiredSlots.has(key)) issues.push(`slots.${key}: unknown Review Slot`);
   }
-  if (issues.length) throw new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`);
+  if (issues.length) throw Object.assign(new Error(`Invalid Review configuration:\n- ${issues.join("\n- ")}`), { code: "INVALID_ARGUMENT" });
   if (!snapshot && actorBoundSlots.length) {
-    throw new Error(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
+    throw new RunReviewControlPlaneRequired(`control_plane config is required for Actor-bound Review Slots:\n- ${actorBoundSlots.join("\n- ")}`);
   }
   return structuredClone(configuration);
 }
@@ -3866,7 +3879,7 @@ function applyControlPlaneToSteps(
           return binding && "skip" in binding ? [] : [key];
         });
         if (actorBoundSlots.length) {
-          throw new Error(`control_plane config is required for Actor-bound Review Slots in ${artifactScope}:\n- ${actorBoundSlots.join("\n- ")}`);
+          throw new RunReviewControlPlaneRequired(`control_plane config is required for Actor-bound Review Slots in ${artifactScope}:\n- ${actorBoundSlots.join("\n- ")}`);
         }
       }
       if (snapshot && step.reviewSlots?.length) {

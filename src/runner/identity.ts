@@ -1,3 +1,4 @@
+import { failure } from "../context_control/errors.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
@@ -48,7 +49,7 @@ export async function currentIdentity(required = false, home?: string): Promise<
   }
   const config = await readRunnerAgents(home);
   if (identity && config[identity.agentType]?.identity_enabled) return identity;
-  if (required) throw new Error("AGENT_SESSION_REQUIRED: enable Runner identity and invoke Continue from a recognized Agent session");
+  if (required) throw failure("AGENT_SESSION_REQUIRED", "AGENT_SESSION_REQUIRED: enable Runner identity and invoke Continue from a recognized Agent session");
   return undefined;
 }
 

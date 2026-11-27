@@ -64,7 +64,7 @@ async function upgradedFixture(){
 }
 test("Embedded upgrade retry requires the dedicated ID and accepts that ID",async()=>{
  const f=await upgradedFixture();try{
-  const missing=f.upgrade("embedded",[],f.linked);assert.notEqual(missing.result.status,0);assert.match(missing.value.failure.message,new RegExp(f.id));
+  const missing=f.upgrade("embedded",[],f.linked);assert.notEqual(missing.result.status,0);assert.equal(missing.value.failure.stage,"preflight");
   const retry=f.upgrade("embedded",["--change",f.id],f.linked);assert.equal(retry.result.status,0,JSON.stringify(retry.value));
  }finally{await f.cleanup();}
 });
@@ -136,7 +136,7 @@ test("Embedded upgrade CLI rolls back Memory when dedicated record creation fail
     assert.equal(failed.value.models.status, "upgraded");
     assert.equal(failed.value.memory.status, "failed");
     assert.equal(failed.value.failure.stage, "memory");
-    assert.match(failed.value.failure.message, /EACCES|EPERM|permission/i);
+    assert.match(failed.value.failure.code, /PERMISSION_DENIED|INTERNAL_ERROR/);
     assert.equal(failed.value.memory.changeSet, undefined, "No record ID may be claimed before persistence");
     assert.equal(await readFile(target, "utf8"), baseline, "Failed record creation must restore applied targets");
     assert.equal(await readFile(join(memoryRoot, memoryPath), "utf8"), baseline, "Original worktree is untouched");

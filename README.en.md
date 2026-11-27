@@ -416,7 +416,7 @@ memsphere data store list --kind value --limit 20 --output json
 memsphere memory list --kind procedures --limit 20 --output json
 ```
 
-New model/data commands, including data store, default to `--output text`: successful results use YAML keys, indentation and lists, preserving nested data and pagination cursors rather than rendering indented JSON. `--output json` emits exactly one JSON value on stdout for programs; all lists also support this JSON protocol. Failures leave stdout empty and exit with status 1. Text mode shows an error message on stderr; JSON mode emits only `{ "error": { "code": "...", "message": "...", "details": ... } }`, with optional details. Argument parsing failures follow the selected format. Raw export content, help and version retain their own output rules. See each command's `--help` for the full options.
+Ordinary commands display public facts and next actions as a text prompt by default. Use `--output json` to read the same facts and actions from stdout as one JSON value with jq or another program. Failures exit with a nonzero status and emit JSON errors to stderr, with a stable `error.code` and optional fields approved for that code. Raw exports, pinned materials, help, and version have their own output protocols.
 
 ## 7. Memsphere Is Still Evolving
 
@@ -514,7 +514,7 @@ memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Continue uses the calling Agent session. Detect Codex, Traex, or Claude Code under Settings → Runner Agent and enable identity first; use native `run` commands when no session is recognized. `review wait` returns available results immediately; otherwise Runner settings choose asynchronous registration or synchronous waiting, without a `--sync` option. Queue notifications contain only `[Memsphere 自动消息]`, `请执行命令以继续：`, and a wait command identifying the Project and Review. Run that command to read current results. Repeated calls reuse active tasks; terminal history does not block a new necessary wait. Use `run review wait status --review R` to inspect tasks and `run review wait retry --review R --round ROUND` to retry a failed delivery explicitly.
+Continue uses the calling Agent session. Detect Codex, Traex, or Claude Code under Settings → Runner Agent and enable identity first; use native `run` commands when no session is recognized. `review wait` returns available results immediately; otherwise Runner settings choose asynchronous registration or synchronous waiting, without a `--sync` option. Queue notifications use the Run’s frozen language for the sender label and instruction. The third line is a native wait command for the delivered review round. Open the notification to read that round. Running `continue review wait` afterwards follows the current session. Repeated calls reuse active tasks; terminal history does not block a new necessary wait. Use `run review wait status --review R` to inspect tasks and `run review wait retry --review R --round ROUND` to retry a failed delivery explicitly.
 
 For Claude Code Reviewers, install `@agentclientprotocol/claude-agent-acp@0.109.1` separately, authenticate Claude Code, and choose the optional model on the Agent Actor.
 

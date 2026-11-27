@@ -156,7 +156,11 @@ async function check(trial) {
     const { readAppState } = await import(pathToFileURL(join(repo, 'src/app/state.ts')).href);
     assert.equal((await readAppState(context.primary)).installations['example.skill-eval'].enabled, true);
     const shown = JSON.parse(call('cli', 'show', 'example.skill-tool', '--output', 'json'));
-    assert.deepEqual(shown.invocation.args.slice(-2), ['--mode', 'safe']); assert.equal(shown.invocation.envFrom.TOKEN, 'SKILL_EVAL_TOKEN');
+    assert.deepEqual(Object.keys(shown).sort(), ['apps', 'id', 'project', 'status']);
+    const { showCli } = await import(pathToFileURL(join(repo, 'src/tools/registry.ts')).href);
+    const { invocation } = await showCli(context.primary, 'example.skill-tool');
+    assert.deepEqual(invocation.args.slice(-2), ['--mode', 'safe']);
+    assert.equal(invocation.envFrom.TOKEN, 'SKILL_EVAL_TOKEN');
     assert.match(call('memory', 'read', 'concepts/skill-eval-intro'), /隔离能力验证/);
     assert.match(await readFile(join(meta.workspace, 'probe.log'), 'utf8'), /probe/);
     for (const command of ['app install', 'app check', 'app enable', 'cli register', 'cli bind', 'cli check']) assert(commands.includes(command), command);

@@ -93,14 +93,11 @@ flow:
   show(healthy.id);
   assert.deepEqual(healthy.reviewConfiguration, bind("healthy"));
   assert.deepEqual(Object.keys(healthy.controlPlane!.actors), ["healthy"]);
-  for (const [actor, diagnostic] of [
-    ["damaged", /control_plane\.actors\.damaged\.agent\.provider.*acp_providers\.codex/],
-    ["unknown", /control_plane\.actors\.unknown\.agent\.provider.*Unknown ACP Provider id: future-provider/],
-    ["malformed", /control_plane\.actors\.malformed/]
-  ] as const) {
+  for (const actor of ["damaged", "unknown", "malformed"]) {
     const attempted = await start(actor);
     assert.notEqual(attempted.status, 0);
-    assert.match(attempted.stderr, diagnostic);
+    assert.match(attempted.stderr, /INVALID_ARGUMENT/);
+    assert.doesNotMatch(attempted.stderr, /acp_providers|control_plane|future-provider/);
   }
   assert.deepEqual(await listRuns(runsRoot), [healthy]);
 

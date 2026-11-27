@@ -125,12 +125,17 @@ test("CLI discovery never launches a program; explicit check uses only its decla
     versionProbe: { args: ["--version"], format: "semver" }, requirements: { version: "^1.0.0" } }));
   await registerCli(context, descriptor);
   const binding = join(root, "binding.json");
-  await writeFile(binding, JSON.stringify({ schemaVersion: 1, args: ["a value with spaces"] }));
+  await writeFile(binding, JSON.stringify({ schemaVersion: 1, args: ["a value with spaces"],
+    files: [script], envFrom: { PRIVATE_TARGET_NAME: "PATH" } }));
   await bindCli(context, "example.tool", binding);
   await listClis(context.primary);
   assert.deepEqual((await showCli(context.primary, "example.tool")).invocation?.args, [script, "a value with spaces"]);
   await assert.rejects(readFile(counter), { code: "ENOENT" });
-  assert.equal((await checkCli(context.primary, "example.tool")).status, "available");
+  const checked = await checkCli(context.primary, "example.tool");
+  assert.equal(checked.status, "available");
+  assert.deepEqual(checked.items.map(item => item.name).sort(), ["environment", "executable", "file", "version"]);
+  assert.ok(!JSON.stringify(checked.items).includes(script));
+  assert.ok(!JSON.stringify(checked.items).includes("PRIVATE_TARGET_NAME"));
   assert.equal(await readFile(counter, "utf8"), "probe");
   await writeFile(descriptor, JSON.stringify({ schemaVersion: 1, id: "example.unknown", name: "Unknown", description: "No probe protocol",
     command: [process.execPath], requirements: { version: "^1.0.0" } }));
@@ -230,5 +235,15 @@ test("App show and check find renamed entrypoints beyond the first Memory page",
   )));
   const shown = JSON.parse(execFileSync(process.execPath, [...cliArguments, "--project", "test", "app", "show", "example.app", "--output", "json"], { cwd: root, encoding: "utf8" }));
   assert.equal(shown.usage.agent[0].reference, "concepts/zzz-app-intro");
+  const call = (args: string[], json = false) => execFileSync(process.execPath, [...cliArguments, "--project", "test",
+    "app", ...args, ...(json ? ["--output", "json"] : [])], { cwd: root, encoding: "utf8" });
+  const checked = JSON.parse(call(["check", "example.app"], true));
+  assert.equal(checked.id, "example.app");
+  assert.ok(checked.items.some((item: { name: string; status: string }) =>
+    item.name === "entrypoint:concepts/app-intro" && item.status === "available"));
+  assert.ok(call(["check", "example.app"]).includes("entrypoint:concepts/app-intro"));
+  assert.equal(JSON.parse(call(["disable", "example.app"], true)).enabled, false);
+  assert.ok(call(["disable", "example.app"]).includes("false"));
+  assert.equal(JSON.parse(call(["list"], true)).apps[0].enabled, false);
   assert.equal((await checkApp(context.primary, "example.app")).items.find(item => item.name === "entrypoint:concepts/app-intro")?.available, true);
 }, true));

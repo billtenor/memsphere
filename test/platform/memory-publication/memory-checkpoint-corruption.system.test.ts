@@ -19,8 +19,6 @@ for (const damage of ["directory", "body", "description", "legacy", "version"] a
       const value = JSON.parse(await readFile(file, "utf8")); value.format_version = 999;
       await writeFile(file, JSON.stringify(value));
     }
-    const diagnostic = { directory: /checkpoint is missing/, body: /checkpoint digest does not match/,
-      description: /JSON/, legacy: /validate again/, version: /format_version/ }[damage];
-    assertChangeShowRejected(f.invoke(), 1, diagnostic);
+    assertChangeShowRejected(f.invoke(), 1, /MEMORY_CHECKPOINT_INVALID/);
   });
 }

@@ -3,6 +3,15 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { z } from "zod";
+import { standaloneCommand, savedResult, commandFacts } from "./output.js";
+
+const skillResult = z.object({
+  skill: z.string(),
+  path: z.string(),
+  status: z.enum(["installed", "upgraded"])
+}).strict();
+
 type SkillOptions = {
   force?: boolean;
   directory?: string;
@@ -10,36 +19,45 @@ type SkillOptions = {
 };
 
 const moduleDir = dirname(fileURLToPath(import.meta.url));
-const skillNames = ["memsphere"];
+const skillName = "memsphere";
 
-export async function skillInitCommand(options: SkillOptions): Promise<void> {
+export const skillInitCommand = standaloneCommand("skill init", skillInitFacts);
+
+export async function skillInitFacts(options: SkillOptions) {
+  return installSkill("init", options);
+}
+
+async function installSkill(operation: "init" | "upgrade", options: SkillOptions) {
   if (options.global && options.directory) {
-    throw new Error("--global and --directory cannot be used together");
+    throw Object.assign(new Error("--global and --directory cannot be used together"), {
+      code: "INVALID_ARGUMENT", issues: [{ code: "mutually_exclusive", path: ["--global", "--directory"] }]
+    });
   }
 
   const base = options.global
     ? join(homedir(), ".agents", "skills")
     : resolve(options.directory ?? ".agents/skills");
 
-  for (const skillName of skillNames) {
-    const target = join(base, skillName);
-    const filePath = join(target, "SKILL.md");
+  const target = join(base, skillName);
+  const filePath = join(target, "SKILL.md");
+  await mkdir(target, { recursive: true });
 
-    await mkdir(target, { recursive: true });
-
-    if (!options.force && await exists(filePath)) {
-      throw new Error(`${filePath} already exists. Use --force to overwrite it.`);
-    }
-
-    const skillMarkdown = await readSkillMarkdown(skillName);
-    await writeFile(filePath, skillMarkdown, "utf8");
-    console.log(`Installed ${skillName} skill: ${filePath}`);
+  if (!options.force && await exists(filePath)) {
+    throw Object.assign(new Error("The Skill already exists"), { code: "ALREADY_EXISTS" });
   }
+
+  const skillMarkdown = await readSkillMarkdown(skillName);
+  await writeFile(filePath, skillMarkdown, "utf8");
+  return commandFacts(() => skillResult.parse({
+    skill: skillName, path: filePath, status: operation === "init" ? "installed" : "upgraded"
+  }), { saved: savedResult(filePath) });
 }
 
 /** Update the selected Skill installation using the same contract as init --force. */
-export async function skillUpgradeCommand(options: Omit<SkillOptions, "force">): Promise<void> {
-  await skillInitCommand({ ...options, force: true });
+export const skillUpgradeCommand = standaloneCommand("skill upgrade", skillUpgradeFacts);
+
+export async function skillUpgradeFacts(options: Omit<SkillOptions, "force">) {
+  return installSkill("upgrade", { ...options, force: true });
 }
 
 async function readSkillMarkdown(skillName: string): Promise<string> {

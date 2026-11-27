@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { writeFile } from "node:fs/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { readFile, writeFile } from "node:fs/promises";
 import crossSpawn from "cross-spawn";
 import { reviewNodeFixture } from "./helpers/review-nodes.js";
 import * as reviews from "../src/context_control/review-repository.js";
@@ -16,7 +16,7 @@ async function legacyFixture(t: test.TestContext, context=false, tail=false) {
  await writeFile(join(f.input.runsRoot,f.runId,`${f.runId}.json`),JSON.stringify(state));
  const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:fileURLToPath(new URL('../dist/cli.js',import.meta.url))});t.after(()=>runtime.cleanup());
  const env={...process.env,MEMSPHERE_HOME:f.home,MEMSPHERE_CONFIG_PATH:join(f.root,'config.json'),MEMSPHERE_WORKSPACE_ROOT:f.cwd,MEMSPHERE_REVIEW_SOURCE_WORKSPACE:f.cwd,MEMSPHERE_REVIEW_RUN_ID:f.runId,MEMSPHERE_REVIEW_ASSIGNMENT_ID:assignment.actorId,MEMSPHERE_REVIEW_ATTEMPT_ID:f.bound.attemptId};
- const cli=(args:string[])=>{const r=crossSpawn.sync(runtime.launcherPath,args,{cwd:f.cwd,env,encoding:'utf8',timeout:20000});assert.ifError(r.error);return r;};
+ const cli=(args:string[], extra:NodeJS.ProcessEnv={})=>{const r=crossSpawn.sync(runtime.launcherPath,args,{cwd:f.cwd,env:{...env,...extra},encoding:'utf8',timeout:20000});assert.ifError(r.error);return r;};
  return {...f,state,env,cli,runtime};
 }
 
@@ -35,13 +35,27 @@ test('legacy candidate reads accept legal global Project parameters',async t=>{
 test('legacy fixed Step reads reject targets outside the pinned submission',async t=>{
  const {state,env,cli,...f}=await legacyFixture(t);
  const step=cli(['run','artifact','show','--run',f.runId,'--step',state.artifactReviews![0].stepId,'--output','json']);assert.equal(step.status,0,step.stderr);assert.match(step.stdout,/Candidate/);
+ for (const args of [["run", "show"], ["run", "step", "show", "--step", state.artifactReviews![0].stepId]]) {
+   const json = cli([...args, "--run", f.runId, "--output", "json"]);
+   assert.equal(json.status, 0, json.stderr);
+   const value = JSON.parse(json.stdout);
+   assert.equal(value.id, f.runId);
+   assert.deepEqual(value.stepIds, [state.artifactReviews![0].stepId]);
+   const text = cli([...args, "--run", f.runId]);
+   assert.equal(text.status, 0, text.stderr);
+   assert.ok(text.stdout.includes(value.stepIds[0]));
+ }
+ const exported = cli(["run", "artifact", "show", "--out", "candidate.md", "--output", "json"]);
+ assert.equal(exported.status, 0, exported.stderr);
+ assert.deepEqual(JSON.parse(exported.stdout), {out: "candidate.md"});
+ assert.equal(await readFile(join(f.cwd, "candidate.md"), "utf8"), "Candidate");
  const wrong=cli(['run','artifact','show','--run',f.runId,'--step','outside','--output','json']);assert.equal(wrong.status,1);assert.equal(wrong.stdout,'');assert.match(wrong.stderr,/REVIEW_RESOURCE_DENIED/);
 
 });
 
 test('legacy sessions without a node tree reject the progressive node protocol',async t=>{
  const {state,env,cli,...f}=await legacyFixture(t);
- const node=cli(['continue','report','--artifact','{"applicable":true}','--output','json']);assert.equal(node.status,1);assert.equal(node.stdout,'');assert.match(node.stderr,/review_nodes_not_enabled/);
+ const node=cli(['continue','report','--artifact','{"applicable":true}','--output','json']);assert.equal(node.status,1);assert.equal(node.stdout,'');assert.match(node.stderr,/REVIEW_PROTOCOL_UNSUPPORTED/);
 
 });
 
@@ -110,5 +124,21 @@ for(const completed of [false,true])test(`legacy accepted contract remains pinne
 
 test('legacy context contract targets fail explicitly instead of reading the current Run contract',async t=>{
  const f=await legacyFixture(t,true),context=JSON.parse(f.cli(['run','artifact','show','--output','json']).stdout).contextArtifacts[0];
- const r=f.cli(['run','artifact','contract','show','--run',f.runId,'--step',context.stepId,'--output','json']);assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/INVALID_ARGUMENT/);assert.match(r.stderr,/pinned candidate contract only/);
+ const r=f.cli(['run','artifact','contract','show','--run',f.runId,'--step',context.stepId,'--output','json']);assert.equal(r.status,1);assert.equal(r.stdout,'');assert.match(r.stderr,/INVALID_ARGUMENT/);assert.match(r.stderr,/"protocol":"flow"/);
+});
+
+test("a flow export remains verifiable after its receipt channel closes", async t => {
+  const f = await legacyFixture(t);
+  const preload = join(f.cwd, "closed-channel.mjs");
+  await writeFile(preload, 'process.stdout.write = (_chunk, callback) => { setImmediate(() => callback(new Error("closed"))); return false; };');
+  const args = ["run", "artifact", "show", "--out", "saved.md", "--output", "json"];
+  const failed = f.cli(args, { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+  assert.equal(failed.status, 1); assert.equal(failed.stdout, "");
+  const { error } = JSON.parse(failed.stderr);
+  assert.equal(error.code, "OUTPUT_RENDER_FAILED"); assert.equal(error.details.savedId, "saved.md");
+  const body = await readFile(join(f.cwd, "saved.md"), "utf8");
+  assert.equal(JSON.parse(f.cli([...error.nextAction.args, "--output", "json"]).stdout).artifact.value, body);
+  const retry = f.cli(args);
+  assert.equal(JSON.parse(retry.stderr).error.code, "ALREADY_EXISTS");
+  assert.equal(await readFile(join(f.cwd, "saved.md"), "utf8"), body);
 });

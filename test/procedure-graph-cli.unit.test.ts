@@ -11,8 +11,9 @@ test("graph continuation returns a status command if its auto-enter target compl
     throw Object.assign(new Error("Step is done"), { code: "STEP_FINISHED" });
   } } as unknown as GraphRuntime;
   const prompt = await graphNext(runtime, snapshot, "test-project");
-  assert.match(prompt, /下一 Step 已由其他进程完成/);
-  assert.match(prompt, /memsphere --project 'test-project' run status --run run-current/);
+  assert.equal(prompt.reason, "step_completed_concurrently");
+  assert.deepEqual(prompt.nextAction, { kind: "command", launcher: "memsphere",
+    args: ["--project", "test-project", "run", "status", "--run", "run-current"] });
 });
 
 

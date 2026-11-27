@@ -1,3 +1,4 @@
+import { invokeCliModule } from "../../helpers/cli-module.js";
 import { managedProjectFixture } from "../../helpers/project.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -7,7 +8,7 @@ import test from "node:test";
 import { projectCreateCommand } from "../../../src/commands/project.js";
 import { runGit } from "../../../src/git.js";
 import { currentMemorySyntax } from "../../../src/memory/syntax.js";
-import { abandonMemoryChange, addMemoryChangeScope, archiveMemoryChange, claimMemoryChange, completeMemoryChange, createMemoryChangeComment, createViewMemoryChange, deleteMemoryChangeComment, editMemories, finishMemoryChange, publishMemoryChange, readMemoryChange, updateMemoryChangeComment, withMemoryChangeDetailSnapshot } from "../../../src/memory/changeset.js";
+import { abandonMemoryChange, addMemoryChangeScope, archiveMemoryChange, claimMemoryChange, createMemoryChangeComment, createViewMemoryChange, deleteMemoryChangeComment, editMemories, finishMemoryChange, publishMemoryChange, readMemoryChange, updateMemoryChangeComment, withMemoryChangeDetailSnapshot } from "../../../src/memory/changeset.js";
 
 test("View ChangeSet records attribution and drives flat Comment claim lifecycle", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "memsphere-view-change-"));
@@ -41,6 +42,16 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       (await readFile(join(seed.candidateRoot, "concepts", "other.yaml"), "utf8"))
         .replace("defines: []", "defines: [Other published Memory]")
     );
+    async function changeReceipt(operation: string, ...args: string[]) {
+      const { stdout, stderr } = await invokeCliModule(["--project", "project", "memory", "change", operation,
+        ...args, "--output", "json"], workspace, process.env, "memsphere");
+      assert.equal(stderr, "");
+      return JSON.parse(stdout);
+    }
+    await changeReceipt("validate", "--change", seed.change.id);
+    const resume = await changeReceipt("resume", seed.change.id);
+    assert.equal(resume.changeId, seed.change.id);
+    assert.equal(resume.candidateRoot, seed.candidateRoot);
     await publishMemoryChange(seed.change.id);
 
     const actor = { kind: "human" as const, id: "owner", name: "Owner" };
@@ -144,7 +155,10 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
     });
     assert(!afterDelete.comments.some((comment) => comment.id === disposable.comment.id));
 
-    const claimed = await claimMemoryChange({ changeId: created.id });
+    const publicClaim = await changeReceipt("claim", created.id);
+    assert.equal(publicClaim.status, "claimed");
+    assert.equal(publicClaim.commentCount, 3);
+    const claimed = { change: await readMemoryChange({ home, project: "project", changeId: created.id }), candidateRoot: publicClaim.candidateRoot };
     assert(claimed.change.claim);
     assert.equal(claimed.change.comments[0]!.status, "processing");
     const claimedSharedPath = join(claimed.candidateRoot, "concepts", "shared.yaml");
@@ -203,11 +217,9 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       }),
       /valid ChangeSet checkpoint/
     );
-    const finished = await finishMemoryChange({
-      changeId: created.id,
-      commentIds: [first.comment.id, second.comment.id],
-      reason: "rejected"
-    });
+    const receipt = await changeReceipt("finish", created.id, "--comment", first.comment.id, second.comment.id, "--reason", "rejected");
+    assert.deepEqual(receipt, { changeId: created.id, status: "completed", commentCount: 2 });
+    const finished = await readMemoryChange({ home, project: "project", changeId: created.id });
     assert.equal(finished.comments[0]!.status, "completed");
     assert.equal(finished.claim, undefined);
 
@@ -248,7 +260,8 @@ test("View ChangeSet records attribution and drives flat Comment claim lifecycle
       archiveMemoryChange({ home, project: "project", changeId: completable.id }),
       /only terminal ChangeSets/
     );
-    const completed = await completeMemoryChange(completable.id);
+    assert.deepEqual(await changeReceipt("complete", completable.id), { changeId: completable.id, status: "completed" });
+    const completed = await readMemoryChange({ home, project: "project", changeId: completable.id });
     assert.equal(completed.status, "completed");
 
     await assert.rejects(createMemoryChangeComment({

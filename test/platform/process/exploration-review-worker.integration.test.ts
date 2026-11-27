@@ -94,7 +94,9 @@ test("exploration dispatch recovers the queued Attempt and owns a fresh native W
     assert.equal(retryAttempts.length, 2);
     const [original, retried] = retryAttempts;
     assert.deepEqual(original, attempt);
-    assert.equal(retried.id, retry.attempt.id);
+    assert.equal(retry.roundId, value.roundId);
+    assert.equal(retry.attempt, undefined);
+    assert.notEqual(retried.id, original.id);
     const retriedWorker = retried.workerIdentity;
     assert.ok(retriedWorker?.started && retriedWorker.pid !== process.pid);
     assert.equal(retried.workerPid, retriedWorker.pid);

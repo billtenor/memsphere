@@ -43,9 +43,7 @@ type ArtifactView = {
     artifactId: string;
     roundId: string;
     status: string;
-    reviewer: {
-      source?: string;
-    };
+    kind?: string;
     vote: {
       value: string;
     };
@@ -382,7 +380,7 @@ for (const source of [
         assert.equal(r.artifactId, produced.artifactId);
         assert.equal(r.roundId, sourceRound);
         assert.equal(r.vote.value, 'approve');
-        assert.equal(r.reviewer.source, 'human');
+        assert.equal(r.kind, 'human');
       }
       async function verify(inputs: Produced[]): Promise<ArtifactView> {
         const view = JSON.parse(cli([
@@ -399,7 +397,7 @@ for (const source of [
           assert.equal(actual.artifact.value, expected.body);
           const sourceRound = expected.reviewRoundId;
           assert.ok(sourceRound, 'expected confirmation keeps its original Round ID');
-          assert.ok(view.confirmations.some(r => r.artifactId === expected.artifactId && r.roundId === sourceRound && r.reviewer.source === 'human' && r.status === 'submitted' && r.vote.value === 'approve'));
+          assert.ok(view.confirmations.some(r => r.artifactId === expected.artifactId && r.roundId === sourceRound && r.kind === 'human' && r.status === 'submitted' && r.vote.value === 'approve'));
         }
         return view;
       }

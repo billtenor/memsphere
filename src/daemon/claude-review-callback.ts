@@ -7,7 +7,9 @@ import { openContextControl } from "../project/context-control.js";
 import { captureClaudeInbox } from "../runner/claude-notifications.js";
 import { currentIdentity, detectRunnerAgent, readRunnerAgents } from "../runner/identity.js";
 import { readTask, recordClaudeDelivery, type ClaudeRecipient, type DaemonTask } from "./tasks.js";
-import { renderReviewResult, reviewReady } from "./review.js";
+import { notificationRound } from "./review.js";
+
+import { failure } from "../context_control/errors.js";
 
 type ReviewTarget = Pick<DaemonTask["input"], "project" | "runId" | "stepId" | "reviewId">;
 
@@ -19,7 +21,7 @@ async function requireBoundTarget(target: ReviewTarget) {
   if (state.status !== "active" || state.groupId !== target.runId
       || state.parameters.project !== target.project || state.parameters.step !== target.stepId
       || state.parameters.review !== explorationReview) {
-    throw new Error("Claude Code session is not bound to this Run, Step, or Review; enter the intended target first");
+    throw failure("SESSION_CONTEXT_CONFLICT", "Claude Code session is not bound to this Run, Step, or Review; enter the intended target first");
   }
 }
 
@@ -27,15 +29,15 @@ export async function prepareClaudeReviewRecipient(sessionId: string, target: Re
   await requireBoundTarget(target);
   const detection = await detectRunnerAgent("claude");
   if (!detection.path || detection.status !== "installed") {
-    throw new Error("Install the Claude Code CLI or disable asynchronous execution to wait synchronously");
+    throw failure("UNSUPPORTED_CAPABILITY", "Install the Claude Code CLI or disable asynchronous execution to wait synchronously");
   }
   const inbox = await captureClaudeInbox({ command: detection.path, version: detection.version, cwd: process.cwd(), sessionId });
   return { agentType: "claude", sessionId, agentCommand: detection.path, inbox };
 }
 
-export async function readClaudeReviewCallback(config: MemsphereConfig, reviewId: string, callback: string): Promise<void> {
+export async function readClaudeReviewCallback(config: MemsphereConfig, reviewId: string, callback: string) {
   const match = /^(task-[0-9a-f-]{36}):([0-9a-f-]{36})$/.exec(callback);
-  if (!match) throw new Error("Invalid Claude Code notification reference");
+  if (!match) throw failure("INVALID_ARGUMENT", "Invalid Claude Code notification reference");
   const [, taskId, deliveryId] = match;
   const identity = await currentIdentity(true);
   const row = await readTask(taskId);
@@ -44,7 +46,7 @@ export async function readClaudeReviewCallback(config: MemsphereConfig, reviewId
       || identity.sessionId !== task.recipient.sessionId || task.claudeDelivery?.id !== deliveryId
       || !["completed", "running"].includes(task.status) || task.input.project !== config.project?.name
       || task.input.reviewId !== reviewId || !(await readRunnerAgents()).claude?.async_enabled) {
-    throw new Error("Claude Code notification does not belong to the current session, review, or delivery");
+    throw failure("PERMISSION_DENIED", "Claude Code notification does not belong to the current session, review, or delivery");
   }
   await requireBoundTarget(task.input);
   if (task.input.stepId) {
@@ -52,21 +54,13 @@ export async function readClaudeReviewCallback(config: MemsphereConfig, reviewId
     const snapshot = await service?.snapshot(task.input.runId);
     if (snapshot) requireEffectiveStep(snapshot.run, task.input.stepId);
     const step = snapshot?.steps.find(candidate => candidate.id === task.input.stepId);
-    if (step?.reviewRounds?.at(-1)?.id !== task.input.roundId) {
-      throw new Error("Claude Code notification is for an obsolete Review round");
+    if (!step?.reviewRounds?.some(round => round.id === task.input.roundId)) {
+      throw failure("REVIEW_CONFLICT", "Claude Code notification is for an obsolete Review round");
     }
   }
   const context = await readArtifactReviewForRunner({ runsRoot: config.runsRoot, reviewId });
-  if (context.run.id !== task.input.runId || context.round.id !== task.input.roundId || !reviewReady(context)) {
-    throw new Error("Claude Code notification is for an obsolete or unfinished Review round");
+  if (context.run.id !== task.input.runId || !context.review.rounds.some(round => round.id === task.input.roundId)) {
+    throw failure("REVIEW_NOT_READY", "Claude Code notification is for an obsolete or unfinished Review round");
   }
-  const output = await renderReviewResult(config, context);
-  await new Promise<void>((resolve, reject) => {
-    process.stdout.write(output + "\n", error => error ? reject(error) : resolve());
-  });
-  try {
-    await recordClaudeDelivery(taskId, deliveryId, "readAt");
-  } catch {
-    console.error("Review result was read; Claude Code notification read-back could not be recorded");
-  }
+  return { context: notificationRound(context, task.input.roundId), acknowledge: () => recordClaudeDelivery(taskId, deliveryId, "readAt") };
 }

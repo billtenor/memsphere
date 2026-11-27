@@ -5,8 +5,8 @@ export type Page<T> = { items: T[]; nextCursor?: string };
 export type CursorScope = { command: string; scope: unknown; filters?: unknown };
 
 export class PaginationError extends Error {
-  readonly code: "INVALID_ARGUMENT" | "INVALID_CURSOR";
-  constructor(message: string, code: "INVALID_ARGUMENT" | "INVALID_CURSOR" = "INVALID_ARGUMENT") {
+  readonly code: "INVALID_ARGUMENT" | "INVALID_CURSOR" | "OUTPUT_LIMIT_EXCEEDED";
+  constructor(message: string, code: "INVALID_ARGUMENT" | "INVALID_CURSOR" | "OUTPUT_LIMIT_EXCEEDED" = "INVALID_ARGUMENT") {
     super(message);
     this.name = "PaginationError";
     this.code = code;
@@ -52,19 +52,41 @@ export function decodeListCursor(cursor: string | undefined, scope: CursorScope)
   }
 }
 
+export type PaginationBudget<T> = {
+  defaultLimit: number;
+  maxLimit: number;
+  defaultBytes: number;
+  maxBytes: number;
+  rowBytes: (item: T) => number;
+};
+
 /** Callers filter and order the complete collection before selecting a page. */
-export function paginateItems<T>(items: readonly T[], options: PaginationOptions, scope: CursorScope): Page<T> {
-  const limit = parseListLimit(options.limit);
+export function paginateItems<T>(
+  items: readonly T[], options: PaginationOptions, scope: CursorScope, budget?: PaginationBudget<T>
+): Page<T> {
+  const limit = options.limit === undefined && budget ? budget.defaultLimit : parseListLimit(options.limit);
+  if (budget && limit > budget.maxLimit) {
+    throw new PaginationError(`limit must be an integer between 1 and ${budget.maxLimit}`);
+  }
   const position = decodeListCursor(options.cursor, scope);
   const offset = position === undefined ? 0 : Number(position);
   if ((position !== undefined && !/^(0|[1-9][0-9]*)$/.test(position))
     || !Number.isSafeInteger(offset) || offset < 0) {
     throw new PaginationError("Invalid list cursor position", "INVALID_CURSOR");
   }
-  const selected = items.slice(offset, offset + limit + 1);
-  const more = selected.length > limit;
-  const page: Page<T> = { items: selected.slice(0, limit) };
-  if (more) page.nextCursor = encodeListCursor(scope, String(offset + limit));
+  const selected = items.slice(offset, offset + limit);
+  const page: Page<T> = { items: [] };
+  let remainingBytes = !budget ? Infinity : options.limit === undefined ? budget.defaultBytes : budget.maxBytes;
+  for (const item of selected) {
+    remainingBytes -= budget?.rowBytes(item) ?? 0;
+    if (remainingBytes < 0) break;
+    page.items.push(item);
+  }
+  if (!page.items.length && selected.length) {
+    throw new PaginationError("One item exceeds the public page budget", "OUTPUT_LIMIT_EXCEEDED");
+  }
+  const next = offset + page.items.length;
+  if (next < items.length) page.nextCursor = encodeListCursor(scope, String(next));
   return page;
 }
 

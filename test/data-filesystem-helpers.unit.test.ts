@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { paginate, portableNameKey, validateFilename, validateRelativeFilePath } from "../src/data/extensions/shared/filesystem.js";
 import { consumeContent } from "../src/data/extensions/shared/payload.js";
@@ -66,6 +67,13 @@ test("pagination is lexical, scoped, bounded and rejects malformed cursors", () 
   const first = paginate(["z", "a", "b", "中文"], { limit: 2 }, "store-1");
   assert.deepEqual(first.items, [{ id: "a" }, { id: "b" }]);
   assert.ok(first.nextCursor);
+  const decoded = JSON.parse(Buffer.from(first.nextCursor, "base64url").toString("utf8"));
+  assert.match(decoded.scope, /^[a-f0-9]{64}$/);
+  const legacy = { scope: "store-1", after: "b",
+    check: createHash("sha256").update(JSON.stringify(["store-1", "b"])).digest("hex") };
+  const legacyCursor = Buffer.from(JSON.stringify(legacy)).toString("base64url");
+  assert.deepEqual(paginate(["a", "b", "c"], { cursor: legacyCursor }, "store-1"), { items: [{ id: "c" }] });
+  assert.throws(() => paginate([], { cursor: legacyCursor }, "store-2"), /cursor/);
   assert.deepEqual(paginate(["z", "a", "b", "中文"], { cursor: first.nextCursor, limit: 2 }, "store-1"), { items: [{ id: "z" }, { id: "中文" }] });
   assert.deepEqual(paginate([], { cursor: first.nextCursor }, "store-1"), { items: [] });
   assert.throws(() => paginate([], { cursor: first.nextCursor }, "store-2"), /cursor/);

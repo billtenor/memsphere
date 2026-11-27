@@ -20,6 +20,8 @@ import {
 import type { MemoryFile } from "./store.js";
 
 export type MemoryReferenceIssue = {
+  code: "SCHEMA_OPTIONAL_INVALID" | "REFERENCE_INVALID" | "REFERENCE_KIND_MISMATCH"
+    | "REFERENCE_NOT_FOUND" | "REFERENCE_RULES_MISSING" | "REFERENCE_CYCLE";
   path: string;
   message: string;
 };
@@ -90,6 +92,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
     if (edge.target === "__invalid_optional_context__") {
       issues.push({
         path: edge.filePath,
+        code: "SCHEMA_OPTIONAL_INVALID",
         message: `${edge.sourcePath}: optional is only allowed on named Schema fields`
       });
       continue;
@@ -100,6 +103,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       if (!parsed) {
         issues.push({
           path: edge.filePath,
+          code: "REFERENCE_INVALID",
           message: `${edge.sourcePath}: invalid !ref target "${edge.target}"; expected canonical logical reference`
         });
         continue;
@@ -107,6 +111,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       if (!edge.expected.includes(parsed.kind as ExpectedKind)) {
         issues.push({
           path: edge.filePath,
+          code: "REFERENCE_KIND_MISMATCH",
           message: `${edge.sourcePath}: !ref target "${edge.target}" has kind ${parsed.kind}; expected ${edge.expected.join(" or ")}`
         });
         continue;
@@ -117,6 +122,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       if (nameIssue) {
         issues.push({
           path: edge.filePath,
+          code: "REFERENCE_INVALID",
           message: `${edge.sourcePath}: invalid canonical Memory target "${edge.target}": ${nameIssue}`
         });
         continue;
@@ -128,6 +134,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
     if (!targets || targets.size === 0) {
       issues.push({
         path: edge.filePath,
+        code: "REFERENCE_NOT_FOUND",
         message: `${edge.sourcePath}: Memory target "${edge.target}" was not found`
       });
       continue;
@@ -144,6 +151,7 @@ export function validateMemoryReferences(files: readonly MemoryFile[]): MemoryRe
       ) {
         issues.push({
           path: edge.filePath,
+          code: "REFERENCE_RULES_MISSING",
           message: `${edge.sourcePath}: !ref target "${edge.target}" has no effective ${edge.channel}`
         });
       }
@@ -428,6 +436,7 @@ function detectReferenceCycles(graph: ReadonlyMap<string, readonly ReferenceEdge
       const edge = stack.at(-1);
       issues.push({
         path: edge?.filePath ?? reference,
+        code: "REFERENCE_CYCLE",
         message: `Memory reference cycle detected: ${detail || reference}`
       });
       return;

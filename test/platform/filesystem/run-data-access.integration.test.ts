@@ -5,6 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { AgentActivityRecorder, agentActivityIds, readAgentActivitySnapshot } from "../../../src/acp/activity.js";
 import { parseControlPlaneConfig } from "../../../src/control-plane/index.js";
+import { emitLegacyRun } from "../../../src/commands/legacy-run-output.js";
 import { exportRunArtifact } from "../../../src/commands/run.js";
 import { RunMemoryProvider, runMemoryFiles } from "../../../src/memory/run-provider.js";
 import { currentMemorySyntax } from "../../../src/memory/syntax.js";
@@ -128,7 +129,7 @@ test("Run snapshot excludes Git placeholders, preserves source files and reports
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("Schema finalization exports an opaque middle Artifact, retains progress on invalid report and accepts the edited local copy", async () => {
+test("Schema finalization exports an opaque middle Artifact, retains progress on invalid report and accepts the edited local copy", async t => {
   const root = await mkdtemp(join(tmpdir(), "memsphere-schema-store-export-"));
   try {
     const memoryRoot = join(root, "memory");
@@ -138,9 +139,27 @@ test("Schema finalization exports an opaque middle Artifact, retains progress on
     const data = opaqueRunData();
     prepareRunData({ runsRoot, archiveRoot: join(root, "archive"), manager: data.manager });
     const started = await startRun({ name: "Schema probe", memoryRoot, runsRoot, procedureName: "probe" });
-    await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    let output = "";
+    const stdout = t.mock.method(process.stdout, "write", (chunk: string) => { output = chunk; return true; });
+    const inspectPhase = (run: RunState, phase: string) => {
+      for (const format of ["text", "json"] as const) {
+        emitLegacyRun("run status", run, { runsRoot }, format);
+        assert.ok(output.includes(phase));
+        if (format === "json") {
+          const receipt = JSON.parse(output);
+          assert.equal(receipt.runId, started.id);
+          assert.ok(receipt.stepId);
+          assert.equal(receipt.schemaPhase, phase);
+          assert.equal(receipt.actor, undefined);
+        }
+      }
+    };
+    const writing = await enterSchema({ memoryRoot, runsRoot, runId: started.id });
+    inspectPhase(writing, "writing");
     await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "# Delivery" } });
     const middle = await reportRun({ runsRoot, runId: started.id, artifact: { kind: "inline", value: "ready" } });
+    inspectPhase(middle, "awaiting_finalization");
+    stdout.mock.restore();
     const finalization = currentSchemaFinalization(middle);
     assert(finalization);
     assert(!finalization.draft.path.includes("/drafts/"));

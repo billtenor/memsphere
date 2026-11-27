@@ -11,7 +11,7 @@ export const cliInvocationSignal = () => outputScope.getStore()?.signal;
  * Participating test adapters consume the optional invocation signal for I/O;
  * this does not add cancellation options to public command handlers.
  */
-export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.ProcessEnv, entrypoint: string, signal?: AbortSignal) {
+export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.ProcessEnv, entrypoint: string, signal?: AbortSignal, execute: typeof runCli = runCli) {
   signal?.throwIfAborted();
   const previous = { cwd: process.cwd(), env: { ...process.env }, argv: process.argv, exitCode: process.exitCode,
     stdout: process.stdout.write, stderr: process.stderr.write };
@@ -33,7 +33,7 @@ export async function invokeCliModule(args: string[], cwd: string, env: NodeJS.P
     process.argv = [process.execPath, entrypoint, ...args];
     process.exitCode = 0;
     process.stdout.write = capture(output, process.stdout, previous.stdout); process.stderr.write = capture(errors, process.stderr, previous.stderr);
-    await outputScope.run({ token, signal }, () => runCli(process.argv));
+    await outputScope.run({ token, signal }, () => execute(process.argv));
     signal?.throwIfAborted();
     const result = { stdout: Buffer.concat(output).toString(), stderr: Buffer.concat(errors).toString() };
     if (process.exitCode) throw Object.assign(new Error(result.stderr || `CLI exited ${process.exitCode}`), result, { code: process.exitCode });

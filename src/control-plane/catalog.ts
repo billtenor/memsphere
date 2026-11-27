@@ -19,17 +19,6 @@ export type PermissionId = (typeof permissionIds)[number];
 export const permissionCatalogVersion = "memsphere-permissions-20260721";
 export const decisionPolicyCatalogVersion = "memsphere-decision-policies-20260721";
 
-const permissionDefinitions = permissionIds.map((id): PermissionDefinitionSnapshot => deepFreeze({
-  id,
-  version: "1",
-  descriptions: {
-    "zh-CN": renderPrompt("control-plane.permission-description", "zh-CN", { id }),
-    en: renderPrompt("control-plane.permission-description", "en", { id })
-  }
-}));
-
-const permissionDefinitionsById = new Map(permissionDefinitions.map((definition) => [definition.id, definition]));
-
 const decisionPolicyDefinitions: DecisionPolicyDefinitionSnapshot[] = [deepFreeze({
   id: "artifact_acceptance.unanimous",
   version: "1",
@@ -41,17 +30,19 @@ const decisionPolicyDefinitions: DecisionPolicyDefinitionSnapshot[] = [deepFreez
 const decisionPolicyDefinitionsById = new Map(decisionPolicyDefinitions.map((definition) => [definition.id, definition]));
 
 export function isPermissionId(value: string): value is PermissionId {
-  return permissionDefinitionsById.has(value as PermissionId);
+  return (permissionIds as readonly string[]).includes(value);
 }
 
 export function listPermissionDefinitions(): PermissionDefinitionSnapshot[] {
-  return permissionDefinitions.map((definition) => structuredClone(definition));
+  return permissionIds.map(requirePermissionDefinition);
 }
 
 export function requirePermissionDefinition(id: string): PermissionDefinitionSnapshot {
-  const definition = permissionDefinitionsById.get(id as PermissionId);
-  if (!definition) throw new Error(`Unknown Permission id: ${id}`);
-  return structuredClone(definition);
+  if (!isPermissionId(id)) throw new Error(`Unknown Permission id: ${id}`);
+  return { id, version: "1", descriptions: {
+    "zh-CN": renderPrompt("control-plane.permission-description", "zh-CN", { id }),
+    en: renderPrompt("control-plane.permission-description", "en", { id })
+  } };
 }
 
 export function listDecisionPolicyDefinitions(): DecisionPolicyDefinitionSnapshot[] {

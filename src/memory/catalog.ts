@@ -1,6 +1,6 @@
 import type { MemoryEntity } from "./ast.js";
 import { randomUUID } from "node:crypto";
-import { compareStrings, paginateItems, parseListLimit, decodeListCursor, type Page, type PaginationOptions } from "../pagination.js";
+import { compareStrings, paginateItems, parseListLimit, decodeListCursor, type Page, type PaginationOptions, type PaginationBudget } from "../pagination.js";
 import type { MemoryKind } from "./kinds.js";
 import {
   canonicalMemoryNameIssue,
@@ -36,7 +36,7 @@ export type MemoryResolveQuery = {
 export interface MemoryCatalog {
   snapshot?(): Promise<MemoryCatalog>;
   readonly paginationScope?: unknown;
-  list(query?: MemoryListQuery): Promise<MemoryListPage>;
+  list(query?: MemoryListQuery, budget?: PaginationBudget<MemoryDescriptor>): Promise<MemoryListPage>;
   resolve(referenceOrName: string, query?: MemoryResolveQuery): Promise<MemoryDescriptor>;
   read(referenceOrName: string, query?: MemoryResolveQuery): Promise<MemoryEntity>;
 }
@@ -123,7 +123,7 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
     }, this.paginationScope);
   }
 
-  async list(query: MemoryListQuery = {}): Promise<MemoryListPage> {
+  async list(query: MemoryListQuery = {}, budget?: PaginationBudget<MemoryDescriptor>): Promise<MemoryListPage> {
     const normalizedQuery = query.query === undefined ? undefined : normalizeMemoryName(query.query);
     const scope = { command: "memory list", scope: this.paginationScope, filters: { kind: query.kind, query: normalizedQuery } };
     parseListLimit(query.limit);
@@ -134,7 +134,7 @@ export class DefaultMemoryCatalog implements MemoryCatalog {
       .map((entry) => entry.descriptor)
       .sort(compareDescriptors);
 
-    return paginateItems(memories, query, scope);
+    return paginateItems(memories, query, scope, budget);
   }
 
   async resolve(referenceOrName: string, query: MemoryResolveQuery = {}): Promise<MemoryDescriptor> {

@@ -71,9 +71,11 @@ test("findRun and listRuns are readonly under a held Run lock while native statu
     "--project", "test-project", "run", "status", "--run", run.id, "--output", "json",
   ], { cwd: f.cwd, env: { ...process.env, MEMSPHERE_HOME: f.home } });
   const status = JSON.parse(result.stdout);
-  const step = status.steps.find((s: { id: string }) => `${run.id}/${s.id}` === missingKey);
-  assert.equal(step.status, "running");
-  assert.equal(step.artifact.id, (saved!.value as { id: string }).id);
+  assert.equal(`${run.id}/${status.stepId}`, missingKey);
+  assert.equal(status.stepStatus, "running");
+  assert.equal(Object.hasOwn(status, "steps"), false);
+  const step = (await service.inspect(run.id)).steps.find(s => s.id === status.stepId);
+  assert.deepEqual(step?.artifact, { mode: "produce", id: (saved!.value as { id: string }).id });
   assert.deepEqual(await service.stores.run.get({}, run.id), before);
 });
 

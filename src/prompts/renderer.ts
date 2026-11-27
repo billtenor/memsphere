@@ -53,7 +53,7 @@ export function createPromptRenderer(assets: PromptAssets) {
       const engine = engineFor(locale);
       let source: string;
       try {
-        source = assets.read(locale, definition.path);
+        source = assets.read(locale, definition.path).replaceAll("\r\n", "\n");
       } catch (error) {
         throw new PromptRenderError(id, locale, "asset", error);
       }
@@ -134,7 +134,7 @@ export function createPromptRenderer(assets: PromptAssets) {
     ) {
       return left === right ? options.fn(this) : options.inverse(this);
     });
-    for (const partial of assets.partials(locale)) engine.registerPartial(partial.name, partial.source);
+    for (const partial of assets.partials(locale)) engine.registerPartial(partial.name, partial.source.replaceAll("\r\n", "\n"));
     engines.set(locale, engine);
     return engine;
   }

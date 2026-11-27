@@ -5,7 +5,7 @@ import { readConfig, readConfigAt, type MemsphereConfig } from "./config.js";
 import { analyzeMemoryDescriptors } from "./memory/catalog.js";
 import { memoryKinds, type MemoryKind } from "./memory/kinds.js";
 import type { ProviderMemoryDescriptor } from "./memory/provider.js";
-import { validateMemoryReferences } from "./memory/references.js";
+import { validateMemoryReferences, type MemoryReferenceIssue } from "./memory/references.js";
 import { listMemoryFiles, pathExists, readMemoryFile, type MemoryFile } from "./memory/store.js";
 import { currentMemorySyntax, readMemorySyntax } from "./memory/syntax.js";
 import { parseMemoryYaml } from "./memory/yaml.js";
@@ -13,6 +13,7 @@ import { canMigrateMemorySyntax } from "./migration/memory-syntax-path.js";
 
 export type ValidationIssue = {
   path: string;
+  code?: MemoryReferenceIssue["code"];
   message: string;
   migration?: "syntax";
   line?: number;

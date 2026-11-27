@@ -5,6 +5,8 @@ names:
   - memsphere 代码仓库开发规范
 defines:
   - 规定 memsphere 代码仓库的开发要求，并按主题组织可扩展的规范章节。
+asserts:
+  - 修改 CLI 命令及其输出时，读取并遵循 statements/memsphere-cli-maintenance-rules。
 sections:
   - !statement
     names:

@@ -10,14 +10,18 @@ import { createAgentReviewCliRuntime } from '../src/acp/cli-runtime.js';
 import { graphMemorySyntax } from '../src/memory/syntax.js';
 import type { GraphAction, GraphProcedureMemory } from '../src/memory/ast.js';
 import * as reviews from '../src/context_control/review-repository.js';
+import type { ControlPlaneActor } from '../src/control-plane/model.js';
 import { currentReviewNode } from '../src/review-nodes.js';
 const entrypoint=fileURLToPath(new URL('../dist/cli.js',import.meta.url));
 const action=(id:string,from='START',review=false):GraphAction=>({tag:'!action',id,description:id,dependencies:[{tag:'!dependency',from}],artifact:{name:id,model:{definedBy:'raw.json',definition:'{}'},payload:{contentType:'text/plain'},...(review?{review:['check']}:{} )}});
 
-async function fixture(t:test.TestContext,actions:GraphAction[]) {
+async function fixture(t:test.TestContext,actions:GraphAction[], humanActors: string[] = []) {
  const f=await initializedContextFixture(t),service=(await openContextControl(f.root))!;
  const procedure:GraphProcedureMemory={tag:'!procedure',syntax:graphMemorySyntax,mode:'graph',names:['cli-evidence'],defines:['Evidence'],actions};
- const start=await service.withGraph(g=>g.start({name:'CLI evidence',procedure,controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{reader:{kind:'agent',name:'Reader',permissions:['artifact.read','decision.assess'],agent:{provider:'test',providerType:'traex',command:process.execPath,args:[],env:{},startupTimeoutMs:10000,idleTimeoutMs:null,maxRuntimeMs:null}}},acpProviders:{}},reviewConfiguration:{reviews:Object.fromEntries(actions.filter(a=>a.artifact?.review).map(a=>[`cli-evidence#actions[${a.id}]`,{policy:'artifact_acceptance.unanimous'}])),slots:{'cli-evidence::check':{actorIds:['reader']}}}}));
+ const humanReviewers = Object.fromEntries(humanActors.map(id => [id, {
+   kind: "human", name: id, permissions: ["artifact.read", "decision.decide"]
+ } satisfies ControlPlaneActor]));
+ const start=await service.withGraph(g=>g.start({name:'CLI evidence',procedure,controlPlane:{runner:{permissions:['artifact.read','artifact.submit','decision.decide']},actors:{...humanReviewers,reader:{kind:'agent',name:'Reader',permissions:['artifact.read','decision.assess'],agent:{provider:'test',providerType:'traex',command:process.execPath,args:[],env:{},startupTimeoutMs:10000,idleTimeoutMs:null,maxRuntimeMs:null}}},acpProviders:{}},reviewConfiguration:{reviews:Object.fromEntries(actions.filter(a=>a.artifact?.review).map(a=>[`cli-evidence#actions[${a.id}]`,{policy:'artifact_acceptance.unanimous'}])),slots:{'cli-evidence::check':{actorIds:humanActors.length ? humanActors : ['reader']}}}}));
  const runId=start.run.id,env=Object.fromEntries(Object.entries(process.env).filter(([k])=>!k.startsWith('MEMSPHERE_')));
  Object.assign(env,{MEMSPHERE_HOME:f.home,MEMSPHERE_CONFIG_PATH:join(f.root,'config.json')});
  const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:entrypoint});t.after(()=>runtime.cleanup());
@@ -60,7 +64,7 @@ test('real production CLI loops and rewinds pin each acceptance Session to the c
  const rewound=JSON.parse(f.runner(['run','step','rewind','--run',f.runId,'--step',r1.stepId,'--reason','new confirmed requirements','--output','json']).stdout);
  const r3=await f.produce('requirements','requirements after rewind',[],rewound.replacementStepId),c3=await f.produce('acceptance','after rewind'),s3=await f.claim(c3.stepId);s3.read('artifact',r3.artifactId,'third-r3.txt');s3.read('artifact',r2.artifactId,'deny-v2-after.txt',false);
  s1.read('artifact',r1.artifactId,'revoked.txt',false);
- const history=JSON.parse(f.runner(['run','show','--run',f.runId,'--output','json']).stdout);const original=history.artifacts.find((a:any)=>a.id===c1.artifactId);assert.ok(original.dependencies.some((d:any)=>d.id===r1.artifactId));assert.ok(!original.dependencies.some((d:any)=>d.id===r2.artifactId||d.id===r3.artifactId));
+ const history=await f.service.inspect(f.runId);const original=history.artifacts.find((a:any)=>a.id===c1.artifactId);assert.ok(original.dependencies.some((d:any)=>d.id===r1.artifactId));assert.ok(!original.dependencies.some((d:any)=>d.id===r2.artifactId||d.id===r3.artifactId));
  f.runner(['run','artifact','show','--run',f.runId,'--artifact',r1.artifactId,'--out',join(f.cwd,'historical-requirements.txt'),'--output','json']);assert.equal(await readFile(join(f.cwd,'historical-requirements.txt'),'utf8'),'requirements v1');
  assert.equal((await f.service.readArtifact(f.runId,r1.artifactId)).bytes.toString(),'requirements v1');assert.equal(await readFile(join(f.cwd,'history-r1.txt'),'utf8'),'requirements v1');
 });
@@ -96,6 +100,77 @@ test('a historical restricted Session retains its original candidate and Externa
 test('production CLI rejects an unrelated supplemental Artifact and accepts a causal ancestor',async t=>{
  const f=await fixture(t,[action('R'),action('P','R'),action('U'),action('C','P',true)]),r=await f.seed('R','requirements');await f.seed('P','plan');const u=await f.seed('U','unrelated'),step=(await f.active('C')).id;
  f.runner(['run','step','enter','--run',f.runId,'--step',step]);const before=(await f.service.snapshot(f.runId)).artifacts.length;
- const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/outside this Step/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
+ const denied=f.runner(['run','report','--run',f.runId,'--step',step,'--artifact','invalid','--depends-on',`artifact:${u.artifactId}`,'--output','json'],false);assert.match(denied.stderr,/PERMISSION_DENIED|INVALID_ARGUMENT/);assert.equal((await f.service.snapshot(f.runId)).artifacts.length,before);
  await f.produce('C','valid',['--depends-on',`artifact:${r.artifactId}`]);const reader=await f.claim(step);reader.read('artifact',r.artifactId,'ancestor.txt');reader.read('artifact',u.artifactId,'unrelated.txt',false);
+});
+
+test("Runner follows a completed review receipt to its authorized round details", async t => {
+  const f = await fixture(t, [action("deliver", "START", true)]);
+  const candidate = await f.produce("deliver", "candidate");
+  const reviewer = await f.claim(candidate.stepId);
+  await reviewer.decide("approve");
+  const wait = ["run", "review", "wait", "--review", reviewer.input.reviewId];
+  const receipt = JSON.parse(f.runner([...wait, "--output", "json"]).stdout);
+  assert.equal(receipt.roundId, reviewer.input.roundId);
+  assert.equal(receipt.assignmentCount, 1);
+  assert.equal(receipt.commentCount, 0);
+  for (const key of ["assignments", "comments", "taskId", "vote"]) assert.ok(!Object.hasOwn(receipt, key), key);
+  const text = f.runner(wait).stdout;
+  assert.ok(text.includes(receipt.roundId));
+  assert.doesNotMatch(text, /assignments[:：]|comments[:：]|Reader/);
+  assert.deepEqual(receipt.details.args.slice(0, 2), ["--project", "test-project"]);
+  const detail = JSON.parse(f.runner([...receipt.details.args.slice(2), "--output", "json"]).stdout);
+  assert.equal(detail.roundId, receipt.roundId);
+  assert.equal(detail.assignments[0].actorId, "reader");
+  assert.equal(detail.assignments[0].vote, "approve");
+});
+
+test("Runner can follow a large round to the final assignment and its complete opinion", async t => {
+  const actors = Array.from({ length: 12 }, (_, i) => "reader-" + String(i + 1).padStart(2, "0"));
+  const f = await fixture(t, [action("deliver", "START", true)], actors);
+  const candidate = await f.seed("deliver", "candidate");
+  const reviewId = reviews.graphReviewHandle(f.runId, candidate.stepId);
+  const base = { service: f.service, runsRoot: join(f.root, "runs"), reviewId };
+  const { round } = await reviews.readArtifactReviewForRunner(base);
+  const summary = "Original full opinion. ".repeat(14);
+  await reviews.submitArtifactReviewHumanAssignmentForRunner({ ...base, runId: f.runId,
+    roundId: round.id, assignmentId: actors[11], vote: "approve", summary, comments: [], authorizationNote: "Fixture" });
+  const show = ["run", "review", "show", "--review", reviewId, "--round", round.id, "--all"];
+  const first = JSON.parse(f.runner([...show, "--output", "json"]).stdout);
+  assert.equal(first.assignmentCount, 12);
+  assert.equal(first.assignments.length, 10);
+  const page = first.details.args.slice(2);
+  assert.deepEqual(page, [...show, "--assignment-page", "2"]);
+  const last = JSON.parse(f.runner([...page, "--output", "json"]).stdout);
+  assert.deepEqual(last.assignments.map((a: { actorId: string }) => a.actorId), actors.slice(10));
+  assert.equal(last.assignments[0].status, "draft");
+  assert.equal(last.assignments[1].vote, "approve");
+  assert.equal(last.assignments[1].summary, summary);
+  assert.equal(last.details, undefined);
+  const text = f.runner(page).stdout;
+  assert.ok(text.includes(actors[11]) && text.includes(summary.trimEnd()));
+});
+
+test("graph binding show and update distinguish the frozen round from the next round", async t => {
+  const f = await fixture(t, [action("deliver", "START", true)], ["first", "second"]);
+  const produced = await f.seed("deliver", "candidate");
+  const run = ["--run", f.runId], slot = "cli-evidence::check";
+  const step = ["--step", produced.stepId];
+  const items = JSON.parse(f.runner(["run", "artifact", "show", ...run, ...step, "--output", "json"]).stdout).items;
+  assert.deepEqual(items.map((a: {artifactId: string}) => a.artifactId), [produced.artifactId]);
+  const contract = JSON.parse(f.runner(["run", "artifact", "contract", "show", ...run, ...step, "--output", "json"]).stdout);
+  assert.equal(contract.name, "deliver");
+  assert.equal(contract.contentType, "text/plain");
+  const status = JSON.parse(f.runner(["run", "status", ...run, "--output", "json"]).stdout);
+  assert.equal(status.reviewId, reviews.graphReviewHandle(f.runId, produced.stepId));
+  const show = ["run", "binding", "show", ...run], update = ["run", "binding", "update", ...run, "--slot", slot, "--actor", "first"];
+  const original = JSON.parse(f.runner([...show, "--output", "json"]).stdout);
+  assert.deepEqual(original.nextRound[slot].actorIds, ["first", "second"]);
+  assert.ok(f.runner(show).stdout.includes(slot));
+  const result = JSON.parse(f.runner([...update, "--output", "json"]).stdout);
+  assert.deepEqual(result.nextRound[slot].actorIds, ["first"]);
+  assert.equal(result.rounds[0].stepId, produced.stepId);
+  assert.deepEqual(result.rounds[0].bindings[slot].actorIds, ["first", "second"]);
+  assert.ok(f.runner(update).stdout.includes(slot));
+  assert.deepEqual(JSON.parse(f.runner([...show, "--output", "json"]).stdout), result);
 });

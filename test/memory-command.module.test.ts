@@ -51,11 +51,10 @@ function fixture() {
   return { catalog, dependencies, entity, page, stdout: () => stdout };
 }
 
-test("memory list defaults to YAML and forwards filters", async () => {
+test("memory list forwards filters to the catalog", async () => {
   const state = fixture();
-  await memoryListCommand(undefined, { kind: "concepts", query: "记忆" }, state.dependencies);
-  assert.deepEqual(parse(state.stdout()), state.page);
-  assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆", limit: 100, cursor: undefined }]);
+  await memoryListCommand(undefined, { kind: "concepts", query: "记忆", output: "json" }, state.dependencies);
+  assert.deepEqual(state.catalog.listCalls, [{ kind: "concepts", query: "记忆", limit: undefined, cursor: undefined }]);
 });
 
 test("memory list and read select the frozen catalog for a Run", async () => {
@@ -66,31 +65,34 @@ test("memory list and read select the frozen catalog for a Run", async () => {
     return state.catalog;
   };
 
-  await memoryListCommand(undefined, { run: "run-frozen" }, state.dependencies);
+  await memoryListCommand(undefined, { run: "run-frozen", output: "json" }, state.dependencies);
   await memoryReadCommand("Memory", { run: "run-frozen" }, state.dependencies);
 
   assert.deepEqual(requestedRuns, ["run-frozen", "run-frozen"]);
 });
 
-test("memory list supports JSON and text", async () => {
+test("memory list exposes the same public summary in JSON and YAML", async () => {
+  const expected = {
+    items: [{ reference: "concepts/Memory", kind: "concepts", names: ["Memory", "记忆"], summary: "A memory." }]
+  };
   const json = fixture();
   await memoryListCommand(undefined, { output: "json" }, json.dependencies);
-  assert.deepEqual(JSON.parse(json.stdout()), json.page);
+  assert.deepEqual(JSON.parse(json.stdout()), expected);
 
-  const text = fixture();
-  await memoryListCommand(undefined, { output: "text" }, text.dependencies);
-  assert.equal(text.stdout(), "concepts/Memory (记忆)\n");
+  const yaml = fixture();
+  await memoryListCommand(undefined, { output: "yaml" }, yaml.dependencies);
+  assert.deepEqual(parse(yaml.stdout()), expected);
 });
 
 test("memory read defaults to tagged YAML and supports JSON", async () => {
   const yaml = fixture();
   await memoryReadCommand("记忆", { kind: "concepts" }, yaml.dependencies);
-  assert.deepEqual(parseMemoryYaml(yaml.stdout()), yaml.entity);
+  assert.deepEqual(parseMemoryYaml(yaml.stdout()), { ...yaml.entity, syntax: "start" });
   assert.deepEqual(yaml.catalog.readCalls, [{ reference: "记忆", query: { kind: "concepts" } }]);
 
   const json = fixture();
   await memoryReadCommand("concepts/Memory", { output: "json" }, json.dependencies);
-  assert.deepEqual(JSON.parse(json.stdout()), json.entity);
+  assert.deepEqual(JSON.parse(json.stdout()), { ...json.entity, syntax: "start" });
 });
 
 test("memory read --effective preserves references and section groups without exposing rule ids", async () => {
@@ -135,7 +137,7 @@ test("memory read --effective preserves references and section groups without ex
 
   await memoryReadCommand("schemas/record", { effective: true, output: "json" }, dependencies);
   const result = JSON.parse(stdout);
-  assert.deepEqual(result.declared, consumer);
+  assert.deepEqual(result.declared, { ...consumer, syntax: "start" });
   assert.deepEqual(result.effective.effectiveRules.asserts[0], "Local rule.");
   assert.equal(result.effective.effectiveRules.asserts[1].reference, "statements/shared-rules");
   assert.equal(result.effective.effectiveRules.asserts[1].sections[0].name, "Security");
