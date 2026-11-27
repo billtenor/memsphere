@@ -42,13 +42,13 @@ const runId = started.match(/\b(run-[a-z0-9-]+)\b/i)?.[1];
 if (!runId) throw new Error(`Could not read Run id from output:\n${started}`);
 run(cli, ["run", "report", "--run", runId, "--artifact", "Windows packaged CLI passed."], project);
 const completed = JSON.parse(run(cli, ["run", "show", "--run", runId, "--output", "json"], project));
-if (completed.status !== "done") throw new Error(`Windows smoke Run did not complete: ${completed.status}`);
+if (completed.run?.status !== "done") throw new Error(`Windows smoke Run did not complete: ${completed.run?.status}`);
 
 run(cli, ["daemon", "start"], project);
 run(cli, ["daemon", "status"], project);
-const startedView = run(cli, ["view", "start"], project);
-const origin = startedView.match(/https?:\/\/[^\s]+/)?.[0];
-if (!origin) throw new Error(`View start did not return an origin:\n${startedView}`);
+const startedView = JSON.parse(run(cli, ["view", "start", "--output", "json"], project));
+const origin = startedView.view?.url;
+if (!origin) throw new Error("View start did not return view.url");
 run(cli, ["view", "status"], project);
 const response = await fetch(origin);
 if (!response.ok) throw new Error(`View request failed with HTTP ${response.status}`);

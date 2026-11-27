@@ -13,6 +13,7 @@ import type { GraphProcedureMemory } from "../src/memory/ast.js";
 
 import { openContextControl } from "../src/project/context-control.js";
 import { requireCommandState } from "../src/home/command-state-store.js";
+import { unpackCliArgv } from "../src/prompts/cli-command.js";
 import { ownTestProcess } from "./helpers/owned-process.js";
 
 
@@ -258,11 +259,24 @@ test("CLI module failed auxiliary Continue store preserves the running Step and 
   await mkdir(join(f.home, "data"), { recursive: true });
   const invalid = join(f.home, "data", "runner-sessions"); await writeFile(invalid, "not a directory");
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "context recovery");
-  assert.deepEqual(start.nextAction.args.slice(2, 7), ["run", "report", "--run", start.runId, "--step"]);
   const before = await f.call("run", "show", "--run", start.runId); assert.equal(before.steps.length, 1); assert.equal(before.steps[0].status, "running");
+  const stepId = before.steps[0].id;
+  assert.deepEqual(start.nextAction, { kind: "command", launcher: "memsphere",
+    args: ["--project", "test-project", "run", "report", "--run", start.runId, "--step", stepId, "--artifact-file", "<file>"] });
   await rm(invalid);
-  const recovered = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", before.steps[0].id);
-  assert.match(recovered.stdout, /memsphere continue report/);
+  const recovered = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", stepId);
+  const command = recovered.stdout.split(/\r?\n/).find(line => line.startsWith("memsphere "));
+  assert.ok(command, recovered.stdout);
+  // The template has one quoted placeholder on Bash and an encoded argument on Windows.
+  const args = unpackCliArgv([process.execPath, ...command.split(" ")]).slice(2);
+  const placeholder = process.platform === "win32" && !process.env.MSYSTEM ? "<file>" : "'<file>'";
+  assert.deepEqual(args, ["continue", "report", "--artifact-file", placeholder]);
+  const artifact = join(f.directory, "recovered step.txt");
+  await writeFile(artifact, "Recovered Continue report");
+  const submitted = await f.call(...args.slice(0, -1), artifact);
+  assert.equal(submitted.runId, start.runId);
+  assert.equal(submitted.stepId, stepId);
+  assert.equal(submitted.status, "done");
 });
 
 test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
