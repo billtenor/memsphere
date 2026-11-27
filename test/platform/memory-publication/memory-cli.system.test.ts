@@ -367,6 +367,18 @@ test("memory CLI lists and reads from a nested scope without exposing file paths
     assert.equal(filteredPage.items[0].summary, "A managed memory.");
     assert.equal(filteredPage.items[0].structured_defines, undefined);
 
+    const args = ["memory", "list", "--kind", "concepts", "--query", "记忆"];
+    const prompt = await runCli(nested, args);
+    const explicitText = await runCli(nested, [...args, "--output", "text"]);
+    assert.equal(prompt.code, 0, prompt.stderr);
+    assert.equal(explicitText.code, 0, explicitText.stderr);
+    assert.equal(explicitText.stdout, prompt.stdout);
+    assert.match(prompt.stdout, /^memory list\n/);
+    assert.match(prompt.stdout, /reference=concepts\/memory/);
+    assert.match(prompt.stdout, /names=\["memory","记忆"\]/);
+    assert.match(prompt.stdout, /summary="A managed memory\."/);
+    assert.doesNotMatch(prompt.stdout, /schemas\/record|random-95f2/);
+
     for (const reference of ["concepts/memory", "memory", "记忆"]) {
       const read = await runNativeCli(nested, ["memory", "read", reference]);
       assert.equal(read.code, 0, read.stderr);
