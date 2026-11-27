@@ -1,0 +1,9 @@
+{{#ifEq topic "project-repair"}}
+修复选中 Project 的 System Memory。Managed 使用已校验的 ChangeSet。Embedded 将校验后的差异应用于当前 Git worktree，保留已有未提交修改的目标。移除废弃条目需要匹配 manifest 中的 tombstone。按显式项目名称、全局 --project、当前 Primary Project 的顺序确定项目。
+{{/ifEq}}
+{{#ifEq topic "validate"}}
+校验当前 Project Store。使用 --memory-root 可校验独立 Memory 根目录。要在 Project 中捕获未发布的 Memory 修改，请执行 memsphere memory change validate [--change <id>]。
+{{/ifEq}}
+{{#ifEq topic "reviewer-protocol"}}
+当前 Session 缺少协议提示。请用 run review assignment show 查阅绑定的协议。Graph 支持固定 Artifact、External 和确认目标。Flow 支持按绑定的 Assignment 或 Step 读取。
+{{/ifEq}}

@@ -10,7 +10,7 @@ asserts:
   - app show <id> 提供组成、Memory 阅读或 Procedure Run 命令及 View 入口；app check <id> 显式检查依赖和工具，app enable <id> 检查后启用。View 组合变更须按命令提示重启 View。
   - App 安装自动登记自有 CLI 描述；外部程序由使用者按作者说明安装，不自动下载、安装或托管。独立工具使用 cli register <descriptor-file> 登记。
   - cli bind <id> --binding <binding-file> 的绑定属于当前 Project；指定 --app <app-id> 时只覆盖该 App 的调用上下文，不影响其他 App。配置文件中的 args 是独立参数数组，不是 shell 字符串。
-  - cli list 和 cli show 只读取登记及绑定，不执行程序。Agent 按 show 返回的 executable、args、cwd、env 和 envFrom 直接调用程序；envFrom 的值是宿主环境变量名，不是凭据内容，不能把凭据明文写入发行清单或绑定。
+  - cli list 和 cli show 提供可见的工具登记、状态与应用关系。Agent 从 App 公开 Memory 获取已安装入口及允许的操作。涉及私有绑定时，在已绑定的工作区使用工具专用入口。
   - cli check 只检查声明条件，并仅执行明确的 versionProbe；无版本协议时不得猜测 --version，不运行 help 或业务命令，不把未经验证的认证和网络状态视为已通过。
   - App 停用后 Memory 保留归属且可读，新建 Run 的根 Procedure 或调用闭包涉及停用 App 时拒绝；已冻结 Run 的内容、来源和业务数据保留，独立外部 CLI 不因此被禁用。
   - Managed 安装复用 ChangeSet 校验与发布；Embedded 只应用到当前 worktree，不自动提交 Git。Mounted 来源严格只读。未完成安装的保留路径不会作为普通 Memory 暴露，重试必须使用相同发行内容。

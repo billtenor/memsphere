@@ -33,28 +33,33 @@ const notification = (reviewId: string) => `[Memsphere 自动消息]\n请执行�
 test("daemon survives CLI exit, restores View intent, and isolates separate Homes", { timeout: 60000 }, async t => {
   const directory = await mkdtemp(join(tmpdir(), "mem-daemon-"));
   const homes = [join(directory, "deep-".repeat(16)), join(directory, "b")];
-  const call = (home: string, ...args: string[]) => exec(process.execPath, [cli, ...args], { env: { ...process.env, MEMSPHERE_HOME: home } });
+  const call = (home: string, ...args: string[]) => exec(process.execPath, [cli, ...args, "--output", "json"], { env: { ...process.env, MEMSPHERE_HOME: home } });
   t.after(async () => { for (const home of homes) await call(home, "daemon", "stop").catch(() => undefined); await rm(directory, { recursive: true, force: true }); });
   for (const home of homes) await mkdir(home);
   const results = await Promise.all(homes.map(home => call(home, "daemon", "start")));
   const first = JSON.parse(results[0].stdout), second = JSON.parse(results[1].stdout);
-  assert.notEqual(first.pid, second.pid);
+  assert.equal(first.running && second.running, true);
+  assert.equal(Object.hasOwn(first, "pid"), false);
   const firstState = JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8"));
+  const secondState = JSON.parse(await readFile(join(homes[1], ".runtime", "daemon.json"), "utf8"));
+  assert.notEqual(firstState.pid, secondState.pid);
   if (process.platform !== "win32") {
     assert.ok(Buffer.byteLength(firstState.endpoint) < 100);
     assert.equal((await stat(dirname(firstState.endpoint))).mode & 0o777, 0o700);
     assert.equal((await stat(firstState.endpoint)).mode & 0o777, 0o600);
   }
   const repeated = JSON.parse((await call(homes[0], "daemon", "start")).stdout);
-  assert.equal(repeated.instanceId, first.instanceId);
+  assert.equal(repeated.running, true);
+  assert.equal(JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8")).instanceId, firstState.instanceId);
   await writeFile(join(homes[0], ".runtime", "daemon-services.json"), JSON.stringify({ version: 1, view: { desiredState: "running", configPath: join(directory, "missing-config") } }));
   const restarted = JSON.parse((await call(homes[0], "daemon", "restart")).stdout);
-  assert.notEqual(restarted.instanceId, first.instanceId);
+  assert.notEqual(JSON.parse(await readFile(join(homes[0], ".runtime", "daemon.json"), "utf8")).instanceId, firstState.instanceId);
   if (process.platform !== "win32") await assert.rejects(stat(dirname(firstState.endpoint)), { code: "ENOENT" });
   assert.equal(restarted.view.desiredState, "running");
   assert.equal(restarted.view.running, false);
-  assert.ok(restarted.view.error);
-  assert.equal(JSON.parse((await call(homes[1], "daemon", "status")).stdout).instanceId, second.instanceId);
+  assert.equal(restarted.view.errorCode, "VIEW_UNAVAILABLE");
+  assert.equal(JSON.parse((await call(homes[1], "daemon", "status")).stdout).running, true);
+  assert.equal(JSON.parse(await readFile(join(homes[1], ".runtime", "daemon.json"), "utf8")).instanceId, secondState.instanceId);
 });
 
 async function writeTestCommand(command: string, source: string) {
@@ -97,7 +102,7 @@ async function observe<T>(t: TestContext, directory: string, read: () => Promise
   }
 }
 
-async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex", mode: "graph" | "exploration" = "graph") {
+async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" = "success", includeAgent = true, processBoundary = false, runnerType: "codex" | "claude" = "codex", mode: "graph" | "exploration" = "graph", language: "en" | "zh-CN" = "zh-CN") {
   // Installation and Embedded worktree discovery are not part of daemon
   // delivery. Reuse installed models in separate Managed filesystem Stores.
   const f = await initializedContextFixture(t);
@@ -204,7 +209,7 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
   const service = (await openContextControl(f.root))!;
   const { runId, reviewId, target, otherReviewId } = mode === "exploration"
     ? await explorationReviewTarget(service, config)
-    : await graphReviewTarget(service, config, includeAgent);
+    : await graphReviewTarget(service, config, includeAgent, language);
   const started = { runId };
   const stateId = `${runnerType}-origin-session`;
   await (await openCommandStates(true, f.home))!.create({}, stateId, {
@@ -250,14 +255,14 @@ async function reviewFixture(t: TestContext, queueMode: "success" | "all-fail" =
 type FixtureService = NonNullable<Awaited<ReturnType<typeof openContextControl>>>;
 type FixtureConfig = Awaited<ReturnType<typeof readProjectConfig>>;
 
-async function graphReviewTarget(service: FixtureService, config: FixtureConfig, includeAgent: boolean) {
+async function graphReviewTarget(service: FixtureService, config: FixtureConfig, includeAgent: boolean, language: "en" | "zh-CN") {
   const procedure: GraphProcedureMemory = {
     tag: "!procedure", syntax: "memsphere-20261027-stable", names: ["async-test"], defines: ["Async test"], mode: "graph",
     actions: [{ tag: "!action", id: "work", description: "Produce", dependencies: [{ tag: "!dependency", from: "START" }],
       artifact: { name: "Candidate", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" }, review: ["approval"] } }]
   };
   return service.withGraph(async graph => {
-    const initial = await graph.start({ name: "Async", language: "zh-CN", procedure, controlPlane: config.controlPlane,
+    const initial = await graph.start({ name: "Async", language, procedure, controlPlane: config.controlPlane,
       reviewConfiguration: { reviews: { "async-test#actions[work]": { policy: "artifact_acceptance.unanimous" } },
         slots: { "async-test::approval": { actorIds: includeAgent ? ["human", "agent"] : ["human"] } } } });
     const runId = initial.run.id, step = initial.steps[0].id;
@@ -330,7 +335,7 @@ test("Claude notification is completed on socket write and only the bound sessio
 }, async t => {
   const f = await claudeNotificationFixture(t);
   await f.startDaemon();
-  assert.match((await f.call("continue", "review", "wait")).stdout, /已登记异步等待/);
+  assert.match((await f.call("continue", "review", "wait")).stdout, /taskId[:：]/);
   await f.completeAgent();
   const { value: sent } = await f.waitForTask("completed");
   assert.ok(sent.claudeDelivery?.sentAt);
@@ -365,13 +370,13 @@ test("Claude notification is completed on socket write and only the bound sessio
     assert.deepEqual(await observableState(), before);
   };
   const fromOtherSession = (...commandArgs: string[]) => f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "other-session" }, ...commandArgs);
-  await rejectsWithoutSideEffects(/does not belong to the current session/,
+  await rejectsWithoutSideEffects(/PERMISSION_DENIED/,
     () => fromOtherSession(...args), () => fromOtherSession(...continueArgs));
-  await assert.rejects(f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...args), /does not belong to the current session/);
+  await assert.rejects(f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...args), /PERMISSION_DENIED/);
   await assert.rejects(f.call("run", "review", "wait", "--review", "different-review", "--callback", callback),
-    /does not belong to the current session/);
+    /PERMISSION_DENIED/);
   await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${sent.id}:00000000-0000-4000-8000-000000000000`),
-    /does not belong to the current session/);
+    /PERMISSION_DENIED/);
   for (const changed of [
     { ...original, parameters: { ...original.parameters, project: "other-project" } },
     { ...original, groupId: "other-run" },
@@ -379,20 +384,20 @@ test("Claude notification is completed on socket write and only the bound sessio
   ]) {
     const previous = await requireCommandState(stateId, f.home);
     await states.update({}, stateId, changed, { expectedRevision: previous.revision });
-    await rejectsWithoutSideEffects(/not bound|conflicts with CommandState|CommandState .*not found|does not refer to/,
+    await rejectsWithoutSideEffects(/SESSION_CONTEXT_CONFLICT|INVALID_ARGUMENT|NOT_FOUND/,
       () => f.call(...args), () => f.call(...continueArgs));
   }
   const changed = await requireCommandState(stateId, f.home);
   await states.delete({}, stateId, { expectedRevision: changed.revision });
-  await rejectsWithoutSideEffects(/No session context/, () => f.call(...args), () => f.call(...continueArgs));
+  await rejectsWithoutSideEffects(/NOT_FOUND/, () => f.call(...args), () => f.call(...continueArgs));
   await states.create({}, stateId, original);
 
   const delivered = (await readTask(sent.id, f.home))!;
   await updateTask(delivered, { input: { ...sent.input, roundId: "old-round" } }, f.home);
-  await rejectsWithoutSideEffects(/obsolete Review round/, () => f.call(...args), () => f.call(...continueArgs));
+  await rejectsWithoutSideEffects(/REVIEW_CONFLICT/, () => f.call(...args), () => f.call(...continueArgs));
   await updateTask((await readTask(sent.id, f.home))!, { input: sent.input }, f.home);
   await f.setAsync(false);
-  await rejectsWithoutSideEffects(/does not belong to the current session/, () => f.call(...args), () => f.call(...continueArgs));
+  await rejectsWithoutSideEffects(/PERMISSION_DENIED/, () => f.call(...args), () => f.call(...continueArgs));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { claude: { identity_enabled: false } } }));
   await rejectsWithoutSideEffects(/AGENT_SESSION_REQUIRED/, () => f.call(...args), () => f.call(...continueArgs));
   await f.setAsync(true);
@@ -406,17 +411,17 @@ test("Claude notification is completed on socket write and only the bound sessio
     try {
       const before = await observableState();
       const read = await f.call(...args);
-      assert.match(read.stdout, /产物评审信息/);
-      assert.match(read.stderr, /read-back could not be recorded/);
+      assert.match(read.stdout, /roundId[:：]/);
+      assert.match(read.stderr, /NOTIFICATION_READ_RECEIPT_FAILED/);
       assert.deepEqual(await observableState(), before);
     } finally {
       await chmod(lock, 0o600);
     }
   }
-  assert.match((await f.call(...continueArgs)).stdout, /产物评审信息/);
+  assert.match((await f.call(...continueArgs)).stdout, /roundId[:：]/);
   const firstRead = (await f.waitForTask("completed")).value.claudeDelivery?.readAt;
   assert.ok(firstRead);
-  assert.match((await f.call(...args)).stdout, /产物评审信息/);
+  assert.match((await f.call(...args)).stdout, /roundId[:：]/);
   assert.equal((await f.waitForTask("completed")).value.claudeDelivery?.readAt, firstRead);
 });
 
@@ -458,7 +463,7 @@ test("Claude exploration notifications return only the Review bound to the origi
   };
 
   await f.startDaemon();
-  assert.match((await f.call(...native)).stdout, /已登记异步等待/);
+  assert.match((await f.call(...native)).stdout, /taskId[:：]/);
   const registered = await f.waitForTask("running");
   assert.match((await f.call(...continuation)).stdout, new RegExp(registered.id));
   assert.deepEqual(registered.value.input, {
@@ -471,7 +476,7 @@ test("Claude exploration notifications return only the Review bound to the origi
   const earlyId = randomUUID();
   await updateTask(registered, { claudeDelivery: { id: earlyId } }, f.home);
   const early = `${registered.id}:${earlyId}`;
-  await failsWithoutChanges(/unfinished Review round/, () => callback(early, native), () => callback(early, continuation));
+  await failsWithoutChanges(/REVIEW_NOT_READY/, () => callback(early, native), () => callback(early, continuation));
   await updateTask((await readTask(registered.id, f.home))!, { claudeDelivery: undefined }, f.home);
 
   await f.completeAgent();
@@ -481,34 +486,38 @@ test("Claude exploration notifications return only the Review bound to the origi
   const ref = `${sent.id}:${sent.value.claudeDelivery.id}`;
   const expected = `${notification(f.reviewId)} --callback '${ref}'`;
   assert.deepEqual(await f.waitForMessages(1), [expected]);
-  await failsWithoutChanges(/Invalid Claude Code notification reference/,
+  await failsWithoutChanges(/INVALID_ARGUMENT/,
     () => callback("bogus", native), () => callback("bogus", continuation));
-  await failsWithoutChanges(/does not belong to the current session/,
+  await failsWithoutChanges(/PERMISSION_DENIED/,
     () => callback(early, native), () => callback(early, continuation),
     () => f.nativeCall({ ...f.env, CLAUDE_CODE_SESSION_ID: "different-session" }, ...native, "--callback", ref));
   await updateTask(sent, { input: { ...sent.value.input, roundId: "obsolete-round" } }, f.home);
-  await failsWithoutChanges(/obsolete or unfinished Review round/, () => callback(ref, native), () => callback(ref, continuation));
+  await failsWithoutChanges(/REVIEW_NOT_READY/, () => callback(ref, native), () => callback(ref, continuation));
   await updateTask((await readTask(sent.id, f.home))!, { input: sent.value.input }, f.home);
 
   assert.ok(f.otherReviewId);
   await bind(f.otherReviewId);
-  await failsWithoutChanges(/not bound|does not belong/, () => callback(ref, native), () => callback(ref, continuation));
+  await failsWithoutChanges(/SESSION_CONTEXT_CONFLICT|PERMISSION_DENIED/, () => callback(ref, native), () => callback(ref, continuation));
   await bind();
-  await failsWithoutChanges(/not bound|requires a graph Step Review/, () => callback(ref, native), () => callback(ref, continuation));
+  await failsWithoutChanges(/SESSION_CONTEXT_CONFLICT|INVALID_ARGUMENT/, () => callback(ref, native), () => callback(ref, continuation));
   await bind(f.reviewId);
 
   const beforeRead = await context();
   const stdout = (await callback(ref, native)).stdout;
   assert.ok(stdout.includes(f.reviewId));
   assert.ok(stdout.includes(sent.value.input.roundId));
-  assert.match(stdout, /自由探索评审|Exploration Review/);
+  assert.match(stdout, /scope[:：] ?opinion/);
   const read = (await readTask(sent.id, f.home))!;
   assert.ok(read.value.claudeDelivery?.readAt);
   assert.deepEqual(read.value, {
     ...sent.value, updatedAt: read.value.updatedAt,
     claudeDelivery: { ...sent.value.claudeDelivery, readAt: read.value.claudeDelivery.readAt }
   });
-  assert.equal((await callback(ref, continuation)).stdout, stdout);
+  const nativeReceipt = JSON.parse((await callback(ref, [...native, "--output", "json"])).stdout);
+  const continuedReceipt = JSON.parse((await callback(ref, [...continuation, "--output", "json"])).stdout);
+  assert.deepEqual(continuedReceipt, nativeReceipt);
+  assert.equal(nativeReceipt.roundId, sent.value.input.roundId);
+  assert.doesNotMatch(JSON.stringify(nativeReceipt), /--callback|claudeDelivery|inbox/);
   assert.deepEqual(await context(), beforeRead);
   assert.deepEqual(await listTasks(f.home), [read]);
   assert.deepEqual(f.messages, [expected]);
@@ -537,8 +546,8 @@ test("Claude notification restart distinguishes interrupted attempts and never r
   const earlyId = randomUUID();
   await updateTask((await readTask(registered.id, f.home))!, { claudeDelivery: { id: earlyId } }, f.home);
   const early = (await readTask(registered.id, f.home))!;
-  await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${registered.id}:${earlyId}`), /unfinished Review round/);
-  await assert.rejects(f.call("continue", "review", "wait", "--callback", `${registered.id}:${earlyId}`), /unfinished Review round/);
+  await assert.rejects(f.call("run", "review", "wait", "--review", f.reviewId, "--callback", `${registered.id}:${earlyId}`), /REVIEW_NOT_READY/);
+  await assert.rejects(f.call("continue", "review", "wait", "--callback", `${registered.id}:${earlyId}`), /REVIEW_NOT_READY/);
   assert.deepEqual(await readTask(registered.id, f.home), early);
   await updateTask(early, { claudeDelivery: undefined }, f.home);
   await f.interruptDaemon();
@@ -590,9 +599,9 @@ test("Claude notification restart distinguishes interrupted attempts and never r
   const nextDelivery = succeeded.claudeDelivery!.id;
   assert.notEqual(nextDelivery, interruptedDelivery);
   const wait = (deliveryId: string) => f.call("continue", "review", "wait", "--callback", `${registered.id}:${deliveryId}`);
-  await assert.rejects(wait(interruptedDelivery), /does not belong to the current session/);
+  await assert.rejects(wait(interruptedDelivery), /PERMISSION_DENIED/);
   assert.deepEqual((await readTask(registered.id, f.home))!.value, succeeded);
-  assert.match((await wait(nextDelivery)).stdout, /产物评审信息/);
+  assert.match((await wait(nextDelivery)).stdout, /roundId[:：]/);
   await f.waitForMessages(2);
   await f.stopDaemon();
   await f.startDaemon();
@@ -661,12 +670,12 @@ syncBuiltinESMExports();
   try {
     const result = await f.call("run", "review", "wait", "--review", f.reviewId, "--callback", callback);
     assert.ok(result.stdout.includes(f.reviewId));
-    assert.match(result.stdout, /通过/);
+    assert.match(result.stdout, /roundStatus[:：]/);
     const early = (await readTask(registered.id, f.home))!;
     assert.equal(early.value.status, "running");
     assert.equal(early.value.claudeDelivery?.sentAt, undefined);
     assert.ok(early.value.claudeDelivery?.readAt);
-    assert.match((await f.call("continue", "review", "wait", "--callback", callback)).stdout, /产物评审信息/);
+    assert.match((await f.call("continue", "review", "wait", "--callback", callback)).stdout, /roundId[:：]/);
     assert.deepEqual(await readTask(registered.id, f.home), early);
     assert.deepEqual(await f.reviewState(), contextBefore);
     assert.deepEqual(await requireCommandState("claude-origin-session", f.home), stateBefore);
@@ -682,19 +691,46 @@ syncBuiltinESMExports();
   }
 });
 
+test("a delayed notification reads its original candidate while Continue follows the new round", async t => {
+  const f = await reviewFixture(t, "success", false, true);
+  const first = await f.reviewState();
+  await f.voteHuman("request_changes", false);
+  await f.service.withGraph(g => g.report(first.run.id, first.review.stepId, {
+    text: "second candidate", revisionSummary: "Review the revised version"
+  }));
+  const second = await f.reviewState();
+  assert.notEqual(second.round.id, first.round.id);
+  const binding = await requireCommandState("codex-origin-session", f.home);
+  const notice = ["run", "review", "wait", "--review", f.reviewId, "--notification-round", first.round.id];
+  const original = JSON.parse((await f.call(...notice, "--output", "json")).stdout);
+  assert.equal(original.roundId, first.round.id);
+  assert.equal(original.candidateId, first.round.submissionId);
+  assert.equal(original.roundStatus, "changes_requested");
+  assert.deepEqual(original.nextAction, original.details);
+  assert.deepEqual(original.details.args.slice(-3), ["--round", first.round.id, "--all"]);
+  assert.ok((await f.call(...notice)).stdout.includes(first.round.id));
+  assert.equal(JSON.parse((await f.call(...original.details.args.slice(2), "--output", "json")).stdout).roundId, first.round.id);
+  await assert.rejects(f.call("continue", "review", "wait", "--notification-round", first.round.id, "--output", "json"), /INVALID_ARGUMENT/);
+  assert.deepEqual(await f.reviewState(), second);
+  assert.deepEqual(await requireCommandState("codex-origin-session", f.home), binding);
+  const current = JSON.parse((await f.call("continue", "review", "wait", "--output", "json")).stdout);
+  assert.equal(current.roundId, second.round.id);
+  assert.equal(current.candidateId, second.round.submissionId);
+});
+
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
-  const f = await reviewFixture(t, "success", true, true);
+  const f = await reviewFixture(t, "success", true, true, "codex", "graph", "en");
   const { call, queue } = f;
   await f.startDaemon();
   const wait = await call("continue", "review", "wait");
-  assert.match(wait.stdout, /已登记异步等待/);
+  assert.match(wait.stdout, /taskId[:：]/);
   await f.completeAgent();
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
   await f.waitForTask("completed");
   const sent: string[] = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(sent[0], "queue"); assert.equal(sent[2], "origin-session");
   assert.equal((await f.reviewState()).round.assignments.find(a => a.actorId === "human")!.status, "draft");
-  assert.equal(sent[4], notification(f.reviewId));
+  assert.equal(sent[4], `[Memsphere automated message]\nRun this command to continue:\nmemsphere --project 'test-project' run review wait --review '${f.reviewId}' --notification-round '${(await f.reviewState()).round.id}'`);
   assert.doesNotMatch(sent[4], /approve|投票|状态|Reviewer/);
   const ready = await call("continue", "review", "wait");
   assert.ok(ready.stdout.includes(f.reviewId));
@@ -713,11 +749,11 @@ test("explicit retry delivers the same continuation to the original session", { 
   await updateTask(task, { status: "failed", error: { stage: "send", code: "fixture", message: "Explicit retry fixture" } }, f.home);
   await rm(queue);
   const retry = await call("run", "review", "wait", "retry", "--review", task.value.input.reviewId, "--round", task.value.input.roundId);
-  assert.match(retry.stdout, /registered for retry/);
+  assert.match(retry.stdout, /mayRepeatNotification[:：] ?true/);
   await f.waitForTask("completed");
   const retriedMessage = JSON.parse(await readFile(queue, "utf8"));
   assert.equal(retriedMessage[2], "origin-session");
-  assert.equal(retriedMessage[4], notification(f.reviewId));
+  assert.equal(retriedMessage[4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
 });
 
 test("Continue refuses missing, ambiguous, disabled and invalid session identities without creating state", { timeout: 30000 }, async t => {
@@ -754,18 +790,23 @@ test("View desired running/stopped survives daemon restarts while View remains i
   const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "", TRAECLI_THREAD_ID: "" };
   const call = (...args: string[]) => exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.cwd, env });
   f.beforeCleanup(async () => { await call("daemon", "stop"); });
-  const start = await call("view", "start");
-  const origin = /http:\/\/[^\s]+/.exec(start.stdout)![0];
+  const start = await call("view", "start", "--output", "json");
+  const { url: origin } = JSON.parse(start.stdout).view;
   assert.equal((await fetch(origin)).status, 200);
-  const first = JSON.parse((await call("daemon", "status")).stdout);
+  const view = JSON.parse((await call("view", "status", "--output", "json")).stdout);
+  assert.equal(view.view.url, origin);
+  const refreshed = JSON.parse((await call("view", "restart", "--output", "json")).stdout);
+  assert.equal(refreshed.view.running, true);
+  assert.equal((await fetch(refreshed.view.url)).status, 200);
+  const first = JSON.parse((await call("daemon", "status", "--output", "json")).stdout);
   assert.equal(first.view.desiredState, "running"); assert.equal(first.view.running, true);
-  const restarted = JSON.parse((await call("daemon", "restart")).stdout);
+  const restarted = JSON.parse((await call("daemon", "restart", "--output", "json")).stdout);
   assert.equal(restarted.view.desiredState, "running"); assert.equal(restarted.view.running, true);
-  assert.notEqual(restarted.instanceId, first.instanceId);
+  assert.equal(Object.hasOwn(restarted, "instanceId"), false);
   await call("view", "stop");
-  const stopped = JSON.parse((await call("daemon", "status")).stdout);
+  const stopped = JSON.parse((await call("daemon", "status", "--output", "json")).stdout);
   assert.equal(stopped.running, true); assert.equal(stopped.view.running, false);
-  const again = JSON.parse((await call("daemon", "restart")).stdout);
+  const again = JSON.parse((await call("daemon", "restart", "--output", "json")).stdout);
   assert.equal(again.view.desiredState, "stopped"); assert.equal(again.view.running, false);
 });
 
@@ -799,7 +840,12 @@ test("a Runner without artifact.read cannot reach asynchronous review registrati
   await writeFile(procedure, `!procedure\nsyntax: memsphere-20261027-stable\nnames: [denied-test]\ndefines: [Read permission test]\nmode: graph\nactions:\n  - !action\n    id: work\n    description: Produce\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Candidate\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}\n      review: [approval]\n`);
   const bindings = join(f.directory, "bindings.json");
   await writeFile(bindings, JSON.stringify({ reviews: { "denied-test#actions[work]": { policy: "artifact_acceptance.unanimous" } }, slots: { "denied-test::approval": { actors: ["human"] } } }));
-  await assert.rejects(call("run", "start", "--file", procedure, "--name", "Denied", "--review-config", bindings, "--output", "json"), /artifact.read/);
+  await assert.rejects(call("run", "start", "--file", procedure, "--name", "Denied", "--review-config", bindings, "--output", "json"), (error: unknown) => {
+    const { stdout, stderr } = error as { stdout: string; stderr: string };
+    assert.equal(stdout, "");
+    assert.deepEqual(JSON.parse(stderr), { error: { code: "PERMISSION_DENIED" } });
+    return true;
+  });
   const { listTasks } = await import("../../../src/daemon/tasks.js");
   const { daemonStatus } = await import("../../../src/daemon/service.js");
   assert.deepEqual(await listTasks(f.home), []);
@@ -818,7 +864,7 @@ test("daemon notification for a requested revision contains only the continuatio
   const sent = JSON.parse(await readFile(f.queue, "utf8"));
   const sync = await f.call("run", "review", "wait", "--review", f.reviewId);
   assert.equal(sent[2], "origin-session");
-  assert.equal(sent[4], notification(f.reviewId));
+  assert.equal(sent[4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
   assert.ok(sync.stdout.includes(f.reviewId));
 });
 
@@ -832,7 +878,7 @@ test("failed wakeup remains queryable without sending a second notification", { 
   const attempts: string[][] = (await readFile(f.queueLog, "utf8")).trim().split("\n").map(line => JSON.parse(line));
   assert.equal(attempts.length, 1);
   assert.equal(attempts[0][2], "origin-session");
-  assert.equal(attempts[0][4], notification(f.reviewId));
+  assert.equal(attempts[0][4], notification(f.reviewId) + ` --notification-round '${(await f.reviewState()).round.id}'`);
   const ready = await f.call("run", "review", "wait", "--review", f.reviewId);
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.doesNotMatch(ready.stdout, /已登记/);
@@ -899,7 +945,7 @@ test("daemon control refuses unauthorized stop requests without changing its ins
   const { stopDaemon, daemonStatus } = await import("../../../src/daemon/service.js");
   f.beforeCleanup(async () => { await stopDaemon(f.home); });
   // Launch through the real entrypoint: ensureDaemon captures its caller's CLI.
-  const started = JSON.parse((await exec(process.execPath, [cli, "daemon", "start"],
+  const started = JSON.parse((await exec(process.execPath, [cli, "daemon", "start", "--output", "json"],
     { env: { ...process.env, MEMSPHERE_HOME: f.home } })).stdout);
   const state = JSON.parse(await readFile(join(f.home, ".runtime", "daemon.json"), "utf8"));
   const { createConnection } = await import("node:net");
@@ -920,7 +966,8 @@ test("daemon control refuses unauthorized stop requests without changing its ins
     });
     assert.match(response.error!, /protocol\/authentication mismatch/);
     const after = await daemonStatus(f.home);
-    assert.equal(after.running, true); assert.equal(after.instanceId, started.instanceId);
+    assert.equal(after.running, true); assert.equal(after.instanceId, state.instanceId);
+    assert.equal(Object.hasOwn(started, "instanceId"), false);
   }
 });
 
@@ -942,13 +989,13 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   await f.startDaemon();
   const first = await f.call("continue", "review", "wait");
   const repeated = await f.call("continue", "review", "wait");
-  assert.equal(/task-[a-f0-9-]+/.exec(first.stdout)![0], /task-[a-f0-9-]+/.exec(repeated.stdout)![0]);
+  assert.equal(/task-[a-zA-Z0-9-]+/.exec(first.stdout)![0], /task-[a-zA-Z0-9-]+/.exec(repeated.stdout)![0]);
   await f.stopDaemon();
   const previous = (await listTasks(f.home))[0];
   await updateTask(previous, { status: "completed", daemonInstanceId: undefined }, f.home);
   await f.startDaemon();
   const outputs = await Promise.all([f.call("continue", "review", "wait"), f.call("continue", "review", "wait")]);
-  const ids = outputs.map(r => /task-[a-f0-9-]+/.exec(r.stdout)![0]);
+  const ids = outputs.map(r => /task-[a-zA-Z0-9-]+/.exec(r.stdout)![0]);
   assert.equal(ids[0], ids[1]);
   assert.notEqual(ids[0], previous.id);
   const rows = await listTasks(f.home);
@@ -961,9 +1008,10 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   assert.doesNotMatch(ready.stdout, /已登记/);
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.equal((await listTasks(f.home)).length, 2);
-  const status = JSON.parse((await f.call("run", "review", "wait", "status", "--review", f.reviewId)).stdout);
-  assert.equal(status.length, 2);
-  assert.ok(status.every((task: { status: string }) => task.status === "completed"));
+  const status = JSON.parse((await f.call("run", "review", "wait", "status", "--review", f.reviewId, "--output", "json")).stdout);
+  assert.equal(status.total, 2);
+  assert.equal(status.items.length, 2);
+  assert.ok(status.items.every((task: { status: string }) => task.status === "completed"));
 });
 
 
@@ -1013,3 +1061,42 @@ test("daemon suspends a delivered notification after terminal CAS conflict until
  assert.equal(recovered.value.status,"failed");assert.equal(recovered.value.error?.code,"execution_interrupted");
  assert.equal((await readFile(f.queueLog,"utf8")).trim().split("\n").length,1,"restart exposes uncertain outcome without automatic redelivery");
 });
+
+for (const language of ["en", "zh-CN"] as const) for (const json of [false, true]) {
+  test(`daemon, View and review wait deliver the registered ${language} ${json ? "JSON" : "default text"} receipts`, { timeout: 90000 }, async t => {
+    const f = await reviewFixture(t, "success", true, true, "codex", "graph", language);
+    const settings = join(f.home, "config.json");
+    await writeFile(settings, JSON.stringify({ ...JSON.parse(await readFile(settings, "utf8")), language }));
+    const call = async (args: string[], fact: string, expected?: unknown) => {
+      const { stdout, stderr } = await f.call(...args, ...(json ? ["--output", "json"] : []));
+      assert.equal(stderr, "");
+      if (json) {
+        const fields = JSON.parse(stdout);
+        assert.ok(Object.hasOwn(fields, fact), stdout);
+        if (expected !== undefined) assert.equal(fields[fact], expected);
+      } else {
+        assert.ok(stdout.includes(fact + (language === "en" ? ": " : "：")), stdout);
+        if (expected !== undefined) assert.ok(stdout.includes(String(expected)), stdout);
+      }
+    };
+    const stop = (await import("../../../src/daemon/service.js")).stopDaemon;
+    f.beforeCleanup(() => stop(f.home).then(() => undefined));
+    await call(["daemon", "start"], "running", true);
+    await call(["daemon", "restart"], "running", true);
+    await call(["daemon", "status"], "running", true);
+    for (const verb of ["start", "status", "restart", "stop"]) await call(["view", verb], "view");
+    const round = (await f.reviewState()).round.id;
+    const native = ["run", "review", "wait", "--review", f.reviewId];
+    await call(native, "taskId");
+    await call(["continue", "review", "wait"], "taskId");
+    await f.completeAgent();
+    const task = await f.waitForTask("completed");
+    await call(["continue", "review", "wait"], "roundId", round);
+    const { updateTask } = await import("../../../src/daemon/tasks.js");
+    await updateTask(task, { status: "failed", error: { stage: "send", code: "fixture", message: "Fixture retry" } }, f.home);
+    await call(["run", "review", "wait", "retry", "--review", f.reviewId, "--round", round], "taskId", task.id);
+    await f.waitForTask("completed");
+    assert.equal((await f.reviewState()).round.id, round);
+    await call(["daemon", "stop"], "running", false);
+  });
+}

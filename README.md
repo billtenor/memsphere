@@ -420,7 +420,7 @@ memsphere data store list --kind value --limit 20 --output json
 memsphere memory list --kind procedures --limit 20 --output json
 ```
 
-新增 model/data（含 data store）命令默认 `--output text`，成功时使用 YAML 的键值、缩进和列表格式展示完整结果，保留嵌套数据及分页的 nextCursor，不是缩进 JSON。`--output json` 面向程序读取，成功的 stdout 只有一个 JSON 值；所有 list 也支持此 JSON 协议。失败时 stdout 为空，text 在 stderr 显示错误说明，json 的 stderr 只有 `{ "error": { "code": "...", "message": "...", "details": ... } }`，退出码 1。details 按需要返回；参数解析失败也遵循所选格式。原始导出正文、帮助与版本保持各自的输出规则。完整参数以各命令 `--help` 为准。
+普通命令默认用文本 Prompt 显示公开事实和下一步动作。`--output json` 从 stdout 返回同样的事实和动作，以单一 JSON 值供 jq 或程序读取。执行失败时以非零状态退出，JSON 错误从 stderr 返回，包含稳定的 `error.code` 和经该错误码批准的可选字段。原始导出、固定材料、帮助及版本按各自协议输出。
 
 ## 7. Memsphere 仍在进化
 
@@ -518,7 +518,7 @@ memsphere continue review vote --vote approve
 memsphere run finish --run R
 ```
 
-Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex、Traex 或 Claude Code 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知仅包含 `[Memsphere 自动消息]`、“请执行命令以继续：”和显式定位 Project/Review 的 wait 命令，结果由再次执行命令获取。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
+Continue 使用当前 Agent 会话：先在“设置 → Runner Agent”探测 Codex、Traex 或 Claude Code 并开启身份。会话无法识别时使用原生 `run` 命令。`review wait` 已就绪时直接返回；仍需等待时按配置选择异步登记或同步等待，无需 `--sync`。异步通知按 Run 的冻结语言显示来源标记和执行提示，第三行是定位到投递轮次的原生 wait 命令。执行通知命令可读回当时的结果，随后输入 `continue review wait` 会继续当前会话的评审。重复调用复用活动任务，历史终态不阻止新的必要等待。用 `run review wait status --review R` 查询任务，投递失败后用 `run review wait retry --review R --round ROUND` 显式重试。
 
 Claude Code Reviewer 通过另行安装和认证的 `@agentclientprotocol/claude-agent-acp@0.109.1` 接入。参与者配置的模型在 ACP 会话中生效。
 

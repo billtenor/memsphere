@@ -4,6 +4,7 @@ import { createConnection } from "node:net";
 import { basename, isAbsolute, resolve } from "node:path";
 import { promisify } from "node:util";
 import { z } from "zod";
+import { failure } from "../context_control/errors.js";
 import { safeDetectionEnvironment } from "../acp/detection.js";
 
 export const claudeNotificationVersion = "2.1.330";
@@ -84,16 +85,16 @@ async function socketIdentity(path: string, pid: number) {
 
 export async function captureClaudeInbox(input: { command: string; version?: string; cwd: string; sessionId: string }, env = process.env): Promise<ClaudeInbox> {
   if (!supportsClaudeNotifications(input.version)) {
-    throw new Error(`Claude Code asynchronous reviews require verified Linux CLI ${claudeNotificationVersion}; disable asynchronous execution to wait synchronously`);
+    throw failure("UNSUPPORTED_CAPABILITY", `Claude Code asynchronous reviews require verified Linux CLI ${claudeNotificationVersion}; disable asynchronous execution to wait synchronously`);
   }
   const path = env.CLAUDE_CODE_MESSAGING_SOCKET;
-  if (!path) throw new Error("The current Claude Code session has no inbox; disable asynchronous execution to wait synchronously");
+  if (!path) throw failure("UNSUPPORTED_CAPABILITY", "The current Claude Code session has no inbox; disable asynchronous execution to wait synchronously");
   const configDir = env.CLAUDE_CONFIG_DIR ? resolve(input.cwd, env.CLAUDE_CONFIG_DIR) : undefined;
   try {
     const { pid, startedAt } = selectSession(await readRoster(input.command, input.cwd, configDir), input.sessionId);
     return { path, pid, startedAt, ...await socketIdentity(path, pid), ...(configDir ? { configDir } : {}) };
   } catch (error) {
-    throw new Error(`Could not verify the current Claude Code inbox (${failureReason(error)}); disable asynchronous execution to wait synchronously`);
+    throw failure("UNSUPPORTED_CAPABILITY", `Could not verify the current Claude Code inbox (${failureReason(error)}); disable asynchronous execution to wait synchronously`);
   }
 }
 

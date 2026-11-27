@@ -1,0 +1,9 @@
+{{#ifEq topic "project-repair"}}
+Repairs bundled System Memory in the selected Project. Managed repair uses a validated ChangeSet. Embedded repair applies the validated changes to the current Git worktree and preserves dirty targets. Deprecated entries require a matching tombstone. Project selection uses the explicit name, global --project, then the current Primary Project.
+{{/ifEq}}
+{{#ifEq topic "validate"}}
+Validate the current Project Store or use --memory-root for stateless validation. To capture unpublished Memory changes in a Project, use memsphere memory change validate [--change <id>].
+{{/ifEq}}
+{{#ifEq topic "reviewer-protocol"}}
+The Session protocol hint is unavailable. Use run review assignment show to inspect the bound protocol. Graph supports fixed Artifact, External, and confirmation targets. Flow supports pinned assignment and Step reads.
+{{/ifEq}}

@@ -26,6 +26,14 @@ test("Reviewer ChangeSet default options", async t => {
 
 test("Reviewer ChangeSet material receipts", async t => {
   const f = await changeShowFixture(t);
+  await t.test("the Runner and the assigned Reviewer independently retrieve the same four checkpoint materials", async () => {
+    for (const part of ["summary", "validation", "memory", "diff"]) {
+      const args = ["--part", part, ...(part === "memory" ? ["--reference", "concepts/review-evidence"] : [])];
+      const material = await f.readMaterial(args, "runner");
+      assert.equal(material.checkpointDigest, f.checkpoint.checkpointDigest);
+      assert.deepEqual(material, f.read(args));
+    }
+  });
   await t.test("body reads preserve both sides of create, update, delete and rename", async () => {
     const body = async (reference: string, side = "after") => (await f.readMaterial(["--part", "memory", "--reference", reference, "--side", side])).content;
     assert.match(await body("concepts/review-evidence"), /Pinned content/);
@@ -62,23 +70,23 @@ test("Reviewer ChangeSet read boundary", async t => {
     assert.doesNotMatch(JSON.stringify(await f.snapshot()), /candidateRoot|source_worktree|memoryRoot/);
   });
   await t.test("body reads require an explicit reference", () => {
-    assertChangeShowRejected(f.invoke(["--part", "memory"]), 1, /requires --reference/);
+    assertChangeShowRejected(f.invoke(["--part", "memory"]), 1, /INVALID_ARGUMENT/);
   });
   await t.test("pinned reads require an explicit checkpoint", () => {
-    assertChangeShowRejected(f.command(["memory", "change", "show", f.edit.change.id]), 1, /required option.*--checkpoint/);
+    assertChangeShowRejected(f.command(["memory", "change", "show", f.edit.change.id]), 1, /INVALID_ARGUMENT/);
   });
   await t.test("unknown references do not resolve outside the change", () => {
-    assertChangeShowRejected(f.invoke(["--reference", "../../config.json"]), 1, /reference not found or ambiguous/);
+    assertChangeShowRejected(f.invoke(["--reference", "../../config.json"]), 1, /NOT_FOUND/);
   });
   for (const extra of [["--project", "other"], ["--project=other"], ["--project", "project", "--project=other"]]) {
     await t.test(`cross-Project selector is denied: ${extra.join(" ")}`, () => {
-      assertChangeShowRejected(f.invoke(extra), 1, /project conflicts with this Agent Review Session/);
+      assertChangeShowRejected(f.invoke(extra), 1, /REVIEW_IDENTITY_CONFLICT/);
     });
   }
   for (const operation of ["validate", "claim", "resume", "complete", "finish"]) {
     await t.test(`Reviewer cannot mutate a ChangeSet using ${operation}`, () => {
       const result = f.command(["memory", "change", operation, ...(operation === "validate" ? ["--change"] : []), f.edit.change.id]);
-      assertChangeShowRejected(result, 1, /command is not allowed in this Agent Review Session/);
+      assertChangeShowRejected(result, 1, /REVIEW_SESSION_DENIED/);
     });
   }
 });

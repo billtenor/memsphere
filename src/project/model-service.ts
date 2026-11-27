@@ -18,7 +18,7 @@ import { withSharedStoreLock } from "./shared-store-lock.js";
 import { modelDefinitionStore } from "./system-model-store.js";
 import { JSON_SCHEMA_DRAFT_07 } from "../data/extensions/index.js";
 import { atomicWriteJson } from "../persistence.js";
-import { paginateItems, compareStrings, type PaginationOptions } from "../pagination.js";
+import { paginateItems, compareStrings, type PaginationOptions, type PaginationBudget } from "../pagination.js";
 
 export type ModelManagementFields = Pick<ModelRegistration, "name" | "description" | "package" | "package_name" | "tags">;
 export type ModelChanges = { source?: string; fields?: ModelManagementFields; unset?: string[]; dryRun?: boolean };
@@ -37,10 +37,11 @@ async function hostFor(context: Context, root: string) {
   const host = await createProjectModelHost(context, { root, ...project });
   return { stamp, project, host };
 }
-export function listModels(context: Context, root: string, filters: ModelFilters = {}, options: PaginationOptions = {}) {
-  return withConsistentModelRead(() => listModelsOnce(context, root, filters, options));
+type ModelListItem = Awaited<ReturnType<Awaited<ReturnType<typeof hostFor>>["host"]["list"]>>[number];
+export function listModels(context: Context, root: string, filters: ModelFilters = {}, options: PaginationOptions = {}, budget?: PaginationBudget<ModelListItem>) {
+  return withConsistentModelRead(() => listModelsOnce(context, root, filters, options, budget));
 }
-async function listModelsOnce(context: Context, root: string, filters: ModelFilters, options: PaginationOptions) {
+async function listModelsOnce(context: Context, root: string, filters: ModelFilters, options: PaginationOptions, budget?: PaginationBudget<ModelListItem>) {
   if (filters.package && filters.unpackaged) throw serviceError("INVALID_ARGUMENT", "package and unpackaged are mutually exclusive");
   const { stamp, host } = await hostFor(context, root);
   const items = (await host.list()).filter(item => {
@@ -54,7 +55,7 @@ async function listModelsOnce(context: Context, root: string, filters: ModelFilt
   return paginateItems(items, options, { command: "model.list", scope: { root }, filters: {
     origin: filters.origin, package: filters.package, unpackaged: filters.unpackaged, query: filters.query, status: filters.status,
     tag: filters.tag ? [...filters.tag].sort(compareStrings) : undefined
-  } });
+  } }, budget);
 }
 export function readModel(context: Context, root: string, ref: string, part: "all" | "registration" | "definition" = "definition") {
   return withConsistentModelRead(() => readModelOnce(context, root, ref, part));

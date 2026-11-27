@@ -1,0 +1,3030 @@
+{
+  "cases": {
+    "cli-daemon-start-1": [
+      "native",
+      "daemon start",
+      "cli-daemon-start-1"
+    ],
+    "cli-daemon-status-1": [
+      "native",
+      "daemon status",
+      "cli-daemon-start-1"
+    ],
+    "cli-daemon-stop-1": [
+      "native",
+      "daemon stop",
+      "cli-daemon-start-1"
+    ],
+    "cli-daemon-restart-1": [
+      "native",
+      "daemon restart",
+      "cli-daemon-start-1"
+    ],
+    "cli-daemon-serve-1": [
+      "native",
+      "daemon serve",
+      "cli-daemon-serve-1"
+    ],
+    "cli-runner-detect-1": [
+      "native",
+      "runner detect",
+      "cli-runner-detect-1"
+    ],
+    "cli-runner-identity-1": [
+      "native",
+      "runner identity",
+      "cli-runner-identity-1"
+    ],
+    "cli-runner-identity-2": [
+      "native",
+      "runner identity",
+      "cli-runner-identity-2"
+    ],
+    "cli-model-list-1": [
+      "native",
+      "model list",
+      "cli-model-list-1"
+    ],
+    "cli-model-read-1": [
+      "native",
+      "model read",
+      "cli-model-read-1"
+    ],
+    "cli-model-read-2": [
+      "native",
+      "model read",
+      "cli-model-read-2"
+    ],
+    "cli-model-read-3": [
+      "native",
+      "model read",
+      "cli-model-read-3"
+    ],
+    "cli-model-create-1": [
+      "native",
+      "model create",
+      "cli-model-create-1"
+    ],
+    "cli-model-create-2": [
+      "native",
+      "model create",
+      "cli-model-create-2"
+    ],
+    "cli-model-update-1": [
+      "native",
+      "model update",
+      "cli-model-create-1"
+    ],
+    "cli-model-update-2": [
+      "native",
+      "model update",
+      "cli-model-create-2"
+    ],
+    "cli-model-delete-1": [
+      "native",
+      "model delete",
+      "cli-model-delete-1"
+    ],
+    "cli-model-delete-2": [
+      "native",
+      "model delete",
+      "cli-model-delete-2"
+    ],
+    "cli-model-validate-1": [
+      "native",
+      "model validate",
+      "cli-model-validate-1"
+    ],
+    "cli-model-validate-2": [
+      "native",
+      "model validate",
+      "cli-model-validate-2"
+    ],
+    "cli-data-store-list-1": [
+      "native",
+      "data store list",
+      "cli-data-store-list-1"
+    ],
+    "cli-data-store-read-1": [
+      "native",
+      "data store read",
+      "cli-data-store-read-1"
+    ],
+    "cli-data-store-create-1": [
+      "native",
+      "data store create",
+      "cli-data-store-create-1"
+    ],
+    "cli-data-store-create-2": [
+      "native",
+      "data store create",
+      "cli-data-store-create-2"
+    ],
+    "cli-data-store-remove-1": [
+      "native",
+      "data store remove",
+      "cli-data-store-remove-1"
+    ],
+    "cli-data-store-remove-2": [
+      "native",
+      "data store remove",
+      "cli-data-store-remove-2"
+    ],
+    "cli-data-list-1": [
+      "native",
+      "data list",
+      "cli-data-list-1"
+    ],
+    "cli-data-read-1": [
+      "native",
+      "data read",
+      "cli-data-read-1"
+    ],
+    "cli-data-read-2": [
+      "native",
+      "data read",
+      "cli-data-read-1"
+    ],
+    "cli-data-read-3": [
+      "native",
+      "data read",
+      "cli-data-read-3"
+    ],
+    "cli-data-read-4": [
+      "native",
+      "data read",
+      "cli-data-read-4"
+    ],
+    "cli-data-has-1": [
+      "native",
+      "data has",
+      "cli-data-has-1"
+    ],
+    "cli-data-create-1": [
+      "native",
+      "data create",
+      "cli-data-create-1"
+    ],
+    "cli-data-create-2": [
+      "native",
+      "data create",
+      "cli-data-create-2"
+    ],
+    "cli-data-update-1": [
+      "native",
+      "data update",
+      "cli-data-update-1"
+    ],
+    "cli-data-update-2": [
+      "native",
+      "data update",
+      "cli-data-update-2"
+    ],
+    "cli-data-upsert-1": [
+      "native",
+      "data upsert",
+      "cli-data-create-1"
+    ],
+    "cli-data-upsert-2": [
+      "native",
+      "data upsert",
+      "cli-data-create-2"
+    ],
+    "cli-data-delete-1": [
+      "native",
+      "data delete",
+      "cli-data-delete-1"
+    ],
+    "cli-data-delete-2": [
+      "native",
+      "data delete",
+      "cli-data-delete-2"
+    ],
+    "cli-data-edit-1": [
+      "native",
+      "data edit",
+      "cli-data-update-1"
+    ],
+    "cli-data-edit-2": [
+      "native",
+      "data edit",
+      "cli-data-update-2"
+    ],
+    "cli-data-export-1": [
+      "native",
+      "data export",
+      "cli-data-export-1"
+    ],
+    "cli-data-export-2": [
+      "native",
+      "data export",
+      "cli-daemon-serve-1"
+    ],
+    "cli-data-validate-1": [
+      "native",
+      "data validate",
+      "cli-data-validate-1"
+    ],
+    "cli-data-validate-2": [
+      "native",
+      "data validate",
+      "cli-data-validate-2"
+    ],
+    "cli-debug-thread-id-1": [
+      "native",
+      "debug-thread-id",
+      "cli-debug-thread-id-1"
+    ],
+    "cli-project-models-initialize-1": [
+      "native",
+      "project models initialize",
+      "cli-project-models-initialize-1"
+    ],
+    "cli-project-create-1": [
+      "native",
+      "project create",
+      "cli-project-create-1"
+    ],
+    "cli-project-clone-1": [
+      "native",
+      "project clone",
+      "cli-project-create-1"
+    ],
+    "cli-project-register-1": [
+      "native",
+      "project register",
+      "cli-project-create-1"
+    ],
+    "cli-project-list-1": [
+      "native",
+      "project list",
+      "cli-project-list-1"
+    ],
+    "cli-project-show-1": [
+      "native",
+      "project show",
+      "cli-project-show-1"
+    ],
+    "cli-project-upgrade-1": [
+      "native",
+      "project upgrade",
+      "cli-project-upgrade-1"
+    ],
+    "cli-project-repair-1": [
+      "native",
+      "project repair",
+      "cli-project-repair-1"
+    ],
+    "cli-project-bind-1": [
+      "native",
+      "project bind",
+      "cli-project-bind-1"
+    ],
+    "cli-project-unbind-1": [
+      "native",
+      "project unbind",
+      "cli-project-bind-1"
+    ],
+    "cli-project-mount-1": [
+      "native",
+      "project mount",
+      "cli-project-bind-1"
+    ],
+    "cli-project-unmount-1": [
+      "native",
+      "project unmount",
+      "cli-project-bind-1"
+    ],
+    "cli-project-prune-1": [
+      "native",
+      "project prune",
+      "cli-project-prune-1"
+    ],
+    "cli-app-install-1": [
+      "native",
+      "app install",
+      "cli-app-install-1"
+    ],
+    "cli-app-list-1": [
+      "native",
+      "app list",
+      "cli-app-list-1"
+    ],
+    "cli-app-show-1": [
+      "native",
+      "app show",
+      "cli-app-show-1"
+    ],
+    "cli-app-configure-1": [
+      "native",
+      "app configure",
+      "cli-app-configure-1"
+    ],
+    "cli-app-enable-1": [
+      "native",
+      "app enable",
+      "cli-app-enable-1"
+    ],
+    "cli-app-disable-1": [
+      "native",
+      "app disable",
+      "cli-app-enable-1"
+    ],
+    "cli-app-check-1": [
+      "native",
+      "app check",
+      "cli-app-check-1"
+    ],
+    "cli-cli-register-1": [
+      "native",
+      "cli register",
+      "cli-cli-register-1"
+    ],
+    "cli-cli-bind-1": [
+      "native",
+      "cli bind",
+      "cli-cli-bind-1"
+    ],
+    "cli-cli-list-1": [
+      "native",
+      "cli list",
+      "cli-cli-list-1"
+    ],
+    "cli-cli-show-1": [
+      "native",
+      "cli show",
+      "cli-cli-show-1"
+    ],
+    "cli-cli-check-1": [
+      "native",
+      "cli check",
+      "cli-app-check-1"
+    ],
+    "cli-validate-1": [
+      "native",
+      "validate",
+      "cli-validate-1"
+    ],
+    "cli-memory-list-1": [
+      "native",
+      "memory list",
+      "cli-memory-list-1"
+    ],
+    "cli-memory-list-2": [
+      "native",
+      "memory list",
+      "cli-memory-list-2"
+    ],
+    "cli-memory-read-1": [
+      "native",
+      "memory read",
+      "cli-memory-read-1"
+    ],
+    "cli-memory-read-2": [
+      "native",
+      "memory read",
+      "cli-memory-read-2"
+    ],
+    "cli-memory-read-3": [
+      "native",
+      "memory read",
+      "cli-memory-read-3"
+    ],
+    "cli-memory-read-4": [
+      "native",
+      "memory read",
+      "cli-memory-read-4"
+    ],
+    "cli-memory-read-5": [
+      "native",
+      "memory read",
+      "cli-memory-read-5"
+    ],
+    "cli-memory-read-6": [
+      "native",
+      "memory read",
+      "cli-memory-read-6"
+    ],
+    "cli-memory-read-7": [
+      "native",
+      "memory read",
+      "cli-memory-read-7"
+    ],
+    "cli-memory-edit-1": [
+      "native",
+      "memory edit",
+      "cli-memory-edit-1"
+    ],
+    "cli-memory-edit-2": [
+      "native",
+      "memory edit",
+      "cli-memory-edit-2"
+    ],
+    "cli-memory-delete-1": [
+      "native",
+      "memory delete",
+      "cli-memory-edit-2"
+    ],
+    "cli-memory-rename-1": [
+      "native",
+      "memory rename",
+      "cli-memory-edit-2"
+    ],
+    "cli-memory-publish-1": [
+      "native",
+      "memory publish",
+      "cli-memory-publish-1"
+    ],
+    "cli-memory-recover-1": [
+      "native",
+      "memory recover",
+      "cli-memory-recover-1"
+    ],
+    "cli-memory-recover-2": [
+      "native",
+      "memory recover",
+      "cli-memory-edit-2"
+    ],
+    "cli-memory-push-1": [
+      "native",
+      "memory push",
+      "cli-memory-push-1"
+    ],
+    "cli-memory-sync-1": [
+      "native",
+      "memory sync",
+      "cli-memory-sync-1"
+    ],
+    "cli-memory-sync-2": [
+      "native",
+      "memory sync",
+      "cli-memory-edit-2"
+    ],
+    "cli-memory-sync-publish-1": [
+      "native",
+      "memory sync publish",
+      "cli-memory-sync-publish-1"
+    ],
+    "cli-memory-change-show-1": [
+      "native",
+      "memory change show",
+      "cli-memory-change-show-1"
+    ],
+    "cli-memory-change-show-2": [
+      "native",
+      "memory change show",
+      "cli-memory-change-show-2"
+    ],
+    "cli-memory-change-show-3": [
+      "native",
+      "memory change show",
+      "cli-memory-change-show-3"
+    ],
+    "cli-memory-change-show-4": [
+      "native",
+      "memory change show",
+      "cli-memory-change-show-4"
+    ],
+    "cli-memory-change-resume-1": [
+      "native",
+      "memory change resume",
+      "cli-memory-edit-2"
+    ],
+    "cli-memory-change-claim-1": [
+      "native",
+      "memory change claim",
+      "cli-memory-change-claim-1"
+    ],
+    "cli-memory-change-finish-1": [
+      "native",
+      "memory change finish",
+      "cli-memory-change-finish-1"
+    ],
+    "cli-memory-change-complete-1": [
+      "native",
+      "memory change complete",
+      "cli-memory-change-complete-1"
+    ],
+    "cli-memory-change-validate-1": [
+      "native",
+      "memory change validate",
+      "cli-memory-change-validate-1"
+    ],
+    "cli-view-start-1": [
+      "native",
+      "view start",
+      "cli-daemon-start-1"
+    ],
+    "cli-view-stop-1": [
+      "native",
+      "view stop",
+      "cli-daemon-start-1"
+    ],
+    "cli-view-restart-1": [
+      "native",
+      "view restart",
+      "cli-daemon-start-1"
+    ],
+    "cli-view-status-1": [
+      "native",
+      "view status",
+      "cli-daemon-start-1"
+    ],
+    "cli-view-serve-1": [
+      "native",
+      "view serve",
+      "cli-daemon-serve-1"
+    ],
+    "cli-skill-init-1": [
+      "native",
+      "skill init",
+      "cli-skill-init-1"
+    ],
+    "cli-skill-upgrade-1": [
+      "native",
+      "skill upgrade",
+      "cli-skill-init-1"
+    ],
+    "cli-run-start-1": [
+      "native",
+      "run start",
+      "cli-run-start-1"
+    ],
+    "cli-run-start-2": [
+      "native",
+      "run start",
+      "cli-run-start-2"
+    ],
+    "cli-run-start-3": [
+      "native",
+      "run start",
+      "cli-run-start-3"
+    ],
+    "cli-run-start-4": [
+      "native",
+      "run start",
+      "cli-run-start-4"
+    ],
+    "cli-run-start-5": [
+      "native",
+      "run start",
+      "cli-run-start-5"
+    ],
+    "cli-run-start-6": [
+      "native",
+      "run start",
+      "cli-run-start-6"
+    ],
+    "cli-run-start-7": [
+      "native",
+      "run start",
+      "cli-run-start-7"
+    ],
+    "cli-run-report-1": [
+      "native",
+      "run report",
+      "cli-run-report-1"
+    ],
+    "cli-run-report-2": [
+      "native",
+      "run report",
+      "cli-run-report-2"
+    ],
+    "cli-run-report-3": [
+      "native",
+      "run report",
+      "cli-run-report-3"
+    ],
+    "cli-run-abandon-1": [
+      "native",
+      "run abandon",
+      "cli-run-start-6"
+    ],
+    "cli-run-show-1": [
+      "native",
+      "run show",
+      "cli-run-show-1"
+    ],
+    "reviewer-run-show-1": [
+      "reviewer",
+      "run show",
+      "reviewer-run-show-1"
+    ],
+    "reviewer-run-show-2": [
+      "reviewer",
+      "run show",
+      "reviewer-run-show-2"
+    ],
+    "cli-run-binding-show-1": [
+      "native",
+      "run binding show",
+      "cli-run-binding-show-1"
+    ],
+    "cli-run-binding-show-2": [
+      "native",
+      "run binding show",
+      "cli-run-binding-show-2"
+    ],
+    "cli-run-binding-update-1": [
+      "native",
+      "run binding update",
+      "cli-run-binding-show-1"
+    ],
+    "cli-run-binding-update-2": [
+      "native",
+      "run binding update",
+      "cli-run-binding-update-2"
+    ],
+    "cli-run-try-run-1": [
+      "native",
+      "run try-run",
+      "cli-run-try-run-1"
+    ],
+    "cli-run-step-enter-1": [
+      "native",
+      "run step enter",
+      "cli-run-start-3"
+    ],
+    "cli-run-step-enter-2": [
+      "native",
+      "run step enter",
+      "cli-run-start-4"
+    ],
+    "cli-run-step-enter-3": [
+      "native",
+      "run step enter",
+      "cli-run-start-5"
+    ],
+    "cli-run-step-store-retry-1": [
+      "native",
+      "run step store retry",
+      "cli-run-step-store-retry-1"
+    ],
+    "cli-run-step-rewind-1": [
+      "native",
+      "run step rewind",
+      "cli-run-step-rewind-1"
+    ],
+    "cli-run-step-rewind-2": [
+      "native",
+      "run step rewind",
+      "cli-run-step-rewind-2"
+    ],
+    "cli-run-step-show-1": [
+      "native",
+      "run step show",
+      "cli-run-step-show-1"
+    ],
+    "cli-run-step-show-2": [
+      "native",
+      "run step show",
+      "cli-run-step-show-2"
+    ],
+    "cli-run-step-show-3": [
+      "native",
+      "run step show",
+      "cli-run-step-show-3"
+    ],
+    "reviewer-run-step-show-1": [
+      "reviewer",
+      "run step show",
+      "reviewer-run-show-1"
+    ],
+    "reviewer-run-step-show-2": [
+      "reviewer",
+      "run step show",
+      "reviewer-run-show-2"
+    ],
+    "cli-run-step-configure-1": [
+      "native",
+      "run step configure",
+      "cli-run-step-show-3"
+    ],
+    "cli-run-artifact-show-1": [
+      "native",
+      "run artifact show",
+      "cli-run-artifact-show-1"
+    ],
+    "cli-run-artifact-show-2": [
+      "native",
+      "run artifact show",
+      "cli-run-artifact-show-2"
+    ],
+    "cli-run-artifact-show-3": [
+      "native",
+      "run artifact show",
+      "cli-run-artifact-show-3"
+    ],
+    "cli-run-artifact-show-4": [
+      "native",
+      "run artifact show",
+      "cli-run-artifact-show-4"
+    ],
+    "cli-run-artifact-show-5": [
+      "native",
+      "run artifact show",
+      "cli-run-artifact-show-5"
+    ],
+    "reviewer-run-artifact-show-1": [
+      "reviewer",
+      "run artifact show",
+      "reviewer-run-artifact-show-1"
+    ],
+    "reviewer-run-artifact-show-2": [
+      "reviewer",
+      "run artifact show",
+      "reviewer-run-artifact-show-2"
+    ],
+    "reviewer-run-artifact-show-3": [
+      "reviewer",
+      "run artifact show",
+      "reviewer-run-artifact-show-3"
+    ],
+    "reviewer-run-artifact-show-4": [
+      "reviewer",
+      "run artifact show",
+      "reviewer-run-artifact-show-4"
+    ],
+    "reviewer-run-artifact-show-5": [
+      "reviewer",
+      "run artifact show",
+      "reviewer-run-artifact-show-5"
+    ],
+    "reviewer-run-artifact-show-6": [
+      "reviewer",
+      "run artifact show",
+      "reviewer-run-artifact-show-6"
+    ],
+    "cli-run-artifact-contract-show-1": [
+      "native",
+      "run artifact contract show",
+      "cli-run-artifact-contract-show-1"
+    ],
+    "cli-run-artifact-contract-show-2": [
+      "native",
+      "run artifact contract show",
+      "cli-run-artifact-contract-show-2"
+    ],
+    "reviewer-run-artifact-contract-show-1": [
+      "reviewer",
+      "run artifact contract show",
+      "reviewer-run-artifact-contract-show-1"
+    ],
+    "cli-run-artifact-export-1": [
+      "native",
+      "run artifact export",
+      "cli-run-artifact-export-1"
+    ],
+    "cli-run-artifact-export-2": [
+      "native",
+      "run artifact export",
+      "cli-run-artifact-export-2"
+    ],
+    "cli-run-artifact-tag-1": [
+      "native",
+      "run artifact tag",
+      "cli-run-artifact-tag-1"
+    ],
+    "cli-run-artifact-impact-1": [
+      "native",
+      "run artifact impact",
+      "cli-run-artifact-impact-1"
+    ],
+    "cli-run-schema-show-1": [
+      "native",
+      "run schema show",
+      "cli-run-schema-show-1"
+    ],
+    "cli-run-schema-show-2": [
+      "native",
+      "run schema show",
+      "cli-run-schema-show-2"
+    ],
+    "cli-run-schema-show-3": [
+      "native",
+      "run schema show",
+      "cli-run-schema-show-3"
+    ],
+    "cli-run-schema-show-4": [
+      "native",
+      "run schema show",
+      "cli-run-schema-show-4"
+    ],
+    "cli-run-schema-show-5": [
+      "native",
+      "run schema show",
+      "cli-run-schema-show-5"
+    ],
+    "cli-run-schema-report-1": [
+      "native",
+      "run schema report",
+      "cli-run-schema-show-1"
+    ],
+    "cli-run-schema-report-2": [
+      "native",
+      "run schema report",
+      "cli-run-schema-report-2"
+    ],
+    "cli-run-schema-report-3": [
+      "native",
+      "run schema report",
+      "cli-run-schema-show-3"
+    ],
+    "cli-run-schema-report-4": [
+      "native",
+      "run schema report",
+      "cli-run-schema-show-4"
+    ],
+    "cli-run-review-wait-1": [
+      "native",
+      "run review wait",
+      "cli-run-review-wait-1"
+    ],
+    "cli-run-review-wait-2": [
+      "native",
+      "run review wait",
+      "cli-run-review-wait-2"
+    ],
+    "cli-run-review-wait-status-1": [
+      "native",
+      "run review wait status",
+      "cli-run-review-wait-status-1"
+    ],
+    "cli-run-review-wait-retry-1": [
+      "native",
+      "run review wait retry",
+      "cli-run-review-wait-retry-1"
+    ],
+    "cli-run-review-vote-1": [
+      "native",
+      "run review vote",
+      "cli-run-review-vote-1"
+    ],
+    "cli-run-review-retry-1": [
+      "native",
+      "run review retry",
+      "cli-run-review-retry-1"
+    ],
+    "cli-run-review-submit-for-human-1": [
+      "native",
+      "run review submit-for-human",
+      "cli-run-review-submit-for-human-1"
+    ],
+    "cli-run-review-resolve-1": [
+      "native",
+      "run review resolve",
+      "cli-run-review-resolve-1"
+    ],
+    "reviewer-run-review-assignment-show-1": [
+      "reviewer",
+      "run review assignment show",
+      "reviewer-run-review-assignment-show-1"
+    ],
+    "reviewer-run-review-comment-1": [
+      "reviewer",
+      "run review comment",
+      "reviewer-run-review-comment-1"
+    ],
+    "cli-run-review-comment-add-1": [
+      "native",
+      "run review comment add",
+      "cli-run-review-comment-add-1"
+    ],
+    "cli-run-review-comment-update-1": [
+      "native",
+      "run review comment update",
+      "cli-run-review-comment-add-1"
+    ],
+    "cli-run-review-comment-delete-1": [
+      "native",
+      "run review comment delete",
+      "cli-run-review-comment-add-1"
+    ],
+    "reviewer-run-review-submit-1": [
+      "reviewer",
+      "run review submit",
+      "reviewer-run-review-submit-1"
+    ],
+    "cli-run-review-submit-1": [
+      "native",
+      "run review submit",
+      "cli-run-review-submit-1"
+    ],
+    "cli-run-review-agent-worker-1": [
+      "native",
+      "run review agent-worker",
+      "cli-daemon-serve-1"
+    ],
+    "cli-run-review-start-1": [
+      "native",
+      "run review start",
+      "cli-run-review-start-1"
+    ],
+    "cli-run-review-create-1": [
+      "native",
+      "run review create",
+      "cli-run-review-create-1"
+    ],
+    "cli-run-review-list-1": [
+      "native",
+      "run review list",
+      "cli-run-review-list-1"
+    ],
+    "cli-run-review-list-2": [
+      "native",
+      "run review list",
+      "cli-run-review-list-2"
+    ],
+    "reviewer-run-review-list-1": [
+      "reviewer",
+      "run review list",
+      "reviewer-run-review-list-1"
+    ],
+    "cli-run-review-show-1": [
+      "native",
+      "run review show",
+      "cli-run-review-create-1"
+    ],
+    "cli-run-review-show-2": [
+      "native",
+      "run review show",
+      "cli-run-review-show-2"
+    ],
+    "cli-run-review-show-3": [
+      "native",
+      "run review show",
+      "cli-run-review-show-3"
+    ],
+    "cli-run-review-show-4": [
+      "native",
+      "run review show",
+      "cli-run-review-show-4"
+    ],
+    "reviewer-run-review-show-1": [
+      "reviewer",
+      "run review show",
+      "reviewer-run-review-show-1"
+    ],
+    "cli-run-review-report-1": [
+      "native",
+      "run review report",
+      "cli-run-review-report-1"
+    ],
+    "cli-run-review-update-1": [
+      "native",
+      "run review update",
+      "cli-run-review-report-1"
+    ],
+    "cli-run-enter-schema-1": [
+      "native",
+      "run enter-schema",
+      "cli-run-schema-show-1"
+    ],
+    "cli-run-enter-schema-2": [
+      "native",
+      "run enter-schema",
+      "cli-run-schema-report-2"
+    ],
+    "cli-run-enter-schema-3": [
+      "native",
+      "run enter-schema",
+      "cli-run-schema-show-3"
+    ],
+    "cli-run-enter-schema-4": [
+      "native",
+      "run enter-schema",
+      "cli-run-schema-show-4"
+    ],
+    "cli-run-enter-schema-5": [
+      "native",
+      "run enter-schema",
+      "cli-run-report-3"
+    ],
+    "cli-run-repeat-1": [
+      "native",
+      "run repeat",
+      "cli-run-schema-show-1"
+    ],
+    "cli-run-repeat-2": [
+      "native",
+      "run repeat",
+      "cli-run-schema-report-2"
+    ],
+    "cli-run-repeat-3": [
+      "native",
+      "run repeat",
+      "cli-run-schema-show-3"
+    ],
+    "cli-run-repeat-4": [
+      "native",
+      "run repeat",
+      "cli-run-schema-show-4"
+    ],
+    "cli-run-repeat-5": [
+      "native",
+      "run repeat",
+      "cli-run-report-3"
+    ],
+    "cli-run-skip-1": [
+      "native",
+      "run skip",
+      "cli-run-schema-show-1"
+    ],
+    "cli-run-skip-2": [
+      "native",
+      "run skip",
+      "cli-run-schema-report-2"
+    ],
+    "cli-run-skip-3": [
+      "native",
+      "run skip",
+      "cli-run-schema-show-3"
+    ],
+    "cli-run-skip-4": [
+      "native",
+      "run skip",
+      "cli-run-schema-show-4"
+    ],
+    "cli-run-skip-5": [
+      "native",
+      "run skip",
+      "cli-run-report-3"
+    ],
+    "cli-run-status-1": [
+      "native",
+      "run status",
+      "cli-run-status-1"
+    ],
+    "cli-run-status-2": [
+      "native",
+      "run status",
+      "cli-run-start-2"
+    ],
+    "cli-run-status-3": [
+      "native",
+      "run status",
+      "cli-run-start-3"
+    ],
+    "cli-run-status-4": [
+      "native",
+      "run status",
+      "cli-run-start-4"
+    ],
+    "cli-run-status-5": [
+      "native",
+      "run status",
+      "cli-run-start-5"
+    ],
+    "cli-run-status-6": [
+      "native",
+      "run status",
+      "cli-run-start-6"
+    ],
+    "cli-run-status-7": [
+      "native",
+      "run status",
+      "cli-run-status-7"
+    ],
+    "cli-run-enter-1": [
+      "native",
+      "run enter",
+      "cli-run-enter-1"
+    ],
+    "cli-run-outputs-list-1": [
+      "native",
+      "run outputs list",
+      "cli-run-outputs-list-1"
+    ],
+    "cli-run-outputs-update-1": [
+      "native",
+      "run outputs update",
+      "cli-run-outputs-list-1"
+    ],
+    "cli-run-external-add-1": [
+      "native",
+      "run external add",
+      "cli-run-external-add-1"
+    ],
+    "cli-run-external-add-2": [
+      "native",
+      "run external add",
+      "cli-run-external-add-2"
+    ],
+    "cli-run-external-show-1": [
+      "native",
+      "run external show",
+      "cli-run-artifact-show-2"
+    ],
+    "cli-run-external-show-2": [
+      "native",
+      "run external show",
+      "cli-run-artifact-show-3"
+    ],
+    "cli-run-external-show-3": [
+      "native",
+      "run external show",
+      "cli-run-artifact-show-4"
+    ],
+    "reviewer-run-external-show-1": [
+      "reviewer",
+      "run external show",
+      "reviewer-run-external-show-1"
+    ],
+    "reviewer-run-external-show-2": [
+      "reviewer",
+      "run external show",
+      "reviewer-run-external-show-2"
+    ],
+    "reviewer-run-external-show-3": [
+      "reviewer",
+      "run external show",
+      "reviewer-run-external-show-3"
+    ],
+    "cli-run-finish-1": [
+      "native",
+      "run finish",
+      "cli-run-start-6"
+    ],
+    "cli-continue-1": [
+      "native",
+      "continue",
+      "cli-continue-1"
+    ],
+    "cli-migrate-syntax-1": [
+      "native",
+      "migrate syntax",
+      "cli-migrate-syntax-1"
+    ],
+    "cli-migrate-artifact-contract-v2-1": [
+      "native",
+      "migrate artifact-contract-v2",
+      "cli-migrate-syntax-1"
+    ],
+    "cli-migrate-schema-contract-v2-1": [
+      "native",
+      "migrate schema-contract-v2",
+      "cli-migrate-syntax-1"
+    ],
+    "cli-archive-list-1": [
+      "native",
+      "archive list",
+      "cli-archive-list-1"
+    ],
+    "cli-archive-run-1": [
+      "native",
+      "archive run",
+      "cli-archive-run-1"
+    ],
+    "cli-archive-restore-run-1": [
+      "native",
+      "archive restore run",
+      "cli-archive-run-1"
+    ],
+    "cli-run-review-wait-3": [
+      "native",
+      "run review wait",
+      "cli-run-review-wait-2"
+    ],
+    "cli-run-review-show-5": [
+      "native",
+      "run review show",
+      "cli-run-review-show-5"
+    ],
+    "reviewer-run-review-list-2": [
+      "reviewer",
+      "run review list",
+      "reviewer-run-review-list-2"
+    ],
+    "reviewer-memory-list-1": [
+      "reviewer",
+      "memory list",
+      "cli-memory-list-1"
+    ],
+    "reviewer-memory-list-2": [
+      "reviewer",
+      "memory list",
+      "cli-memory-list-2"
+    ],
+    "reviewer-memory-read-1": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-1"
+    ],
+    "reviewer-memory-read-2": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-2"
+    ],
+    "reviewer-memory-read-3": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-3"
+    ],
+    "reviewer-memory-read-4": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-4"
+    ],
+    "reviewer-memory-read-5": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-5"
+    ],
+    "reviewer-memory-read-6": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-6"
+    ],
+    "reviewer-memory-read-7": [
+      "reviewer",
+      "memory read",
+      "cli-memory-read-7"
+    ],
+    "reviewer-memory-change-show-1": [
+      "reviewer",
+      "memory change show",
+      "cli-memory-change-show-1"
+    ],
+    "reviewer-memory-change-show-2": [
+      "reviewer",
+      "memory change show",
+      "cli-memory-change-show-2"
+    ],
+    "reviewer-memory-change-show-3": [
+      "reviewer",
+      "memory change show",
+      "cli-memory-change-show-3"
+    ],
+    "reviewer-memory-change-show-4": [
+      "reviewer",
+      "memory change show",
+      "cli-memory-change-show-4"
+    ],
+    "reviewer-run-review-comment-add-1": [
+      "reviewer",
+      "run review comment add",
+      "reviewer-run-review-comment-add-1"
+    ],
+    "reviewer-run-review-comment-update-1": [
+      "reviewer",
+      "run review comment update",
+      "reviewer-run-review-comment-add-1"
+    ],
+    "reviewer-run-review-comment-delete-1": [
+      "reviewer",
+      "run review comment delete",
+      "reviewer-run-review-comment-add-1"
+    ],
+    "reviewer-run-review-submit-2": [
+      "reviewer",
+      "run review submit",
+      "reviewer-run-review-submit-2"
+    ],
+    "reviewer-run-review-show-2": [
+      "reviewer",
+      "run review show",
+      "reviewer-run-review-show-2"
+    ],
+    "reviewer-run-review-show-3": [
+      "reviewer",
+      "run review show",
+      "reviewer-run-review-show-3"
+    ],
+    "reviewer-run-review-report-1": [
+      "reviewer",
+      "run review report",
+      "reviewer-run-review-report-1"
+    ],
+    "reviewer-run-review-update-1": [
+      "reviewer",
+      "run review update",
+      "reviewer-run-review-report-1"
+    ],
+    "reviewer-run-review-show-4": [
+      "reviewer",
+      "run review show",
+      "reviewer-run-review-show-4"
+    ],
+    "runner-continue-enter-schema-1": [
+      "runnerContinue",
+      "continue enter-schema",
+      "cli-run-schema-show-1"
+    ],
+    "runner-continue-enter-schema-2": [
+      "runnerContinue",
+      "continue enter-schema",
+      "cli-run-schema-report-2"
+    ],
+    "runner-continue-enter-schema-3": [
+      "runnerContinue",
+      "continue enter-schema",
+      "cli-run-schema-show-3"
+    ],
+    "runner-continue-enter-schema-4": [
+      "runnerContinue",
+      "continue enter-schema",
+      "cli-run-schema-show-4"
+    ],
+    "runner-continue-step-show-1": [
+      "runnerContinue",
+      "continue step show",
+      "cli-run-step-show-1"
+    ],
+    "runner-continue-step-show-2": [
+      "runnerContinue",
+      "continue step show",
+      "cli-run-step-show-3"
+    ],
+    "runner-continue-step-configure-1": [
+      "runnerContinue",
+      "continue step configure",
+      "cli-run-step-show-3"
+    ],
+    "runner-continue-schema-show-1": [
+      "runnerContinue",
+      "continue schema show",
+      "cli-run-schema-show-1"
+    ],
+    "runner-continue-schema-show-2": [
+      "runnerContinue",
+      "continue schema show",
+      "cli-run-schema-show-2"
+    ],
+    "runner-continue-schema-show-3": [
+      "runnerContinue",
+      "continue schema show",
+      "cli-run-schema-show-3"
+    ],
+    "runner-continue-schema-show-4": [
+      "runnerContinue",
+      "continue schema show",
+      "cli-run-schema-show-4"
+    ],
+    "runner-continue-schema-report-1": [
+      "runnerContinue",
+      "continue schema report",
+      "cli-run-schema-show-1"
+    ],
+    "runner-continue-schema-report-2": [
+      "runnerContinue",
+      "continue schema report",
+      "cli-run-schema-report-2"
+    ],
+    "runner-continue-schema-report-3": [
+      "runnerContinue",
+      "continue schema report",
+      "cli-run-schema-show-3"
+    ],
+    "runner-continue-schema-report-4": [
+      "runnerContinue",
+      "continue schema report",
+      "cli-run-schema-show-4"
+    ],
+    "runner-continue-skip-1": [
+      "runnerContinue",
+      "continue skip",
+      "cli-run-schema-show-1"
+    ],
+    "runner-continue-skip-2": [
+      "runnerContinue",
+      "continue skip",
+      "cli-run-schema-report-2"
+    ],
+    "runner-continue-skip-3": [
+      "runnerContinue",
+      "continue skip",
+      "cli-run-schema-show-3"
+    ],
+    "runner-continue-skip-4": [
+      "runnerContinue",
+      "continue skip",
+      "cli-run-schema-show-4"
+    ],
+    "runner-continue-repeat-1": [
+      "runnerContinue",
+      "continue repeat",
+      "cli-run-schema-show-1"
+    ],
+    "runner-continue-repeat-2": [
+      "runnerContinue",
+      "continue repeat",
+      "cli-run-schema-report-2"
+    ],
+    "runner-continue-repeat-3": [
+      "runnerContinue",
+      "continue repeat",
+      "cli-run-schema-show-3"
+    ],
+    "runner-continue-repeat-4": [
+      "runnerContinue",
+      "continue repeat",
+      "cli-run-schema-show-4"
+    ],
+    "runner-continue-artifact-export-1": [
+      "runnerContinue",
+      "continue artifact export",
+      "cli-run-artifact-export-1"
+    ],
+    "runner-continue-artifact-tag-1": [
+      "runnerContinue",
+      "continue artifact tag",
+      "cli-run-artifact-tag-1"
+    ],
+    "runner-continue-review-wait-1": [
+      "runnerContinue",
+      "continue review wait",
+      "cli-run-review-wait-1"
+    ],
+    "runner-continue-review-wait-2": [
+      "runnerContinue",
+      "continue review wait",
+      "cli-run-review-wait-2"
+    ],
+    "runner-continue-review-vote-1": [
+      "runnerContinue",
+      "continue review vote",
+      "cli-run-review-vote-1"
+    ],
+    "runner-continue-review-resolve-1": [
+      "runnerContinue",
+      "continue review resolve",
+      "cli-run-review-resolve-1"
+    ],
+    "runner-continue-review-submit-for-human-1": [
+      "runnerContinue",
+      "continue review submit-for-human",
+      "cli-run-review-submit-for-human-1"
+    ],
+    "runner-continue-review-retry-1": [
+      "runnerContinue",
+      "continue review retry",
+      "cli-run-review-retry-1"
+    ],
+    "runner-continue-review-start-1": [
+      "runnerContinue",
+      "continue review start",
+      "cli-run-review-start-1"
+    ],
+    "runner-continue-review-list-1": [
+      "runnerContinue",
+      "continue review list",
+      "cli-run-review-list-1"
+    ],
+    "runner-continue-review-list-2": [
+      "runnerContinue",
+      "continue review list",
+      "cli-run-review-list-2"
+    ],
+    "runner-continue-review-show-1": [
+      "runnerContinue",
+      "continue review show",
+      "cli-run-review-create-1"
+    ],
+    "runner-continue-review-show-2": [
+      "runnerContinue",
+      "continue review show",
+      "cli-run-review-show-2"
+    ],
+    "runner-continue-review-show-3": [
+      "runnerContinue",
+      "continue review show",
+      "cli-run-review-show-3"
+    ],
+    "runner-continue-review-show-4": [
+      "runnerContinue",
+      "continue review show",
+      "cli-run-review-show-5"
+    ],
+    "runner-continue-review-report-1": [
+      "runnerContinue",
+      "continue review report",
+      "cli-run-review-report-1"
+    ],
+    "runner-continue-review-update-1": [
+      "runnerContinue",
+      "continue review update",
+      "cli-run-review-report-1"
+    ],
+    "runner-continue-review-comment-add-1": [
+      "runnerContinue",
+      "continue review comment add",
+      "cli-run-review-comment-add-1"
+    ],
+    "runner-continue-review-comment-update-1": [
+      "runnerContinue",
+      "continue review comment update",
+      "cli-run-review-comment-add-1"
+    ],
+    "runner-continue-review-comment-delete-1": [
+      "runnerContinue",
+      "continue review comment delete",
+      "cli-run-review-comment-add-1"
+    ],
+    "runner-continue-review-submit-1": [
+      "runnerContinue",
+      "continue review submit",
+      "cli-run-review-submit-1"
+    ],
+    "runner-continue-review-create-1": [
+      "runnerContinue",
+      "continue review create",
+      "cli-run-review-create-1"
+    ],
+    "runner-continue-report-1": [
+      "runnerContinue",
+      "continue report",
+      "cli-run-report-1"
+    ],
+    "runner-continue-report-2": [
+      "runnerContinue",
+      "continue report",
+      "cli-run-report-2"
+    ],
+    "runner-continue-external-add-1": [
+      "runnerContinue",
+      "continue external add",
+      "cli-run-external-add-1"
+    ],
+    "runner-continue-external-add-2": [
+      "runnerContinue",
+      "continue external add",
+      "cli-run-external-add-2"
+    ],
+    "runner-continue-outputs-update-1": [
+      "runnerContinue",
+      "continue outputs update",
+      "cli-run-outputs-list-1"
+    ],
+    "runner-continue-finish-1": [
+      "runnerContinue",
+      "continue finish",
+      "cli-run-start-6"
+    ],
+    "runner-continue-abandon-1": [
+      "runnerContinue",
+      "continue abandon",
+      "cli-run-start-6"
+    ],
+    "reviewer-continue-continue-report-1": [
+      "reviewerContinue",
+      "continue report",
+      "reviewer-run-review-report-1"
+    ],
+    "reviewer-continue-continue-update-1": [
+      "reviewerContinue",
+      "continue update",
+      "reviewer-run-review-report-1"
+    ],
+    "reviewer-continue-continue-comment-add-1": [
+      "reviewerContinue",
+      "continue comment add",
+      "reviewer-run-review-comment-add-1"
+    ],
+    "reviewer-continue-continue-comment-update-1": [
+      "reviewerContinue",
+      "continue comment update",
+      "reviewer-run-review-comment-add-1"
+    ],
+    "reviewer-continue-continue-comment-delete-1": [
+      "reviewerContinue",
+      "continue comment delete",
+      "reviewer-run-review-comment-add-1"
+    ],
+    "reviewer-continue-continue-list-1": [
+      "reviewerContinue",
+      "continue list",
+      "reviewer-run-review-list-2"
+    ],
+    "reviewer-continue-continue-show-1": [
+      "reviewerContinue",
+      "continue show",
+      "reviewer-run-review-show-2"
+    ],
+    "reviewer-continue-continue-show-2": [
+      "reviewerContinue",
+      "continue show",
+      "reviewer-run-review-show-3"
+    ],
+    "reviewer-continue-continue-show-3": [
+      "reviewerContinue",
+      "continue show",
+      "reviewer-run-review-show-4"
+    ],
+    "reviewer-continue-continue-submit-1": [
+      "reviewerContinue",
+      "continue submit",
+      "reviewer-run-review-submit-2"
+    ]
+  },
+  "fields": {
+    "cli-daemon-start-1": {
+      "running": "boolean",
+      "view": "{desiredState:\"running\"|\"stopped\",errorCode?:\"VIEW_UNAVAILABLE\",running:boolean,settingsAccess?:\"configured\"|\"local\"|\"setup_required\",url?:string}",
+      "tasks?": "{cancelled?:int,completed?:int,failed?:int,queued?:int,running?:int}",
+      "taskErrorCount?": "int",
+      "settingsConfigKey?": "\"view.operator_token\"",
+      "nextAction?": "Action"
+    },
+    "cli-daemon-serve-1": {},
+    "cli-runner-detect-1": {
+      "items": "[{status:\"failed\"|\"installed\"|\"missing\"|\"version_unknown\",type:string,version?:string}]"
+    },
+    "cli-runner-identity-1": {
+      "identified": "true",
+      "agentType": "\"claude\"|\"codex\"|\"traex\""
+    },
+    "cli-runner-identity-2": {
+      "identified": "false"
+    },
+    "cli-model-list-1": {
+      "items": "[{errorCode?:string,id:string,name?:string,origin?:string,status:string,title?:string}]",
+      "project?": "string",
+      "nextCursor?": "string"
+    },
+    "cli-model-read-1": {
+      "modelRef": "string",
+      "definition": "content",
+      "project?": "string"
+    },
+    "cli-model-read-2": {
+      "modelRef": "string",
+      "registration": "{description?:string,modelRef:string,name?:string,package?:string,package_name?:string,tags?:[string]}",
+      "origin?": "string",
+      "project?": "string"
+    },
+    "cli-model-read-3": {
+      "modelRef": "string",
+      "registration": "{description?:string,modelRef:string,name?:string,package?:string,package_name?:string,tags?:[string]}",
+      "definition": "content",
+      "origin?": "string",
+      "project?": "string"
+    },
+    "cli-model-create-1": {
+      "operation": "string",
+      "modelRef": "string",
+      "project?": "string",
+      "registration?": "{description?:string,modelRef:string,name?:string,package?:string,package_name?:string,tags?:[string]}"
+    },
+    "cli-model-create-2": {
+      "operation": "string",
+      "modelRef": "string",
+      "dryRun": "true",
+      "project?": "string",
+      "registration?": "{description?:string,modelRef:string,name?:string,package?:string,package_name?:string,tags?:[string]}"
+    },
+    "cli-model-delete-1": {
+      "operation": "string",
+      "modelRef": "string",
+      "project?": "string"
+    },
+    "cli-model-delete-2": {
+      "operation": "string",
+      "modelRef": "string",
+      "dryRun": "true",
+      "project?": "string"
+    },
+    "cli-model-validate-1": {
+      "operation": "string",
+      "modelRef": "string",
+      "valid": "boolean",
+      "checks": "{definition:string,runtime:string}",
+      "project?": "string"
+    },
+    "cli-model-validate-2": {
+      "operation": "string",
+      "modelRef": "string",
+      "valid": "boolean",
+      "checks": "{definition:string,runtime:string}",
+      "data": "[{checked:int,storeId:string}]",
+      "project?": "string"
+    },
+    "cli-data-store-list-1": {
+      "items": "[{errorCode?:string,factory:string,kind:\"data\"|\"value\",model:string,status:string,storeId:string}]",
+      "project?": "string",
+      "nextCursor?": "string"
+    },
+    "cli-data-store-read-1": {
+      "storeId": "string",
+      "model": "string",
+      "kind": "\"data\"|\"value\"",
+      "factory": "string",
+      "status": "string",
+      "idRule": "string",
+      "capabilities": "{conditionalWrite:boolean,edit:boolean,payload:boolean,update:boolean,upsert:boolean,value:boolean}",
+      "errorCode?": "string",
+      "project?": "string",
+      "contentTypeExtensions?": "map<[string]>"
+    },
+    "cli-data-store-create-1": {
+      "operation": "string",
+      "storeId": "string",
+      "model": "string",
+      "kind": "\"data\"|\"value\"",
+      "factory": "string",
+      "project?": "string",
+      "pendingCleanup?": "boolean"
+    },
+    "cli-data-store-create-2": {
+      "operation": "string",
+      "storeId": "string",
+      "dryRun": "boolean",
+      "model": "string",
+      "kind": "\"data\"|\"value\"",
+      "factory": "string",
+      "project?": "string",
+      "pendingCleanup?": "boolean"
+    },
+    "cli-data-store-remove-1": {
+      "operation": "string",
+      "storeId": "string",
+      "dataRetained": "boolean",
+      "project?": "string"
+    },
+    "cli-data-store-remove-2": {
+      "operation": "string",
+      "storeId": "string",
+      "dryRun": "boolean",
+      "dataRetained": "boolean",
+      "project?": "string"
+    },
+    "cli-data-list-1": {
+      "storeId": "string",
+      "items": "[{id:string}]",
+      "project?": "string",
+      "nextCursor?": "string"
+    },
+    "cli-data-read-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "value": "content",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean"
+    },
+    "cli-data-read-3": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean"
+    },
+    "cli-data-read-4": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "deleted": "boolean",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number"
+    },
+    "cli-data-has-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "exists": "boolean",
+      "project?": "string"
+    },
+    "cli-data-create-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean"
+    },
+    "cli-data-create-2": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "dryRun": "boolean",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean"
+    },
+    "cli-data-update-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean",
+      "expectedRevision?": "string"
+    },
+    "cli-data-update-2": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "dryRun": "boolean",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean",
+      "expectedRevision?": "string"
+    },
+    "cli-data-delete-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "deleted": "boolean",
+      "project?": "string"
+    },
+    "cli-data-delete-2": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "dryRun": "boolean",
+      "deleted": "boolean",
+      "project?": "string"
+    },
+    "cli-data-export-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "out": "string",
+      "bytes": "int",
+      "project?": "string",
+      "revision?": "string",
+      "contentType?": "string",
+      "createdAt?": "number",
+      "updatedAt?": "number",
+      "deleted?": "boolean"
+    },
+    "cli-data-validate-1": {
+      "storeId": "string",
+      "id": "string",
+      "modelRef": "string",
+      "operation": "string",
+      "valid": "boolean",
+      "project?": "string"
+    },
+    "cli-data-validate-2": {
+      "modelRef": "string",
+      "operation": "string",
+      "valid": "boolean",
+      "project?": "string"
+    },
+    "cli-project-models-initialize-1": {
+      "project": "string",
+      "created": "int",
+      "retained": "int",
+      "diagnosticCount": "int",
+      "system": "{created:int,retained:int,status:\"installed\"|\"unchanged\"}",
+      "contextControl?": "{changed:boolean,records:int}"
+    },
+    "cli-project-create-1": {
+      "project": "string",
+      "root": "string",
+      "storeType": "\"embedded\"|\"managed\"",
+      "bound": "boolean",
+      "nextAction?": "Action"
+    },
+    "cli-project-list-1": {
+      "items": "[{missing:boolean,name:string,relation:\"mounted\"|\"primary\"|\"unbound\",root:string}]",
+      "nextCursor?": "string"
+    },
+    "cli-project-show-1": {
+      "name": "string",
+      "root": "string",
+      "storeType": "\"embedded\"|\"managed\"",
+      "canonicalMemoryRoot": "string",
+      "health": "{reason?:\"dirty\"|\"memory_missing\"|\"revision_mismatch\"|\"unavailable\"|\"wrong_branch\",status:\"ok\"|\"unhealthy\"}",
+      "effectiveMemoryRoot?": "string",
+      "branch?": "string",
+      "revision?": "string"
+    },
+    "cli-project-upgrade-1": {
+      "cliVersion": "string",
+      "overall": "\"failed\"|\"not_run\"|\"unchanged\"|\"upgraded\"",
+      "models": "{created?:int,retained?:int,status:\"failed\"|\"not_run\"|\"unchanged\"|\"upgraded\",system?:{created:int,retained:int,status:\"installed\"|\"unchanged\"|\"upgraded\",updated:int},updated?:int}",
+      "memory": "{branch?:string,changeSet?:{checkpointDigest?:string,id:string,intent:\"system_upgrade\",status:string,validation:\"not_run\"|\"passed\",view:string},created?:int,deleted?:int,integrationStatus?:\"pending\",revision?:string,status:\"failed\"|\"not_run\"|\"unchanged\"|\"upgraded\",updated?:int,worktree?:string}",
+      "validation": "\"failed\"|\"not_run\"|\"passed\"",
+      "project?": "string",
+      "storeType?": "\"embedded\"|\"managed\"",
+      "failure?": "{code:string,stage:string}",
+      "nextAction?": "Action"
+    },
+    "cli-project-repair-1": {
+      "project": "string",
+      "storeType": "\"embedded\"|\"managed\"",
+      "created": "int",
+      "updated": "int",
+      "deleted": "int",
+      "revision?": "string",
+      "worktree?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-project-bind-1": {
+      "project": "string",
+      "relation": "\"mounted\"|\"primary\"|\"unbound\""
+    },
+    "cli-project-prune-1": {
+      "removedCount": "int"
+    },
+    "cli-app-install-1": {
+      "id": "string",
+      "status": "string",
+      "enabled": "boolean",
+      "version?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-app-list-1": {
+      "apps": "[{enabled:boolean,id:string,name:string,version:string}]",
+      "pendingCount": "int",
+      "nextCursor?": "string"
+    },
+    "cli-app-show-1": {
+      "id": "string",
+      "name": "string",
+      "version": "string",
+      "enabled": "boolean",
+      "revision": "string",
+      "usage": "{agent:[{action:Command,reference:string}],view:[{instanceId:string,path?:string}]}",
+      "projectStores": "[{key:string,kind:string,model:string,storeId:null|string}]",
+      "viewChangesRequireRestart": "boolean",
+      "configuration?": "string",
+      "description?": "string",
+      "descriptionTruncated?": "boolean"
+    },
+    "cli-app-configure-1": {
+      "id": "string",
+      "status": "string",
+      "revision": "string",
+      "restartRequired": "boolean",
+      "nextAction?": "Action"
+    },
+    "cli-app-enable-1": {
+      "id": "string",
+      "enabled": "boolean",
+      "restartRequired": "boolean",
+      "nextAction?": "Action"
+    },
+    "cli-app-check-1": {
+      "id": "string",
+      "status": "string",
+      "items": "[{name:string,status:string}]",
+      "total": "int",
+      "app?": "string"
+    },
+    "cli-cli-register-1": {
+      "id": "string",
+      "status": "string"
+    },
+    "cli-cli-bind-1": {
+      "id": "string",
+      "project": "string",
+      "status": "string",
+      "app?": "string"
+    },
+    "cli-cli-list-1": {
+      "items": "[{apps:[string],id:string,status:string}]",
+      "nextCursor?": "string"
+    },
+    "cli-cli-show-1": {
+      "id": "string",
+      "status": "string",
+      "apps": "[string]",
+      "project": "string",
+      "app?": "string"
+    },
+    "cli-validate-1": {
+      "valid": "boolean",
+      "validationScope": "\"memory-root\"|\"project-store\"",
+      "changeSetEffect": "\"none\"",
+      "issueCount": "int",
+      "issues": "[{code:\"INVALID_MEMORY\"|\"INVALID_STORE\"|\"MIGRATION_REQUIRED\"|\"REFERENCE_CYCLE\"|\"REFERENCE_INVALID\"|\"REFERENCE_KIND_MISMATCH\"|\"REFERENCE_NOT_FOUND\"|\"REFERENCE_RULES_MISSING\"|\"SCHEMA_OPTIONAL_INVALID\",column?:int,line?:int,path?:string}]≤10",
+      "nextAction?": "Action"
+    },
+    "cli-memory-list-1": {
+      "memory": "{kind:\"concepts\"|\"procedures\"|\"schemas\"|\"statements\",names:[string]≤10,reference:string}",
+      "items": "[{artifact?:string,condition_artifact?:string,field?:string,has_children:boolean,name?:string,node_ref:string,relation?:string,summary?:string,target?:string,type:string}]",
+      "parent_node_ref?": "string",
+      "nextCursor?": "string"
+    },
+    "cli-memory-list-2": {
+      "items": "[{app?:{assetKey:string,enabled:boolean,id:string,version:string},kind:\"concepts\"|\"procedures\"|\"schemas\"|\"statements\",names:[string]≤10,project_name?:string,reference:string,revision?:string,summary?:string}]",
+      "nextCursor?": "string"
+    },
+    "cli-memory-read-1": {
+      "syntax": "string",
+      "tag": "string",
+      "names": "[string]",
+      "defines": "[string]",
+      "extends?": "[string]"
+    },
+    "cli-memory-read-2": {
+      "syntax": "string",
+      "tag": "string",
+      "names": "[string]",
+      "defines": "[string]",
+      "asserts?": "content",
+      "suggests?": "content",
+      "sections?": "content"
+    },
+    "cli-memory-read-3": {
+      "syntax": "string",
+      "tag": "string",
+      "names": "[string]",
+      "defines": "[string]",
+      "asserts?": "content",
+      "suggests?": "content",
+      "optional?": "boolean",
+      "type?": "string",
+      "format?": "content",
+      "fields?": "content",
+      "item?": "content",
+      "items?": "content"
+    },
+    "cli-memory-read-4": {
+      "syntax": "string",
+      "tag": "string",
+      "names": "[string]",
+      "defines": "[string]",
+      "goals": "[string]",
+      "flow": "content",
+      "mode?": "string",
+      "asserts?": "content"
+    },
+    "cli-memory-read-5": {
+      "syntax": "string",
+      "tag": "string",
+      "names": "[string]",
+      "defines": "[string]",
+      "goals": "[string]",
+      "mode": "string",
+      "actions": "content",
+      "asserts?": "content"
+    },
+    "cli-memory-read-6": {
+      "memory": "{kind:string,names:[string],reference:string}",
+      "node_ref": "string",
+      "node_type": "string",
+      "context": "{ancestors:[{node_ref?:string,relation:string,type:string,value:content}],root:content}",
+      "fragment": "content"
+    },
+    "cli-memory-read-7": {
+      "declared": "content",
+      "effective?": "content"
+    },
+    "cli-memory-edit-1": {
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "storeType": "\"embedded\"|\"managed\"",
+      "targets": "[{operation:\"create\"|\"update\",path:string,reference:string}]",
+      "nextAction": "Action"
+    },
+    "cli-memory-edit-2": {
+      "changeId": "string",
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "nextAction": "Action",
+      "candidateRoot?": "string"
+    },
+    "cli-memory-publish-1": {
+      "changeId": "string",
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "storeType": "\"embedded\"|\"managed\"",
+      "revision?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-memory-recover-1": {
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "reference": "string"
+    },
+    "cli-memory-push-1": {
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "storeType": "\"embedded\"|\"managed\""
+    },
+    "cli-memory-sync-1": {
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "revision": "string"
+    },
+    "cli-memory-sync-publish-1": {
+      "changeId": "string",
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "revision?": "string"
+    },
+    "cli-memory-change-show-1": {
+      "changeId": "string",
+      "project": "string",
+      "checkpointDigest": "string",
+      "status": "string",
+      "baseRevision": "string",
+      "files": "[{operation:string,path:string,reference:string}]"
+    },
+    "cli-memory-change-show-2": {
+      "changeId": "string",
+      "project": "string",
+      "checkpointDigest": "string",
+      "validation": "{baseRevision:string,createdAt:string,issueCount:int,issues:[{code:string,column?:int,line?:int,path?:string}],valid:boolean}"
+    },
+    "cli-memory-change-show-3": {
+      "changeId": "string",
+      "project": "string",
+      "checkpointDigest": "string",
+      "reference": "string",
+      "side": "string",
+      "operation": "string",
+      "content": "null|string"
+    },
+    "cli-memory-change-show-4": {
+      "changeId": "string",
+      "project": "string",
+      "checkpointDigest": "string",
+      "files": "[{diff:string,operation:string,path:string,reference:string}]"
+    },
+    "cli-memory-change-claim-1": {
+      "changeId": "string",
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "nextAction": "Action",
+      "commentCount": "int",
+      "warningCount": "int",
+      "candidateRoot?": "string"
+    },
+    "cli-memory-change-finish-1": {
+      "changeId": "string",
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\"",
+      "commentCount": "int"
+    },
+    "cli-memory-change-complete-1": {
+      "changeId": "string",
+      "status": "\"applied\"|\"claimed\"|\"completed\"|\"published\"|\"pushed\"|\"ready\"|\"restored\"|\"synchronized\""
+    },
+    "cli-memory-change-validate-1": {
+      "valid": "boolean",
+      "changeId": "string",
+      "storeType": "\"embedded\"|\"managed\"",
+      "baseRevision": "string",
+      "checkpointDigest": "string",
+      "completedChangeIds": "[string]≤20",
+      "completedChangeCount": "int",
+      "issueCount": "int",
+      "issues": "[{code:\"INVALID_MEMORY\"|\"INVALID_STORE\"|\"MIGRATION_REQUIRED\"|\"REFERENCE_CYCLE\"|\"REFERENCE_INVALID\"|\"REFERENCE_KIND_MISMATCH\"|\"REFERENCE_NOT_FOUND\"|\"REFERENCE_RULES_MISSING\"|\"SCHEMA_OPTIONAL_INVALID\",column?:int,line?:int,path?:string}]≤10",
+      "empty": "boolean",
+      "previewPath": "string",
+      "previewUrl?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-skill-init-1": {
+      "skill": "string",
+      "path": "string",
+      "status": "\"installed\"|\"upgraded\""
+    },
+    "cli-run-start-1": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "nextAction": "Action"
+    },
+    "cli-run-start-2": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "eligibleSteps?": "int",
+      "completedSteps?": "int",
+      "waitingReviews?": "int",
+      "reason?": "string",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-start-3": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "stepId": "string",
+      "actor": "\"agent\"|\"human\"",
+      "instruction": "string",
+      "stepStatus?": "string",
+      "artifactName?": "string",
+      "contentType?": "string",
+      "model?": "string",
+      "artifactFormat?": "string",
+      "ruleCount?": "int",
+      "rules?": "[{scope:string,text:string}]",
+      "materials?": "[{id:string,kind:\"artifact\"|\"external\",read?:Command}]",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-start-4": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "reviewId": "string",
+      "stepId?": "string",
+      "stepStatus?": "string",
+      "roundId?": "string",
+      "waitingReviews?": "int",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-start-5": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "stepId": "string",
+      "stepStatus?": "string",
+      "schemaPhase?": "string",
+      "schemaField?": "string",
+      "completedFields?": "int",
+      "totalFields?": "int",
+      "minimumCount?": "int",
+      "maximumCount?": "int",
+      "instruction?": "string",
+      "artifactName?": "string",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-start-6": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "completedSteps?": "int",
+      "warningCount?": "int",
+      "reason?": "string",
+      "details?": "Command"
+    },
+    "cli-run-start-7": {
+      "status": "\"review_configuration_required\"",
+      "reviews": "[{artifact:string,policies:[string],scope:string,slots:[string]}]",
+      "slots": "[{key:string,name:string,procedure:string}]",
+      "actors": "[{id:string,kind:\"agent\"|\"human\",name:string,permissions:[string]}]",
+      "example": "{reviews:map<{policy:string}>,slots:map<{actors:[string]}|{skip:true}>}",
+      "nextAction?": "Action"
+    },
+    "cli-run-report-1": {
+      "runId": "string",
+      "stepId": "string",
+      "artifactId": "string",
+      "status": "string",
+      "dependencies": "[{id:string,kind:\"artifact\"|\"external\"}]≤20",
+      "dependencyCount": "int",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "storeId?": "string",
+      "modelRef?": "string",
+      "dataId?": "string",
+      "nextMaterials?": "[{id:string,kind:\"artifact\"|\"external\",read?:Command}]≤4",
+      "nextRules?": "[{scope:string,text:string}]≤5",
+      "nextStep?": "string",
+      "nextInstruction?": "string",
+      "nextActor?": "\"agent\"|\"human\"",
+      "nextDetails?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-report-2": {
+      "runId": "string",
+      "stepId": "string",
+      "artifactId": "string",
+      "stepStatus": "string",
+      "artifactStatus": "string",
+      "warningCount?": "int",
+      "candidates?": "[string]",
+      "candidateCount?": "int",
+      "nextAction?": "Action",
+      "tags?": "[string]"
+    },
+    "cli-run-report-3": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "stepId?": "string",
+      "instruction?": "string",
+      "actor?": "\"agent\"|\"human\"",
+      "artifactId?": "string",
+      "artifactName?": "string",
+      "artifactFormat?": "string",
+      "dataId?": "string",
+      "receipt?": "{artifactName:string,dataId?:string}",
+      "schemaPhase?": "string",
+      "schemaField?": "string",
+      "completedFields?": "int",
+      "totalFields?": "int",
+      "minimumCount?": "int",
+      "maximumCount?": "int",
+      "memoryRun?": "string",
+      "rules?": "[{scope:string,text:string}]",
+      "ruleCount?": "int",
+      "details?": "Command",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-show-1": {
+      "run": "{id:string,name:string,status:string}",
+      "steps": "[{actionId?:string,artifactId?:string,effective?:boolean,id:string,status:string}]",
+      "stepCount": "int",
+      "outputArtifactIds": "[string]",
+      "outputArtifactCount": "int",
+      "nextCursor?": "string"
+    },
+    "reviewer-run-show-1": {
+      "id": "string",
+      "name": "string",
+      "status": "string",
+      "steps": "[{actionId?:string,artifactIds:[string],id:string,status:string}]"
+    },
+    "reviewer-run-show-2": {
+      "id": "string",
+      "name": "string",
+      "status": "string",
+      "stepIds": "[string]"
+    },
+    "cli-run-binding-show-1": {
+      "runId": "string",
+      "nextRound": "map<{actorIds:[string],skipped:boolean}>",
+      "rounds": "[{bindings:map<{actorIds:[string],skipped:boolean}>,roundId:string,stepId:string}]"
+    },
+    "cli-run-binding-show-2": {
+      "runId": "string",
+      "status": "string",
+      "readOnly": "boolean",
+      "actors": "[{id:string,kind:\"agent\"|\"human\",name:string,permissions:[string]}]",
+      "slots": "[{activeReviews?:[{artifactScope:string,currentBinding:{actorIds:[string]}|{skip:true},currentRoundId:string,currentRoundSequence:int,effectiveFromRoundSequence:int,nextBinding:{actorIds:[string]}|{skip:true},reviewId:string}],binding:{actorIds:[string]}|{skip:true},key:string,reviewIds:[string],reviewScopes:[string]}]"
+    },
+    "cli-run-binding-update-2": {
+      "changeId": "string",
+      "slot": "string",
+      "nextBinding": "{actorIds:[string]}|{skip:true}",
+      "bindings": "{actors:[{id:string,kind:\"agent\"|\"human\",name:string,permissions:[string]}],readOnly:boolean,runId:string,slots:[{activeReviews?:[{artifactScope:string,currentBinding:{actorIds:[string]}|{skip:true},currentRoundId:string,currentRoundSequence:int,effectiveFromRoundSequence:int,nextBinding:{actorIds:[string]}|{skip:true},reviewId:string}],binding:{actorIds:[string]}|{skip:true},key:string,reviewIds:[string],reviewScopes:[string]}],status:string}"
+    },
+    "cli-run-try-run-1": {
+      "runId": "string",
+      "items": "[{assignmentId:string,launchPath:string,promptPath:string}]"
+    },
+    "cli-run-step-store-retry-1": {
+      "runId": "string",
+      "stepId": "string",
+      "status": "string",
+      "artifactId?": "string",
+      "storeId?": "string",
+      "modelRef?": "string",
+      "dataId?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-step-rewind-1": {
+      "runId": "string",
+      "dryRun": "boolean",
+      "targetStepId": "string",
+      "actionId": "string",
+      "affectedStepIds": "[string]",
+      "affectedArtifactIds": "[string]",
+      "retainedStepIds": "[string]"
+    },
+    "cli-run-step-rewind-2": {
+      "runId": "string",
+      "dryRun": "boolean",
+      "targetStepId": "string",
+      "actionId": "string",
+      "affectedStepIds": "[string]",
+      "affectedArtifactIds": "[string]",
+      "retainedStepIds": "[string]",
+      "rewindId": "string",
+      "replacementStepId": "string",
+      "nextAction": "Action"
+    },
+    "cli-run-step-show-1": {
+      "runId": "string",
+      "step": "{actionId?:string,artifactId?:string,effective:boolean,id:string,inputGroups?:map<[{id:string,kind:\"artifact\"|\"external\"}]>,status:string,supersedingRewindId?:string}",
+      "instruction": "string",
+      "actor": "\"agent\"|\"human\"",
+      "rules": "[{scope:string,text:string}]",
+      "artifactName?": "string",
+      "contentType?": "string",
+      "model?": "string"
+    },
+    "cli-run-step-show-2": {
+      "ref": "string",
+      "procedureName": "string",
+      "current": "boolean",
+      "procedureAsserts": "[content]",
+      "step": "{actor:\"agent\"|\"human\",artifact?:{final:boolean,format?:{name:string,options?:map<content>},name:string,review?:string,schema?:content,type?:string},asserts:[content],details:[string],id:string,instruction:string,kind:string,suggests:[content]}"
+    },
+    "cli-run-step-show-3": {
+      "runId": "string",
+      "stepId": "string",
+      "stepStatus": "string",
+      "configuration": "{asserts?:[string],inheritedFrom?:{artifactId:string,stepId:string},reviewer?:string,suggests?:[string]}",
+      "reviewers": "[{label:string,value:string}]",
+      "missing": "[string]",
+      "artifactId?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-artifact-show-1": {
+      "runId": "string",
+      "stepId": "string",
+      "items": "[{artifactId:string,contentType?:string,dependencies:[{id:string,kind:\"artifact\"|\"external\"}],name:string,status:string}]"
+    },
+    "cli-run-artifact-show-2": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "content": "string",
+      "truncated": "boolean",
+      "nextAction?": "Action"
+    },
+    "cli-run-artifact-show-3": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-artifact-show-4": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "out": "string"
+    },
+    "cli-run-artifact-show-5": {
+      "stepRef": "string",
+      "source": "\"not_reported\"|\"review_submission\"|\"run_event\"",
+      "artifact": "null|{contentType?:string,fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content}",
+      "revisionSummary?": "{body:string,createdAt:string,digest:string,previousSubmissionId?:string}"
+    },
+    "reviewer-run-artifact-show-1": {
+      "artifact": "{contentType?:string,fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content}",
+      "contextArtifacts?": "[{artifact:{contentType?:string,fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content},artifactId?:string,stepId:string}]",
+      "revisionSummary?": "{body:string,createdAt:string,digest:string,previousSubmissionId?:string}"
+    },
+    "reviewer-run-artifact-show-2": {
+      "artifactId": "string",
+      "artifact": "{business?:{destination:{dataId:string,modelRef:string,operation:\"create\"|\"upsert\",storeId:string},value?:content},contentType?:string,dependencies:[{id:string,kind:\"artifact\"|\"external\"}],fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content}",
+      "contextArtifacts": "[{artifact:{business?:{destination:{dataId:string,modelRef:string,operation:\"create\"|\"upsert\",storeId:string},value?:content},contentType?:string,dependencies:[{id:string,kind:\"artifact\"|\"external\"}],fileName?:string,final?:boolean,format?:{name:string,options?:map<content>},name:string,storage?:\"file\"|\"inline\",type?:string,value?:content},artifactId:string,stepId:string}]",
+      "contextExternals": "[{externalId:string,source:string,viaArtifactIds:[string]}]",
+      "confirmations": "[{actorId?:string,artifactId:string,comments:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],id:string,kind?:string,roundId?:string,status:string,vote?:{summary?:string,value:string}}]",
+      "revisionSummary?": "{body:string,createdAt:string,digest:string,previousSubmissionId?:string}"
+    },
+    "reviewer-run-artifact-show-3": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "content": "string",
+      "truncated": "boolean",
+      "nextAction?": "Action",
+      "dependencies?": "[{id:string,kind:\"artifact\"|\"external\"}]",
+      "business?": "{destination:{dataId:string,modelRef:string,operation:\"create\"|\"upsert\",storeId:string},valuePreview?:string,valueTruncated?:boolean}"
+    },
+    "reviewer-run-artifact-show-4": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "nextAction?": "Action",
+      "dependencies?": "[{id:string,kind:\"artifact\"|\"external\"}]",
+      "business?": "{destination:{dataId:string,modelRef:string,operation:\"create\"|\"upsert\",storeId:string},valuePreview?:string,valueTruncated?:boolean}"
+    },
+    "reviewer-run-artifact-show-5": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "out": "string",
+      "dependencies?": "[{id:string,kind:\"artifact\"|\"external\"}]"
+    },
+    "reviewer-run-artifact-show-6": {
+      "out": "string"
+    },
+    "cli-run-artifact-contract-show-1": {
+      "runId": "string",
+      "stepId": "string",
+      "rules": "[{scope:string,text:string}]",
+      "name?": "string",
+      "contentType?": "string",
+      "model?": "string",
+      "definition?": "string",
+      "memoryReference?": "string",
+      "schema?": "{definition:string,source:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string}}"
+    },
+    "cli-run-artifact-contract-show-2": {
+      "stepRef": "string",
+      "procedure": "{asserts:[content],name:string}",
+      "action": "{asserts:[content],details:[string],instruction:string,suggests:[content]}",
+      "artifact?": "{final:boolean,format?:{name:string,options?:map<content>},name:string,review?:string,schema?:content,type?:string}"
+    },
+    "reviewer-run-artifact-contract-show-1": {
+      "procedure": "{asserts:[content],name:string}",
+      "action": "{asserts:[content],details:[string],instruction:string,suggests:[content]}",
+      "artifact": "{final:boolean,format?:{name:string,options:map<content>},modelTarget?:{dataId?:string,modelRef:string,storeId:string},name:string,review?:string,schema?:content,type?:string}"
+    },
+    "cli-run-artifact-export-1": {
+      "runId": "string",
+      "stepId": "string",
+      "artifactId": "string",
+      "exported": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-artifact-export-2": {
+      "runId": "string",
+      "stepRef": "string",
+      "exported": "string"
+    },
+    "cli-run-artifact-tag-1": {
+      "runId": "string",
+      "artifactId": "string",
+      "tags": "[string]"
+    },
+    "cli-run-artifact-impact-1": {
+      "runId": "string",
+      "artifactIds": "[string]",
+      "nextCursor?": "string"
+    },
+    "cli-run-schema-show-1": {
+      "runId": "string",
+      "stepId": "string",
+      "phase": "string",
+      "effective?": "boolean",
+      "nextAction?": "Action"
+    },
+    "cli-run-schema-show-2": {
+      "runId": "string",
+      "stepId": "string",
+      "phase": "string",
+      "position": "string",
+      "current": "{format?:string,id:string,instruction:string,kind:string,max?:number,min?:number,optional?:boolean,path?:string,type?:string}",
+      "artifactId?": "string",
+      "progress?": "{completed:int,remaining:int,total:int}",
+      "effective?": "boolean",
+      "rules?": "[{scope:string,text:string}]",
+      "ruleCount?": "int",
+      "nextAction?": "Action"
+    },
+    "cli-run-schema-show-3": {
+      "runId": "string",
+      "stepId": "string",
+      "phase": "string",
+      "artifactId": "string",
+      "effective?": "boolean",
+      "progress?": "{completed:int,remaining:int,total:int}",
+      "validation?": "{issueCount:int,status:string}",
+      "nextAction?": "Action"
+    },
+    "cli-run-schema-show-4": {
+      "runId": "string",
+      "stepId": "string",
+      "phase": "string",
+      "artifactId?": "string",
+      "effective?": "boolean",
+      "progress?": "{completed:int,remaining:int,total:int}",
+      "validation?": "{issueCount:int,status:string}",
+      "nextAction?": "Action"
+    },
+    "cli-run-schema-show-5": {
+      "runId": "string",
+      "stepId": "string",
+      "artifactName": "string",
+      "phase": "string",
+      "completed": "int",
+      "total": "int",
+      "currentField?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-wait-1": {
+      "runId": "string",
+      "stepId": "string",
+      "reviewId": "string",
+      "roundId": "string",
+      "candidateId": "string",
+      "scope": "\"decision\"|\"opinion\"",
+      "status": "string",
+      "roundStatus": "string",
+      "assignmentCount": "int",
+      "commentCount": "int",
+      "taskId": "string",
+      "nextAction": "Action",
+      "details?": "Command"
+    },
+    "cli-run-review-wait-2": {
+      "runId": "string",
+      "stepId": "string",
+      "reviewId": "string",
+      "roundId": "string",
+      "candidateId": "string",
+      "scope": "\"decision\"|\"opinion\"",
+      "status": "string",
+      "roundStatus": "string",
+      "assignmentCount": "int",
+      "commentCount": "int",
+      "outcome?": "string",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-wait-status-1": {
+      "items": "[{currentRound:boolean,id:string,roundId:string,stage?:\"cancel\"|\"recovery\"|\"render\"|\"send\"|\"wait\",status:\"cancelled\"|\"completed\"|\"failed\"|\"queued\"|\"running\"}]",
+      "total": "int",
+      "nextCursor?": "string"
+    },
+    "cli-run-review-wait-retry-1": {
+      "taskId": "string",
+      "roundId": "string",
+      "status": "string",
+      "mayRepeatNotification": "boolean",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-vote-1": {
+      "runId": "string",
+      "stepId": "string",
+      "reviewId": "string",
+      "roundId": "string",
+      "candidateId": "string",
+      "scope": "\"decision\"|\"opinion\"",
+      "status": "string",
+      "roundStatus": "string",
+      "assignmentCount": "int",
+      "commentCount": "int",
+      "vote": "string",
+      "outcome?": "string",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-retry-1": {
+      "runId": "string",
+      "stepId": "string",
+      "reviewId": "string",
+      "roundId": "string",
+      "candidateId": "string",
+      "scope": "\"decision\"|\"opinion\"",
+      "status": "string",
+      "roundStatus": "string",
+      "assignmentCount": "int",
+      "commentCount": "int",
+      "outcome?": "string",
+      "details?": "Command",
+      "nextAction?": "Action",
+      "assignmentId?": "string"
+    },
+    "cli-run-review-submit-for-human-1": {
+      "runId": "string",
+      "stepId": "string",
+      "reviewId": "string",
+      "roundId": "string",
+      "candidateId": "string",
+      "scope": "\"decision\"|\"opinion\"",
+      "status": "string",
+      "roundStatus": "string",
+      "assignmentCount": "int",
+      "commentCount": "int",
+      "assignmentId": "string",
+      "vote": "string",
+      "outcome?": "string",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-resolve-1": {
+      "reviewId": "string",
+      "roundId": "string",
+      "commentId": "string",
+      "disposition": "string",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-assignment-show-1": {
+      "protocol": "\"flow\"|\"graph\"",
+      "memoryReads": "{frozen?:string,project:string}",
+      "status": "string",
+      "binding": "string",
+      "slots": "[string]",
+      "permissions": "[string]",
+      "comments": "[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}]",
+      "artifactId?": "string",
+      "references?": "[{artifactId?:string,confirmation?:string,id:string,kind:\"artifact\"|\"external\"|\"review\",readCommand?:string,roundId?:string,source?:string,stepId?:string,viaArtifactIds?:[string]}]",
+      "reviewProgress?": "{phase:string,processed:int,total:int}",
+      "vote?": "string",
+      "summary?": "string"
+    },
+    "reviewer-run-review-comment-1": {
+      "reviewId": "string",
+      "roundId": "string",
+      "assignmentId": "string",
+      "status": "string",
+      "commentCount": "int",
+      "completed": "boolean"
+    },
+    "cli-run-review-comment-add-1": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "operation": "string",
+      "commentId": "string",
+      "runId?": "string",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "savedCommentIds?": "[string]",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-submit-1": {
+      "reviewId": "string",
+      "roundId": "string",
+      "assignmentId": "string",
+      "status": "string",
+      "commentCount": "int",
+      "completed": "boolean",
+      "vote": "string"
+    },
+    "cli-run-review-submit-1": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "vote": "string|{summary?:string,value:string}",
+      "runId?": "string",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "operation?": "string",
+      "summary?": "string"
+    },
+    "cli-run-review-start-1": {
+      "runId": "string",
+      "reviewId": "string",
+      "status": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "stepId?": "string",
+      "progress?": "{phase:string,processed:int,total:int}",
+      "warnings?": "[\"REVIEW_DISPATCH_PENDING\"|\"REVIEW_SESSION_NOT_BOUND\"]≤2",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-create-1": {
+      "reviewId": "string",
+      "artifactId": "string",
+      "status": "string",
+      "comments": "[{body:string,commentId:string}]",
+      "runId": "string",
+      "source?": "\"agent\"|\"human\""
+    },
+    "cli-run-review-list-1": {
+      "runId": "string",
+      "items": "[{artifactId:string,commentCount:int,details:Command,reviewId:string,source?:\"agent\"|\"human\",status:string}]",
+      "nextCursor?": "string"
+    },
+    "cli-run-review-list-2": {
+      "runId": "string",
+      "items": "[{artifactId:string,createdAt:string,progress?:{phase:string,processed:int,total:int},reviewId:string,reviewer?:string,roundId:string,status:string,stepId:string}]",
+      "nextCursor?": "string"
+    },
+    "reviewer-run-review-list-1": {
+      "items": "[{actorId?:string,artifactId:string,comments:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],id:string,kind?:string,roundId?:string,status:string,vote?:{summary?:string,value:string}}]"
+    },
+    "cli-run-review-show-2": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "runId?": "string",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "node?": "{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-show-3": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "nodes": "[{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}]",
+      "runId?": "string",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-review-show-4": {
+      "runId": "string",
+      "stepId": "string",
+      "reviewId": "string",
+      "roundId": "string",
+      "candidateId": "string",
+      "scope": "\"decision\"|\"opinion\"",
+      "status": "string",
+      "roundStatus": "string",
+      "assignmentCount": "int",
+      "commentCount": "int",
+      "assignments": "[{actorId:string,assignmentId:string,binding:\"advisory\"|\"decision\",failureCode?:string,kind:\"agent\"|\"human\",name:string,progress?:{phase:string,processed:int,total:int},status:string,summary?:string,vote?:string}]≤10",
+      "comments": "[{actorId:string,body:string,commentId:string,disposition?:string,severity?:string,truncated?:boolean}]",
+      "outcome?": "string",
+      "details?": "Command",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-show-1": {
+      "id": "string",
+      "artifactId": "string",
+      "status": "string",
+      "comments": "[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}]",
+      "roundId?": "string",
+      "actorId?": "string",
+      "kind?": "string",
+      "vote?": "{summary?:string,value:string}"
+    },
+    "cli-run-review-report-1": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "operation": "string",
+      "savedNodeId": "string",
+      "runId?": "string",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "savedCommentIds?": "[string]",
+      "nextAction?": "Action"
+    },
+    "cli-run-status-1": {
+      "runId": "string",
+      "name": "string",
+      "status": "string",
+      "completedSteps": "int",
+      "details": "Command",
+      "stepId?": "string",
+      "stepStatus?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-status-7": {
+      "runs": "[{name:string,runId:string,status:string}]",
+      "nextCursor?": "string"
+    },
+    "cli-run-enter-1": {
+      "runId": "string",
+      "reviewId?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-run-outputs-list-1": {
+      "runId": "string",
+      "items": "[{id:string,name:string,status:string}]",
+      "nextCursor?": "string"
+    },
+    "cli-run-external-add-1": {
+      "runId": "string",
+      "externalId": "string",
+      "source": "string"
+    },
+    "cli-run-external-add-2": {
+      "runId": "string",
+      "externalId": "string",
+      "source": "string",
+      "checkpointDigest": "string"
+    },
+    "reviewer-run-external-show-1": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "content": "string",
+      "truncated": "boolean",
+      "nextAction?": "Action",
+      "source?": "string",
+      "viaArtifactIds?": "[string]"
+    },
+    "reviewer-run-external-show-2": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "nextAction?": "Action",
+      "source?": "string",
+      "viaArtifactIds?": "[string]"
+    },
+    "reviewer-run-external-show-3": {
+      "runId": "string",
+      "id": "string",
+      "contentType": "string",
+      "out": "string",
+      "source?": "string",
+      "viaArtifactIds?": "[string]"
+    },
+    "cli-continue-1": {
+      "project": "string",
+      "runId": "string",
+      "status": "string",
+      "available": "boolean",
+      "commands": "[string]",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "usage?": "string"
+    },
+    "cli-migrate-syntax-1": {
+      "mode": "\"check\"|\"write\"",
+      "migration": "\"artifact-contract-v2\"|\"memory-syntax\"|\"schema-contract-v2\"",
+      "status": "\"blocked\"|\"ready\"",
+      "affectedFiles": "int",
+      "issueCount": "int",
+      "issues": "[{code:string,file:string,path:string}]≤10",
+      "target?": "string",
+      "backupPath?": "string",
+      "nextAction?": "Action"
+    },
+    "cli-archive-list-1": {
+      "items": "[{archivedAt?:string,id:string,kind:\"changes\"|\"runs\"}]",
+      "nextCursor?": "string"
+    },
+    "cli-archive-run-1": {
+      "runId": "string",
+      "archived": "boolean"
+    },
+    "cli-run-review-show-5": {
+      "progress": "{phase:string,processed:int,total:int}",
+      "nodes": "[{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}]",
+      "runId?": "string",
+      "stepId?": "string",
+      "reviewId?": "string",
+      "roundId?": "string",
+      "artifactId?": "string",
+      "status?": "string",
+      "comments?": "[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}]",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string"
+    },
+    "reviewer-run-review-list-2": {
+      "progress": "{phase:string,processed:int,total:int}",
+      "tree": "{applicable?:boolean,assertCount:int,children:[self],commentIds:[string],complete:boolean,hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,reasonCommentId?:string,reported:boolean,requiresReport:boolean,suggestCount:int}",
+      "status?": "string",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-comment-add-1": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "operation": "string",
+      "commentId": "string",
+      "savedCommentIds?": "[string]",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-submit-2": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "vote": "string|{summary?:string,value:string}",
+      "operation?": "string",
+      "summary?": "string"
+    },
+    "reviewer-run-review-show-2": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "node?": "{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-show-3": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "nodes": "[{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}]",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-report-1": {
+      "status": "string",
+      "progress": "{phase:string,processed:int,total:int}",
+      "operation": "string",
+      "savedNodeId": "string",
+      "savedCommentIds?": "[string]",
+      "nextAction?": "Action"
+    },
+    "reviewer-run-review-show-4": {
+      "progress": "{phase:string,processed:int,total:int}",
+      "nodes": "[{applicable?:boolean,assertCount?:int,asserts?:[{rulePath:string,text:string}],commentIds:[string],comments?:[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}],complete:boolean,defines?:[string],hasContent:boolean,isCurrent:boolean,kind?:\"open_review\",name:string,nodeId:string,path?:[string],reasonCommentId?:string,reported:boolean,requiresReport:boolean,ruleResults?:[{commentIds:[string],result:\"not_satisfied\"|\"undetermined\",rulePath:string}],source?:{kind:\"procedure\"|\"schema\"|\"statement\"|\"step\",memoryRef?:string,path:string},suggestCount?:int,suggests?:[{rulePath:string,text:string}]}]",
+      "status?": "string",
+      "comments?": "[{anchor?:{context?:string,location?:string,sourceHash?:string,submissionId?:string,target?:string,targetRef?:{id:string,kind:\"artifact\"|\"external\"}},body:string,commentId?:string,createdAt?:string,id?:string,severity?:string,updatedAt?:string}]",
+      "vote?": "string|{summary?:string,value:string}",
+      "summary?": "string"
+    },
+    "cli-run-schema-report-2": {
+      "runId": "string",
+      "stepId": "string",
+      "phase": "string",
+      "position": "string",
+      "current": "{format?:string,id:string,instruction:string,kind:string,max?:number,min?:number,optional?:boolean,path?:string,type?:string}",
+      "artifactId?": "string",
+      "progress?": "{completed:int,remaining:int,total:int}",
+      "effective?": "boolean",
+      "rules?": "[{scope:string,text:string}]≤8",
+      "ruleCount?": "int",
+      "nextAction?": "Action"
+    },
+    "cli-debug-thread-id-1": {
+      "identified": "boolean"
+    }
+  }
+}

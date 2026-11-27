@@ -230,6 +230,15 @@ test("renderer reports missing injected assets with a diagnosable stage", () => 
 });
 
 
+test("template and partial line endings are stable while input keeps its original lines", () => {
+  const renderer = createPromptRenderer({
+    read: () => "Header\r\n{{> fixture}}",
+    partials: () => [{ name: "fixture", source: "Body\r\n{{preflightJson}}" }]
+  });
+  const result = renderer.renderPrompt("run.review-configuration-required", "en", { preflightJson: "one\r\ntwo" });
+  assert.equal(result, "Header\nBody\none\r\ntwo");
+});
+
 test("successful renderer instances keep compiled templates and partial engines isolated", () => {
   const reads = [0, 0];
   const make = (index: number, label: string) => createPromptRenderer({

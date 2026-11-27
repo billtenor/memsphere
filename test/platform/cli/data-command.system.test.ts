@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { fork, spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import { writeData, readData } from "../../../src/project/data-service.js";
 import { businessFixture, snapshotTree } from "../../helpers/business-data.js";
@@ -40,7 +40,7 @@ function success(result: Result): any {
 }
 function failure(result: Result, code?: string): any {
   assert.equal(result.code, 1, result.stdout); assert.equal(result.stdout, "");
-  const error = JSON.parse(result.stderr).error; assert.equal(typeof error.code, "string"); assert.equal(typeof error.message, "string");
+  const error = JSON.parse(result.stderr).error; assert.equal(typeof error.code, "string"); assert.equal(Object.hasOwn(error, "message"), false);
   if (code) assert.equal(error.code, code); return error;
 }
 
@@ -107,11 +107,48 @@ test("CLI reports parsing, input, missing/conflict and capability failures as on
   failure(await cli(t, fixture, ["data", "update", "item.json", "--store", "files", "--expected-revision", "1", "--value-file", "-", "--output", "json"], undefined, true), "UNSUPPORTED_CAPABILITY");
 });
 
+test("a saved Data write can be verified after its receipt template fails", { timeout: 30_000 }, async t => {
+  const fixture = await businessFixture(t);
+  await fixture.createStore();
+  const preload = join(fixture.directory, "unavailable-result-template.mjs");
+  await fs.writeFile(preload, `import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const read = fs.readFileSync;
+fs.readFileSync = function (file, ...args) {
+  if (typeof file === "string" && file.endsWith("result.hbs")) throw new Error("PRIVATE_TEMPLATE_FAILURE");
+  return read.call(this, file, ...args);
+};
+syncBuiltinESMExports();
+`);
+  const child = spawn(process.execPath, ["--import", pathToFileURL(preload).href, cliPath, "--project", "test-project",
+    "data", "create", "saved", "--store", "records", "--value", '{"name":"saved","count":0}'], {
+    cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["ignore", "pipe", "pipe"]
+  });
+  ownTestProcess(child, t.signal, fixture.beforeCleanup);
+  const stdout: Buffer[] = [], stderr: Buffer[] = [];
+  child.stdout.on("data", chunk => stdout.push(chunk)); child.stderr.on("data", chunk => stderr.push(chunk));
+  const [code] = await once(child, "close");
+  assert.equal(code, 1);
+  assert.equal(Buffer.concat(stdout).length, 0);
+  const error = Buffer.concat(stderr).toString();
+  assert.match(error, /OUTPUT_RENDER_FAILED/);
+  assert.match(error, /savedId[：:] ?saved/);
+  assert.doesNotMatch(error, /PRIVATE_TEMPLATE_FAILURE/);
+  const args = ["--project", "test-project", "data", "read", "saved", "--store", "records", "--metadata-only", "--output", "json"];
+  assert.ok(error.includes(`memsphere ${args.join(" ")}`));
+  const verified = success(await cli(t, fixture, args.slice(2)));
+  assert.equal(verified.revision, "1");
+  assert.equal(verified.id, "saved");
+  const listed = success(await cli(t, fixture, ["data", "list", "--store", "records", "--output", "json"]));
+  assert.deepEqual(listed.items, [{ id: "saved" }]);
+});
+
 test("CLI Store configuration paths are relative to selected Project and remove permits explicit re-registration", { timeout: 30_000 }, async (t) => {
   const fixture = await businessFixture(t);
   const args = ["data", "store", "create", "records", "--model", "record.json", "--kind", "value", "--factory", "memsphere/filesystem-json", "--config-file", "-", "--output", "json"];
   const configured = success(await cli(t, fixture, args, '{"directory":"data/records"}'));
-  assert.equal(configured.directory, join(fixture.root, "data/records"));
+  assert.equal(configured.storeId, "records");
+  assert.equal(Object.hasOwn(configured, "directory"), false);
   await writeData({}, fixture.root, "records", "item", "create", { kind: "value", value: { name: "keep", count: 1 } });
   const removed = success(await cli(t, fixture, ["data", "store", "remove", "records", "--output", "json"]));
   assert.equal(removed.dataRetained, true);
@@ -127,7 +164,7 @@ test("CLI uses external absolute directories for both Store kinds and retains re
     const factory = kind === "value" ? "memsphere/filesystem-json" : "memsphere/filesystem";
     const args = ["data", "store", "create", storeId, "--model", "record.json", "--kind", kind, "--factory", factory, "--config-file", "-", "--output", "json"];
     const config = JSON.stringify({ directory });
-    assert.equal(success(await cli(t, fixture, args, config)).directory, directory);
+    assert.equal(success(await cli(t, fixture, args, config)).storeId, storeId);
     const id = kind === "value" ? "item" : "item.json"; const value = { name: storeId, count: 1 };
     // Record creation is setup for the re-registration contract. Keep the
     // registration/removal/re-registration/read sequence in separate processes.
@@ -136,11 +173,11 @@ test("CLI uses external absolute directories for both Store kinds and retains re
       { ...process.env, MEMSPHERE_HOME: fixture.home }, cliPath);
     assert.equal(receipt.stderr, "");
     const loaded = JSON.parse(receipt.stdout);
-    assert.equal(loaded.directory, directory); assert.equal(loaded.config.directory, directory); assert.equal(loaded.status, "available");
+    assert.equal(Object.hasOwn(loaded, "directory"), false); assert.equal(Object.hasOwn(loaded, "config"), false); assert.equal(loaded.status, "available");
     assert.deepEqual((await readData({}, fixture.root, storeId, id)).value, value);
     const dataBefore = await snapshotTree(directory);
     const removed = success(await cli(t, fixture, ["data", "store", "remove", storeId, "--output", "json"]));
-    assert.equal(removed.dataRetained, true); assert.equal(removed.directory, directory);
+    assert.equal(removed.dataRetained, true); assert.equal(removed.storeId, storeId);
     assert.deepEqual(await snapshotTree(directory), dataBefore);
     success(await cli(t, fixture, args, config));
     assert.deepEqual(success(await cli(t, fixture, ["data", "read", id, "--store", storeId, "--output", "json"])).value, value);
@@ -170,6 +207,61 @@ test("CLI opaque Payload export writes exact bytes and keeps raw stdout free of 
   const target = join(fixture.directory, "export.bin"); await fs.writeFile(target, "retained");
   failure(await cli(t, fixture, ["data", "export", "item.bin", "--store", "files", "--as", "payload", "--out", target, "--output", "json"]), "ALREADY_EXISTS");
   assert.equal(await fs.readFile(target, "utf8"), "retained");
+});
+
+test("closing stdout after a write returns a read-only receipt on stderr", { timeout: 30_000 }, async t => {
+  const fixture = await businessFixture(t);
+  await fixture.createStore();
+  const child = spawn(process.execPath, [cliPath, "--project", "test-project", "data", "create", "saved-once",
+    "--store", "records", "--value", '{"name":"saved","count":0}', "--output", "json"], {
+    cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["ignore", "pipe", "pipe"]
+  });
+  ownTestProcess(child, t.signal, fixture.beforeCleanup);
+  child.stdout.destroy();
+  const stderr: Buffer[] = [];
+  child.stderr.on("data", chunk => stderr.push(chunk));
+  const [code, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  assert.equal(code, 1);
+  const { error } = JSON.parse(Buffer.concat(stderr).toString());
+  assert.equal(error.code, "OUTPUT_RENDER_FAILED");
+  assert.deepEqual(error.details, { savedId: "saved-once" });
+  assert.deepEqual(error.nextAction.args.slice(0, 4), ["--project", "test-project", "data", "read"]);
+  const actual = success(await cli(t, fixture, error.nextAction.args.slice(2)));
+  assert.equal(actual.id, "saved-once");
+  assert.equal(actual.revision, "1");
+  assert.equal(Object.hasOwn(actual, "value"), false);
+});
+
+test("a raw export exits cleanly when the consumer closes after the first bytes", { timeout: 30_000 }, async t => {
+  const fixture = await businessFixture(t);
+  await fixture.createStore("files", "record.json", "data");
+  const bytes = Buffer.alloc(4 * 1024 * 1024, 0xa5);
+  success(await cli(t, fixture, ["data", "create", "large.bin", "--store", "files", "--payload-file", "-",
+    "--content-type", "application/octet-stream", "--output", "json"], bytes));
+  const child = spawn(process.execPath, [cliPath, "--project", "test-project", "data", "export", "large.bin",
+    "--store", "files", "--as", "payload", "--out", "-"], {
+    cwd: fixture.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.home }, stdio: ["ignore", "pipe", "pipe"]
+  });
+  ownTestProcess(child, t.signal, fixture.beforeCleanup);
+  const stderr: Buffer[] = [];
+  child.stderr.on("data", chunk => stderr.push(chunk));
+  let prefix: Buffer | undefined;
+  child.stdout.once("data", chunk => {
+    prefix = chunk;
+    child.stdout.destroy();
+  });
+  const [code, signal] = await once(child, "close");
+  assert.equal(signal, null);
+  assert.equal(code, 1);
+  assert.ok(prefix && prefix.length > 0 && prefix.length < bytes.length);
+  assert.deepEqual(prefix, bytes.subarray(0, prefix.length));
+  const diagnostic = Buffer.concat(stderr).toString();
+  assert.match(diagnostic, /OUTPUT_PIPE_CLOSED/);
+  assert.doesNotMatch(diagnostic, /Unhandled|at Socket|EPIPE/);
+  const retry = await cli(t, fixture, ["data", "export", "large.bin", "--store", "files", "--as", "payload", "--out", "-"]);
+  assert.equal(retry.code, 0, retry.stderr);
+  assert.deepEqual(retry.bytes, bytes);
 });
 
 test("CLI and direct Factory conditional writes use the same cross-process record lock", { timeout: 30_000 }, async (t) => {
@@ -222,7 +314,7 @@ test("Store discovery does not advertise an incompatible existing raw ValueStore
   assert.equal(list.items[0].status, "unavailable");
   assert.equal(read.errorCode, "STORE_INCOMPATIBLE");
   assert.equal(list.items[0].errorCode, "STORE_INCOMPATIBLE");
-  assert.match(read.error, /JSON/i); assert.match(list.items[0].error, /JSON/i);
+  assert.equal(read.error, undefined); assert.equal(list.items[0].error, undefined);
   assert.deepEqual(read.capabilities, { value: false, payload: false, conditionalWrite: false, update: false, upsert: false, edit: false });
 });
 
@@ -239,8 +331,8 @@ test("Store discovery keeps missing and Runtime-unsupported models unavailable w
   for (const id of ["missing", "advanced"]) {
     const read = success(await cli(t, fixture, ["data", "store", "read", id, "--output", "json"]));
     assert.equal(read.status, "unavailable");
-    assert.equal(typeof read.error, "string"); assert.notEqual(read.error.trim(), "");
-    assert.equal(typeof read.errorCode, "string");
+    assert.equal(read.error, undefined);
+    assert.equal(read.errorCode, id === "missing" ? "MODEL_NOT_FOUND" : "MODEL_RUNTIME_UNSUPPORTED");
     assert.deepEqual(read.capabilities, { value: false, payload: false, conditionalWrite: false, update: false, upsert: false, edit: false });
   }
   assert.deepEqual(await snapshotTree(fixture.root), before);

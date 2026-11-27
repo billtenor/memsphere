@@ -1,3 +1,4 @@
+import { writeCliChunk } from "../cli-transport.js";
 import { Readable } from "node:stream";
 import { encodeJsonChunks } from "../data/extensions/json-serializer/streaming.js";
 import { assertEtag } from "../data/extensions/tos-datastore/revision.js";
@@ -41,7 +42,7 @@ async function nativeModelRuntime(context: Context, root: string, modelRef: stri
 }
 async function nativeExportBytes(bytes: Uint8Array, out: string): Promise<string | undefined> {
   if (out === "-") {
-    await new Promise<void>((resolveWrite, reject) => process.stdout.write(bytes, error => error ? reject(error) : resolveWrite()));
+    await writeCliChunk(bytes);
     return undefined;
   }
   const destination = resolve(out);
@@ -60,7 +61,7 @@ async function nativeExportContent(context: Context, content: PayloadContent, ou
   if (out === "-") {
     await beforePublish();
     await consumeContent(context, content, async chunk => {
-      await new Promise<void>((done, reject) => process.stdout.write(chunk, error => error ? reject(error) : done()));
+      await writeCliChunk(chunk);
       bytes += chunk.byteLength;
     });
     return { bytes };
@@ -167,18 +168,24 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
     if ("deleted" in record && record.deleted) {
       await assertModelOperationStamp(root, opened.stamp);
       if (options.path !== undefined) throw serviceError("DATA_DELETED", "Record is deleted", { revision: record.revision });
-      return { id, modelRef: opened.binding.model, deleted: true as const, revision: record.revision };
+      return { kind: "deleted" as const, record: { id, modelRef: opened.binding.model, deleted: true as const, revision: record.revision } };
     }
-    let value: unknown;
-    if (!options.metadataOnly) {
-      value = await recordValue(context, opened, record);
-      if (options.path !== undefined) {
-        try { assertJsonValue(value); } catch (cause) { throw serviceError("UNSUPPORTED_CAPABILITY", "Path queries require JSON-compatible values", { cause: String(cause) }); }
-        value = queryJsonPath(value, options.path);
-      }
+    const fields = { id, modelRef: opened.binding.model, ...metadata(record),
+      ...("data" in record ? { contentType: record.data.payload.contentType } : {}) };
+    if (options.metadataOnly) {
+      await assertModelOperationStamp(root, opened.stamp);
+      return { kind: "metadata" as const, record: fields };
+    }
+    const value = await recordValue(context, opened, record);
+    const streaming = opened.binding.factory === "memsphere/tos-json";
+    if (options.path !== undefined) {
+      try { assertJsonValue(value); } catch (cause) { throw serviceError("UNSUPPORTED_CAPABILITY", "Path queries require JSON-compatible values", { cause: String(cause) }); }
+      const matches = queryJsonPath(value, options.path);
+      await assertModelOperationStamp(root, opened.stamp);
+      return { kind: "selectedPath" as const, record: { ...fields, value: matches }, streaming };
     }
     await assertModelOperationStamp(root, opened.stamp);
-    return { id, modelRef: opened.binding.model, ...metadata(record), ...("data" in record ? { contentType: record.data.payload.contentType } : {}), ...(options.metadataOnly ? {} : { value }) };
+    return { kind: "value" as const, record: { ...fields, value }, streaming };
   }
   async function hasDataUnlocked(context: Context, root: string, storeId: string, id: string) {
     const opened = await openBusinessStore(context, root, storeId); assertId(opened, id);
@@ -319,13 +326,21 @@ export function createDataService(adapters: Partial<DataServiceAdapters> = {}) {
 
   const listData = (...args: Parameters<typeof listDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => listDataUnlocked(...args)) : listDataUnlocked(...args);
 
-  const readData = (...args: Parameters<typeof readDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => readDataUnlocked(...args)) : readDataUnlocked(...args);
+  const readDataOutcome = (...args: Parameters<typeof readDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => readDataUnlocked(...args)) : readDataUnlocked(...args);
+  // Existing service consumers receive the same record. The CLI also needs the
+  // authorized read scope and transport policy from this specific Store open.
+  type ReadRecord = ReturnType<typeof metadata> & {
+    id: string; modelRef: string; contentType?: string; deleted?: true; value?: unknown
+  };
+  const readData = async (...args: Parameters<typeof readDataUnlocked>): Promise<ReadRecord> =>
+    (await readDataOutcome(...args)).record;
+
 
   const hasData = (...args: Parameters<typeof hasDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => hasDataUnlocked(...args)) : hasDataUnlocked(...args);
 
   const exportData = (...args: Parameters<typeof exportDataUnlocked>) => isContextControlStore(args[2]) ? withContextControlAccess(args[1], () => exportDataUnlocked(...args)) : exportDataUnlocked(...args);
 
-  return { listData, readData, hasData, writeData, upsertData, deleteData, editData, validateData, exportData };
+  return { listData, readData, readDataOutcome, hasData, writeData, upsertData, deleteData, editData, validateData, exportData };
 }
 
-export const { listData, readData, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } = createDataService();
+export const { listData, readData, readDataOutcome, hasData, writeData, upsertData, deleteData, editData, validateData, exportData } = createDataService();

@@ -111,7 +111,7 @@ test("project upgrade CLI preserves a failed Memory publication after models suc
     assert.equal(failed.value.models.status, "upgraded", "Already completed model work must be reported");
     assert.equal(failed.value.memory.status, "failed");
     assert.equal(failed.value.failure.stage, "memory");
-    assert.ok(failed.value.failure.message);
+    assert.equal(Object.hasOwn(failed.value.failure, "message"), false);
     assert.equal(await readFile(join(project, definitionPath), "utf8"), systemModel.source);
     assert.equal(JSON.parse(await readFile(configPath, "utf8")).store.published_revision, beforeRevision);
     assert.equal(f.git(["rev-parse", "HEAD"], join(project, "memory")), beforeRevision);

@@ -1,0 +1,15 @@
+!statement
+syntax: memsphere-20261027-stable
+names:
+  - memsphere-cli-output-rules
+  - Memsphere CLI 输出契约
+defines:
+  - Memsphere CLI 的普通结果为 Agent 提供公开业务事实、当前状态和可用动作。默认文本面向阅读，显式 --output json 适合程序提取。
+asserts:
+  - 同一命令及参数的 JSON 和默认文本应呈现同一组公开业务事实、相同详情范围及相同有效动作。先定义逐场景公开投影，再将投影应用于 JSON 和仓库中英文 Prompt。
+  - 普通输出使用严格的嵌套字段白名单。凭据、原始配置、堆栈、第三方错误、宿主会话标识、调度帧及冻结运行快照不得进入 CLI stdout 或错误回执。
+  - JSON 成功回执在 stdout 输出一个 JSON 值。执行失败使用非零退出码并在 stderr 输出单个错误对象。声明的业务否定结果仍按业务协议返回。
+  - 使用返回的 ID、revision、position 及 nextCursor 原值继续操作。列表在筛选后分页，直到响应没有 nextCursor；详情和正文通过相应读取命令、part 或输出文件取得。
+  - memory read、固定 ChangeSet 材料、帮助、版本及原始内容导出沿各自的输出协议。调用方依据命令及场景选择协议；不得把明确请求的正文截为普通摘要。
+  - 动作由当前状态决定。等待回执给出恢复入口；Human 确认动作要求获取对应明确决定。成功写入后回执失败时按返回的真实业务标识核验，避免重复写入。
+  - review wait、vote 和 retry 提供轮次、计数、操作结果与下一步。需要明细时使用同轮 details 入口按权限读取。cli show 只给登记与应用关系，工具的公开用法由 App Memory 提供。

@@ -49,7 +49,7 @@ flow:
     ]);
     assert.equal(preflight.status, 0, preflight.stderr);
     assert.match(preflight.stdout, /artifact_acceptance\.unanimous/);
-    assert.match(preflight.stdout, /"skip": true/);
+    assert.match(preflight.stdout, /"skip":true/);
     assert.deepEqual(await readdir(runsRoot), []);
 
     const skippedConfigPath = join(root, "skipped-review.json");
@@ -62,10 +62,10 @@ flow:
       }
     }));
     const started = runBuiltCli(projectRoot, home, projectName, [
-      "run", "start", "reviewed-cli", "--name", "all skipped", "--review-config", skippedConfigPath
+      "run", "start", "reviewed-cli", "--name", "all skipped", "--review-config", skippedConfigPath, "--output", "json"
     ]);
     assert.equal(started.status, 0, started.stderr);
-    const runId = started.stdout.match(/Run (run-[^\s]+)/)?.[1];
+    const runId = JSON.parse(started.stdout).runId;
     assert(runId, started.stdout);
     assert.deepEqual(await runDirectories(runsRoot), [runId]);
 
@@ -73,7 +73,7 @@ flow:
       "run", "report", "--run", runId, "--artifact", "accepted without Review"
     ]);
     assert.equal(reported.status, 0, reported.stderr);
-    assert.match(reported.stdout, /完成|Done/);
+    assert.match(reported.stdout, /status[:：] ?done/);
 
     const actorConfigPath = join(root, "actor-review.json");
     await writeFile(actorConfigPath, JSON.stringify({
@@ -88,7 +88,7 @@ flow:
       "run", "start", "reviewed-cli", "--name", "actor bound", "--review-config", actorConfigPath
     ]);
     assert.equal(rejected.status, 1);
-    assert.match(rejected.stderr, /control_plane config is required/);
+    assert.match(rejected.stderr, /CONTROL_PLANE_REQUIRED/);
     assert.doesNotMatch(rejected.stderr, /Review configuration is required/);
     assert.deepEqual(await runDirectories(runsRoot), [runId]);
   } finally {

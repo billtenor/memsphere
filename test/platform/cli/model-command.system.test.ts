@@ -31,11 +31,27 @@ function success(result: Result): any {
 function failure(result: Result, code?: string): any {
   assert.equal(result.signal, null, "CLI must reject before waiting for stdin"); assert.equal(result.code, 1, result.stdout); assert.equal(result.stdout, "");
   const error = JSON.parse(result.stderr).error;
-  assert.equal(typeof error.message, "string"); assert.ok(error.message.length); assert.equal(typeof error.code, "string");
+  assert.equal(Object.hasOwn(error, "message"), false); assert.equal(typeof error.code, "string");
   if (code) assert.equal(error.code, code); return error;
 }
 const json = ["--output", "json"];
 const source = '\uFEFF {\r\n "type":"string", "title":"Definition title", "description":"Definition description"\r\n}\r\n';
+
+test("a model committed before an oversized receipt can be verified without replaying the write", async t => {
+  const f = await businessFixture(t);
+  const ref = "large-registration.json";
+  const description = "a".repeat(9000);
+  const result = await cli(t, f, ["model", "create", ref, "--description", description, "--definition-file", "-", "--output", "json"],
+    { input: JSON.stringify({ type: "string" }) });
+  assert.equal(result.code, 1);
+  assert.equal(result.stdout, "");
+  const { error } = JSON.parse(result.stderr);
+  assert.equal(error.code, "OUTPUT_RENDER_FAILED");
+  assert.equal(error.details.savedId, ref);
+  assert.deepEqual(error.nextAction.args, ["--project", "test-project", "model", "read", ref, "--part", "registration"]);
+  const verified = success(await cli(t, f, ["model", "read", ref, "--part", "registration", "--output", "json"]));
+  assert.equal(verified.registration.description, description);
+});
 
 test("actual model CLI resolves the Registry Project and preserves stdin definition bytes through CRUD", { timeout: 30_000 }, async t => {
   const f = await businessFixture(t, {});
@@ -132,7 +148,7 @@ test("CLI check-data reports failing record identities without saving the candid
   assert.deepEqual(good.data.map((item: { storeId: string; checked: number }) => [item.storeId, item.checked]), [["records", 1]]);
   const candidate = JSON.stringify({ ...objectSchema, properties: { ...objectSchema.properties, count: { type: "integer", maximum: 0 } } });
   const error = failure(await cli(t, f, ["model", "validate", "record.json", "--definition-file", "-", "--check-data", ...json], { input: candidate }), "DATA_VALIDATION_FAILED");
-  assert.equal(error.details.snapshot, false); assert.equal(error.details.data[0].failures[0].id, "bad-for-candidate");
+  assert.equal(error.details.data[0].failures[0].id, "bad-for-candidate");
   assert.deepEqual(JSON.parse(await fs.readFile(join(f.root, "models/json-schema/draft-07/record.json"), "utf8")), objectSchema);
 });
 

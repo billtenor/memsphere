@@ -70,15 +70,15 @@ test("project list pages all registered Projects and binds cursors to the Home a
     const first = result(await f.run(["project", "list", "--output", "json"]));
     assert.equal(first.items.length, 100);
     assert.equal(first.items[0].name, "main");
-    assert.equal(first.items[0].primary, true);
+    assert.equal(first.items[0].relation, "primary");
     const last = result(await f.run(["project", "list", "--limit", "1000", "--cursor", first.nextCursor, "--output", "json"]));
     assert.equal(last.items.length, 3);
     assert.equal(Object.hasOwn(last, "nextCursor"), false);
     assert.deepEqual([...first.items, ...last.items].map((item: { name: string }) => item.name), Object.keys(f.registry.projects).sort());
     const text = await f.run(["project", "list", "--limit", "1"]);
     assert.equal(text.status, 0, text.stderr);
-    assert.match(text.stdout, /^main\tavailable\tprimary/m);
-    assert.match(text.stdout, /^nextCursor: \S+$/m);
+    assert.match(text.stdout, /name=main.*relation=primary/);
+    assert.match(text.stdout, /^nextCursor[:：] ?\S+$/m);
     const elsewhere = join(f.root, "elsewhere");
     await mkdir(elsewhere);
     const wrongWorkspace = await f.run(["project", "list", "--cursor", first.nextCursor, "--output", "json"], elsewhere);
@@ -103,13 +103,13 @@ test("Memory CLI filters before paging and supports the same result in JSON, YAM
     const last = result(await f.run(["memory", "list", "--kind", "concepts", "--cursor", first.nextCursor, "--limit", "1000", "--output", "json"]));
     assert.deepEqual(last.items.map((item: { reference: string }) => item.reference), ["concepts/middle", "concepts/zed"]);
     assert.equal(Object.hasOwn(last, "nextCursor"), false);
-    const yaml = await f.run(["memory", "list", "--kind", "concepts", "--limit", "1"]);
+    const yaml = await f.run(["memory", "list", "--kind", "concepts", "--limit", "1", "--output", "yaml"]);
     assert.equal(yaml.status, 0, yaml.stderr);
     assert.deepEqual(parse(yaml.stdout), first);
     const text = await f.run(["memory", "list", "--kind", "concepts", "--limit", "1", "--output", "text"]);
     assert.equal(text.status, 0, text.stderr);
-    assert.match(text.stdout, /^concepts\/alpha\tmain@/);
-    assert.match(text.stdout, new RegExp(`nextCursor: ${first.nextCursor}`));
+    assert.match(text.stdout, /reference=concepts\/alpha.*project_name=main/);
+    assert.match(text.stdout, new RegExp(`nextCursor[:：] ?${first.nextCursor}`));
     const empty = result(await f.run(["memory", "list", "--query", "no-match", "--output", "json"]));
     assert.deepEqual(empty, { items: [] });
     const wrongFilter = await f.run(["memory", "list", "--kind", "statements", "--cursor", first.nextCursor, "--output=json"]);
@@ -164,8 +164,8 @@ test("archive list filters before paging and orders timestamp ties by kind and I
     assert.equal(JSON.parse(wrong.stderr).error.code, "INVALID_CURSOR");
     const text = await f.run(["archive", "list", "changes", "--limit", "1"]);
     assert.equal(text.status, 0, text.stderr);
-    assert.match(text.stdout, /^changes change-a/m);
-    assert.match(text.stdout, /^nextCursor: /m);
+    assert.match(text.stdout, /kind=changes id=change-a/);
+    assert.match(text.stdout, /^nextCursor[:：] ?/m);
   } finally { await f.cleanup(); }
 });
 
@@ -192,7 +192,7 @@ test("list argument and runtime failures return one JSON error and leave stdout 
       assert.equal(failed.stdout, "");
       const error = JSON.parse(failed.stderr).error;
       assert.equal(typeof error.code, "string");
-      assert.equal(typeof error.message, "string");
+      assert.equal(Object.hasOwn(error, "message"), false);
     }
     assert.equal((await f.run(["memory", "list", "--help"])).status, 0);
     assert.equal((await f.run(["--version"])).status, 0);
@@ -214,7 +214,7 @@ test("model, data Store and record lists paginate through the registered CLI com
     assert.equal(Object.hasOwn(modelLast, "nextCursor"), false);
     const modelText = await f.run(["model", "list", "--origin", "project", "--tag", "paged", "--cursor", modelFirst.nextCursor, "--limit", "1000"]);
     assert.equal(modelText.status, 0, modelText.stderr);
-    assert.deepEqual(parse(modelText.stdout).items, modelLast.items);
+    for (const item of modelLast.items) assert.ok(modelText.stdout.includes(item.id));
     assert.deepEqual(result(await f.run(["model", "list", "--query", "no-match", "--output=json"])).items, []);
     for (const id of ["zed", "alpha", "middle"]) await createBusinessStore({}, f.project, id, {
       model: "alpha.json", kind: "value", factory: "memsphere/filesystem-json", config: { directory: `business/${id}` }
@@ -257,7 +257,7 @@ test("Store creation reports invalid configuration as JSON field diagnostics wit
     assert.equal(invalidConfig.stdout, "");
     const error = JSON.parse(invalidConfig.stderr).error;
     assert.equal(error.code, "INVALID_ARGUMENT");
-    assert(error.details.some((issue: { path: string[] }) => issue.path.includes("directory")));
+    assert(error.details.diagnostics.some((issue: { path: string[] }) => issue.path.includes("directory")));
   } finally { await f.cleanup(); }
 });
 

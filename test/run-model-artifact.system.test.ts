@@ -59,12 +59,12 @@ test("real CLI report forwards explicit ID and exposes it in the receipt", async
   const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
   const cli = (...args: string[]) => spawnSync(process.execPath, [cliPath, "--project", "test-project", "run", "report", "--run", run.id, "--artifact", '{"name":"cli","count":1}', ...args], { cwd: f.root, env: { ...process.env, MEMSPHERE_HOME: f.home }, encoding: "utf8" });
   for (const value of ["", "{", "null", "[]", '"task"', '{"data_id":null}', '{"data_id":1}', '{"data_id":""}', '{"data_id":"task","expected_revision":3}', "@options.json", "data_id: task"]) {
-    const invalid = cli("--write-options", value); assert.equal(invalid.status, 1, value); assert.match(invalid.stderr, /write-options|data_id/);
+    const invalid = cli("--write-options", value); assert.equal(invalid.status, 1, value); assert.match(invalid.stderr, /INVALID_ARGUMENT/);
     const state = await readRun(f.runsRoot, run.id);
     assert.equal(state.events.length, 0); assert.equal(currentStep(state)!.stepExecutionId, undefined);
     assert.deepEqual((await listData({}, f.root, "records")).items, []);
   }
-  const removed = cli("--data-id", "task"); assert.equal(removed.status, 1); assert.match(removed.stderr, /unknown option/);
-  const result = cli("--write-options", '{"data_id":"cli-task"}'); assert.equal(result.status, 0, result.stderr); assert.match(result.stdout, /data_id: cli-task/);
+  const removed = cli("--data-id", "task"); assert.equal(removed.status, 1); assert.match(removed.stderr, /INVALID_ARGUMENT/);
+  const result = cli("--write-options", '{"data_id":"cli-task"}', "--output", "json"); assert.equal(result.status, 0, result.stderr); assert.equal(JSON.parse(result.stdout).receipt.dataId, "cli-task");
   assert.deepEqual((await readData({}, f.root, "records", "cli-task")).value, { name: "cli", count: 1 });
 });

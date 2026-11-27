@@ -54,7 +54,7 @@ flow:
     const second = (await service.report(run.id, { name: "new result", content: textContent("new body"), dependencies: [{ kind: "artifact", id: first.id }] })).artifact;
     await service.review(run.id, second.id, "human", ["latest opinion"]);
     await page.getByRole("button", { name: "刷新", exact: true }).click();
-    const newNode = page.getByRole("button", { name: /new result/ });
+    const newNode = page.locator("button.pg-node").filter({ hasText: "new result" });
     await newNode.waitFor(); await newNode.click();
     await page.getByRole("dialog").getByText("new body", { exact: true }).waitFor();
     await page.getByRole("dialog").getByText("latest opinion", { exact: true }).waitFor();

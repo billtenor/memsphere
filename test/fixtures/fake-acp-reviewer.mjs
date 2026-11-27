@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
-import { access, appendFile, writeFile } from "node:fs/promises";
+import { access, appendFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { realpathSync } from "node:fs";
 
@@ -43,6 +43,7 @@ const app = acp
       process.stderr.write("provider diagnostic: reconnecting\n");
       throw new Error("synthetic provider failure");
     }
+    if (mode === "silent-prompt") await new Promise(resolve => signal.addEventListener("abort", resolve, { once: true }));
     if (mode === "idle") await delay(1_500);
     if (mode === "progress") {
       for (let index = 0; index < 8; index += 1) {
@@ -120,20 +121,17 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   const cli = process.env.MEMSPHERE_CLI;
   const assignment = process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID;
   if (!cli || !assignment) throw new Error("fake reviewer is missing Memsphere Session environment");
-  const crashMarker = process.env.EXPLORATION_TEST_CRASH_MARKER;
-  const resuming = crashMarker && await access(crashMarker).then(() => true, error => {
-    if (error.code === "ENOENT") return false;
-    throw error;
-  });
   let commandIndex = 0;
   const invokeReviewCli = async (args) => {
     // Report actual work boundaries so a busy fixture does not look idle between CLI calls.
     await sendProgress(client, sessionId, `cli-${++commandIndex}`);
-    return invoke(cli, args);
+    const receipt = await invoke(cli, args);
+    if (process.env.REVIEW_TEST_CLI_TRANSCRIPT) {
+      await appendFile(process.env.REVIEW_TEST_CLI_TRANSCRIPT, JSON.stringify({ args, receipt }) + "\n");
+    }
+    return receipt;
   };
-  // The retry scenario is already bound to a progressive Review. Its first
-  // native command saves a node before the Provider deliberately exits.
-  let graph = graphAlreadyRead || Boolean(crashMarker);
+  let graph = graphAlreadyRead;
   if (!graph) {
     await invokeReviewCli(["run", "artifact", "show", "--assignment", assignment, "--output", "json"]);
     await invokeReviewCli(["run", "artifact", "contract", "show", "--assignment", assignment, "--output", "json"]);
@@ -142,15 +140,13 @@ async function completeReview(vote, client, sessionId, graphAlreadyRead = false)
   }
   if (graph) {
     const reportNode = () => invokeReviewCli(["continue", "report", "--artifact", JSON.stringify({applicable:true}), "--output", "json"]);
-    if (crashMarker && !resuming) {
-      await reportNode();
-      await writeFile(crashMarker, "node saved\n", { flag: "wx" });
-      process.exit(7);
-    }
     let view = JSON.parse(await invokeReviewCli(["continue", "show", "--output", "json"]));
-    while (view.node) {
-      if (view.node.kind === "open_review" && vote === "request_changes") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
-      view = JSON.parse(await reportNode());
+    while (view.progress.phase === "reviewing") {
+      if (vote === "request_changes" && view.node?.kind === "open_review") await invokeReviewCli(["continue", "comment", "add", "--artifact", JSON.stringify({body:"Fake blocking finding",severity:"blocking"}), "--output", "json"]);
+      const saved = JSON.parse(await reportNode());
+      if (saved.progress.phase !== "reviewing") break;
+      // Only a reviewer adding comments needs the next node's body.
+      view = vote === "request_changes" ? JSON.parse(await invokeReviewCli([...saved.nextAction.args, "--output", "json"])) : saved;
     }
     await invokeReviewCli(["continue", "submit", "--artifact", JSON.stringify({vote:vote === "request_changes" ? "request_changes" : "approve",summary:"Fake ACP review completed"}), "--output", "json"]);
     return;
@@ -182,7 +178,7 @@ async function invoke(command, args) {
       errors.push(chunk); errorBytes += chunk.length;
       if (errorBytes > limit) { child.kill(); reject(new Error('fake reviewer CLI stderr exceeded maxBuffer')); }
     });
-    child.once('close', code => code === 0 ? resolve() : reject(new Error(`fake reviewer CLI failed: ${Buffer.concat(errors).toString() || Buffer.concat(output).toString()}`)));
+    child.once('close', code => code === 0 ? resolve() : reject(new Error(`fake reviewer CLI ${args.slice(0, args.findIndex(arg => arg.startsWith("-"))).join(" ")} failed: ${Buffer.concat(errors).toString() || Buffer.concat(output).toString()}`)));
   });
   return Buffer.concat(output).toString().trim();
 }

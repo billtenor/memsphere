@@ -1,3 +1,4 @@
+import { failure } from "./context_control/errors.js";
 import { z } from "zod";
 import type { EffectiveRuleEntry, EffectiveRuleSection, EffectiveRuleTree } from "./memory/rules.js";
 
@@ -67,7 +68,7 @@ export function assertReviewNodes(value: ReviewNodes, comments: readonly NodeCom
     if (new Set(s.ruleResults.map(r => r.rulePath)).size !== s.ruleResults.length || s.ruleResults.some(r => !rules.includes(r.rulePath))) throw new Error("review_rule_result_invalid");
     for (const id of nodeIds(s)) { if (linked.has(id) || !ids.has(id)) throw new Error("review_comment_reference_invalid"); linked.add(id); }
     if (s.reported && !needsNodeReport(node)) throw new Error("review_organization_report_invalid");
-    if (final && (needsNodeReport(node) && !s.reported || (needsNodeReport(node) || nodeIds(s).length || s.applicable !== undefined) && !contentComplete(node, s, comments))) throw new Error(`review_node_incomplete: ${node.nodeId}`);
+    if (final && (needsNodeReport(node) && !s.reported || (needsNodeReport(node) || nodeIds(s).length || s.applicable !== undefined) && !contentComplete(node, s, comments))) throw failure("REVIEW_CONFLICT", `review_node_incomplete: ${node.nodeId}`);
   }
   if (linked.size !== comments.length) throw new Error("review_comment_unlinked");
 }
@@ -176,7 +177,7 @@ export function mutateReviewNode<C extends NodeComment>(value: Required<ReviewNo
       if (node.kind && !input.applicable) throw new Error("review_open_node_must_be_completed");
       if (input.comments !== undefined) { const old = new Set(nodeIds(state)); saved = saved.filter(c => !old.has(reviewCommentId(c))); state.ruleResults = []; delete state.reasonCommentId; if (node.kind) state.commentIds = []; input.comments.forEach(c => add(node, state, c)); }
       state.applicable = input.applicable;
-      if (mutation.operation === "report") { if (!contentComplete(node, state, saved)) throw new Error(`review_node_incomplete: ${node.nodeId}`); state.reported = true; }
+      if (mutation.operation === "report") { if (!contentComplete(node, state, saved)) throw failure("REVIEW_CONFLICT", `review_node_incomplete: ${node.nodeId}`); state.reported = true; }
     }
   } else {
     const c = saved.find(c => reviewCommentId(c) === mutation.commentId); if (!c) throw new Error("review_comment_not_found");

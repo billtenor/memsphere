@@ -445,9 +445,11 @@ export async function withMemoryChangeDetailSnapshot<T>(input: {
     const verifyCheckpoint = async () => {
       const latest = await readChange(context.primary, input.changeId);
       if (!latest.checkpoint || latest.checkpoint.digest !== input.checkpointDigest) {
-        throw new Error(`ChangeSet checkpoint mismatch: ${latest.id}; validate again and update the review reference`);
+        throw Object.assign(new Error(`ChangeSet checkpoint mismatch: ${latest.id}; validate again and update the review reference`),
+          { code: "CHECKPOINT_CONFLICT", details: { changeId: latest.id } });
       }
-      return readCheckpointChange(context.primary, latest, true);
+      try { return await readCheckpointChange(context.primary, latest, true); }
+      catch (error) { throw new MemoryChangeIntegrityError(latest.id, error instanceof Error ? error.message : String(error)); }
     };
     const change = input.checkpointDigest === undefined ? current : await verifyCheckpoint();
     const baseRoot = await mkdtemp(join(tmpdir(), "memsphere-change-detail-base-"));
@@ -2700,13 +2702,13 @@ async function forwardEmbeddedViewBase(
 export async function recoverMemory(
   reference: string,
   mode: "restore" | "create-change"
-): Promise<{ change?: MemoryChangeSet; candidateRoot?: string }> {
+): Promise<{ project: string; change?: MemoryChangeSet; candidateRoot?: string }> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
   return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
-    return recoverMemoryLocked(context.primary, reference, mode);
+    return { project: context.primary.name, ...await recoverMemoryLocked(context.primary, reference, mode) };
   });
 }
 
@@ -2776,23 +2778,24 @@ async function recoverMemoryLocked(
   return result ?? {};
 }
 
-export async function pushMemory(): Promise<void> {
+export async function pushMemory(): Promise<string> {
   const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(context.primary);
   await assertManagedHealthy(context.primary);
   await runGit(["push", "origin", context.primary.config.store.branch], { cwd: context.primary.memoryRoot });
+  return context.primary.name;
 }
 
 export async function syncMemory(
   options: { onLockWait?: () => void } = {}
-): Promise<{ revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
+): Promise<{ project: string; revision?: string; change?: MemoryChangeSet; candidateRoot?: string }> {
   const initialContext = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
   assertManaged(initialContext.primary);
   const source = await prepareSync(initialContext.primary);
   return withMemoryWriteAccess(initialContext.primary.memoryRoot, async () => {
     const context = await resolveProjectContext({ project: process.env.MEMSPHERE_PROJECT });
     assertManaged(context.primary);
-    return syncMemoryLocked(context.primary, source, context);
+    return { project: context.primary.name, ...await syncMemoryLocked(context.primary, source, context) };
   });
 }
 

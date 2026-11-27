@@ -47,7 +47,7 @@ test("Embedded upgrade preserves a same-path customized Procedure", async () => 
     f.git(["worktree", "add", "-b", "upgrade/system", linked, "master"]);
     const { result, value } = f.upgrade("embedded", [], linked);
     assert.equal(result.status, 1);
-    assert.match(value.failure.message, /removal identity or content conflict/);
+    assert.equal(value.failure.stage, "preflight");
     assert.equal(await readFile(join(linked, ".memsphere/memory", entry.path), "utf8"), custom);
   } finally { await f.cleanup(); }
 });

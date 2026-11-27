@@ -1,3 +1,4 @@
+import { failure } from "../context_control/errors.js";
 import { createServer, createConnection } from "node:net";
 import { createHash, randomUUID, randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, chmod } from "node:fs/promises";
@@ -12,12 +13,13 @@ import { spawnCommand } from "../platform-process.js";
 import { readConfigAt, readViewConfig } from "../config.js";
 import { currentCliRuntimeDescriptor } from "../acp/cli-runtime.js";
 import { listTasks, readTask, recordClaudeDelivery, updateTask, taskDiagnostics, type TaskRow } from "./tasks.js";
-import { automaticMessagePrefix, inspectReview, reviewResumeNotification, reviewReady } from "./review.js";
+import { inspectReview, reviewResumeNotification, reviewReady } from "./review.js";
 import { readRunnerAgents } from "../runner/identity.js";
 import { resolveQueueCommand } from "../runner/queue-command.js";
 import { stripRunnerEnvironment } from "../runner/agent-types.js";
 import { ClaudeNotificationError, sendClaudeNotification } from "../runner/claude-notifications.js";
 import { dispatchArtifactReviewAgents } from "../acp/dispatcher.js";
+import { isLoopbackHost } from "../view/service.js";
 
 const stateSchema = z.object({ protocol: z.literal(1), pid: z.number().int().positive(), instanceId: z.string(), token: z.string(), endpoint: z.string() }).strict();
 type State = z.infer<typeof stateSchema>;
@@ -99,7 +101,7 @@ export async function ensureDaemon(home = resolveMemsphereHome()) {
 export async function ensureClaudeNotificationDaemon() {
   const state = await ensureDaemon();
   if (!(await request(state, "status")).claudeNotifications) {
-    throw new Error("Restart the Memsphere daemon with this CLI version before registering Claude Code notifications");
+    throw failure("UNSUPPORTED_CAPABILITY", "Restart the Memsphere daemon with this CLI version before registering Claude Code notifications");
   }
 }
 export async function daemonControl(command: string, home = resolveMemsphereHome()) {
@@ -130,7 +132,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
       let view: HttpServer | undefined, viewError: string | undefined;
       let opening: Promise<void> | undefined;
       let stopping = false, busy = false, scanOffset = 0;
-      let viewInfo: { host: string; port: number; settingsToken?: string } | undefined;
+      let viewInfo: { host: string; port: number; settingsAccess: "local" | "configured" | "setup_required" } | undefined;
       const closeView = async () => { await opening; const server = view; view = undefined; viewInfo = undefined; if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } };
       const doOpenView = async () => {
         if (view) return;
@@ -156,7 +158,11 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(config.view.port, config.view.host, () => { server.removeListener("error", reject); resolve(); }); });
           view = server; viewError = undefined;
           const address = server.address();
-          viewInfo = { settingsToken, host: config.view.host, port: typeof address === "object" && address ? address.port : config.view.port };
+          viewInfo = {
+            host: config.view.host,
+            port: typeof address === "object" && address ? address.port : config.view.port,
+            settingsAccess: isLoopbackHost(config.view.host) ? "local" : config.view.operatorToken ? "configured" : "setup_required"
+          };
           server.on("error", () => { viewError = "View service error"; void closeView(); });
         } catch (e) { viewError = (e as Error).message; }
       };
@@ -192,7 +198,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           if (claimed) await dispatchArtifactReviewAgents({ config, run: context.run, workspaceRoot: row.value.input.cwd });
           if (!reviewReady(context)) return;
           stage = "render";
-          const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId);
+          const body = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, { roundId: row.value.input.roundId }, context.run.language);
           const latest = await inspectReview(config, row.value.input.reviewId);
           if (latest.round.id !== row.value.input.roundId) { await save({ status: "cancelled", error: { stage: "cancel", code: "round_changed", message: "Review round changed before sending" } }); return; }
           if (!reviewReady(latest)) return;
@@ -204,10 +210,10 @@ export async function runDaemon(home = resolveMemsphereHome()) {
           if (recipient.agentType === "claude") {
             deliveryId = randomUUID();
             await save({ claudeDelivery: { id: deliveryId } });
-            const callbackBody = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, `${row.id}:${deliveryId}`);
+            const callbackBody = reviewResumeNotification(row.value.input.project, row.value.input.reviewId, { callback: `${row.id}:${deliveryId}` }, latest.run.language);
             await sendClaudeNotification({
               command: recipient.agentCommand, sessionId: recipient.sessionId, inbox: recipient.inbox,
-              cwd: row.value.input.cwd, message: `${automaticMessagePrefix}\n${callbackBody}`, signal: stopNotifications.signal
+              cwd: row.value.input.cwd, message: callbackBody, signal: stopNotifications.signal
             });
             await recordClaudeDelivery(row.id, deliveryId, "sentAt", home);
           } else {
@@ -258,7 +264,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
             else if (request.command === "notify") void tick();
             else if (request.command !== "status" && request.command !== "stop") throw new Error("Unknown daemon command");
             const counts: Record<string, number> = {}; for (const row of await listTasks(home)) counts[row.value.status] = (counts[row.value.status] ?? 0) + 1;
-            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, claudeNotifications: true, view: { ...(await readServiceIntent(home)).view, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
+            socket.end(JSON.stringify({ taskErrors: [...taskDiagnostics(home), ...executionErrors.values()], tasks: counts, running: !stopping, pid: process.pid, instanceId: state.instanceId, protocol: 1, claudeNotifications: true, view: { desiredState: (await readServiceIntent(home)).view.desiredState, running: Boolean(view), ...viewInfo, ...(viewError ? { error: viewError } : {}) } }) + "\n");
             if (request.command === "stop") void shutdown();
           } catch (e) { socket.end(JSON.stringify({ error: (e as Error).message }) + "\n"); }
         });
@@ -298,8 +304,7 @@ export async function runDaemon(home = resolveMemsphereHome()) {
 export async function sendQueue(command: string, sessionId: string, body: string, cwd: string) {
   const launch = await resolveQueueCommand(command);
   return new Promise<void>((resolve, reject) => {
-    const message = `${automaticMessagePrefix}\n${body}`;
-    const child = spawnCommand(launch.command, [...launch.args, "queue", "--thread", sessionId, "--message", message], { cwd, stdio: "ignore" });
+    const child = spawnCommand(launch.command, [...launch.args, "queue", "--thread", sessionId, "--message", body], { cwd, stdio: "ignore" });
     const timeout = setTimeout(() => { child.kill(); reject(new Error("Queue timeout; outcome unknown")); }, 15000);
     child.once("error", e => { clearTimeout(timeout); reject(e); });
     child.once("close", code => { clearTimeout(timeout); if (code === 0) resolve(); else reject(new Error(`Queue exited ${code}`)); });

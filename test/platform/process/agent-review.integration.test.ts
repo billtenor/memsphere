@@ -263,10 +263,18 @@ test("Agent Review try-run explicitly writes launch evidence without starting or
     const after = await readRun(runsRoot, runId);
     assert.deepEqual(after, before);
     assert.equal(after.artifactReviews?.[0]?.rounds[0]?.assignments[0]?.status, "queued");
-    const generated = await tryRunArtifactReviewAgents({ config: debugConfig, run: before });
-    assert.equal(generated.length, 1);
-    const directory = generated[0].directory;
-    assert.equal(directory, join(debugRoot, "agent-review", review.id, round.id, artifactReviewAssignmentId(assignment)));
+    const globalConfigPath = join(config.homeRoot, "config.json");
+    const global = JSON.parse(await readFile(globalConfigPath, "utf8"));
+    await writeFile(globalConfigPath, JSON.stringify({ ...global, debug: { agent_review: true } }));
+    const entry = fileURLToPath(new URL("../../../dist/cli.js", import.meta.url));
+    const result = crossSpawn.sync(process.execPath, [entry, "--project", "review-fixture", "run", "try-run", "--run", runId,
+      "--output", "json"], { cwd: dirname(configPath), env: launcherEnv({ MEMSPHERE_HOME: config.homeRoot }), encoding: "utf8", timeout: 30000 });
+    assert.equal(result.status, 0, result.stderr);
+    const receipt = JSON.parse(result.stdout);
+    const directory = join(config.debug.root, "agent-review", review.id, round.id, artifactReviewAssignmentId(assignment));
+    assert.deepEqual(receipt, { runId, items: [{ assignmentId: artifactReviewAssignmentId(assignment),
+      promptPath: join(directory, "prompt.md"), launchPath: join(directory, "launch.json") }] });
+    assert.deepEqual(await readRun(runsRoot, runId), before);
     const launch = JSON.parse(await readFile(join(directory, "launch.json"), "utf8")) as Record<string, unknown>;
     const prompt = normalizeNewlines(await readFile(join(directory, "prompt.md"), "utf8"));
     assert.equal(launch.processStarted, false);
@@ -356,9 +364,10 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     onSession: async () => undefined
   }), /agent_startup_timeout: startup exceeded 500ms/);
 
+  let idleSessionReady = false;
   await assert.rejects(runAgentReviewAcpSession({
-    launch: fakeClientLaunch("idle", {
-      startupTimeoutMs: 1_000,
+    launch: fakeClientLaunch("silent-prompt", {
+      startupTimeoutMs: 10_000,
       idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
@@ -366,13 +375,14 @@ test("ACP Client separates startup, idle, and maximum runtime timeouts", async (
     reminder: "Submit",
     workspaceRoot: tmpdir(),
     isSubmitted: async () => false,
-    onSession: async () => undefined
+    onSession: async () => { idleSessionReady = true; }
   }), /agent_idle_timeout: no ACP activity for 500ms/);
+  assert.equal(idleSessionReady, true, "idle expiration follows the completed ACP handshake");
 
   const progressUpdates: string[] = [];
   const activeWithoutMaximum = await runAgentReviewAcpSession({
     launch: fakeClientLaunch("progress", {
-      startupTimeoutMs: 1_000,
+      startupTimeoutMs: 10_000,
       idleTimeoutMs: 500,
       maxRuntimeMs: null
     }),
@@ -622,15 +632,17 @@ test("Windows queue passes complete multiline messages through direct and npm No
   t.after(() => rm(directory, { recursive: true, force: true }));
   const script = join(directory, "queue.mjs"), output = join(directory, "args.json"), shim = join(directory, "codex.cmd");
   await writeFile(script, `import { writeFileSync } from 'node:fs'; if (process.argv.includes('--help')) console.log('queue --thread --message'); else writeFileSync(${JSON.stringify(output)}, JSON.stringify(process.argv.slice(2)));`);
-  const body = '请执行命令以继续：\ncommand "quoted" %percent% & | ^ !';
+  const { reviewResumeNotification } = await import("../../../src/daemon/review.js");
+  const message = reviewResumeNotification("test-project", 'review "quoted" %percent% & | ^ !', { roundId: 'round-1' }, 'zh-CN');
+  const expected = '[Memsphere 自动消息]\n请执行命令以继续：\nmemsphere --project \'test-project\' run review wait --review \'review "quoted" %percent% & | ^ !\' --notification-round \'round-1\'';
   for (const source of [
     `@"${process.execPath}" "${script}" %*\r\n`,
     'SET "_prog=%dp0%\\node.exe"\r\nSET "_prog=node"\r\nendLocal & "%_prog%" "%dp0%\\queue.mjs" %*\r\n'
   ]) {
     await writeFile(shim, source);
     await checkQueueCapability(shim);
-    await sendQueue(shim, "session", body, directory);
-    assert.deepEqual(JSON.parse(await readFile(output, "utf8")), ["queue", "--thread", "session", "--message", `[Memsphere 自动消息]\n${body}`]);
+    await sendQueue(shim, "session", message, directory);
+    assert.deepEqual(JSON.parse(await readFile(output, "utf8")), ["queue", "--thread", "session", "--message", expected]);
   }
   await writeFile(shim, '@echo unknown %*\r\n');
   await assert.rejects(checkQueueCapability(shim), /QUEUE_BATCH_UNSUPPORTED/);

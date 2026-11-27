@@ -1,3 +1,4 @@
+import { formatCliCommand } from "../src/prompts/cli-command.js";
 import { graphReviewId } from "../src/context_control/graph-review.js";
 import { buildArtifactReviewerPrompt } from "../src/acp/prompt.js";
 import { createHash } from "node:crypto";
@@ -89,6 +90,9 @@ async function shellWithWrongGlobalCli(f: Awaited<ReturnType<typeof evidenceFixt
 test('generated Artifact and External read commands execute inside the restricted launcher', { timeout: 120000 }, async t => {
   const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f);
   const wrong=run('memsphere --version');assert.equal(wrong.status,93);assert.match(wrong.stderr,/WRONG_GLOBAL_CLI/);
+  const previousShell = process.env.MSYSTEM;
+  process.env.MSYSTEM = "MINGW64";
+  t.after(() => { if (previousShell === undefined) delete process.env.MSYSTEM; else process.env.MSYSTEM = previousShell; });
   const generatedPrompt=await buildArtifactReviewerPrompt({context:await reviews.readArtifactReviewForActor(f.input),locale:"zh-CN",promptVersion:"artifact-review-v3"});
   const generatedReads=[...generatedPrompt.matchAll(/"readCommand":\s*("(?:\\.|[^"\\])*")/g)].map(m=>JSON.parse(m[1]) as string);
   assert.equal(generatedReads.length,5,"the frozen contract, both Artifact inputs and both External references have read commands");
@@ -151,8 +155,8 @@ test('Run summaries exclude unrelated data and peer Review details', async t => 
 
 test('original Human confirmations are readable while current peer drafts are denied', async t => {
   const { f, service, runId, a, u, e, eRef, outside, c, input, first, attempt, runtime, env, cli, bytes, opened } = await evidenceFixture(t);
-  const confirmation=await cli(["run","review","show","--review",graphReviewId(a.step.reviewRounds![0].id,"owner"),"--output","json"]);assert.equal(confirmation.status,0,confirmation.stderr);assert.equal(JSON.parse(confirmation.stdout).artifactId,a.artifact.id);assert.equal(JSON.parse(confirmation.stdout).vote.value,"approve");assert.equal(JSON.parse(confirmation.stdout).reviewer.source,"human");
-  const confirmations=await cli(["run","review","list","--artifact",a.artifact.id,"--output","json"]);assert.equal(confirmations.status,0,confirmations.stderr);assert.equal(JSON.parse(confirmations.stdout).length,2);
+  const confirmation=await cli(["run","review","show","--review",graphReviewId(a.step.reviewRounds![0].id,"owner"),"--output","json"]);assert.equal(confirmation.status,0,confirmation.stderr);assert.equal(JSON.parse(confirmation.stdout).artifactId,a.artifact.id);assert.equal(JSON.parse(confirmation.stdout).vote.value,"approve");assert.equal(JSON.parse(confirmation.stdout).kind,"human");
+  const confirmations=await cli(["run","review","list","--artifact",a.artifact.id,"--output","json"]);assert.equal(confirmations.status,0,confirmations.stderr);assert.equal(JSON.parse(confirmations.stdout).items.length,2);
   const peer=await cli(["run","review","show","--review",graphReviewId(c.step.reviewRounds![0].id,"owner"),"--output","json"]);assert.equal(peer.status,1);assert.equal(peer.stdout,"");assert.match(peer.stderr,/REVIEW_RESOURCE_DENIED/);
 
 });
@@ -214,6 +218,19 @@ test('submitted Assignments retain fixed reads and reject further writes', { tim
   let context = await reviews.readArtifactReviewForActor(input);
   while (currentReviewNode(context.assignment)) context = await reviews.mutateArtifactReviewNodes({ ...input, attemptId: first.attempt.id, mutation: { operation: "report", expectedNodeId: currentReviewNode(context.assignment)!.nodeId, artifact: { applicable: true } } });
   await reviews.submitArtifactReviewAgentAssignment({ ...input, attemptId: first.attempt.id, vote: "approve" });
+  for (const entry of [["run", "review"], ["continue"]]) {
+    const list = await cli([...entry, "list", "--output", "json"]);
+    assert.equal(list.status, 0, list.stderr);
+    assert.ok(JSON.parse(list.stdout).tree);
+    for (const flags of [[], ["--all"]]) {
+      const shown = await cli([...entry, "show", ...flags, "--output", "json"]);
+      assert.equal(shown.status, 0, shown.stderr);
+      const view = JSON.parse(shown.stdout);
+      assert.equal(view.progress.phase, "submitted");
+      assert.ok(view.nodes.length);
+      assert.equal(view.nextAction, undefined);
+    }
+  }
   const submitted = await cli(["run", "artifact", "show", "--output", "json"]); assert.equal(submitted.status, 0, submitted.stderr);
   const write = await cli(["continue", "report", "--artifact", '{"applicable":true}', "--output", "json"]); assert.notEqual(write.status, 0); assert.equal(write.stdout, "");
 
@@ -244,6 +261,23 @@ test("restricted Embedded Memory uses the launching worktree with a custom Home 
  const runtime=await createAgentReviewCliRuntime({nodeExecutable:process.execPath,cliEntrypoint:entrypoint});t.after(()=>runtime.cleanup());
  const read=crossSpawn.sync(runtime.launcherPath,['--project','test-project','memory','read','workspace-evidence','--output','json'],{cwd:f.cwd,env,encoding:'utf8',timeout:20000});
  assert.equal(read.status,0,read.stderr);assert.match(read.stdout,/SOURCE_WORKTREE/);assert.doesNotMatch(read.stdout,/MAIN_CANONICAL/);
+ const statements = join(worktree, memoryPath, "statements");
+ await mkdir(statements, { recursive: true });
+ await writeFile(join(statements, "source-rules.yaml"), `!statement\nsyntax: ${graphMemorySyntax}\nnames: [source-rules]\nasserts: [Keep source facts]\n`);
+ for (const options of [[], ["--effective"]]) {
+   const args = ["memory", "read", "source-rules", ...options];
+   for (const format of [[], ["--output", "json"]]) {
+     const result = crossSpawn.sync(runtime.launcherPath, [...args, ...format], {cwd:f.cwd,env,encoding:"utf8",timeout:20000});
+     assert.equal(result.status, 0, result.stderr);
+     assert.match(result.stdout, /Keep source facts/);
+     if (format.length) {
+       const value = JSON.parse(result.stdout);
+       const declared = options.length ? value.declared : value;
+       assert.deepEqual(declared.asserts, ["Keep source facts"]);
+       if (options.length) assert.ok(value.effective);
+     }
+   }
+ }
  const bad=crossSpawn.sync(runtime.launcherPath,['memory','read','workspace-evidence','--output','json'],{cwd:f.cwd,env:{...env,MEMSPHERE_REVIEW_SOURCE_WORKSPACE:main,MEMSPHERE_CONFIG_PATH:join(f.cwd,'config.json')},encoding:'utf8',timeout:20000});
  assert.notEqual(bad.status,0);assert.equal(bad.stdout,'');assert.match(bad.stderr,/REVIEW_SESSION_INVALID/);
 });
@@ -339,6 +373,22 @@ test('personal node report and comment edits survive a missing unrelated old can
 });
 
 
+test("packaged Reviewer reads an authorized Step and rejects an unrelated Step through the argument transport", async t => {
+  const f = await evidenceFixture(t);
+  const step = (id: string) => ["--windows-argv", "run", "step", "show", "--step",
+    "msarg_" + Buffer.from(JSON.stringify(id)).toString("base64url")];
+  const allowed = await f.cli([...step(f.c.step.id), "--output", "json"]);
+  assert.equal(allowed.status, 0, allowed.stderr);
+  assert.deepEqual(JSON.parse(allowed.stdout).steps.map((s: {id: string}) => s.id), [f.c.step.id]);
+  const text = await f.cli(step(f.c.step.id));
+  assert.equal(text.status, 0, text.stderr);
+  assert.ok(text.stdout.includes(f.c.step.id));
+  const denied = await f.cli([...step(f.u.step.id), "--output", "json"]);
+  assert.notEqual(denied.status, 0);
+  assert.equal(denied.stdout, "");
+  assert.match(denied.stderr, /REVIEW_RESOURCE_DENIED/);
+});
+
 test('Reviewer production commands remain forbidden independently of target identity',async t=>{
  const f=await evidenceFixture(t),r=await f.cli(['run','report','--run',f.runId,'--step',f.c.step.id,'--artifact','attack','--output','json']);assert.notEqual(r.status,0);assert.equal(r.stdout,'');assert.match(r.stderr,/REVIEW_SESSION_DENIED/);
 });
@@ -354,11 +404,16 @@ test('graph sessions without a HANDLE hint discover External help and retain act
 });
 
 test('assignment references, preview export and node commands stay bound after shell PATH replacement',async t=>{
- const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json']);assert.equal(detail.status,0,detail.stderr);
+ const f=await evidenceFixture(t),run=await shellWithWrongGlobalCli(f),detail=await f.cli(['run','review','assignment','show','--output','json'], { MSYSTEM: 'MINGW64' });assert.equal(detail.status,0,detail.stderr);
  for(const reference of JSON.parse(detail.stdout).references){const r=run(reference.readCommand);assert.equal(r.status,0,reference.readCommand+': '+r.stderr);assert.doesNotMatch(r.stderr,/WRONG_GLOBAL_CLI/);}
- const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const exported=run(JSON.parse(preview.stdout).exportCommand.replace('<file>','preview-body.txt'));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
+ const preview=await f.cli(['run','external','show','--external',f.e.id,'--output','json']);assert.equal(preview.status,0,preview.stderr);const action=JSON.parse(preview.stdout).nextAction;assert.equal(action.launcher,'reviewer');action.args[action.args.indexOf('<file>')]='preview-body.txt';const exported=run(formatCliCommand(action, "bash"));assert.equal(exported.status,0,exported.stderr);assert.deepEqual(await readFile(join(f.attempt,'preview-body.txt')),f.bytes);
  await reviews.markArtifactReviewAgentCliReady({...f.input,attemptId:f.first.attempt.id});
- const node=await f.cli(['run','review','show']);assert.equal(node.status,0,node.stderr);const command=/^"\$MEMSPHERE_CLI" continue report --artifact .+$/m.exec(node.stdout)?.[0];assert.ok(command,node.stdout);const reported=run(command);assert.equal(reported.status,0,reported.stderr);assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
+ const node=await f.cli(['run','review','show','--output','json']);assert.equal(node.status,0,node.stderr);
+ const next=JSON.parse(node.stdout).nextAction;assert.equal(next.launcher,'reviewer');
+ await writeFile(join(f.attempt,'node-report.json'),JSON.stringify({applicable:true}));
+ next.args[next.args.indexOf('<node-result>')]='node-report.json';
+ const reported=run(formatCliCommand(next, "bash"));assert.equal(reported.status,0,reported.stderr);
+ assert.ok((await reviews.readArtifactReviewForActor(f.input)).assignment.nodeStates!.some(s=>s.reported));
 });
 
 test("scoped Reviewer reads bound Artifact previews and exports its original body", async t => {
@@ -373,7 +428,7 @@ test("scoped Reviewer reads bound Artifact previews and exports its original bod
   assert.equal(projected.valueTruncated, true);
   const exported = await cli([...artifact, "--out", "stored.md", "--output", "json"]);
   assert.equal(exported.status, 0, exported.stderr);
-  assert.deepEqual(JSON.parse(exported.stdout).business, { destination: projected.destination });
+  assert.equal(JSON.parse(exported.stdout).business, undefined);
   assert.equal(await readFile(join(attempt, "stored.md"), "utf8"), body);
   const full = await cli(["run", "artifact", "show", "--output", "json"]);
   assert.equal(full.status, 0, full.stderr);
@@ -385,4 +440,127 @@ test("scoped Reviewer reads bound Artifact previews and exports its original bod
   assert.equal(store.kind, "ValueStore");
   assert.deepEqual((await store.get({}, projected.destination.dataId))?.value, body);
   assert.equal((await store.get({}, projected.destination.dataId))?.revision, "1");
+});
+
+test("restricted Reviewer can verify persisted nodes and comments through its own launcher after stdout fails", async t => {
+  const f = await evidenceFixture(t);
+  await reviews.markArtifactReviewAgentCliReady({ ...f.input, attemptId: f.first.attempt.id });
+  const before = await reviews.readArtifactReviewForActor(f.input);
+  const nodeId = currentReviewNode(before.assignment)!.nodeId;
+  const preload = join(f.f.directory, "receipt-channel.mjs");
+  await writeFile(preload, 'process.stdout.write = (_chunk, callback) => { setImmediate(() => callback(new Error("private-write-error"))); return false; };');
+  const { pathToFileURL } = await import("node:url");
+  const failed = await f.cli(["continue", "report", "--artifact", '{"applicable":true}', "--output", "json"],
+    { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+  assert.equal(failed.status, 1);
+  assert.equal(failed.stdout, "");
+  const inspect = { kind: "command", launcher: "reviewer", args: ["continue", "show", "--all"] };
+  assert.deepEqual(JSON.parse(failed.stderr), { error: { code: "OUTPUT_RENDER_FAILED", details: { savedId: nodeId }, nextAction: inspect } });
+  const verified = await f.cli([...inspect.args, "--output", "json"]);
+  assert.equal(verified.status, 0, verified.stderr);
+  const saved = JSON.parse(verified.stdout);
+  assert.equal(saved.progress.processed, 1);
+  assert.ok(saved.nodes.find((node: { nodeId: string; reported: boolean }) => node.nodeId === nodeId && node.reported));
+  const openNode = saved.nodes.find((node: { kind?: string }) => node.kind === "open_review");
+  assert.ok(openNode);
+  const commentFailure = await f.cli(["continue", "comment", "add", "--node", openNode.nodeId,
+    "--artifact", JSON.stringify({ body: "Verify persisted comment", severity: "suggestion" }), "--output", "json"],
+    { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+  assert.equal(commentFailure.status, 1);
+  assert.equal(commentFailure.stdout, "");
+  const persisted = (await reviews.readArtifactReviewForActor(f.input)).assignment.draft.comments
+    .filter(comment => comment.body === "Verify persisted comment");
+  assert.equal(persisted.length, 1);
+  assert.ok(persisted[0].commentId);
+  assert.deepEqual(JSON.parse(commentFailure.stderr), { error: {
+    code: "OUTPUT_RENDER_FAILED", details: { savedId: persisted[0].commentId }, nextAction: inspect
+  } });
+});
+
+test("native and restricted Memory readers select the declared kind, node and effective rules", async t => {
+  const fixture = await evidenceFixture(t);
+  const root = join(fixture.f.root, "memory");
+  const sources = [
+    ["schemas", "labels", "!schema", "fields: [Label]"],
+    ["statements", "policy", "!statement", "asserts: [Scope matters]\nsections:\n  - !statement\n    names: [Review]\n    asserts: [Read the candidate]"],
+    ["procedures", "flow-policy", "!procedure", "flow:\n  - !action\n    action: Read the candidate\n    artifact: !artifact\n      name: Candidate\n      type: string\n      format: markdown"],
+    ["procedures", "graph-policy", "!procedure", "mode: graph\ndefines: [Review procedure]\nactions:\n  - !action\n    id: read\n    description: Read the candidate\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Candidate\n      model: {definedBy: raw.json, definition: '{}'}\n      payload: {contentType: text/plain}"]
+  ];
+  for (const [kind, name, tag, body] of sources) {
+    await mkdir(join(root, kind), {recursive: true});
+    await writeFile(join(root, kind, name + ".yaml"), tag + "\nsyntax: " + graphMemorySyntax + "\nnames: [" + name + "]\n" + body + "\n");
+  }
+  await runGit(["add", "."], { cwd: root });
+  await runGit(["-c","user.name=Test","-c","user.email=test@example.com","commit","-qm","Publish Memory reader fixtures"], { cwd: root });
+  const configPath = join(fixture.f.root, "config.json");
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  config.store.published_revision = await gitOutput(["rev-parse", "HEAD"], root);
+  await writeFile(configPath, JSON.stringify(config));
+  for (const restricted of [false, true]) {
+    const call = async (args: string[]) => {
+      const result = restricted ? await fixture.cli(args) :
+        crossSpawn.sync(process.execPath, [entrypoint, "--project", "test-project", ...args], {
+          cwd: fixture.f.cwd, env: { ...process.env, MEMSPHERE_HOME: fixture.f.home }, encoding: "utf8", timeout: 20000 });
+      assert.equal(result.status, 0, args.join(" ") + "\n" + result.stderr);
+      return result.stdout;
+    };
+    for (const [, name, tag] of sources) {
+      const args = ["memory", "read", name];
+      const json = JSON.parse(await call([...args, "--output", "json"]));
+      assert.equal(json.tag, tag);
+      assert.deepEqual(json.names, [name]);
+      assert.ok((await call(args)).includes(name));
+    }
+    const list = JSON.parse(await call(["memory", "list", "policy", "--output", "json"]));
+    assert.equal(list.items[0].node_ref, "statement:Review");
+    const node = ["memory", "read", "policy", "--node", "statement:Review"];
+    assert.ok((await call(node)).includes("Read the candidate"));
+    const fragment = JSON.parse(await call([...node, "--output", "json"]));
+    assert.deepEqual(fragment.fragment.asserts, ["Read the candidate"]);
+    const effective = JSON.parse(await call(["memory", "read", "policy", "--effective", "--output", "json"]));
+    assert.deepEqual(effective.declared.asserts, ["Scope matters"]);
+    assert.ok(JSON.stringify(effective.effective).includes("Scope matters"));
+  }
+});
+
+test("restricted review rejects conflicting options before changing the assignment", async t => {
+  const f = await evidenceFixture(t);
+  const before = (await reviews.readArtifactReviewForActor(f.input)).assignment;
+  for (const format of ["text", "json"]) {
+    for (const [args, flags, issue] of [
+      [["show", "--all", "--node", "private-node"], ["--node", "--all"], "mutually_exclusive"],
+      [["report"], ["--artifact", "--artifact-file"], "exactly_one_required"],
+      [["report", "--artifact", "private-body", "--artifact-file", "private-path"], ["--artifact", "--artifact-file"], "exactly_one_required"]
+    ] as const) {
+      const failed = await f.cli(["continue", ...args, "--output", format]);
+      assert.equal(failed.status, 1); assert.equal(failed.stdout, "");
+      assert.match(failed.stderr, /INVALID_ARGUMENT/);
+      assert.doesNotMatch(failed.stderr, /private-node|private-body|private-path/);
+      for (const flag of flags) assert.ok(failed.stderr.includes(flag), failed.stderr);
+      if (format === "json") assert.deepEqual(JSON.parse(failed.stderr).error.details.diagnostics, [{code: issue, path: flags}]);
+    }
+  }
+  assert.deepEqual((await reviews.readArtifactReviewForActor(f.input)).assignment, before);
+});
+
+test("restricted material exports remain verifiable after a closed stdout", async t => {
+  const f = await evidenceFixture(t);
+  const preload = join(f.f.directory, "closed-channel.mjs");
+  const { pathToFileURL } = await import("node:url");
+  await writeFile(preload, 'process.stdout.write = (_chunk, callback) => { setImmediate(() => callback(new Error("closed"))); return false; };');
+  for (const [kind, id, bytes] of [["external", f.e.id, f.bytes], ["artifact", f.c.artifact.id, Buffer.from("candidate")]] as const) {
+    const out = kind + ".txt";
+    const args = ["run", kind, "show", "--" + kind, id, "--out", out, "--output", "json"];
+    const failed = await f.cli(args, { NODE_OPTIONS: "--import=" + pathToFileURL(preload).href });
+    assert.equal(failed.status, 1); assert.equal(failed.stdout, "");
+    const { error } = JSON.parse(failed.stderr);
+    assert.equal(error.code, "OUTPUT_RENDER_FAILED"); assert.deepEqual(error.details, { savedId: out });
+    const inspected = await f.cli([...error.nextAction.args, "--output", "json"]);
+    assert.equal(inspected.status, 0, inspected.stderr); assert.equal(JSON.parse(inspected.stdout).id, id);
+    assert.deepEqual(await readFile(join(f.attempt, out)), bytes);
+    const retry = await f.cli(args);
+    assert.equal(retry.status, 1); assert.equal(retry.stdout, "");
+    assert.equal(JSON.parse(retry.stderr).error.code, "ALREADY_EXISTS");
+    assert.deepEqual(await readFile(join(f.attempt, out)), bytes);
+  }
 });
