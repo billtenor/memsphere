@@ -5,30 +5,98 @@ import { promisify } from "node:util";
 import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { invokeCliModule } from "./helpers/cli-module.js";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
+import { ownTestProcess } from "./helpers/owned-process.js";
 const exec = promisify(execFile), cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 
-async function schemaCliFixture(t: test.TestContext) {
+async function schemaCliFixture(t: test.TestContext, invocation: "process" | "module" = "process") {
   const f = await initializedContextFixture(t);
-  await exec("git", ["init", "-b", "master"], { cwd: f.root, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" });
+  // Schema writing uses a real project and persisted Stores. A Managed Memory
+  // baseline avoids enumerating Embedded worktrees on each unrelated Store read.
+  const processOptions = { timeout: 20000, killSignal: "SIGKILL" as const };
+  const runProcess = (file: string, args: string[], cwd: string, env?: NodeJS.ProcessEnv) => {
+    t.signal.throwIfAborted();
+    const result = exec(file, args, { cwd, env, ...processOptions });
+    ownTestProcess(result.child, t.signal, f.beforeCleanup);
+    return result;
+  };
+  const memory = join(f.root, "memory");
+  await runProcess("git", ["init", "-b", "master"], memory);
+  await runProcess("git", ["-c", "user.name=Graph Test", "-c", "user.email=graph@example.invalid", "commit", "--allow-empty", "-m", "Fixture baseline"], memory);
+  const { stdout: revision } = await runProcess("git", ["rev-parse", "HEAD"], memory);
   const config = JSON.parse(await readFile(join(f.root, "config.json"), "utf8"));
-  config.store = { type: "embedded", repository_path: f.root, memory_path: "memory" };
+  config.store = { type: "managed", branch: "master", published_revision: revision.trim() };
   await writeFile(join(f.root, "config.json"), JSON.stringify(config));
   await writeFile(join(f.home, "config.json"), JSON.stringify({ runner_agents: { codex: { identity_enabled: true, async_enabled: false } } }));
   const env = { ...process.env, MEMSPHERE_HOME: f.home, MEMSPHERE_REVIEW_ASSIGNMENT_ID: "", MEMSPHERE_REVIEW_SESSION_ID: "", CODEX_THREAD_ID: "schema-cli", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
-  const call = async (...args: string[]) => JSON.parse((await exec(process.execPath, [cli, "--project", "test-project", ...args, "--output", "json"], { cwd: f.root, env, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" })).stdout);
-  const raw = async (...args: string[]) => (await exec(process.execPath, [cli, "--project", "test-project", ...args], { cwd: f.root, env, signal: t.signal, timeout: 20000, killSignal: "SIGKILL" })).stdout;
+  let pending: ReturnType<typeof invokeCliModule> | undefined;
+  if (invocation === "module") {
+    f.beforeCleanup(async () => { await Promise.allSettled([pending]); });
+  }
+  const invoke = (...args: string[]) => {
+    const command = ["--project", "test-project", ...args];
+    if (invocation === "process") return runProcess(process.execPath, [cli, ...command], f.cwd, env);
+    pending = invokeCliModule(command, f.cwd, env, cli, t.signal);
+    return pending;
+  };
+  const call = async (...args: string[]) => JSON.parse((await invoke(...args, "--output", "json")).stdout);
+  const raw = async (...args: string[]) => (await invoke(...args)).stdout;
   return { f, call, raw };
 }
 
-test("real graph CLI and Continue save a positioned draft, export and submit the same Artifact", { timeout: 90000 }, async t => {
-  const { f, call } = await schemaCliFixture(t);
+async function startSchemaStep({ f, call }: Awaited<ReturnType<typeof schemaCliFixture>>) {
   const file = join(f.directory, "schema.yaml");
   await writeFile(file, `!procedure\nsyntax: memsphere-20261027-stable\nmode: graph\nname: schema-cli\ndefines: [Report]\nactions:\n  - !action\n    id: report\n    description: Report\n    dependencies: [!dependency {from: START}]\n    artifact:\n      name: Report\n      model:\n        definedBy: memsphere/schema.json\n        definition: |\n          !schema\n          syntax: memsphere-20261027-stable\n          type: object\n          fields: [summary]\n      payload: {contentType: application/json}\n`);
-  const started = await call("run", "start", "--file", file, "--name", "Schema CLI");
-  const run = started.runId;
-  const snapshot = await call("run", "show", "--run", run); const step = snapshot.steps[0].id;
+  const { runId: run, stepId: step } = await call("run", "start", "--file", file, "--name", "Schema CLI");
+  assert.ok(step);
   const target = ["--run", run, "--step", step];
+  return { run, step, target };
+}
+
+test("real graph CLI and Continue save a positioned draft, export and submit the same Artifact", { timeout: 90000 }, async t => {
+  const setupStarted = performance.now();
+  const fixture = await schemaCliFixture(t);
+  t.diagnostic(`Fixture setup took ${Math.round(performance.now() - setupStarted)} ms`);
+  const { f } = fixture;
+  const call = async (...args: string[]) => {
+    const started = performance.now();
+    try {
+      return await fixture.call(...args);
+    } finally {
+      const command = args.join(" ").split(" --", 1)[0];
+      t.diagnostic(`${command} took ${Math.round(performance.now() - started)} ms`);
+    }
+  };
+  const { run, step, target } = await startSchemaStep({ ...fixture, call });
+  const initial = await call("continue", "enter-schema");
+  assert.equal(initial.stepId, step);
+  assert.ok(initial.position);
+  const saved = await call("continue", "schema", "report", "--position", initial.position, "--artifact", '{"summary":"draft"}');
+  assert.equal(saved.artifactId, initial.artifactId);
+  assert.equal(saved.phase, "awaiting_finalization");
+
+  const copy = join(f.directory, "copy.json");
+  const exported = await call("continue", "artifact", "export", "--file", copy);
+  assert.equal(exported.artifactId, initial.artifactId);
+  assert.deepEqual(exported.nextAction.args, ["--project", "test-project", "run", "report", "--run", run,
+    "--step", step, "--artifact-file", copy]);
+  assert.deepEqual(JSON.parse(await readFile(copy, "utf8")), { summary: "draft" });
+  await writeFile(copy, '{"summary":"final"}');
+  const submitted = await call(...exported.nextAction.args.slice(2));
+  assert.equal(submitted.artifactId, initial.artifactId);
+  assert.equal(submitted.status, "done");
+
+  const finalCopy = join(f.directory, "submitted.json");
+  const persisted = await call("run", "artifact", "export", ...target, "--file", finalCopy);
+  assert.equal(persisted.artifactId, initial.artifactId);
+  assert.deepEqual(JSON.parse(await readFile(finalCopy, "utf8")), { summary: "final" });
+});
+
+test("graph Schema CLI preserves draft identity and enforces position and lifecycle boundaries", { timeout: 90000 }, async t => {
+  const fixture = await schemaCliFixture(t, "module");
+  const { f, call } = fixture;
+  const { run, target } = await startSchemaStep(fixture);
   for (const state of [await call("run", "schema", "show", ...target), await call("continue", "schema", "show")]) {
     assert.equal(state.phase, "not_started");
     assert.ok(state.nextAction.args.includes("enter-schema"));
@@ -42,7 +110,7 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const initial = await call("continue", "enter-schema");
   const saved = await call("continue", "schema", "report", "--position", initial.position, "--artifact", '{"summary":"draft"}');
   assert.equal(saved.artifactId, initial.artifactId); assert.equal(saved.phase, "awaiting_finalization");
-  await assert.rejects(call("run", "schema", "report", "--run", run, "--step", step, "--position", initial.position, "--artifact", '{"summary":"late"}'), /SCHEMA_POSITION_CHANGED/);
+  await assert.rejects(call("run", "schema", "report", ...target, "--position", initial.position, "--artifact", '{"summary":"late"}'), /SCHEMA_POSITION_CHANGED/);
   const reference = join(f.directory, "invalid-reference.json");
   await writeFile(reference, JSON.stringify({ contentRef: { storeId: "context_control/artifacts", dataId: `${run}/${initial.artifactId}`, sha256: "0".repeat(64) } }));
   await assert.rejects(call("continue", "report", "--file", reference), /(CONTENT_CHANGED|RECOVERY_REQUIRED|INVALID_ARGUMENT)/);
@@ -61,14 +129,9 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
   const nativeExport = await call("run", "artifact", "export", ...target, "--file", nativeCopy);
   assert.equal(nativeExport.exported, nativeCopy);
   assert.deepEqual(JSON.parse(await readFile(nativeCopy, "utf8")), { summary: "draft" });
-  const copy = join(f.directory, "copy.json");
-  const exported = await call("continue", "artifact", "export", "--file", copy);
-  assert.deepEqual(exported.nextAction.args, ["--project", "test-project", "run", "report", "--run", run,
-    "--step", step, "--artifact-file", copy]);
-  assert.deepEqual(JSON.parse(await readFile(copy, "utf8")), { summary: "draft" });
-  await writeFile(copy, '{"summary":"final"}');
-  const submitted = await call(...exported.nextAction.args.slice(2));
-  assert.equal(submitted.artifactId, initial.artifactId); assert.equal(submitted.status, "done");
+  const submitted = await call("run", "report", ...target, "--artifact-file", nativeCopy);
+  assert.equal(submitted.artifactId, initial.artifactId);
+  assert.equal(submitted.status, "done");
   for (const operation of mutations) {
     await assert.rejects(call("run", ...operation, ...target, "--position", initial.position), /STEP_NOT_RUNNING|RUN_FINISHED/);
     await assert.rejects(call("continue", ...operation, "--position", initial.position), /RUN_FINISHED/);
@@ -78,7 +141,7 @@ test("real graph CLI and Continue save a positioned draft, export and submit the
 });
 
 test("Schema native entry and Continue retain all rule scopes, input links and Human responsibility", { timeout: 90000 }, async t => {
-  const { f, call, raw } = await schemaCliFixture(t);
+  const { f, call, raw } = await schemaCliFixture(t, "module");
   const { serializeMemoryYaml } = await import("../src/memory/serializer.js");
   const source = { tag: "!procedure", syntax: "memsphere-20261027-stable", mode: "graph", names: ["schema-context"], defines: ["Report"], asserts: ["Workflow rule"], actions: [
     { tag: "!action", id: "input", description: "Prepare", dependencies: [{ tag: "!dependency", from: "START" }], artifact: { name: "Input", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/plain" } } },
