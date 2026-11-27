@@ -14,6 +14,7 @@ import { initializedContextFixture } from "./helpers/initialized-context.js";
 
 const exec = promisify(execFile);
 const entry = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+const rethrowEntry = fileURLToPath(new URL("./fixtures/cli-rethrow.mjs", import.meta.url));
 const reviewer = new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url).href;
 
 async function executable(path: string, body: string) {
@@ -90,14 +91,17 @@ actions:
   const tokenizer = get_encoding("o200k_base");
   t.after(() => tokenizer.free());
   let runnerCalls = 0, runnerTokens = 0;
-  const call = async (...args: string[]) => {
-    const { stdout, stderr } = await exec(process.execPath, [entry, "--project", "test-project", ...args, "--output", "json"],
-      { cwd: f.root, env, signal: t.signal, timeout: 30000, killSignal: "SIGKILL" });
+  const invoke = async (entrypoint: string[], args: string[]) => {
+    const started = performance.now();
+    const { stdout, stderr } = await exec(process.execPath, [...entrypoint, "--project", "test-project", ...args, "--output", "json"],
+      { cwd: f.root, env, signal: t.signal, timeout: 30000, killSignal: "SIGKILL" })
+      .finally(() => t.diagnostic(`${args.join(" ").split(" --", 1)[0]} took ${Math.round(performance.now() - started)} ms`));
     assert.equal(stderr, "");
     runnerCalls++;
     runnerTokens += tokenizer.encode(stdout).length;
     return JSON.parse(stdout);
   };
+  const call = (...args: string[]) => invoke([entry], args);
 
   const { runId } = await call("run", "start", "--file", procedure, "--review-config", bindings, "--name", "Deliver one result");
   const draft = await call("continue", "enter-schema");
@@ -107,7 +111,8 @@ actions:
   const candidate = await call("continue", "report", "--artifact", body);
   assert.equal(candidate.artifactId, draft.artifactId);
   assert.equal(candidate.status, "awaiting_review");
-  const wait = await call(...candidate.nextAction.resume.args);
+  // On failure preserve the internal cause alongside the normal cross-process journey.
+  const wait = await invoke([rethrowEntry, entry], candidate.nextAction.resume.args);
   assert.equal(wait.roundId, candidate.roundId);
   assert.ok(wait.taskId);
   await writeFile(gate, "ready");
