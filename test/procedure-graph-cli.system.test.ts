@@ -276,9 +276,11 @@ test("CLI module failed auxiliary Continue store preserves the running Step and 
   const artifact = join(f.directory, "recovered step.txt");
   await writeFile(artifact, "Recovered Continue report");
   const submitted = await f.call(...args.slice(0, -1), artifact);
-  assert.equal(submitted.runId, start.runId);
-  assert.equal(submitted.stepId, stepId);
-  assert.equal(submitted.status, "done");
+  assert.equal(Object.hasOwn(submitted, "runId"), false);
+  const after = await f.inspect(start.runId);
+  assert.equal(after.steps.find((step: any) => step.id === stepId)?.status, "done");
+  assert.ok(submitted.artifactId);
+  assert.equal(after.artifacts.find((item: any) => item.id === submitted.artifactId)?.stepId, stepId);
 });
 
 test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
