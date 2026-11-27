@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isIntegrationTest, isSystemTest, isE2ETest, isPlatformTest } from "./test-plan.mjs";
+import { discoverTestFiles, selectTests, testSuites, isUnitTest, isModuleTest, isIntegrationTest, isSystemTest, isE2ETest, isPlatformTest, isWindowsPackageSmokeTest, selectWindowsPackageSmokeTests } from "./test-plan.mjs";
 
 export function ciProfile(event, input = "default") {
   if (event === "push") return "full";
@@ -28,9 +28,14 @@ export function createCiPlan(profile, files, sources) {
       timeoutMinutes: runsInDefault ? 5 : 30,
       browser: !["unit", "module"].includes(suite) && selected.some(file => sources[file].includes("helpers/browser") || /from ["']playwright["']/.test(sources[file])) }];
   }));
+  const packagedTests = selectWindowsPackageSmokeTests(files);
   for (const os of systems) {
-    const expected = files.filter(file => profile === "full" || (!isSystemTest(file) && !isE2ETest(file) && (os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file, sources[file])))).sort();
-    const assigned = include.filter(row => row.os === os).flatMap(row => selectTests(files, sources, row.suite)).sort();
+    const runsPackagedTests = profile === "full" && os === "windows-latest";
+    const expected = files.filter(file => isWindowsPackageSmokeTest(file) ? runsPackagedTests
+      : profile === "full" || (!isSystemTest(file) && !isE2ETest(file) && (os === "ubuntu-24.04" || isUnitTest(file) || isModuleTest(file) || isPlatformTest(file, sources[file])))).sort();
+    const assigned = include.filter(row => row.os === os).flatMap(row => selectTests(files, sources, row.suite));
+    if (runsPackagedTests) assigned.push(...packagedTests);
+    assigned.sort();
     if (JSON.stringify(assigned) !== JSON.stringify(expected)) throw new Error(`Unassigned or duplicate tests on ${os}`);
   }
   return { include };

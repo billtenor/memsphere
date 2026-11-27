@@ -1,9 +1,12 @@
 import crossSpawn from "cross-spawn";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import test from "node:test";
 
-export async function runPackagedCliSmoke(workspace, cli) {
+test("installed Windows CLI completes a Run and exercises the View and daemon lifecycle", async () => {
+  const workspace = process.cwd();
   const project = resolve(workspace, ".ci windows project");
+  const cli = resolve(workspace, ".ci-install", "node_modules", ".bin", "memsphere.cmd");
 
   await Promise.all(
     ["concepts", "statements", "schemas", "procedures"].map((kind) =>
@@ -53,7 +56,7 @@ flow:
   run(["view", "status"]);
   run(["daemon", "stop"]);
 
-  function run(args, cwd = project) {
+  function run(args: string[], cwd = project) {
     const result = crossSpawn.sync(cli, args, {
       cwd,
       encoding: "utf8",
@@ -66,4 +69,4 @@ flow:
     if (result.status !== 0) throw new Error(`${cli} ${args.join(" ")} exited ${result.status}`);
     return result.stdout ?? "";
   }
-}
+});

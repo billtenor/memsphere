@@ -77,6 +77,8 @@ export const isModuleTest = file => file.endsWith(".module.test.ts");
 export const isIntegrationTest = file => file.endsWith(".integration.test.ts");
 export const isSystemTest = file => file.endsWith(".system.test.ts");
 export const isE2ETest = file => file.endsWith(".e2e.test.ts");
+export const isWindowsPackageSmokeTest = file => isSystemTest(file) && key(file).startsWith("packaged-cli/");
+export const selectWindowsPackageSmokeTests = files => files.filter(isWindowsPackageSmokeTest).sort();
 export const isPlatformTest = (file, source = "") => /(?:^|\/)platform\//.test(key(file)) || source.includes("// @integration-platform: native");
 export function platformGroup(file, source = "") {
   const declared = key(file).match(/(?:^|\/)platform\/([^/]+)\//)?.[1];
@@ -95,6 +97,8 @@ export function platformGroup(file, source = "") {
 export function selectTests(files, sources, suite = "all") {
   if (suite !== "all" && !testSuites[suite]) throw new Error(`Unknown test suite: ${suite}`);
   return files.filter(file => {
+    // The packaged suite needs the installed Windows tarball and a shared project for the later shell tests.
+    if (isWindowsPackageSmokeTest(file)) return false;
     if (suite === "all") return true;
     if (suite === "regression") return !isSystemTest(file) && !isE2ETest(file);
     if (suite === "unit") return isUnitTest(file);
