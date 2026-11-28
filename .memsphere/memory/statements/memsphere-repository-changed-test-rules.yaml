@@ -1,0 +1,12 @@
+!statement
+syntax: memsphere-20261027-stable
+names:
+  - memsphere-repository-changed-test-rules
+  - Memsphere 仓库变更测试观察规范
+defines:
+  - 规定 Memsphere 源码仓库维护者如何用增量观察检查验证 MR 合并候选中的 Full-only 文件及适用平台。
+asserts:
+  - 在干净的 MR 合并候选 checkout 使用 npm run test:changed -- --base <SHA>，其中 base 是准确的基线提交。附加 --dry-run 仅计算计划。跨平台观察可按 PR 编号手动运行 Changed Full-only test observation。
+  - 选取沿用现有 CI 在两个 profile 中的文件与平台分配，记录选择触发路径。删除、未登记的影响、运行器与全局配置变更应列出需要补证的原因和入口。Windows 打包 CLI 需通过真实打包安装及独立多 shell 作业确认。
+  - 通过结论必须对应相同 base、合并候选、平台和套件，并具备计划中每个文件实际执行且通过的证据。合法空集和 dry-run 只说明选取。失败、取消、全跳过、缺跑及待补证都必须如实报告。
+  - 观察结果对应固定的 PR 候选范围。master Full CI、CI Guard 与最终合入继续使用仓库现有门禁和证据。

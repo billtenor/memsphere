@@ -13,9 +13,9 @@ PR 和手动运行的缺省选择为 default；显式选择 full 或向 master �
 | `*.system.test.ts` | 不运行 | Linux、macOS、Windows |
 | `*.e2e.test.ts` | 不运行 | 有实际用例时在 Linux、macOS、Windows 运行 |
 
-理论模型包含 unit、module、integration、system、e2e 五层；当前建设前四层，e2e 尚无独立套件，也不新增占位作业。已建设的四层使用独立 CI job。OS 契约位于 `test/platform/`、`test/ci/platform/`，或在文件头声明 `// @integration-platform: native`。声明依据是被测契约，不能只因 fixture 使用文件或进程就扩大平台覆盖。进程、跨进程锁、文件系统、Git/worktree、Memory 发布、升级、Context/Review、产物归档和模型存储按职责分组，每个文件在适用平台仅执行一次。
+测试分为 unit、module、integration、system、e2e 五层，各层使用独立 CI job。平台集成契约位于 `test/platform/`、`test/ci/platform/`，或在文件头声明 `// @integration-platform: native`。声明依据是被测契约。进程、跨进程锁、文件系统、Git/worktree、Memory 发布、升级、Context/Review、产物归档和模型存储按职责分组，每个文件在适用平台仅执行一次。
 
-系统层包含产品 API、浏览器、真实命令树和完整后台服务功能验证；即使文件位于 platform 目录，也不会进入集成矩阵。Windows 打包 CLI/Shell 冒烟同属系统层，单独运行并测量。这些作业仅在 full 执行。系统层每个平台一个作业、完整执行全部文件，不与集成职责分组合并；full 也自动发现实际的端到端文件，每个平台为该层单独生成作业，当前没有用例时不生成。完整 full 汇总必须确认全部已建设层级及 Windows 打包作业成功。
+系统层包含产品 API、浏览器、真实命令树和完整后台服务功能验证。Windows 打包 CLI/Shell 冒烟同属系统层，单独运行并测量。这些作业仅在 full 执行。系统层每个平台一个作业，执行相应范围内全部用例。full 自动发现 E2E 文件并在适用平台生成独立作业。完整 full 汇总必须确认全部已建设层级及 Windows 打包作业成功。
 
 - `npm run test:unit`、`npm run test:module`、`npm run test:integration`、`npm run test:system` 分别构建后执行对应层。
 - `run-tests.mjs --suite=unit|module|integration|system|e2e --list` 查看相应选取；默认 `regression` 只包含前三层，显式 `all` 才包含系统和端到端层。
@@ -26,3 +26,18 @@ PR 和手动运行的缺省选择为 default；显式选择 full 或向 master �
 - 涉及真实浏览器进程清理的适配器契约会按需安装 Chromium；这与通过页面验证产品功能的系统测试是不同范围。
 
 本目录、`.github/workflows/` 与 `test/ci/` 受 CI change guard 保护。探索提交不代表流程评审或完整验收完成。
+
+## 观察 MR 的 Full-only 变更
+
+在干净的 MR 合并候选 checkout 中，以实际 base SHA 执行：
+
+```bash
+npm run test:changed -- --base <SHA> --dry-run
+npm run test:changed -- --base <SHA>
+```
+
+输出记录 base 和候选、每个文件的选择原因及平台。dry-run 只生成计划。直接执行会在当前平台构建并验证选中的文件，输出逐文件实际用例数和剩余平台。使用与现有 CI 相同的 Node 及浏览器依赖，含浏览器的套件需要先安装 Chromium。
+
+dry-run 的退出码 0 表示计划有效。实际执行的退出码 0 表示合法空集或全部计划任务有通过证据，1 表示测试失败，2 表示计划不确定、需要补证或仍有未执行范围。中断沿用文件 runner 的信号退出码。删除、未映射文件、runner 与通用配置明确列为待补证。Windows 打包变更需在候选版本运行 `ci.yml` 的 **Windows packaged CLI shells** 作业，由它安装打包产物并覆盖四种 shell。
+
+GitHub 的 **Changed Full-only test observation** 工作流接受一个 PR 编号，固定该 PR 的合并候选及父提交并汇总各平台和套件的实际结果。检查是按需启动的独立观察，Full CI 和合入门禁继续使用原有记录。

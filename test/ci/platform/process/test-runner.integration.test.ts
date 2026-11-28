@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import type { BrowserServer } from "playwright";
 import { processTable, terminateTestProcesses } from "../../../../scripts/ci/test-processes.mjs";
+import { processGates } from "../../../fixtures/process-gates.mjs";
 
 // BrowserServer.process() supplies the real browser PID through the controlled
 // fixture handshake. No sleep or guessed output interval establishes readiness.
@@ -148,3 +149,69 @@ for (const signal of [undefined, "SIGINT", "SIGTERM"] as const) {
     verified = true;
   });
 }
+
+test("cancelling a selected file reports cancellation and releases its isolated Home", { timeout: 30000 }, async t => {
+  const directory = await mkdtemp(join(tmpdir(), "memsphere-selected-cancel-"));
+  let gates: Awaited<ReturnType<typeof processGates>> | undefined;
+  let child: ReturnType<typeof spawn> | undefined;
+  let closed: Promise<unknown[]> | undefined;
+  t.after(async () => {
+    gates?.publish("release");
+    try {
+      if (child && child.exitCode === null && child.signalCode === null) {
+        await terminateTestProcesses(new Set([child]), "SIGTERM");
+        await closed;
+      }
+    } finally {
+      await gates?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, { timeout: 10000 });
+  gates = await processGates(t.signal);
+  const testDirectory = join(directory, "test");
+  await mkdir(testDirectory);
+  const file = join(testDirectory, "selected.system.test.ts");
+  const os = { linux: "ubuntu-24.04", darwin: "macos-latest", win32: "windows-latest" }[process.platform];
+  const gateModule = new URL("../../../fixtures/process-gates.mjs", import.meta.url).href;
+  await writeFile(file, `
+    import test from "node:test";
+    import { processGate } from ${JSON.stringify(gateModule)};
+    test("wait for explicit release", async () => {
+      await processGate(${gates.endpoint}, "publish", "selected-started", process.env.MEMSPHERE_HOME);
+      await processGate(${gates.endpoint}, "wait", "release");
+    });
+  `);
+  const runner = pathToFileURL(resolve("scripts/ci/changed-test-results.mjs")).href;
+  const entry = join(directory, "run.mjs");
+  await writeFile(entry, `
+    import { runChangedTestJob } from ${JSON.stringify(runner)};
+    process.on("message", signal => process.emit(signal));
+    process.channel?.unref();
+    const report = await runChangedTestJob(${JSON.stringify({ root: directory, fileCount: 1, base: "base", candidate: "candidate" })},
+      ${JSON.stringify({ os, suite: "system", title: "Selected system", files: [{ path: "selected.system.test.ts" }] })});
+    console.log(JSON.stringify(report));
+    process.exitCode = report.exitCode;
+  `);
+  await copyFile(resolve("package.json"), join(directory, "package.json"));
+  const { symlink } = await import("node:fs/promises");
+  await symlink(resolve("node_modules"), join(directory, "node_modules"), "junction");
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  child = spawn(process.execPath, [entry], { env, detached: process.platform !== "win32",
+    stdio: ["ignore", "pipe", "pipe", "ipc"] });
+  closed = once(child, "close");
+  let stdout = "", stderr = "";
+  child.stdout!.on("data", data => { stdout += data; });
+  child.stderr!.on("data", data => { stderr += data; });
+  const home = await Promise.race([gates.wait("selected-started"),
+    closed.then(() => assert.fail(stdout + stderr))]);
+  if (process.platform === "win32") child.send("SIGTERM");
+  else child.kill("SIGTERM");
+  const [code, signal] = await closed;
+  assert.equal(signal, null, stdout + stderr);
+  assert.equal(code, 143, stdout + stderr);
+  const report = JSON.parse(stdout.trimEnd().split("\n").at(-1)!);
+  assert.equal(report.status, "cancelled");
+  assert.equal(report.files[0].execution.status, "cancelled");
+  await assert.rejects(stat(home), { code: "ENOENT" });
+});

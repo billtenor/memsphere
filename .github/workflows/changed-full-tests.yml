@@ -1,0 +1,171 @@
+name: Changed Full-only test observation
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Open pull request number
+        type: number
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: changed-full-tests-${{ inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      base: ${{ steps.candidate.outputs.base }}
+      head: ${{ steps.candidate.outputs.head }}
+      candidate: ${{ steps.candidate.outputs.candidate }}
+      has_jobs: ${{ steps.plan.outputs.has_jobs }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - name: Resolve the current PR merge candidate
+        id: candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" | jq -er '
+            select(.state == "open" and .base.ref == "master" and .mergeable == true)
+            | [.base.sha, .head.sha, .merge_commit_sha]
+            | select(all(.[]; type == "string" and test("^[0-9a-f]{40}$")))
+            | "base=\(.[0])\nhead=\(.[1])\ncandidate=\(.[2])"
+          ' >> "$GITHUB_OUTPUT" || {
+            echo "Merge candidate unavailable. Check PR mergeability and dispatch again."
+            exit 1
+          }
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.candidate.outputs.candidate }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Plan changed jobs
+        id: plan
+        env:
+          OBSERVATION_BASE: ${{ steps.candidate.outputs.base }}
+          OBSERVATION_HEAD: ${{ steps.candidate.outputs.head }}
+          OBSERVATION_CANDIDATE: ${{ steps.candidate.outputs.candidate }}
+          OBSERVATION_PLAN_PATH: ${{ runner.temp }}/changed-test-plan/plan.json
+        run: node scripts/ci/observe-changed-tests.mjs plan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: changed-test-plan
+          path: ${{ runner.temp }}/changed-test-plan/plan.json
+          if-no-files-found: error
+
+  selected:
+    name: Observe ${{ matrix.layer }} (${{ matrix.os }}, ${{ matrix.suite }})
+    needs: plan
+    if: needs.plan.outputs.has_jobs == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.timeoutMinutes }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.candidate }}
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/download-artifact@v4
+        with:
+          name: changed-test-plan
+          path: ${{ runner.temp }}/changed-test-plan
+      - name: Reuse Node compilation within this job
+        shell: bash
+        run: echo "NODE_COMPILE_CACHE=$RUNNER_TEMP/memsphere-node-compile-cache" >> "$GITHUB_ENV"
+      - run: npm ci
+      - name: Install Playwright Chromium
+        if: matrix.browser
+        run: npx playwright install chromium
+      - run: npm run build
+      - name: Run selected files
+        env:
+          OBSERVATION_BASE: ${{ needs.plan.outputs.base }}
+          OBSERVATION_HEAD: ${{ needs.plan.outputs.head }}
+          OBSERVATION_CANDIDATE: ${{ needs.plan.outputs.candidate }}
+          OBSERVATION_OS: ${{ matrix.os }}
+          OBSERVATION_SUITE: ${{ matrix.suite }}
+          OBSERVATION_PLAN_PATH: ${{ runner.temp }}/changed-test-plan/plan.json
+          OBSERVATION_RESULT_PATH: ${{ runner.temp }}/changed-test-result/result.json
+        run: node scripts/ci/observe-changed-tests.mjs run
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: changed-test-result-${{ matrix.os }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/changed-test-result/result.json
+          if-no-files-found: warn
+
+  observation-result:
+    name: Changed Full-only observation result
+    needs: [plan, selected]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require a completed plan
+        env:
+          PLAN_STATUS: ${{ needs.plan.result }}
+        run: |
+          if [[ "$PLAN_STATUS" != success ]]; then
+            echo "Observation incomplete. No completed merge-candidate plan."
+            exit 1
+          fi
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.plan.outputs.candidate }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: changed-test-plan
+          path: ${{ runner.temp }}/changed-test-plan
+      - uses: actions/download-artifact@v4
+        if: needs.plan.outputs.has_jobs == 'true'
+        continue-on-error: true
+        with:
+          pattern: changed-test-result-*
+          path: ${{ runner.temp }}/changed-test-results
+      - name: Confirm candidate is still current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr }}
+          BASE: ${{ needs.plan.outputs.base }}
+          HEAD: ${{ needs.plan.outputs.head }}
+          CANDIDATE: ${{ needs.plan.outputs.candidate }}
+        run: |
+          set -euo pipefail
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" | jq -e +            --arg base "$BASE" --arg head "$HEAD" --arg candidate "$CANDIDATE" '
+            .state == "open" and .mergeable == true
+            and .base.sha == $base and .head.sha == $head and .merge_commit_sha == $candidate
+          ' > /dev/null || {
+            echo "Observation incomplete. The PR changed or its merge candidate could not be verified."
+            exit 1
+          }
+      - name: Verify the planned files actually ran
+        env:
+          OBSERVATION_PLAN_PATH: ${{ runner.temp }}/changed-test-plan/plan.json
+          OBSERVATION_RESULT_DIRECTORY: ${{ runner.temp }}/changed-test-results
+          OBSERVATION_JOBS_STATUS: ${{ needs.selected.result }}
+        run: node scripts/ci/observe-changed-tests.mjs summarize

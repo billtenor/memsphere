@@ -185,6 +185,8 @@ sections:
           - 操作系统差异风险必须来自被测契约；仅通过 Git 准备数据或使用浏览器，不构成将普通集成升级为三系统覆盖的理由。
           - OS 契约集成使用 test/platform、test/ci/platform 或文件头的明确声明标识，并按业务职责分组；目录位置不能将系统测试重新归为集成测试。
           - CI 必须自动发现适用文件，并验证每个文件在适用平台恰好分配一次；平台专属用例只在适用系统执行。
+          - !ref
+            target: statements/memsphere-repository-changed-test-rules
           - 某层尚未建设时必须明确说明，不得创建空套件或占位作业来声称已具备该层覆盖。
       - !statement
         names:

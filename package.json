@@ -55,6 +55,7 @@
     "test": "node scripts/ci/run-tests.mjs",
     "pretest:ci": "npm run build",
     "test:ci": "node scripts/ci/run-tests.mjs",
+    "test:changed": "node scripts/ci/test-changed.mjs",
     "pretest:unit": "npm run build",
     "test:unit": "node scripts/ci/run-tests.mjs --suite=unit",
     "pretest:module": "npm run build",
