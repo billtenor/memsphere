@@ -513,11 +513,14 @@ test("Claude exploration notifications return only the Review bound to the origi
     ...sent.value, updatedAt: read.value.updatedAt,
     claudeDelivery: { ...sent.value.claudeDelivery, readAt: read.value.claudeDelivery.readAt }
   });
-  const nativeReceipt = JSON.parse((await callback(ref, [...native, "--output", "json"])).stdout);
+  const { runId: nativeRunId, reviewId: nativeReviewId, ...nativeFacts } =
+    JSON.parse((await callback(ref, [...native, "--output", "json"])).stdout);
   const continuedReceipt = JSON.parse((await callback(ref, [...continuation, "--output", "json"])).stdout);
-  assert.deepEqual(continuedReceipt, nativeReceipt);
-  assert.equal(nativeReceipt.roundId, sent.value.input.roundId);
-  assert.doesNotMatch(JSON.stringify(nativeReceipt), /--callback|claudeDelivery|inbox/);
+  assert.equal(nativeRunId, runId);
+  assert.equal(nativeReviewId, f.reviewId);
+  assert.deepEqual(continuedReceipt, nativeFacts);
+  assert.equal(nativeFacts.roundId, sent.value.input.roundId);
+  assert.doesNotMatch(JSON.stringify(nativeFacts), /--callback|claudeDelivery|inbox/);
   assert.deepEqual(await context(), beforeRead);
   assert.deepEqual(await listTasks(f.home), [read]);
   assert.deepEqual(f.messages, [expected]);
@@ -701,21 +704,28 @@ test("a delayed notification reads its original candidate while Continue follows
   const second = await f.reviewState();
   assert.notEqual(second.round.id, first.round.id);
   const binding = await requireCommandState("codex-origin-session", f.home);
+  const assertCandidate = async (receipt: { details: unknown; roundId: string }, roundId: string, candidateId: string) => {
+    assert.equal(receipt.roundId, roundId);
+    assert.equal(Object.hasOwn(receipt, "candidateId"), false);
+    const args = ["run", "review", "show", "--review", f.reviewId, "--round", roundId, "--all"];
+    assert.deepEqual(receipt.details, {
+      kind: "command", launcher: "memsphere", args: ["--project", "test-project", ...args]
+    });
+    const detail = JSON.parse((await f.call(...args, "--output", "json")).stdout);
+    assert.equal(detail.roundId, roundId);
+    assert.equal(detail.candidateId, candidateId);
+  };
   const notice = ["run", "review", "wait", "--review", f.reviewId, "--notification-round", first.round.id];
   const original = JSON.parse((await f.call(...notice, "--output", "json")).stdout);
-  assert.equal(original.roundId, first.round.id);
-  assert.equal(original.candidateId, first.round.submissionId);
+  await assertCandidate(original, first.round.id, first.round.submissionId);
   assert.equal(original.roundStatus, "changes_requested");
   assert.deepEqual(original.nextAction, original.details);
-  assert.deepEqual(original.details.args.slice(-3), ["--round", first.round.id, "--all"]);
   assert.ok((await f.call(...notice)).stdout.includes(first.round.id));
-  assert.equal(JSON.parse((await f.call(...original.details.args.slice(2), "--output", "json")).stdout).roundId, first.round.id);
   await assert.rejects(f.call("continue", "review", "wait", "--notification-round", first.round.id, "--output", "json"), /INVALID_ARGUMENT/);
   assert.deepEqual(await f.reviewState(), second);
   assert.deepEqual(await requireCommandState("codex-origin-session", f.home), binding);
   const current = JSON.parse((await f.call("continue", "review", "wait", "--output", "json")).stdout);
-  assert.equal(current.roundId, second.round.id);
-  assert.equal(current.candidateId, second.round.submissionId);
+  await assertCandidate(current, second.round.id, second.round.submissionId);
 });
 
 test("asynchronous review wait notifies its original session without waiting for Human", { timeout: 90000 }, async t => {
@@ -1009,9 +1019,15 @@ test("a completed historical wait does not block a fresh pending wait in the sam
   assert.ok(ready.stdout.includes(f.reviewId));
   assert.equal((await listTasks(f.home)).length, 2);
   const status = JSON.parse((await f.call("run", "review", "wait", "status", "--review", f.reviewId, "--output", "json")).stdout);
-  assert.equal(status.total, 2);
   assert.equal(status.items.length, 2);
-  assert.ok(status.items.every((task: { status: string }) => task.status === "completed"));
+  assert.equal(Object.hasOwn(status, "total"), false);
+  assert.equal(Object.hasOwn(status, "nextCursor"), false);
+  assert.deepEqual(status.items.map((task: { id: string }) => task.id).sort(), [previous.id, ids[0]].sort());
+  for (const task of status.items) {
+    assert.equal(task.roundId, previous.value.input.roundId);
+    assert.equal(task.currentRound, true);
+    assert.equal(task.status, "completed");
+  }
 });
 
 
