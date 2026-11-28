@@ -7,13 +7,17 @@ import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import test from "node:test";
 import { get_encoding } from "tiktoken";
-import { stopDaemon } from "../src/daemon/service.js";
+import { inspectWindowsReviewJob } from "../src/context_control/windows-review-job.js";
+import { daemonStatus, stopDaemon } from "../src/daemon/service.js";
 import { openContextControl } from "../src/project/context-control.js";
 import { stripRunnerEnvironment } from "../src/runner/agent-types.js";
+import { cleanupFixtureResources, createFixtureProcesses } from "./helpers/fixture-process.js";
 import { initializedContextFixture } from "./helpers/initialized-context.js";
+import { ownTestProcess } from "./helpers/owned-process.js";
 
 const exec = promisify(execFile);
 const entry = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+const rethrowEntry = fileURLToPath(new URL("./fixtures/cli-rethrow.mjs", import.meta.url));
 const reviewer = new URL("./fixtures/fake-acp-reviewer.mjs", import.meta.url).href;
 
 async function executable(path: string, body: string) {
@@ -34,6 +38,7 @@ test("a Schema author receives the original Review wakeup, verifies the saved ca
   await mkdir(bin);
   const actor = "contract-author";
   const env = { ...process.env, MEMSPHERE_HOME: f.home, PATH: bin + delimiter + process.env.PATH };
+  let activeRun: string | undefined;
   stripRunnerEnvironment(env);
   Object.assign(env, { CODEX_THREAD_ID: actor });
   await executable(join(bin, "codex"), `
@@ -49,10 +54,52 @@ test("a Schema author receives the original Review wakeup, verifies the saved ca
       process.env.REVIEW_TEST_CLI_TRANSCRIPT = ${JSON.stringify(transcript)};
       import(${JSON.stringify(reviewer)});
     }`);
-  f.beforeCleanup(async () => {
-    await writeFile(gate, "release");
-    await stopDaemon(f.home);
-  });
+  const readerReview = async (runId: string) => (await service.inspect(runId)).reviews.find(row => row.reviewer.actorId === "reader");
+  let processObserver: ReturnType<typeof createFixtureProcesses> | undefined;
+  const observeProcesses = () => processObserver ??= createFixtureProcesses();
+  f.beforeCleanup(() => cleanupFixtureResources([
+    () => writeFile(gate, "release"),
+    async () => {
+      let pid: number | undefined;
+      try {
+        const daemon = await daemonStatus(f.home);
+        if (daemon.running) {
+          await (await observeProcesses()).remember(daemon.pid);
+          pid = daemon.pid;
+        }
+      } finally {
+        await stopDaemon(f.home);
+      }
+      if (pid !== undefined) {
+        const processes = await observeProcesses();
+        const signal = AbortSignal.timeout(20_000);
+        while ((await processes.alive(pid))[0]) await delay(50, undefined, { signal });
+      }
+    },
+    async () => {
+      if (process.platform === "win32" && activeRun) {
+        const runId = activeRun;
+        const signal = AbortSignal.timeout(20_000);
+        let review = await readerReview(runId);
+        while (review?.attempts?.at(-1) && !review.attempts.at(-1)?.workerJob && !review.attempts.at(-1)?.completion) {
+          await delay(50, undefined, { signal });
+          review = await readerReview(runId);
+        }
+        const job = review?.attempts?.at(-1)?.workerJob;
+        if (job) {
+          while ((await inspectWindowsReviewJob(job)).exists) await delay(50, undefined, { signal });
+          const members = (await readerReview(runId))?.attempts?.at(-1)?.workerMembers ?? [];
+          if (members.length) {
+            const processes = await observeProcesses();
+            processes.rememberSnapshot(...members);
+            const pids = members.map(member => member.pid);
+            while ((await processes.alive(...pids)).some(Boolean)) await delay(50, undefined, { signal });
+          }
+        }
+      }
+    },
+    async () => (await processObserver)?.close()
+  ]));
   await exec("git", ["init", "-b", "master"], { cwd: f.root, signal: t.signal });
   const configPath = join(f.root, "config.json");
   const config = JSON.parse(await readFile(configPath, "utf8"));
@@ -90,14 +137,20 @@ actions:
   const tokenizer = get_encoding("o200k_base");
   t.after(() => tokenizer.free());
   let runnerCalls = 0, runnerTokens = 0;
-  const call = async (...args: string[]) => {
-    const { stdout, stderr } = await exec(process.execPath, [entry, "--project", "test-project", ...args, "--output", "json"],
-      { cwd: f.root, env, signal: t.signal, timeout: 30000, killSignal: "SIGKILL" });
+  const invoke = async (entrypoint: string[], args: string[]) => {
+    t.signal.throwIfAborted();
+    const started = performance.now();
+    const command = exec(process.execPath, [...entrypoint, "--project", "test-project", ...args, "--output", "json"],
+      { cwd: f.root, env, timeout: 30000, killSignal: "SIGKILL" });
+    ownTestProcess(command.child, t.signal, f.beforeCleanup);
+    const { stdout, stderr } = await command
+      .finally(() => t.diagnostic(`${args.join(" ").split(" --", 1)[0]} took ${Math.round(performance.now() - started)} ms`));
     assert.equal(stderr, "");
     runnerCalls++;
     runnerTokens += tokenizer.encode(stdout).length;
     return JSON.parse(stdout);
   };
+  const call = (...args: string[]) => invoke([entry], args);
 
   const { runId } = await call("run", "start", "--file", procedure, "--review-config", bindings, "--name", "Deliver one result");
   const draft = await call("continue", "enter-schema");
@@ -107,12 +160,28 @@ actions:
   const candidate = await call("continue", "report", "--artifact", body);
   assert.equal(candidate.artifactId, draft.artifactId);
   assert.equal(candidate.status, "awaiting_review");
-  const wait = await call(...candidate.nextAction.resume.args);
+  assert.equal((await daemonStatus(f.home)).running, false);
+  assert.equal((await readerReview(runId))?.attempts?.at(-1)?.workerPid, undefined);
+  // On failure preserve the internal cause from registering the wakeup.
+  activeRun = runId;
+  const wait = await invoke([rethrowEntry, entry], candidate.nextAction.resume.args);
   assert.equal(wait.roundId, candidate.roundId);
   assert.ok(wait.taskId);
+  assert.equal((await daemonStatus(f.home)).running, true);
+  const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60000)]);
+  // The wait command can launch the Reviewer. Keep the gate closed until
+  // both the wakeup registration and the ACP session are established.
+  const reviewerStarted = performance.now();
+  let reader = await readerReview(runId);
+  while (!reader?.attempts?.at(-1)?.session) {
+    const failure = reader?.attempts?.at(-1)?.completion?.failure;
+    if (failure) throw new Error(`Reviewer setup failed (${failure.code}) ${failure.message}`);
+    await delay(30, undefined, { signal });
+    reader = await readerReview(runId);
+  }
+  t.diagnostic(`Reviewer readiness took ${Math.round(performance.now() - reviewerStarted)} ms`);
   await writeFile(gate, "ready");
   let queued: string[] | undefined;
-  const signal = AbortSignal.any([t.signal, AbortSignal.timeout(60000)]);
   while (!queued) {
     try { queued = JSON.parse(await readFile(queue, "utf8")); }
     catch (error) {
@@ -125,7 +194,11 @@ actions:
   assert.ok(wake, queued[4]);
   assert.deepEqual(wake.slice(1), [candidate.reviewId, candidate.roundId]);
   const read = await call("run", "review", "wait", "--review", wake[1], "--notification-round", wake[2]);
-  assert.equal(read.candidateId, candidate.artifactId);
+  assert.equal(read.roundId, candidate.roundId);
+  assert.deepEqual(read.details.args, ["--project", "test-project", "run", "review", "show",
+    "--review", candidate.reviewId, "--round", candidate.roundId, "--all"]);
+  const detail = await call(...read.details.args.slice(2));
+  assert.equal(detail.candidateId, candidate.artifactId);
   // The worker records its provider stop reason just after the vote becomes readable.
   let before = await service.inspect(runId);
   while (!before.reviews.find(row => row.reviewer.actorId === "reader")?.attempts?.at(-1)?.completion?.stopReason) {
