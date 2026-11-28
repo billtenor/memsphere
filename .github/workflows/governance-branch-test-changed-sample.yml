@@ -1,0 +1,159 @@
+name: Governance branch test changed sample
+
+on:
+  push:
+    branches: [codex/full-ci-governance-proof]
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      base: ${{ steps.fixture.outputs.base }}
+      head: ${{ steps.fixture.outputs.head }}
+      candidate: ${{ steps.fixture.outputs.candidate }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Create and freeze a two-parent sample
+        id: fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD^)" = 997cbe89995cd0304862ddb863cd4ce6e021adf9
+          git diff HEAD^ HEAD --exit-code -- scripts/ci package.json package-lock.json test/ci/changed-test-run.system.test.ts
+          bundle="$RUNNER_TEMP/changed-proof/fixture.bundle"
+          mkdir -p "$RUNNER_TEMP/changed-proof" "$GITHUB_WORKSPACE/.changed-fixture/test"
+          cd "$GITHUB_WORKSPACE/.changed-fixture"
+          git init -qb master
+          git config user.name 'Memsphere CI fixture'
+          git config user.email 'fixture@example.test'
+          : > test/default.unit.test.ts
+          printf '%s\n' '{"type":"module"}' > package.json
+          printf '%s\n' 'throw new Error("unselected file ran");' > test/unselected.system.test.ts
+          printf '%s\n' 'throw new Error("pre-merge fixture ran");' > test/selected.system.test.ts
+          git add .
+          git commit -qm base
+          base="$(git rev-parse HEAD)"
+          git switch -qc feature
+          printf '%s\n' 'import test from "node:test"; test("selected sample", () => {});' > test/selected.system.test.ts
+          git add test/selected.system.test.ts
+          git commit -qm feature
+          head="$(git rev-parse HEAD)"
+          git switch -q master
+          git merge --no-ff --no-edit feature
+          candidate="$(git rev-parse HEAD)"
+          git bundle create "$bundle" master feature
+          printf 'base=%s\nhead=%s\ncandidate=%s\n' "$base" "$head" "$candidate" >> "$GITHUB_OUTPUT"
+      - name: Run the implementation plan entrypoint
+        id: plan
+        working-directory: .changed-fixture
+        env:
+          OBSERVATION_BASE: ${{ steps.fixture.outputs.base }}
+          OBSERVATION_HEAD: ${{ steps.fixture.outputs.head }}
+          OBSERVATION_CANDIDATE: ${{ steps.fixture.outputs.candidate }}
+          OBSERVATION_PLAN_PATH: ${{ runner.temp }}/changed-proof/plan.json
+        run: node ../scripts/ci/observe-changed-tests.mjs plan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fixed-candidate-and-plan
+          path: ${{ runner.temp }}/changed-proof
+          if-no-files-found: error
+
+  platform-proof:
+    name: Selected sample (${{ matrix.os }})
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixed-candidate-and-plan
+          path: ${{ runner.temp }}/changed-proof
+      - name: Check out the identical sample merge candidate
+        env:
+          FIXTURE_BUNDLE: ${{ runner.temp }}/changed-proof/fixture.bundle
+        run: node -e "require('node:child_process').execFileSync('git', ['clone', '--quiet', '--branch', 'master', process.env.FIXTURE_BUNDLE, '.changed-fixture'], {stdio:'inherit'})"
+      - name: Run only the selected file
+        working-directory: .changed-fixture
+        env:
+          OBSERVATION_BASE: ${{ needs.plan.outputs.base }}
+          OBSERVATION_HEAD: ${{ needs.plan.outputs.head }}
+          OBSERVATION_CANDIDATE: ${{ needs.plan.outputs.candidate }}
+          OBSERVATION_OS: ${{ matrix.os }}
+          OBSERVATION_SUITE: ${{ matrix.suite }}
+          OBSERVATION_PLAN_PATH: ${{ runner.temp }}/changed-proof/plan.json
+          OBSERVATION_RESULT_PATH: ${{ runner.temp }}/changed-proof-result/result.json
+        run: node ../scripts/ci/observe-changed-tests.mjs run
+      - name: Verify the public command and independent package-only input
+        run: node --import tsx --test test/ci/changed-test-run.system.test.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: platform-result-${{ matrix.os }}
+          path: ${{ runner.temp }}/changed-proof-result/result.json
+          if-no-files-found: warn
+
+  aggregate:
+    needs: [plan, platform-proof]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: fixed-candidate-and-plan
+          path: ${{ runner.temp }}/changed-proof
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: platform-result-*
+          path: ${{ runner.temp }}/changed-proof-platforms
+      - name: Require the same candidate and one expected result per platform
+        env:
+          OBSERVATION_PLAN_PATH: ${{ runner.temp }}/changed-proof/plan.json
+          OBSERVATION_RESULT_DIRECTORY: ${{ runner.temp }}/changed-proof-platforms
+          OBSERVATION_JOBS_STATUS: ${{ needs.platform-proof.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          destination="$RUNNER_TEMP/changed-proof-aggregate"
+          mkdir -p "$destination"
+          node scripts/ci/observe-changed-tests.mjs summarize > "$destination/result.json"
+          jq -e '
+            .status == "passed" and (.jobs | length) == 3 and
+            ([.jobs[].actualPlatform] | sort) == ["macos-latest","ubuntu-24.04","windows-latest"] and
+            all(.jobs[]; [.files[].file] == ["selected.system.test.ts"] and .files[0].execution.counts.executed == 1)
+          ' "$destination/result.json"
+          cat "$destination/result.json"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aggregate-proof
+          path: ${{ runner.temp }}/changed-proof-aggregate/result.json
+          if-no-files-found: warn
