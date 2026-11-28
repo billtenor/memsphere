@@ -188,6 +188,35 @@ test("historical wait links can only inspect the pinned round", async () => {
   assert.throws(() => check(["run", "report", "--run", "r", "--artifact", "again"]), /contract mismatch/);
 });
 
+test("interleaved review projections preserve shared facts across all four roles", async () => {
+  const { selectReceipt } = await import("../src/prompts/contracts/dispatch.js");
+  const progress = Object.freeze({ phase: "reviewing", processed: 0, total: 1 });
+  const node = Object.freeze({ nodeId: "n", name: "Check", reported: false, requiresReport: true,
+    complete: false, hasContent: false, isCurrent: true, commentIds: Object.freeze([]) });
+  const facts = Object.freeze({ status: "draft", progress, node });
+  const binding = Object.freeze({ runId: "r", stepId: "s", reviewId: "v" });
+  const located = Object.freeze({ ...facts, ...binding });
+  const original = structuredClone(located);
+  const expected = { status: "draft", progress, node: { nodeId: "n", name: "Check", reported: false,
+    requiresReport: true, complete: false, hasContent: false, isCurrent: true } };
+  const cases = [
+    ["runnerContinue", "continue review show", "runner-continue-review-show-2"],
+    ["reviewer", "run review show", "reviewer-run-review-show-2"],
+    ["native", "run review show", "cli-run-review-show-2"],
+    ["reviewerContinue", "continue show", "reviewer-continue-continue-show-1"],
+  ] as const;
+  for (const [role, route, id] of [...cases, ...cases.toReversed()]) {
+    const scope = { role, route, args: [], options: {}, binding };
+    assert.deepEqual(selectReceipt(scope, facts), { id, data: expected });
+    if (role === "reviewer" || role === "reviewerContinue") {
+      assert.throws(() => selectReceipt(scope, located), /contract mismatch/);
+    } else {
+      assert.deepEqual(selectReceipt(scope, located).data, role === "native" ? { ...expected, ...binding } : expected);
+    }
+    assert.deepEqual(located, original);
+  }
+});
+
 test("duplicate eligible contract cases fail closed", async () => {
   const { selectReceipt } = await import("../src/prompts/contracts/dispatch.js");
   const cases = commandCases("native", "runner detect")!;
