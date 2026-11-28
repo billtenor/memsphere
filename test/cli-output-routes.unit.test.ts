@@ -125,6 +125,11 @@ test("every reviewed scenario preserves its public field types and visibility", 
     }
     throw new Error("Missing contract assertion for " + schema.constructor.name);
   }
+  const overrides = new Map<string, Record<string, string | null>>();
+  for (const group of approved.outputOverrides) for (const id of group.cases) {
+    assert.ok(approved.cases[id] && !overrides.has(id), id);
+    overrides.set(id, group.fields);
+  }
   const seen = new Set<string>();
   for (const [role, routes] of Object.entries(commandContracts)) {
     for (const [route, cases] of Object.entries(routes)) for (const entry of cases) {
@@ -133,6 +138,16 @@ test("every reviewed scenario preserves its public field types and visibility", 
       const actual = Object.fromEntries(Object.entries(entry.fields).map(([key, field]) =>
         [key + (field.isOptional() ? "?" : ""), signature(field)]));
       assert.deepEqual(actual, approved.fields[id], entry.id);
+      const expected = { ...approved.fields[id] };
+      for (const [key, replacement] of Object.entries(overrides.get(entry.id) ?? {})) {
+        assert.ok(Object.hasOwn(expected, key) || Object.hasOwn(expected, key + "?"), entry.id + "." + key);
+        delete expected[key];
+        delete expected[key + "?"];
+        if (replacement !== null) expected[key + (replacement.startsWith("?") ? "?" : "")] = replacement.replace(/^\?/, "");
+      }
+      const output = Object.fromEntries(Object.entries(entry.outputFields).map(([key, field]) =>
+        [key + (field.isOptional() ? "?" : ""), signature(field)]));
+      assert.deepEqual(output, expected, entry.id + " output");
       assert.ok(!seen.has(entry.id), entry.id);
       seen.add(entry.id);
     }
@@ -171,6 +186,35 @@ test("historical wait links can only inspect the pinned round", async () => {
   assert.equal(check(["run", "review", "show", "--review", "review", "--round", "old", "--all"]).id, "cli-run-review-wait-3");
   assert.throws(() => check(["run", "review", "show", "--review", "review", "--round", "new", "--all"]), /contract mismatch/);
   assert.throws(() => check(["run", "report", "--run", "r", "--artifact", "again"]), /contract mismatch/);
+});
+
+test("interleaved review projections preserve shared facts across all four roles", async () => {
+  const { selectReceipt } = await import("../src/prompts/contracts/dispatch.js");
+  const progress = Object.freeze({ phase: "reviewing", processed: 0, total: 1 });
+  const node = Object.freeze({ nodeId: "n", name: "Check", reported: false, requiresReport: true,
+    complete: false, hasContent: false, isCurrent: true, commentIds: Object.freeze([]) });
+  const facts = Object.freeze({ status: "draft", progress, node });
+  const binding = Object.freeze({ runId: "r", stepId: "s", reviewId: "v" });
+  const located = Object.freeze({ ...facts, ...binding });
+  const original = structuredClone(located);
+  const expected = { status: "draft", progress, node: { nodeId: "n", name: "Check", reported: false,
+    requiresReport: true, complete: false, hasContent: false, isCurrent: true } };
+  const cases = [
+    ["runnerContinue", "continue review show", "runner-continue-review-show-2"],
+    ["reviewer", "run review show", "reviewer-run-review-show-2"],
+    ["native", "run review show", "cli-run-review-show-2"],
+    ["reviewerContinue", "continue show", "reviewer-continue-continue-show-1"],
+  ] as const;
+  for (const [role, route, id] of [...cases, ...cases.toReversed()]) {
+    const scope = { role, route, args: [], options: {}, binding };
+    assert.deepEqual(selectReceipt(scope, facts), { id, data: expected });
+    if (role === "reviewer" || role === "reviewerContinue") {
+      assert.throws(() => selectReceipt(scope, located), /contract mismatch/);
+    } else {
+      assert.deepEqual(selectReceipt(scope, located).data, role === "native" ? { ...expected, ...binding } : expected);
+    }
+    assert.deepEqual(located, original);
+  }
 });
 
 test("duplicate eligible contract cases fail closed", async () => {

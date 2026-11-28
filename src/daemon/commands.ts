@@ -22,9 +22,9 @@ const taskSchema = z.object({
   stage: z.enum(["wait", "render", "send", "cancel", "recovery"]).optional()
 }).strict();
 const taskListSchema = z.object({
-  items: z.array(taskSchema), total: z.number().int().nonnegative(), nextCursor: z.string().optional()
+  runId: z.string(), items: z.array(taskSchema), total: z.number().int().nonnegative(), nextCursor: z.string().optional()
 }).strict();
-const retrySchema = z.object({ taskId: z.string(), roundId: z.string(), status: z.string(), mayRepeatNotification: z.boolean(), nextAction }).strict();
+const retrySchema = z.object({ runId: z.string(), taskId: z.string(), roundId: z.string(), status: z.string(), mayRepeatNotification: z.boolean(), nextAction }).strict();
 
 async function showDaemon(command: string) {
   const status = await daemonStatus();
@@ -70,7 +70,7 @@ export function registerWaitTaskCommands(wait: Command) {
       filters: { currentRoundId: context.round.id }
     }, "summary");
     return commandFacts(() => taskListSchema.parse({
-      items: page.items, total: items.length, nextCursor: page.nextCursor
+      runId: context.run.id, items: page.items, total: items.length, nextCursor: page.nextCursor
     }));
   });
   registerResultAction(addCliOutput(wait.command("retry").requiredOption("--round <id>")), async (_options, command: Command) => {
@@ -95,7 +95,7 @@ export function registerWaitTaskCommands(wait: Command) {
     await daemonControl("notify");
     const resume = cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", options.review]);
     return commandFacts(() => retrySchema.parse({
-      taskId: task.id, roundId: task.input.roundId, status: task.status,
+      runId: context.run.id, taskId: task.id, roundId: task.input.roundId, status: task.status,
       mayRepeatNotification: true, nextAction: { kind: "wait", resume }
     }), { saved: { id: task.id, inspect: cliCommand([...resume.args, "status"]) } });
   });

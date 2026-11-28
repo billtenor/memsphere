@@ -57,7 +57,7 @@ test("actual model CLI resolves the Registry Project and preserves stdin definit
   const f = await businessFixture(t, {});
   const ref = "sales/order.json";
   const created = success(await cli(t, f, ["model", "create", ref, "--definition-file", "-", "--name", "Managed title", "--tag", "one", "--tag", "two", ...json], { input: source }));
-  assert.equal(created.project, "test-project"); assert.equal(created.modelRef, ref); assert.equal(created.operation, "model.create");
+  assert.equal(created.project, "test-project"); assert.equal(created.modelRef, ref); assert.equal(Object.hasOwn(created, "operation"), false);
   const path = join(f.root, "models/json-schema/draft-07", ref);
   assert.equal(await fs.readFile(path, "utf8"), source);
   const definition = success(await cli(t, f, ["model", "read", ref, ...json]));

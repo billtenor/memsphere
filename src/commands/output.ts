@@ -4,6 +4,7 @@ import { acceptsPublicError } from "../prompts/contracts/errors.js";
 import { publicReceipt, commandCases, type OutputScope, type ReceiptContext, cliProtocol } from "../prompts/contracts/dispatch.js";
 import { writeCliChunk } from "../cli-transport.js";
 import { paginateItems, type CursorScope, type PaginationOptions } from "../pagination.js";
+import { isDeepStrictEqual } from "node:util";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFile } from "node:fs/promises";
 import { type Command, Option } from "commander";
@@ -31,8 +32,19 @@ export function commandFromContract(parent: Command, contract: { readonly route:
   return parent.command(leaf);
 }
 
-type Invocation = { format: CliFormat; locale: PromptLocale; scope?: OutputScope; program?: Command; returnsFacts?: boolean; reviewerProtocol?: "graph" | "flow"; receipt?: { output: string; saved?: ResultOptions["saved"] }; invalid?: CliOutputError; delivered?: boolean; afterDelivery?: () => Promise<void> };
+type OutputEnvironment = { locale?: PromptLocale; render?: typeof renderPrompt; write?: (output: string) => Promise<void> };
+type Invocation = OutputEnvironment & { format: CliFormat; locale: PromptLocale; scope?: OutputScope; program?: Command; returnsFacts?: boolean; reviewerProtocol?: "graph" | "flow"; receipt?: { output: string; saved?: ResultOptions["saved"] }; invalid?: CliOutputError; delivered?: boolean; afterDelivery?: () => Promise<void> };
 const invocation = new AsyncLocalStorage<Invocation>();
+
+export function setContinueOutputBinding(binding: NonNullable<OutputScope["binding"]>) {
+  const scope = invocation.getStore()?.scope;
+  if (scope?.role === "runnerContinue") scope.binding = binding;
+}
+
+export function isBoundContinueStep(runId: string, stepId: string) {
+  const scope = invocation.getStore()?.scope;
+  return scope?.role === "runnerContinue" && scope.binding?.runId === runId && scope.binding.stepId === stepId;
+}
 
 export function setReviewerOutputProtocol(protocol: "graph" | "flow") {
   const state = invocation.getStore();
@@ -71,13 +83,13 @@ export async function flushCliOutput(): Promise<void> {
   if (!state?.receipt || state.delivered) return;
   state.delivered = true;
   const { output, saved } = state.receipt;
-  try { await writeCliChunk(output); }
+  try { await (state.write ?? writeCliChunk)(output); }
   catch (error) { throw new CliOutputError(saved, error); }
   await state.afterDelivery?.();
 }
 
 
-export async function withCliOutput<T>(format: CliFormat, run: () => Promise<T>): Promise<T> {
+async function configuredLocale() {
   let locale = defaultPromptLocale;
   try {
     const raw: unknown = JSON.parse(await readFile(homePaths(resolveMemsphereHome()).configPath, "utf8"));
@@ -86,7 +98,12 @@ export async function withCliOutput<T>(format: CliFormat, run: () => Promise<T>)
     // Startup and help can run before Home exists. Configuration errors keep
     // their own CLI diagnostic and never affect the ability to print a reply.
   }
-  return invocation.run({ format, locale, reviewerProtocol: invocation.getStore()?.reviewerProtocol }, run);
+  return locale;
+}
+
+export async function withCliOutput<T>(format: CliFormat, run: () => Promise<T>, environment: OutputEnvironment = {}): Promise<T> {
+  const locale = environment.locale ?? await configuredLocale();
+  return invocation.run({ ...environment, format, locale, reviewerProtocol: invocation.getStore()?.reviewerProtocol }, run);
 }
 
 export function cliFormat(fallback: CliFormat = "text"): CliFormat {
@@ -168,7 +185,13 @@ export function paginateCliItems<T>(
 function presentAction(action: CliAction): NonNullable<CliResultPrompt["action"]> {
   let commands: CliCommand[];
   if (action.kind === "command") commands = [action];
-  else if (action.kind === "choose") commands = [...action.choices, ...(action.more ? [action.more] : [])];
+  else if (action.kind === "choose") {
+    const choices = action.choices.map(choice => choice.label
+      ? inline(choice.label) + "\n" + formatCliCommand(choice)
+      : formatCliCommand(choice));
+    if (action.more) choices.push(formatCliCommand(action.more));
+    return { kind: action.kind, commands: choices };
+  }
   else commands = action.resume ? [action.resume] : [];
   return { kind: action.kind, commands: commands.map(command => formatCliCommand(command)) };
 }
@@ -180,6 +203,8 @@ type ResultOptions = {
   contentField?: string;
   contentStream?: boolean;
   itemsField?: string;
+  sharedFields?: string[];
+  daemonView?: boolean;
   maximumBytes?: number;
   saved?: { id: string; inspect?: CliCommand };
 };
@@ -305,16 +330,29 @@ export function renderCliResult<Schema extends z.ZodTypeAny>(
       const itemsField = options.itemsField ?? "items";
       const items = details[itemsField];
       const content = options.contentField ? details[options.contentField] : undefined;
+      const commands = nextAction ? presentAction(nextAction) : undefined;
+      const shared = options.sharedFields?.filter(key => details[key] !== undefined);
+      const merge = shared && shared.length > 1 && shared.every(key => details[key] === details[shared[0]]) ? shared : undefined;
+      const view = options.daemonView ? details.view : undefined;
+      if (view && typeof view.running === "boolean" && view.desiredState === (view.running ? "running" : "stopped")) {
+        const { running: _running, desiredState, ...other } = view;
+        details.view = { "actual / desiredState": desiredState, ...other };
+      }
       const facts = Object.entries(details)
-        .filter(([key, value]) => value !== undefined && key !== options.contentField && key !== itemsField)
+        .filter(([key, value]) => value !== undefined && key !== options.contentField &&
+          (key !== itemsField || Array.isArray(items) && items.length === 0) && !merge?.slice(1).includes(key))
+        .filter(([key, value]) => !(key === "details" && isDeepStrictEqual(value, nextAction)))
+        .filter(([key, value]) => !(key === "position" && typeof value === "string" && nextAction?.kind === "command" &&
+          nextAction.args.some((arg: string, index: number) => arg === "--position" && nextAction.args[index + 1] === value)))
         .map(([label, value]) => ({
-          label,
+          label: merge?.[0] === label ? merge.join(" / ") : label,
           value: displayValue(value)
         }));
-      output = renderPrompt("cli.result", options.locale ?? cliLocale(), {
+      const render = invocation.getStore()?.render ?? renderPrompt;
+      output = render("cli.result", options.locale ?? cliLocale(), {
         command, facts, items: (items ?? []).map(itemText),
         content: options.contentStream ? "" : content === undefined ? undefined : inline(content),
-        action: nextAction ? presentAction(nextAction) : undefined
+        action: commands
       }) + "\n";
     }
     if (options.maximumBytes !== undefined && Buffer.byteLength(output) > options.maximumBytes) {

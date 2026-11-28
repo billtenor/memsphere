@@ -24,7 +24,7 @@ const entrypoint = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const spec = { name: "Result", model: { definedBy: "raw.json", definition: "{}" }, payload: { contentType: "text/markdown" } };
 const action = (id: string, from = "START", review = false): GraphAction => ({ tag: "!action", id, description: id, dependencies: [{ tag: "!dependency", from }], artifact: { ...spec, ...(review ? { review: ["test"] } : {}) } });
 
-async function evidenceFixture(t: test.TestContext, businessBody?: string) {
+async function evidenceFixture(t: test.TestContext, businessBody?: string, extraSources: string[] = []) {
   const f = await initializedContextFixture(t, { "text.json": { type: "string" } }), service = (await openContextControl(f.root))!;
   await mkdir(join(f.root, "memory", "concepts"), { recursive: true });
   await writeFile(join(f.root, "memory", "concepts", "live-evidence.yaml"), `!concept\nsyntax: ${graphMemorySyntax}\nnames: [live-evidence]\ndefines: [Current Project auxiliary evidence.]\n`);
@@ -40,7 +40,8 @@ async function evidenceFixture(t: test.TestContext, businessBody?: string) {
     procedure.syntax = graphStoreMemorySyntax;
     procedure.actions[0].artifact!.store = { store_id: "records", operation: "upsert" };
   }
-  const start = await service.withGraph(g => g.start({ name: "Evidence", procedure, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { owner: { kind: "human", name: "Owner", permissions: ["artifact.read", "decision.decide"] }, tester: { kind: "agent", name: "Tester", permissions: ["artifact.read", "decision.assess"], agent: { provider: "test", providerType: "traex", command: "unused", args: [], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: null, maxRuntimeMs: null } } }, acpProviders: {} }, reviewConfiguration: { reviews: { "reviewer-evidence#actions[A]": { policy: "artifact_acceptance.unanimous" }, "reviewer-evidence#actions[C]": { policy: "artifact_acceptance.unanimous" }, "reviewer-evidence#actions[V]": { policy: "artifact_acceptance.unanimous" } }, slots: { "reviewer-evidence::source": { actorIds: ["owner"] }, "reviewer-evidence::test": { actorIds: ["tester", "owner"] } } } }));
+  if (extraSources.length) procedure.actions.find(a => a.id === "B")!.artifact!.review = ["source"];
+  const start = await service.withGraph(g => g.start({ name: "Evidence", procedure, controlPlane: { runner: { permissions: ["artifact.read", "artifact.submit", "decision.decide"] }, actors: { owner: { kind: "human", name: "Owner", permissions: ["artifact.read", "decision.decide"] }, tester: { kind: "agent", name: "Tester", permissions: ["artifact.read", "decision.assess"], agent: { provider: "test", providerType: "traex", command: "unused", args: [], env: {}, startupTimeoutMs: 10000, idleTimeoutMs: null, maxRuntimeMs: null } } }, acpProviders: {} }, reviewConfiguration: { reviews: { ...(extraSources.length ? { "reviewer-evidence#actions[B]": { policy: "artifact_acceptance.unanimous" as const } } : {}), "reviewer-evidence#actions[A]": { policy: "artifact_acceptance.unanimous" }, "reviewer-evidence#actions[C]": { policy: "artifact_acceptance.unanimous" }, "reviewer-evidence#actions[V]": { policy: "artifact_acceptance.unanimous" } }, slots: { "reviewer-evidence::source": { actorIds: ["owner"] }, "reviewer-evidence::test": { actorIds: ["tester", "owner"] } } } }));
   const runId = start.run.id;
   const produce = async (id: string, text: string, dependencies?: Array<{kind:"artifact"|"external";id:string}>) => service.withGraph(async g => {
     const s = (await g.snapshot(runId)).steps.find(s => s.source?.actionId === id)!;
@@ -49,7 +50,14 @@ async function evidenceFixture(t: test.TestContext, businessBody?: string) {
   const a = await produce("A", businessBody ?? "fixed requirements");
   await service.withGraph(async g=>{const round=a.step.reviewRounds![0];await g.submitReview(runId,a.step.id,round.id,"owner","approve");await g.submitReview(runId,a.step.id,round.id,"runner","approve");});
   const u = await produce("U", "UNRELATED_SECRET");
-  await produce("B", "fixed plan");
+  const plan = await produce("B", "fixed plan");
+  if (extraSources.length) {
+    const round = plan.step.reviewRounds![0];
+    await service.withGraph(async g => {
+      await g.submitReview(runId, plan.step.id, round.id, "owner", "approve");
+      await g.submitReview(runId, plan.step.id, round.id, "runner", "approve");
+    });
+  }
   const bytes = Buffer.from(("中文完整证据\n".repeat(160)));
   await f.createStore("sources", "text.json", "data");
   const opened = await openBusinessStore({}, f.root, "sources"); assert.equal(opened.store.kind, "DataStore");
@@ -62,8 +70,15 @@ async function evidenceFixture(t: test.TestContext, businessBody?: string) {
     const v=(await g.snapshot(runId)).steps.find(s=>s.source?.actionId==="V")!;await g.enter(runId,v.id);
     await g.report(runId,v.id,{contentRef:{storeId:"sources",dataId:"source.txt",sha256:createHash("sha256").update(bytes).digest("hex")}});
   });
-  const c = await produce("C", "candidate", [{ kind: "artifact", id: a.artifact.id }, { kind: "external", id: e.id }, { kind: "external", id: eRef.id }]);
-  assert.equal(c.artifact.dependencies.filter(r => r.kind === "artifact").length, 2, "mandatory B and explicit A both remain fixed");
+  const dependencies: Array<{kind: "artifact" | "external"; id: string}> = [
+    { kind: "artifact", id: a.artifact.id }, { kind: "external", id: e.id }, { kind: "external", id: eRef.id }
+  ];
+  for (const source of extraSources) {
+    const external = await service.addExternal(runId, source, { content: { model: spec.model, payload: { contentType: "text/plain", content: "authorized input" } } });
+    dependencies.push({ kind: "external", id: external.id });
+  }
+  const c = await produce("C", "candidate", dependencies);
+  assert.equal(c.artifact.dependencies.filter(r => r.kind === "artifact").length, dependencies.filter(r => r.kind === "artifact").length + 1, "mandatory B and explicit inputs remain fixed");
   const input = { service, runsRoot: join(f.root, "runs"), reviewId: reviews.graphReviewHandle(runId, c.step.id), roundId: c.step.reviewRounds![0].id, actorId: "tester" };
   const first = (await reviews.claimArtifactReviewAgentAssignment({ ...input }))!;
   const attempt = join(f.directory, "attempt"); await mkdir(attempt);
@@ -164,6 +179,35 @@ test('original Human confirmations are readable while current peer drafts are de
 test('Assignment discovery lists fixed references and executable resource reads', async t => {
   const { f, service, runId, a, u, e, eRef, outside, c, input, first, attempt, runtime, env, cli, bytes, opened } = await evidenceFixture(t);
   const detail = await cli(["run", "review", "assignment", "show", "--output", "json"]); assert.equal(detail.status, 0, detail.stderr); assert.match(detail.stdout, new RegExp(e.id));
+});
+
+test('Assignment discovery returns every authorized reference beyond 8 KiB in both languages and formats', { timeout: 120000 }, async t => {
+  const longSource = "材料".repeat(1600) + "-end";
+  const sources = [longSource, ...Array.from({ length: 7 }, (_, i) => "source-" + i)];
+  const { f, cli, outside, u } = await evidenceFixture(t, undefined, sources);
+  for (const language of ["zh-CN", "en"]) {
+    await writeFile(join(f.home, "config.json"), JSON.stringify({ language }));
+    const args = ["run", "review", "assignment", "show"];
+    const json = await cli([...args, "--output", "json"]);
+    assert.equal(json.status, 0, json.stderr);
+    const { references } = JSON.parse(json.stdout) as { references: Array<{ kind: string; id: string; source?: string; readCommand: string }> };
+    assert.equal(references.filter(r => r.kind === "external").length, 10);
+    assert.equal(references.filter(r => r.kind === "review").length, 4);
+    assert.equal(references.filter(r => r.kind === "artifact").length, 3);
+    for (const source of sources) assert.ok(references.some(r => r.source === source));
+
+    const text = await cli(args);
+    assert.equal(text.status, 0, text.stderr);
+    assert.match(text.stdout, language === "en" ? /^protocol: graph$/m : /^protocol：graph$/m);
+    for (const result of [json, text]) {
+      assert.equal(result.stderr, "");
+      assert.ok(Buffer.byteLength(result.stdout) > 8192);
+      assert.ok(result.stdout.includes(longSource));
+      assert.ok(!result.stdout.includes(outside.id));
+      assert.ok(!result.stdout.includes(u.artifact.id));
+      for (const reference of references) assert.ok(result.stdout.includes(reference.id));
+    }
+  }
 });
 
 test('External exports preserve full inline and contentRef bytes and reject changed content', { timeout: 120000 }, async t => {

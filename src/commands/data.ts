@@ -150,10 +150,10 @@ async function writeDataRead(branch: ReadBranch, value: unknown, format: CliForm
         id: inline(result.id), storeId: inline(result.storeId), modelRef: inline(result.modelRef)
       };
       for (const key of ["project", "revision", "contentType", "createdAt", "updatedAt", "deleted"] as const) {
-        if (result[key] !== undefined) facts[key] = inline(result[key]);
+        if (result[key] !== undefined) facts[key] = key === "revision" ? JSON.stringify(result[key]) : inline(result[key]);
       }
       header = (branch.template === "cli.data.read.content"
-        ? renderPrompt(branch.template, cliLocale(), { ...facts, body: streaming ? "" : inline(body) })
+        ? renderPrompt(branch.template, cliLocale(), { ...facts, body: streaming ? "" : escapeDisplayControls(JSON.stringify(body)) })
         : renderPrompt(branch.template, cliLocale(), facts)) + "\n";
       if (!streaming) return await writeCliChunk(header);
     }
@@ -161,7 +161,7 @@ async function writeDataRead(branch: ReadBranch, value: unknown, format: CliForm
     throw new CliOutputError(undefined, error);
   }
   let first = true;
-  for await (const chunk of encodeJsonChunks({}, body)) {
+  for await (const chunk of encodeJsonChunks({}, body, { pretty: false })) {
     if (first && header) await writeCliChunk(header);
     first = false;
     await writeCliChunk(format === "json" ? chunk : escapeDisplayControls(Buffer.from(chunk).toString("utf8")));

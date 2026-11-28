@@ -1,17 +1,43 @@
+import { object } from "./types.js";
 import { action, bool, content, either, integer, list, nil, oneOf, text } from "./types.js";
-import { publicAction, publicArtifact, publicRunArtifactContractShowAction, publicRunArtifactContractShowProcedure, publicRunArtifactContractShowSchema, publicRunArtifactShowArtifact, publicRunArtifactShowEntryItem, publicRunArtifactShowRevisionsummary, publicRunReportReceipt, publicRunSchemaShowCurrent, publicRunSchemaShowProgress, publicRunSchemaShowValidation, publicRunStartRulesItem } from "./fields.js";
+import { projectedSchemaField, schemaValidationReason, publicAction, publicArtifact, publicRunArtifactContractShowAction, publicRunArtifactContractShowProcedure, publicRunArtifactContractShowSchema, publicRunArtifactShowArtifact, publicRunArtifactShowEntryItem, publicRunArtifactShowRevisionsummary, publicRunReportReceipt, publicRunSchemaShowCurrent, publicRunSchemaShowProgress, publicRunSchemaShowValidation, publicRunStartRulesItem, stepArtifactItem } from "./fields.js";
 import { receipt } from "./types.js";
+
+const progress = {
+  schema: object({ completed: integer, total: integer }),
+  select(value: Record<string, unknown>) {
+    return { completed: value.completed, total: value.total };
+  }
+};
+
+const current = {
+  schema: projectedSchemaField,
+  select(field: Record<string, unknown>) {
+    const { instruction, ...rest } = field;
+    return field.kind === "action" && typeof field.path === "string" &&
+      field.id === "schema:" + field.path && instruction === "Write " + field.path ? rest : field;
+  }
+};
+const validation = {
+  schema: object({ status: text, issueCount: integer.optional(), reason: schemaValidationReason.optional() }),
+  select(value: Record<string, unknown>) {
+    return value.status === "passed" && value.issueCount === 0 ? { status: value.status } : value;
+  }
+};
 
 export const runWorkContracts = {
   "run artifact show": [
     receipt("cli-run-artifact-show-1", "graph · 按 Step 查产物",
-      { rule: "按 Step 列 graph 产物；按 ID 给预览/导出；旧 flow 查已上报材料；Reviewer 按协议取固定候选或明确选择的材料。" }, {
+      { items: { items: { schema: stepArtifactItem, select(row) {
+        const { dependencies, ...rest } = row;
+        return Array.isArray(dependencies) && dependencies.length === 0 ? rest : row;
+      } } }, rule: "按 Step 列 graph 产物；按 ID 给预览/导出；旧 flow 查已上报材料；Reviewer 按协议取固定候选或明确选择的材料。" }, {
       runId: text,
       stepId: text,
       items: list(publicRunArtifactShowEntryItem),
     }),
     receipt("cli-run-artifact-show-2", "文本预览",
-      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
+      { omitFalse: ["truncated"], rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -35,6 +61,7 @@ export const runWorkContracts = {
     }),
     receipt("cli-run-artifact-show-5", "历史 flow 产物",
       { rule: "按 Step 列 graph 产物；按 ID 给预览/导出；旧 flow 查已上报材料；Reviewer 按协议取固定候选或明确选择的材料。" }, {
+      runId: text,
       stepRef: text,
       source: oneOf("review_submission", "run_event", "not_reported"),
       artifact: either(publicRunArtifactShowArtifact, nil),
@@ -56,6 +83,7 @@ export const runWorkContracts = {
     }),
     receipt("cli-run-artifact-contract-show-2", "历史 flow 产物契约",
       { rule: "仅所选产物的契约、来源与规则；Reviewer 绑定候选的冻结版本。" }, {
+      runId: text,
       stepRef: text,
       procedure: publicRunArtifactContractShowProcedure,
       action: publicRunArtifactContractShowAction,
@@ -96,7 +124,7 @@ export const runWorkContracts = {
   ],
   "run schema show": [
     receipt("cli-run-schema-show-1", "graph／探索 · 未开始",
-      { rule: "有效步骤给 enter-schema。", omit: ["current", "position"] }, {
+      { omitTrue: ["effective"], rule: "有效步骤给 enter-schema。", omit: ["current", "position"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -104,7 +132,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-schema-show-2", "graph／探索 · 填写中",
-      { rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
+      { nested: { progress, current }, counts: { ruleCount: "rules" }, omitTrue: ["effective"], rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -118,7 +146,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-schema-show-3", "graph／探索 · 待最终提交",
-      { rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -129,7 +157,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-schema-show-4", "graph／探索 · 已完成或已失效",
-      { rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -161,7 +189,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-schema-report-2", "graph／探索 · 填写中",
-      { rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
+      { nested: { progress, current }, counts: { ruleCount: "rules" }, omitTrue: ["effective"], rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -175,7 +203,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-schema-report-3", "graph／探索 · 待最终提交",
-      { rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -186,7 +214,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-schema-report-4", "graph／探索 · 已完成或已失效",
-      { rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -199,7 +227,7 @@ export const runWorkContracts = {
   ],
   "run enter-schema": [
     receipt("cli-run-enter-schema-1", "graph／探索 · 未开始",
-      { rule: "有效步骤给 enter-schema。", omit: ["current", "position"] }, {
+      { omitTrue: ["effective"], rule: "有效步骤给 enter-schema。", omit: ["current", "position"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -207,7 +235,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-enter-schema-2", "graph／探索 · 填写中",
-      { rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
+      { nested: { progress, current }, counts: { ruleCount: "rules" }, omitTrue: ["effective"], rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -221,7 +249,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-enter-schema-3", "graph／探索 · 待最终提交",
-      { rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -232,7 +260,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-enter-schema-4", "graph／探索 · 已完成或已失效",
-      { rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -243,7 +271,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-enter-schema-5", "历史 flow · 操作后的当前进度",
-      { rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
+      { remove: ["name"], rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
       runId: text,
       name: text,
       status: text,
@@ -280,7 +308,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-repeat-2", "graph／探索 · 填写中",
-      { rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
+      { nested: { progress, current }, counts: { ruleCount: "rules" }, omitTrue: ["effective"], rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -294,7 +322,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-repeat-3", "graph／探索 · 待最终提交",
-      { rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -305,7 +333,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-repeat-4", "graph／探索 · 已完成或已失效",
-      { rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -316,7 +344,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-repeat-5", "历史 flow · 操作后的当前进度",
-      { rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
+      { remove: ["name"], rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
       runId: text,
       name: text,
       status: text,
@@ -353,7 +381,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-skip-2", "graph／探索 · 填写中",
-      { rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
+      { nested: { progress, current }, counts: { ruleCount: "rules" }, omitTrue: ["effective"], rule: "位置及字段用于本次写入；已失效草稿由历史分支处理。" }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -367,7 +395,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-skip-3", "graph／探索 · 待最终提交",
-      { rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "只给导出与提交所需的信息。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -378,7 +406,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-skip-4", "graph／探索 · 已完成或已失效",
-      { rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
+      { nested: { progress, validation }, omitTrue: ["effective"], rule: "已完成可回读；失效草稿无写动作。", omit: ["position", "current"] }, {
       runId: text,
       stepId: text,
       phase: text,
@@ -389,7 +417,7 @@ export const runWorkContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-skip-5", "历史 flow · 操作后的当前进度",
-      { rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
+      { remove: ["name"], rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
       runId: text,
       name: text,
       status: text,
@@ -433,7 +461,7 @@ export const runWorkContracts = {
   ],
   "run external show": [
     receipt("cli-run-external-show-1", "文本预览",
-      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
+      { omitFalse: ["truncated"], rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,

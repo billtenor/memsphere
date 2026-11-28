@@ -1,5 +1,6 @@
 import { action, bool, content, either, integer, list, literal, map, oneOf, text } from "./types.js";
-import { publicAction, publicBinding, publicRunBindingShowNextroundValue, publicRunBindingShowRoundsItem, publicRunBindingShowSlotsItem, publicRunBindingUpdateBindings, publicRunReportDependenciesItem, publicRunReportReceipt, publicRunShowRun, publicRunShowStepsItem, publicRunStartActorsItem, publicRunStartExample, publicRunStartMaterialsItem, publicRunStartReviewsItem, publicRunStartRulesItem, publicRunStartSlotsItem, publicRunStatusRunsItem, publicRunStepShowConfiguration, publicRunStepShowReviewersItem, publicRunStepShowStep, publicRunStepShowStep2, publicRunTryRunEntryItem, publicSlotsValue2 } from "./fields.js";
+import { yes } from "./types.js";
+import { publicAction, publicBinding, publicRunBindingShowNextroundValue, publicRunBindingShowRoundsItem, publicRunBindingShowSlotsItem, publicRunBindingUpdateBindings, publicRunReportDependenciesItem, publicRunReportReceipt, publicRunShowRun, publicRunShowStepsItem, publicRunStartActorsItem, publicRunStartExample, publicRunStartMaterialsItem, publicRunStartReviewsItem, publicRunStartRulesItem, publicRunStartSlotsItem, publicRunStatusRunsItem, publicRunStepShowConfiguration, publicRunStepShowReviewersItem, publicRunStepShowStep, publicRunStepShowStep2, publicRunTryRunEntryItem, publicSlotsValue2, bindingActor } from "./fields.js";
 import { receipt } from "./types.js";
 
 export const runStateContracts = {
@@ -38,6 +39,7 @@ export const runStateContracts = {
       artifactFormat: text.optional(),
       ruleCount: integer.optional(),
       rules: list(publicRunStartRulesItem).optional(),
+      rulesTruncated: yes.optional(), materialCount: integer.optional(),
       materials: list(publicRunStartMaterialsItem).optional(),
       details: publicAction.optional(),
       nextAction: action.optional(),
@@ -95,7 +97,7 @@ export const runStateContracts = {
   ],
   "run report": [
     receipt("cli-run-report-1", "graph · 提交产物",
-      { rule: "已发起评审才给轮次；业务写入才给目的地；只有实际后继才给 next*。" }, {
+      { counts: { dependencyCount: "dependencies" }, rule: "已发起评审才给轮次；业务写入才给目的地；只有实际后继才给 next*。" }, {
       runId: text,
       stepId: text,
       artifactId: text,
@@ -107,6 +109,7 @@ export const runStateContracts = {
       storeId: text.optional(),
       modelRef: text.optional(),
       dataId: text.optional(),
+      nextRulesTruncated: yes.optional(), nextMaterialCount: integer.optional(),
       nextMaterials: list(publicRunStartMaterialsItem, 4).optional(),
       nextRules: list(publicRunStartRulesItem, 5).optional(),
       nextStep: text.optional(),
@@ -116,20 +119,21 @@ export const runStateContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-report-2", "探索 · 本次已保存产物",
-      { rule: "只给已存对象与候选引用，禁止回显报告正文。" }, {
+      { counts: { candidateCount: "candidates" }, omitZero: ["warningCount"], rule: "候选预览最多 20 项，超出时保留总数及原会话的完整清单入口。" }, {
       runId: text,
       stepId: text,
       artifactId: text,
       stepStatus: text,
       artifactStatus: text,
       warningCount: integer.optional(),
-      candidates: list(text).optional(),
+      candidates: list(text, 20).optional(),
       candidateCount: integer.optional(),
+      candidateDetails: publicAction.optional(),
       nextAction: action.optional(),
       tags: list(text).optional(),
     }),
     receipt("cli-run-report-3", "历史 flow · 操作后的当前进度",
-      { rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
+      { remove: ["name"], rule: "只给当前步骤适用字段；已终止时无写动作，等待评审才给轮次。" }, {
       runId: text,
       name: text,
       status: text,
@@ -158,7 +162,7 @@ export const runStateContracts = {
   ],
   "run abandon": [
     receipt("cli-run-abandon-1", "已完成或放弃",
-      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
+      { remove: ["name"], omitZero: ["warningCount"], rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,
@@ -170,7 +174,7 @@ export const runStateContracts = {
   ],
   "run show": [
     receipt("cli-run-show-1", "按 Run 分页查看",
-      { rule: "普通调用分页给步骤/输出摘要；Reviewer 只给冻结可见的步骤。" }, {
+      { counts: { stepCount: "steps", outputArtifactCount: "outputArtifactIds" }, rule: "普通调用分页给步骤/输出摘要；Reviewer 只给冻结可见的步骤。" }, {
       run: publicRunShowRun,
       steps: list(publicRunShowStepsItem),
       stepCount: integer,
@@ -187,7 +191,10 @@ export const runStateContracts = {
       rounds: list(publicRunBindingShowRoundsItem),
     }),
     receipt("cli-run-binding-show-2", "历史 flow 绑定",
-      { rule: "graph 只给当前轮及下轮绑定；flow 给可读角色、权限和槽。" }, {
+      { items: { actors: { schema: bindingActor, select(row) {
+        const { name, ...rest } = row;
+        return name === rest.id ? rest : row;
+      } } }, rule: "graph 只给当前轮及下轮绑定；flow 给可读角色、权限和槽。" }, {
       runId: text,
       status: text,
       readOnly: bool,
@@ -233,6 +240,7 @@ export const runStateContracts = {
       artifactFormat: text.optional(),
       ruleCount: integer.optional(),
       rules: list(publicRunStartRulesItem).optional(),
+      rulesTruncated: yes.optional(), materialCount: integer.optional(),
       materials: list(publicRunStartMaterialsItem).optional(),
       details: publicAction.optional(),
       nextAction: action.optional(),
@@ -308,8 +316,12 @@ export const runStateContracts = {
     }),
   ],
   "run step show": [
+    receipt("cli-run-step-show-4", "自由探索 · 本会话提交时的完整候选材料",
+      { rule: "仅原会话显式读取本次提交的完整清单。" }, {
+      runId: text, stepId: text, candidates: list(text)
+    }),
     receipt("cli-run-step-show-1", "graph 步骤",
-      { rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
+      { omitEmpty: ["rules"], rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
       runId: text,
       step: publicRunStepShowStep,
       instruction: text,
@@ -320,7 +332,8 @@ export const runStateContracts = {
       model: text.optional(),
     }),
     receipt("cli-run-step-show-2", "历史 flow 步骤",
-      { rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
+      { omitEmpty: ["procedureAsserts"], rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
+      runId: text,
       ref: text,
       procedureName: text,
       current: bool,
@@ -328,7 +341,7 @@ export const runStateContracts = {
       step: publicRunStepShowStep2,
     }),
     receipt("cli-run-step-show-3", "自由探索步骤",
-      { rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
+      { omitEmpty: ["missing"], rule: "依次适用 graph、旧 flow、探索、受限 Reviewer；输入/规则只在当前授权范围。" }, {
       runId: text,
       stepId: text,
       stepStatus: text,
@@ -341,7 +354,7 @@ export const runStateContracts = {
   ],
   "run step configure": [
     receipt("cli-run-step-configure-1", "自由探索步骤",
-      { rule: "给实际生效的步骤配置、缺项与合法 Reviewer 选项。" }, {
+      { omitEmpty: ["missing"], rule: "给实际生效的步骤配置、缺项与合法 Reviewer 选项。" }, {
       runId: text,
       stepId: text,
       stepStatus: text,
@@ -391,12 +404,13 @@ export const runStateContracts = {
       artifactFormat: text.optional(),
       ruleCount: integer.optional(),
       rules: list(publicRunStartRulesItem).optional(),
+      rulesTruncated: yes.optional(), materialCount: integer.optional(),
       materials: list(publicRunStartMaterialsItem).optional(),
       details: publicAction.optional(),
       nextAction: action.optional(),
     }),
     receipt("cli-run-status-4", "等待评审",
-      { rule: "只读本轮摘要；登记或恢复等待时给等待动作。", omit: ["comments", "assignments"] }, {
+      { remove: ["name"], rule: "只读本轮摘要；登记或恢复等待时给等待动作。", omit: ["comments", "assignments"] }, {
       runId: text,
       name: text,
       status: text,
@@ -427,7 +441,7 @@ export const runStateContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-status-6", "已完成或放弃",
-      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
+      { remove: ["name"], rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,
@@ -468,7 +482,7 @@ export const runStateContracts = {
   ],
   "run finish": [
     receipt("cli-run-finish-1", "已完成或放弃",
-      { rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
+      { remove: ["name"], omitZero: ["warningCount"], rule: "结束原因可公开才给，详情只能读取。", omit: ["nextAction"] }, {
       runId: text,
       name: text,
       status: text,

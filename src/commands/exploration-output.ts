@@ -13,6 +13,7 @@ export const explorationReceipt = z.object({
   runId: z.string(), artifactId: optionalText, stepId: optionalText, externalId: optionalText,
   checkpointDigest: optionalText, source: optionalText, stepStatus: optionalText, artifactStatus: optionalText,
   tags: z.array(z.string()).optional(), candidates: z.array(z.string()).optional(),
+  candidateDetails: cliCommandSchema.optional(),
   candidateCount: z.number().int().nonnegative().optional(), warningCount: z.number().int().nonnegative().optional(),
   nextAction
 }).strict();

@@ -194,7 +194,11 @@ actions:
   assert.ok(wake, queued[4]);
   assert.deepEqual(wake.slice(1), [candidate.reviewId, candidate.roundId]);
   const read = await call("run", "review", "wait", "--review", wake[1], "--notification-round", wake[2]);
-  assert.equal(read.candidateId, candidate.artifactId);
+  assert.equal(read.roundId, candidate.roundId);
+  assert.deepEqual(read.details.args, ["--project", "test-project", "run", "review", "show",
+    "--review", candidate.reviewId, "--round", candidate.roundId, "--all"]);
+  const detail = await call(...read.details.args.slice(2));
+  assert.equal(detail.candidateId, candidate.artifactId);
   // The worker records its provider stop reason just after the vote becomes readable.
   let before = await service.inspect(runId);
   while (!before.reviews.find(row => row.reviewer.actorId === "reader")?.attempts?.at(-1)?.completion?.stopReason) {

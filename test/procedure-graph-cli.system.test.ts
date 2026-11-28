@@ -97,7 +97,9 @@ test("graph CLI auto-enters one Step, binds Continue and leaves show read-only",
   assert.equal(await readFile(join(f.root, "data/context_control/steps", start.runId, `${step.id}.json`), "utf8"), before);
   const help = await f.invoke("continue", "--help"); assert.match(help.stdout, new RegExp(step.id));
   const result = await f.call("continue", "report", "--artifact", "done");
-  assert.equal(result.stepId, step.id); assert.equal(result.status, "done");
+  assert.equal(Object.hasOwn(result, "stepId"), false);
+  assert.equal(result.status, "done");
+  assert.equal((await f.inspect(start.runId)).steps.find((s: any) => s.id === step.id)?.status, "done");
   assert.ok(result.nextAction.args.includes("finish"));
   await assert.rejects(f.invoke("continue", "report", "--artifact", "duplicate"), /RUN_FINISHED/);
   await f.call("run", "finish", "--run", start.runId);
@@ -274,9 +276,11 @@ test("CLI module failed auxiliary Continue store preserves the running Step and 
   const artifact = join(f.directory, "recovered step.txt");
   await writeFile(artifact, "Recovered Continue report");
   const submitted = await f.call(...args.slice(0, -1), artifact);
-  assert.equal(submitted.runId, start.runId);
-  assert.equal(submitted.stepId, stepId);
-  assert.equal(submitted.status, "done");
+  assert.equal(Object.hasOwn(submitted, "runId"), false);
+  const after = await f.inspect(start.runId);
+  assert.equal(after.steps.find((step: any) => step.id === stepId)?.status, "done");
+  assert.ok(submitted.artifactId);
+  assert.equal(after.artifacts.find((item: any) => item.id === submitted.artifactId)?.stepId, stepId);
 });
 
 test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
@@ -357,7 +361,8 @@ for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI modul
   await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', target);
   assert.ok((await f.invoke('continue', '--help')).stdout.includes(target));
   const accepted = await f.call('continue', 'report', '--artifact', 'new A');
-  assert.equal(accepted.stepId, target);
+  assert.equal(Object.hasOwn(accepted, 'stepId'), false);
+  assert.equal((await f.inspect(start.runId)).steps.find((s: any) => s.id === target)?.status, 'done');
   assert.equal(accepted.status, 'done');
 });
 
@@ -412,7 +417,8 @@ test("graph native and Continue reports validate business options before writing
   await assert.rejects(f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"unexpected":true}'));
   assert.equal((await store.list({}, {})).items.length, 1);
   const done = await f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"data_id":"continue"}');
-  assert.equal(done.runId, second.runId);
+  assert.equal(Object.hasOwn(done, "runId"), false);
+  assert.equal((await f.inspect(second.runId)).steps[0].status, "done");
   assert.equal(done.status, "done");
   assert.deepEqual((await store.get({}, "continue") as { value: unknown }).value, { name: "continue" });
 });

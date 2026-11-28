@@ -154,7 +154,7 @@ type OutputOptions = { output?: "json" | "text" };
 
 type RunShowOptions = RunIdOptions & OutputOptions & { limit?: string; cursor?: string };
 
-type RunStepShowOptions = RunShowOptions & { step?: string };
+type RunStepShowOptions = RunShowOptions & { step?: string; candidates?: boolean };
 
 type RunSchemaShowOptions = RunShowOptions;
 
@@ -595,7 +595,7 @@ function assertOnlyKeys(record: Record<string, unknown>, allowed: readonly strin
 }
 
 const reviewDisposition = z.object({
-  reviewId: z.string(), roundId: z.string(), commentId: z.string(), disposition: z.string(), nextAction
+  runId: z.string(), reviewId: z.string(), roundId: z.string(), commentId: z.string(), disposition: z.string(), nextAction
 }).strict();
 
 export async function runReviewResolveCommand(options: ReviewResolveOptions) {
@@ -625,7 +625,7 @@ export async function runReviewResolveCommand(options: ReviewResolveOptions) {
     validationSummary
   });
   return commandFacts(() => reviewDisposition.parse({
-    reviewId, roundId, commentId, disposition: options.disposition,
+    runId: context.run.id, reviewId, roundId, commentId, disposition: options.disposition,
     nextAction: cliCommand(["--project", config.project!.name, "run", "review", "wait", "--review", reviewId])
   }), { saved: { id: commentId, inspect: cliCommand(["--project", config.project!.name, "run", "review", "show", "--review", reviewId, "--round", roundId]) } });
 }
@@ -706,6 +706,9 @@ export async function runTryRunCommand(options: RunIdOptions) {
 }
 
 export async function runStepShowCommand(options: RunStepShowOptions) {
+  if (options.candidates && process.env.MEMSPHERE_REVIEW_ASSIGNMENT_ID) {
+    throw failure("REVIEW_RESOURCE_DENIED", "Candidate lists belong to the reporting session");
+  }
   const resourceResult = await tryReviewerResource("step-show", options);
   if (resourceResult) return resourceResult;
   const contextResult = await tryContextCommand("step-show", options);
@@ -714,7 +717,7 @@ export async function runStepShowCommand(options: RunStepShowOptions) {
   const stepRef = requireStepRef(options.step);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
-  return commandFacts(() => flowStepDetail.parse(buildRunStepDetail(run, stepRef) as z.input<typeof flowStepDetail>), { locale: run.language });
+  return commandFacts(() => flowStepDetail.parse({ ...(buildRunStepDetail(run, stepRef) as object), runId: run.id }), { locale: run.language });
 }
 
 export async function runArtifactShowCommand(options: RunArtifactShowOptions) {
@@ -741,7 +744,7 @@ export async function runArtifactShowCommand(options: RunArtifactShowOptions) {
   const run = await readRun(config.runsRoot, runId);
   const value = await buildRunArtifactDetail(config.runsRoot, run, stepRef) as z.input<typeof flowArtifactDetail>;
   return commandFacts(() => flowArtifactDetail.parse({
-    stepRef: value.stepRef, source: value.source, artifact: authoredArtifact(value.artifact),
+    runId: run.id, stepRef: value.stepRef, source: value.source, artifact: authoredArtifact(value.artifact),
     revisionSummary: value.revisionSummary
   }), { locale: run.language });
 }
@@ -817,7 +820,7 @@ export async function runArtifactContractShowCommand(options: RunArtifactShowOpt
   const stepRef = requireStepRef(options.step);
   const config = await readConfig();
   const run = await readRun(config.runsRoot, runId);
-  return commandFacts(() => flowContractDetail.parse(buildRunArtifactContractDetail(run, stepRef) as z.input<typeof flowContractDetail>), { locale: run.language });
+  return commandFacts(() => flowContractDetail.parse({ ...(buildRunArtifactContractDetail(run, stepRef) as object), runId: run.id }), { locale: run.language });
 }
 
 export async function runReviewAssignmentShowCommand(options: AgentReviewAssignmentOptions) {

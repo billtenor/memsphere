@@ -21,11 +21,14 @@ export function resultPresentation(scope: OutputScope, data: Record<string, unkn
     : "items";
   const contentField = route === "model read" ? "definition"
     : route === "run start" && "example" in data ? "example" : undefined;
-  const detail = Boolean(contentField) || ["run artifact contract show", "run schema show", "run step show"].includes(route)
+  const detail = Boolean(contentField) || ["run artifact contract show", "run review assignment show", "run schema show", "run step show"].includes(route)
     || route === "run artifact show" && ("artifact" in data || "contextArtifacts" in data)
     || route === "run review show" && (scope.options.all || "node" in data || "nodes" in data);
   const page = route.endsWith(" list") || "nextCursor" in data || Array.isArray(data.runs) || route === "run show" && Array.isArray(data.steps);
   const maximumBytes = route === "data list" ? 8192 + 2048 * parseListLimit(scope.options.limit)
     : detail ? undefined : page ? scope.options.limit === undefined ? 32768 : 131072 : 8192;
-  return { itemsField, contentField, maximumBytes };
+  const sharedFields = route === "project show" ? ["canonicalMemoryRoot", "effectiveMemoryRoot"]
+    : route === "project repair" && data.created === 0 && data.updated === 0 && data.deleted === 0 ? ["created", "updated", "deleted"]
+    : ["run start", "run status", "run step enter"].includes(route) ? ["status", "stepStatus"] : undefined;
+  return { itemsField, contentField, maximumBytes, sharedFields, daemonView: route.startsWith("daemon ") || route.startsWith("view ") };
 }

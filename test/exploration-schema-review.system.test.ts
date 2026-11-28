@@ -137,7 +137,7 @@ test("free exploration Schema and Runner Review use explicit native targets and 
   assert.equal((await f.call("continue", "review", "show")).node.comments[0].body, "Updated opinion");
   const deleted = await f.call("run", "review", "comment", "delete", "--run", R, "--review", V, "--comment", comment);
   assert.equal(deleted.commentId, comment);
-  assert.deepEqual((await f.call("continue", "review", "show")).node.comments, []);
+  assert.equal((await f.call("continue", "review", "show")).node.comments, undefined);
   while (progress.progress.phase === "reviewing") progress = await f.call("continue", "review", "report", "--artifact", '{"applicable":true}');
   assert.equal((await f.call("run", "review", "submit", "--run", R, "--review", V, "--artifact", '{"vote":"approve","summary":"Confirmed"}')).status, "submitted");
   await assert.rejects(f.call("continue", "review", "show"), /INVALID_ARGUMENT/);
@@ -171,6 +171,12 @@ test("exploration Schema CLI writes files and empty fields and preserves an inco
   const notes = await f.call("run", "schema", "report", "--run", R, "--step", S, "--position", draft.position, "--artifact-file", field);
   assert.ok(Object.values((await f.service.explorationSchemaShow(R, S)).draft.writing!.values).includes("# Findings\n"));
   const count = await f.call("continue", "schema", "report", "--position", notes.position, "--artifact", "");
+  assert.equal(count.runId, undefined);
+  assert.equal(count.stepId, undefined);
+  assert.deepEqual(count.nextAction.args, ["continue", "schema", "report", "--position", count.position, "--artifact-file", "<field-content>"]);
+  const native = await f.call("run", "schema", "show", "--run", R, "--step", S);
+  assert.equal(native.stepId, S);
+  assert.ok(native.nextAction.args.includes(R));
   const writing = (await f.service.explorationSchemaShow(R, S)).draft.writing!;
   assert.ok(Object.values(writing.values).includes(""));
   assert.deepEqual(writing.skipped, []);
@@ -460,7 +466,9 @@ for (const route of ["native", "continue-json", "continue-text"]) test(`delegate
     assert.equal((await home.get({}, session))?.value.parameters.review, reviewId);
     await f.call("run", "enter-schema", "--run", run.id, "--step", draft.stepId);
   }
-  assert.equal((await f.call("continue", "schema", "show")).stepId, draft.stepId);
+  const resumedDraft = await f.call("continue", "schema", "show");
+  assert.equal(resumedDraft.stepId, undefined);
+  assert.equal(resumedDraft.artifactId, draft.artifactId);
   assert.deepEqual(await f.service.inspect(run.id), before);
   assert.equal((await repository.list(run.id)).length, 1);
 });
@@ -500,7 +508,7 @@ test("waiting for a delegated change request or abstention reports only the Revi
 test("interrupted Schema submission resumes within its original Artifact and releases the completed Continue target", { timeout: 30000 }, async t => {
   const f = await fixture(t), R = (await f.call("run", "start", "--name", "Resume submission")).runId;
   const draft = await f.call("continue", "enter-schema", "report", "--name", "Report", "--content-type", "text/markdown");
-  await writeFixtureSchema(f.service, draft);
+  await writeFixtureSchema(f.service, { ...draft, runId: R });
   const store = f.service.stores.step, update = store.update;
   store.update = async () => { throw new Error("Step update interrupted"); };
   try {
@@ -521,7 +529,7 @@ test("a late Schema submission cannot release a newer Home target", { timeout: 3
   const f = await fixture(t), R = (await f.call("run", "start", "--name", "Home race")).runId;
   const draft = await f.call("continue", "enter-schema", "report", "--name", "First", "--content-type", "text/markdown");
   const another = await f.service.enterExplorationSchema(R, { name: "Second", contentType: "text/markdown", contract: (await f.service.explorationSchemaShow(R, draft.stepId)).draft.schemaContract });
-  await writeFixtureSchema(f.service, draft);
+  await writeFixtureSchema(f.service, { ...draft, runId: R });
   const original = ContextControl.prototype.submitExplorationSchema;
   let saved!: () => void, resume!: () => void;
   const persisted = new Promise<void>(resolve => { saved = resolve; });
@@ -542,7 +550,9 @@ test("a late Schema submission cannot release a newer Home target", { timeout: 3
     await home.update({}, session, { ...(row.value as object), parameters: { project: "test-project", step: another.stepId } }, { expectedRevision: row.revision });
   } finally { resume(); ContextControl.prototype.submitExplorationSchema = original; }
   assert.equal((await late).artifactId, draft.artifactId);
-  assert.equal((await f.call("continue", "schema", "show")).stepId, another.stepId);
+  const activeDraft = await f.call("continue", "schema", "show");
+  assert.equal(activeDraft.stepId, undefined);
+  assert.equal(activeDraft.artifactId, another.draft.id);
   assert.ok((await f.service.inspect(R)).completeIds.includes(draft.artifactId));
 });
 

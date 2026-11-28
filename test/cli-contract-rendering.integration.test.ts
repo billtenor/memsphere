@@ -1,3 +1,4 @@
+import { z } from "zod";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -8,7 +9,7 @@ import { cliCommandSchema } from "../src/prompts/cli-output.js";
 import { withActionScope } from "../src/prompts/contracts/actions.js";
 import { cliProtocol, commandCases, selectReceipt, type CliRole, type ReceiptContext } from "../src/prompts/contracts/dispatch.js";
 
-type Example = { value: Record<string, unknown>; options?: Record<string, unknown>; context?: ReceiptContext };
+type Example = { expected?: Record<string, unknown>; omitted?: string[]; value: Record<string, unknown>; options?: Record<string, unknown>; context?: ReceiptContext };
 type Row = { id: string } & (Example | { like: string });
 
 function assertFacts(text: string, value: unknown, id: string) {
@@ -26,6 +27,15 @@ function assertLabeledFacts(text: string, value: Record<string, unknown>, id: st
   const lines = text.split(/\r?\n/);
   for (const [key, item] of Object.entries(value)) {
     if (key === "items" || key === "nextAction" || item === undefined) continue;
+    if (key === "details" && JSON.stringify(item) === JSON.stringify(value.nextAction)) {
+      assertFacts(text, item, id);
+      continue;
+    }
+    const action = cliCommandSchema.safeParse(value.nextAction);
+    if (key === "position" && action.success && action.data.args.some((arg, i) => arg === "--position" && action.data.args[i + 1] === item)) {
+      assertFacts(text, item, id);
+      continue;
+    }
     const line = lines.find(row => row.startsWith(key + ": ") || row.startsWith(key + "："));
     assert.ok(line, id + " missing field " + key);
     const display = line.slice(key.length).replace(/^(?:: |：)/, "");
@@ -41,6 +51,24 @@ test("two equal field values and an empty string retain independent labels", () 
   for (const missing of Object.keys(value)) {
     assert.throws(() => assertLabeledFacts(text.split("\n").filter(line => !line.startsWith(missing + ":")).join("\n"), value, "round"));
   }
+});
+
+test("report previews stop at 20 and the full list is scoped to an explicit native read", () => {
+  const keys = Array.from({ length: 21 }, (_, i) => "external:" + i);
+  const report = { role: "native" as const, route: "run report", options: {}, args: [] };
+  const saved = { runId: "run", stepId: "step", artifactId: "artifact", stepStatus: "done", artifactStatus: "submitted" };
+  assert.equal(selectReceipt(report, { ...saved, candidates: keys.slice(0, 20), candidateCount: 20 }).data.candidateCount, undefined);
+  assert.throws(() => selectReceipt(report, { ...saved, candidates: keys, candidateCount: 21 }));
+  const preview = { ...saved, candidates: keys.slice(0, 20), candidateCount: 21 };
+  assert.throws(() => selectReceipt(report, preview));
+  const candidateDetails = { kind: "command", launcher: "memsphere", args: ["run", "step", "show", "--step", "step", "--candidates", "--run", "run"] };
+  assert.deepEqual(selectReceipt(report, { ...preview, candidateDetails }).data.candidateDetails, candidateDetails);
+  assert.throws(() => selectReceipt(report, { ...preview, stepId: "another", candidateDetails }));
+  const full = { runId: "run", stepId: "step", candidates: keys };
+  const read = { ...report, route: "run step show" };
+  assert.throws(() => selectReceipt(read, full));
+  assert.deepEqual(selectReceipt({ ...read, options: { candidates: true } }, full).data, full);
+  assert.throws(() => selectReceipt({ ...read, options: { candidates: true }, role: "reviewer" }, full));
 });
 
 test("reviewed examples select exactly their authorized case and preserve every displayed fact", () => {
@@ -63,7 +91,13 @@ test("reviewed examples select exactly their authorized case and preserve every 
       const { value } = example;
       let selected;
       try { selected = select(value); } catch (cause) { throw new Error(row.id, { cause }); }
-      assert.deepEqual(selected, { id: row.id, data: value }, row.id);
+      const expected = structuredClone(example.expected ?? value);
+      for (const path of example.omitted ?? []) {
+        const [key, member] = path.split(".");
+        if (member) delete (expected[key] as Record<string, unknown>)[member];
+        else delete expected[key];
+      }
+      assert.deepEqual(selected, { id: row.id, data: expected }, row.id);
       assert.throws(() => select({ ...value, privateState: "sentinel" }), /contract mismatch/, row.id);
       const entry = commandCases(role, route)!.find(caseEntry => caseEntry.id === row.id)!;
       for (const key of Object.keys(approved.fields[signature]).filter(k => !k.endsWith("?"))) {
@@ -73,12 +107,12 @@ test("reviewed examples select exactly their authorized case and preserve every 
       }
       const nativeRoute = route.replace(/^continue /, role === "reviewerContinue" ? "run review " : "run ");
       if (cliProtocol(nativeRoute) !== "result" || nativeRoute === "data read" || example.options?.out === "-") return;
-      assert.deepEqual(JSON.parse(renderCliResult(route, entry.schema, value, { format: "json" })), value, row.id);
+      assert.deepEqual(JSON.parse(renderCliResult(route, z.record(z.unknown()), selected.data, { format: "json" })), expected, row.id);
       for (const locale of ["en", "zh-CN"] as const) {
-        const text = renderCliResult(route, entry.schema, value, { format: "text", locale });
+        const text = renderCliResult(route, z.record(z.unknown()), selected.data, { format: "text", locale });
         assert.ok(text.includes(route), row.id);
-        assertLabeledFacts(text, value, row.id);
-        assertFacts(text, value, row.id);
+        assertLabeledFacts(text, expected, row.id);
+        assertFacts(text, expected, row.id);
       }
     });
   }

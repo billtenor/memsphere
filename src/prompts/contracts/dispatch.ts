@@ -1,11 +1,11 @@
 import { isDeepStrictEqual } from "node:util";
 import { cliCommandSchema } from "../cli-output.js";
 import { commandContracts } from "./registry.js";
-import type { ReceiptCase } from "./types.js";
+import type { ReceiptBinding, ReceiptCase } from "./types.js";
 import { nativeProtocols } from "./protocols.js";
 
 export type CliRole = keyof typeof commandContracts;
-export type OutputScope = { role: CliRole; route: string; options: Record<string, unknown>; args: readonly unknown[] };
+export type OutputScope = { role: CliRole; route: string; options: Record<string, unknown>; args: readonly unknown[]; binding?: ReceiptBinding };
 const routes: Record<CliRole, Record<string, ReceiptCase[]>> = commandContracts;
 
 export function commandCases(role: CliRole, route: string) {
@@ -33,6 +33,17 @@ function allowed(scope: OutputScope, entry: ReceiptCase, value: Record<string, u
   const key = route.replace(/^continue /, scope.role === "reviewerContinue" ? "run review " : "run ");
   const prefix = scope.role.startsWith("reviewer") ? "reviewer" : "cli";
   const is = (variant: number) => entry.sourceId === prefix + "-" + key.replaceAll(" ", "-") + "-" + variant;
+  if (key === "run step show" && (options.candidates || is(4) && scope.role === "native")) {
+    return scope.role === "native" && Boolean(options.candidates || !explicit) && is(4);
+  }
+  if (key === "run report" && is(2)) {
+    const candidates = value.candidates, total = value.candidateCount;
+    if (total === undefined) return value.candidateDetails === undefined;
+    if (!Array.isArray(candidates) || typeof total !== "number" || total < candidates.length) return false;
+    if (total === candidates.length) return value.candidateDetails === undefined;
+    return candidates.length === 20 && pinnedInspection(value.candidateDetails,
+      ["run", "step", "show", "--step", value.stepId, "--candidates", "--run", value.runId]);
+  }
   if (key === "run start" || key === "run status") {
     if (value.runs !== undefined) return key === "run status" && is(7);
     if (value.status === "review_configuration_required") return key === "run start" && is(7);
@@ -110,7 +121,7 @@ export function selectReceipt(scope: OutputScope, input: unknown, explicitScope 
     const checked = entry.schema.safeParse(value);
     if (!checked.success) continue;
     if (selected) throw new Error("Ambiguous CLI contract for " + scope.route + ": " + selected.id + ", " + entry.id);
-    selected = { id: entry.id, data: checked.data };
+    selected = { id: entry.id, data: entry.project(checked.data, scope.binding) };
   }
   if (!selected) throw new Error("CLI contract mismatch for " + scope.role + " " + scope.route);
   return selected;

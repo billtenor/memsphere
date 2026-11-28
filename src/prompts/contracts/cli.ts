@@ -28,7 +28,7 @@ export const cliContracts = {
   ],
   "cli show": [
     receipt("cli-cli-show-1", "登记详情",
-      { rule: "收紧现有 cliDetail。显示可调用的登记及应用关系；任意 executable/args/cwd 可能带环境或凭据，普通查询不返回启动配置。", omit: ["invocation", "executable", "args", "cwd", "env", "envFrom"] }, {
+      { omitEmpty: ["apps"], rule: "收紧现有 cliDetail。显示可调用的登记及应用关系；任意 executable/args/cwd 可能带环境或凭据，普通查询不返回启动配置。", omit: ["invocation", "executable", "args", "cwd", "env", "envFrom"] }, {
       id: text,
       status: text,
       apps: list(text),
@@ -38,7 +38,7 @@ export const cliContracts = {
   ],
   "cli check": [
     receipt("cli-cli-check-1", "成功",
-      { rule: "每项只给 name/status，total 表示全部检查项；禁止原始探测响应。" }, {
+      { counts: { total: "items" }, rule: "每项只给 name/status，total 表示全部检查项；禁止原始探测响应。" }, {
       id: text,
       status: text,
       items: list(publicAppCheckEntryItem),

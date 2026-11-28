@@ -15,7 +15,7 @@ const contract = z.object({
 // Rule content is already projected from the frozen authored rule tree.
 const rules = z.array(z.unknown());
 export const flowStepDetail = z.object({
-  ref: str, procedureName: str, current: z.boolean(), procedureAsserts: rules,
+  runId: str, ref: str, procedureName: str, current: z.boolean(), procedureAsserts: rules,
   step: z.object({
     id: str, kind: str, actor: z.enum(["agent", "human"]), instruction: str,
     asserts: rules, suggests: rules, details: ids, artifact: contract.optional()
@@ -23,7 +23,7 @@ export const flowStepDetail = z.object({
 }).strict();
 
 export const flowContractDetail = z.object({
-  stepRef: str,
+  runId: str, stepRef: str,
   procedure: z.object({ name: str, asserts: rules }).strict(),
   action: z.object({ instruction: str, asserts: rules, suggests: rules, details: ids }).strict(),
   artifact: contract.optional()
@@ -39,7 +39,7 @@ export const flowArtifact = z.object({
 }).strict();
 
 export const flowArtifactDetail = z.object({
-  stepRef: str, source: z.enum(["review_submission", "run_event", "not_reported"]),
+  runId: str, stepRef: str, source: z.enum(["review_submission", "run_event", "not_reported"]),
   artifact: flowArtifact.nullable(), revisionSummary: revisionSummary.optional()
 }).strict();
 

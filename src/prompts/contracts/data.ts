@@ -29,7 +29,7 @@ export const dataContracts = {
   ],
   "data store create": [
     receipt("cli-data-store-create-1", "执行",
-      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
+      { remove: ["operation"], rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       model: text,
@@ -39,7 +39,7 @@ export const dataContracts = {
       pendingCleanup: bool.optional(),
     }),
     receipt("cli-data-store-create-2", "预演",
-      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
+      { remove: ["operation"], rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       dryRun: bool,
@@ -52,14 +52,14 @@ export const dataContracts = {
   ],
   "data store remove": [
     receipt("cli-data-store-remove-1", "执行",
-      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
+      { remove: ["operation"], rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       dataRetained: bool,
       project: text.optional(),
     }),
     receipt("cli-data-store-remove-2", "预演",
-      { rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
+      { remove: ["operation"], rule: "创建给绑定和实际写入/预演状态；移除给解绑、数据保留或待清理状态。均禁止 config。", omit: ["config"] }, {
       operation: text,
       storeId: text,
       dryRun: bool,
@@ -98,7 +98,7 @@ export const dataContracts = {
   ],
   "data create": [
     receipt("cli-data-create-1", "执行",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -111,7 +111,7 @@ export const dataContracts = {
       deleted: bool.optional(),
     }),
     receipt("cli-data-create-2", "预演 --dry-run",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -127,7 +127,7 @@ export const dataContracts = {
   ],
   "data update": [
     receipt("cli-data-update-1", "执行",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -141,7 +141,7 @@ export const dataContracts = {
       expectedRevision: text.optional(),
     }),
     receipt("cli-data-update-2", "预演 --dry-run",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -158,7 +158,7 @@ export const dataContracts = {
   ],
   "data upsert": [
     receipt("cli-data-upsert-1", "执行",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -171,7 +171,7 @@ export const dataContracts = {
       deleted: bool.optional(),
     }),
     receipt("cli-data-upsert-2", "预演 --dry-run",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -187,7 +187,7 @@ export const dataContracts = {
   ],
   "data delete": [
     receipt("cli-data-delete-1", "执行",
-      { rule: "预演时 deleted 表示若执行能否删除；实际执行时表示本次是否删除。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "预演时 deleted 表示若执行能否删除；实际执行时表示本次是否删除。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -196,7 +196,7 @@ export const dataContracts = {
       project: text.optional(),
     }),
     receipt("cli-data-delete-2", "预演 --dry-run",
-      { rule: "预演时 deleted 表示若执行能否删除；实际执行时表示本次是否删除。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "预演时 deleted 表示若执行能否删除；实际执行时表示本次是否删除。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -208,7 +208,7 @@ export const dataContracts = {
   ],
   "data edit": [
     receipt("cli-data-edit-1", "执行",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -222,7 +222,7 @@ export const dataContracts = {
       expectedRevision: text.optional(),
     }),
     receipt("cli-data-edit-2", "预演 --dry-run",
-      { rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
+      { remove: ["operation"], rule: "只保留本次操作适用的元数据；预演标志为 true。", omit: ["value", "valid", "out", "bytes"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -239,7 +239,7 @@ export const dataContracts = {
   ],
   "data export": [
     receipt("cli-data-export-1", "--out 文件",
-      { rule: "文件回执只给定位、大小及适用元数据。", omit: ["value"] }, {
+      { remove: ["operation"], rule: "文件回执只给定位、大小及适用元数据。", omit: ["value"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -260,7 +260,7 @@ export const dataContracts = {
   ],
   "data validate": [
     receipt("cli-data-validate-1", "校验已有记录",
-      { rule: "只给结论。", omit: ["value"] }, {
+      { remove: ["operation"], rule: "只给结论。", omit: ["value"] }, {
       storeId: text,
       id: text,
       modelRef: text,
@@ -269,7 +269,7 @@ export const dataContracts = {
       project: text.optional(),
     }),
     receipt("cli-data-validate-2", "校验候选值",
-      { rule: "输入值不回显。", omit: ["id", "storeId", "value"] }, {
+      { remove: ["operation"], rule: "输入值不回显。", omit: ["id", "storeId", "value"] }, {
       modelRef: text,
       operation: text,
       valid: bool,
