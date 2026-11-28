@@ -131,9 +131,7 @@ test("memory change validate checks the effective Store without expanding a spar
     assert.equal(repaired.code, 0, repaired.stderr);
     assert.match(repaired.stdout, /^project[:：] ?project$/m);
     assert.match(repaired.stdout, /^storeType[:：] ?managed$/m);
-    assert.match(repaired.stdout, /^created[:：] ?0$/m);
-    assert.match(repaired.stdout, /^updated[:：] ?0$/m);
-    assert.match(repaired.stdout, /^deleted[:：] ?0$/m);
+    assert.match(repaired.stdout, /^created \/ updated \/ deleted[:：] ?0$/m);
     assert.match(repaired.stdout, /^revision[:：] ?[0-9a-f]{40,64}$/m);
     assert.doesNotMatch(repaired.stdout, /ChangeSet:|Candidate Root:|Validate:|Publish:/);
 
@@ -199,7 +197,8 @@ test("memory change validate checks the effective Store without expanding a spar
     const validPayload = JSON.parse(jsonResult.stdout);
     assert.equal(validPayload.valid, true);
     assert.equal(validPayload.changeId, changeId);
-    assert.deepEqual(validPayload.issues, []);
+    assert.equal(Object.hasOwn(validPayload, "issues"), false);
+    assert.equal(Object.hasOwn(validPayload, "issueCount"), false);
 
     await writeFile(candidate, "!concept\nnames: [Broken\n");
     const invalidResult = await runNativeCli(workspace, ["memory", "change", "validate", "--change", changeId, "--format", "json"], home);
