@@ -1,11 +1,11 @@
 import { action, bool, either, integer, list, oneOf, text } from "./types.js";
-import { publicAction, publicCommentsItem, publicRunReviewAssignmentShowReviewprogress, publicRunReviewCreateCommentsItem, publicRunReviewListEntryItem, publicRunReviewListEntryItem2, publicRunReviewShowAssignmentsItem, publicRunReviewShowCommentsItem, publicRunReviewShowNode, publicRunReviewWaitStatusEntryItem, publicVote } from "./fields.js";
+import { publicAction, publicCommentsItem, publicRunReviewAssignmentShowReviewprogress, publicRunReviewCreateCommentsItem, publicRunReviewListEntryItem, publicRunReviewListEntryItem2, publicRunReviewShowAssignmentsItem, publicRunReviewShowCommentsItem, publicRunReviewShowNode, reviewNodeProjection, publicRunReviewWaitStatusEntryItem, publicVote } from "./fields.js";
 import { receipt } from "./types.js";
 
 export const runReviewContracts = {
   "run review wait": [
     receipt("cli-run-review-wait-1", "等待已登记",
-      { rule: "nextAction 为 wait；无完整分派表及意见正文。", omit: ["assignments", "comments", "vote"] }, {
+      { frozenReviewDetail: true, rule: "nextAction 为 wait；无完整分派表及意见正文。", omit: ["assignments", "comments", "vote"] }, {
       runId: text,
       stepId: text,
       reviewId: text,
@@ -21,7 +21,7 @@ export const runReviewContracts = {
       details: publicAction.optional(),
     }),
     receipt("cli-run-review-wait-2", "轮次可供读取",
-      { rule: "正式轮次形成结论才给 outcome；需要决策时给本身份可执行的下一步。", omit: ["assignments", "comments", "vote", "taskId"] }, {
+      { frozenReviewDetail: true, rule: "正式轮次形成结论才给 outcome；需要决策时给本身份可执行的下一步。", omit: ["assignments", "comments", "vote", "taskId"] }, {
       runId: text,
       stepId: text,
       reviewId: text,
@@ -37,7 +37,7 @@ export const runReviewContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-review-wait-3", "过期通知 · 只读原轮次",
-      { rule: "仅指向原轮次或只读入口，禁止再给投票和重报动作。", omit: ["assignments", "comments", "vote", "taskId"] }, {
+      { frozenReviewDetail: true, rule: "仅指向原轮次或只读入口，禁止再给投票和重报动作。", omit: ["assignments", "comments", "vote", "taskId"] }, {
       runId: text,
       stepId: text,
       reviewId: text,
@@ -55,7 +55,8 @@ export const runReviewContracts = {
   ],
   "run review wait status": [
     receipt("cli-run-review-wait-status-1", "成功",
-      { rule: "只给本身份、本评审可见的等待任务页；无任务返回空页。" }, {
+      { counts: { total: "items" }, rule: "只给本身份、本评审可见的等待任务页；无任务返回空页。" }, {
+      runId: text,
       items: list(publicRunReviewWaitStatusEntryItem),
       total: integer,
       nextCursor: text.optional(),
@@ -64,6 +65,7 @@ export const runReviewContracts = {
   "run review wait retry": [
     receipt("cli-run-review-wait-retry-1", "成功",
       { rule: "只给 taskId、roundId、当前状态、重复通知可能性及等待入口。" }, {
+      runId: text,
       taskId: text,
       roundId: text,
       status: text,
@@ -73,7 +75,7 @@ export const runReviewContracts = {
   ],
   "run review vote": [
     receipt("cli-run-review-vote-1", "操作回执",
-      { rule: "仅给实际结果、计数与合法后继。", omit: ["assignments", "comments", "taskId"] }, {
+      { frozenReviewDetail: true, rule: "仅给实际结果、计数与合法后继。", omit: ["assignments", "comments", "taskId"] }, {
       runId: text,
       stepId: text,
       reviewId: text,
@@ -92,7 +94,7 @@ export const runReviewContracts = {
   ],
   "run review retry": [
     receipt("cli-run-review-retry-1", "操作回执",
-      { rule: "仅给实际结果、计数与合法后继。", omit: ["assignments", "comments", "taskId"] }, {
+      { frozenReviewDetail: true, rule: "仅给实际结果、计数与合法后继。", omit: ["assignments", "comments", "taskId"] }, {
       runId: text,
       stepId: text,
       reviewId: text,
@@ -111,7 +113,7 @@ export const runReviewContracts = {
   ],
   "run review submit-for-human": [
     receipt("cli-run-review-submit-for-human-1", "操作回执",
-      { rule: "仅给实际结果、计数与合法后继。", omit: ["assignments", "comments", "taskId"] }, {
+      { frozenReviewDetail: true, rule: "仅给实际结果、计数与合法后继。", omit: ["assignments", "comments", "taskId"] }, {
       runId: text,
       stepId: text,
       reviewId: text,
@@ -132,6 +134,7 @@ export const runReviewContracts = {
   "run review resolve": [
     receipt("cli-run-review-resolve-1", "成功",
       { rule: "给 reviewId/roundId/commentId/disposition 及后续动作，禁止授权原文。" }, {
+      runId: text,
       reviewId: text,
       roundId: text,
       commentId: text,
@@ -141,7 +144,7 @@ export const runReviewContracts = {
   ],
   "run review comment add": [
     receipt("cli-run-review-comment-add-1", "修改本人意见",
-      { rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
+      { savedComments: true, remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -157,7 +160,7 @@ export const runReviewContracts = {
   ],
   "run review comment update": [
     receipt("cli-run-review-comment-update-1", "修改本人意见",
-      { rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
+      { savedComments: true, remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -173,7 +176,7 @@ export const runReviewContracts = {
   ],
   "run review comment delete": [
     receipt("cli-run-review-comment-delete-1", "修改本人意见",
-      { rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
+      { savedComments: true, remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -189,7 +192,7 @@ export const runReviewContracts = {
   ],
   "run review submit": [
     receipt("cli-run-review-submit-1", "本人最终提交",
-      { rule: "只回本人提交状态；不再给写动作。", omit: ["nextAction", "tree", "nodes", "comments"] }, {
+      { remove: ["operation"], rule: "只回本人提交状态；不再给写动作。", omit: ["nextAction", "tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       vote: either(text, publicVote),
@@ -210,7 +213,7 @@ export const runReviewContracts = {
   ],
   "run review start": [
     receipt("cli-run-review-start-1", "发起渐进评审",
-      { rule: "派发后给等待或本人当前动作。", omit: ["tree", "nodes", "comments"] }, {
+      { frozenReviewDetail: true, rule: "派发后给等待或本人当前动作。", omit: ["tree", "nodes", "comments"] }, {
       runId: text,
       reviewId: text,
       status: text,
@@ -228,7 +231,8 @@ export const runReviewContracts = {
       reviewId: text,
       artifactId: text,
       status: text,
-      comments: list(publicRunReviewCreateCommentsItem),
+      commentIds: list(text),
+      details: publicAction,
       runId: text,
       source: oneOf("human", "agent").optional(),
     }),
@@ -258,7 +262,7 @@ export const runReviewContracts = {
       source: oneOf("human", "agent").optional(),
     }),
     receipt("cli-run-review-show-2", "当前节点或 --node",
-      { rule: "显式 --node 只给指定节点，无选项时给当前节点。已提交后禁止写动作。", omit: ["tree"] }, {
+      { nested: { node: reviewNodeProjection }, rule: "显式 --node 只给指定节点，无选项时给当前节点。已提交后禁止写动作。", omit: ["tree"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       runId: text.optional(),
@@ -272,7 +276,7 @@ export const runReviewContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-review-show-3", "--all · 本人完整评审树",
-      { rule: "显式 --all 可看本人各节点已存判断及该节点意见。" }, {
+      { items: { nodes: reviewNodeProjection }, rule: "显式 --all 可看本人各节点已存判断及该节点意见。" }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       nodes: list(publicRunReviewShowNode),
@@ -304,7 +308,7 @@ export const runReviewContracts = {
       nextAction: action.optional(),
     }),
     receipt("cli-run-review-show-5", "本人无当前节点 · 已存判断",
-      { rule: "只给可见节点结果和获准的已存意见。" }, {
+      { items: { nodes: reviewNodeProjection }, rule: "只给可见节点结果和获准的已存意见。" }, {
       progress: publicRunReviewAssignmentShowReviewprogress,
       nodes: list(publicRunReviewShowNode),
       runId: text.optional(),
@@ -320,7 +324,7 @@ export const runReviewContracts = {
   ],
   "run review report": [
     receipt("cli-run-review-report-1", "保存节点判断",
-      { rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
+      { remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -336,7 +340,7 @@ export const runReviewContracts = {
   ],
   "run review update": [
     receipt("cli-run-review-update-1", "保存节点判断",
-      { rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
+      { remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,

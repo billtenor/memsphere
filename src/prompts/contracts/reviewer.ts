@@ -1,5 +1,5 @@
 import { action, bool, content, either, integer, list, nil, oneOf, text } from "./types.js";
-import { publicCommentsItem, publicMemoryChangeShowFilesItem, publicMemoryChangeShowFilesItem2, publicMemoryChangeShowValidation, publicMemoryListEntryItem, publicMemoryListEntryItem2, publicMemoryListMemory, publicMemoryReadContext, publicMemoryReadMemory, publicRunArtifactContractShowAction, publicRunArtifactContractShowArtifact, publicRunArtifactContractShowProcedure, publicRunArtifactShowArtifact, publicRunArtifactShowArtifact2, publicRunArtifactShowBusiness, publicRunArtifactShowConfirmationsItem, publicRunArtifactShowContextartifactsItem, publicRunArtifactShowContextartifactsItem2, publicRunArtifactShowContextexternalsItem, publicRunArtifactShowRevisionsummary, publicRunReportDependenciesItem, publicRunReviewAssignmentShowMemoryreads, publicRunReviewAssignmentShowReferencesItem, publicRunReviewAssignmentShowReviewprogress, publicRunReviewListTree, publicRunReviewShowNode, publicRunShowStepsItem2, publicVote } from "./fields.js";
+import { publicCommentsItem, publicMemoryChangeShowFilesItem, publicMemoryChangeShowFilesItem2, publicMemoryChangeShowValidation, publicMemoryListEntryItem, publicMemoryListEntryItem2, publicMemoryListMemory, publicMemoryReadContext, publicMemoryReadMemory, publicRunArtifactContractShowAction, publicRunArtifactContractShowArtifact, publicRunArtifactContractShowProcedure, publicRunArtifactShowArtifact, publicRunArtifactShowArtifact2, publicRunArtifactShowBusiness, publicRunArtifactShowConfirmationsItem, publicRunArtifactShowContextartifactsItem, publicRunArtifactShowContextartifactsItem2, publicRunArtifactShowContextexternalsItem, publicRunArtifactShowRevisionsummary, publicRunReportDependenciesItem, publicRunReviewAssignmentShowMemoryreads, publicRunReviewAssignmentShowReferencesItem, publicRunReviewAssignmentShowReviewprogress, publicRunReviewListTree, publicRunReviewShowNode, reviewNodeProjection, publicRunShowStepsItem2, publicVote } from "./fields.js";
 import { receipt } from "./types.js";
 
 export const reviewerContracts = {
@@ -52,7 +52,7 @@ export const reviewerContracts = {
       revisionSummary: publicRunArtifactShowRevisionsummary.optional(),
     }),
     receipt("reviewer-run-artifact-show-3", "冻结材料 · 文本预览",
-      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
+      { omitFalse: ["truncated"], rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -94,7 +94,7 @@ export const reviewerContracts = {
   ],
   "run review assignment show": [
     receipt("reviewer-run-review-assignment-show-1", "成功",
-      { rule: "本人 assignment 的协议、权限、候选引用和受限读取方式。禁止同伴草稿或全部分派状态。" }, {
+      { omitEmpty: ["comments"], rule: "本人 assignment 的协议、权限、候选引用和受限读取方式。禁止同伴草稿或全部分派状态。" }, {
       protocol: oneOf("flow", "graph"),
       memoryReads: publicRunReviewAssignmentShowMemoryreads,
       status: text,
@@ -132,7 +132,7 @@ export const reviewerContracts = {
       vote: text,
     }),
     receipt("reviewer-run-review-submit-2", "本人最终提交",
-      { rule: "只回本人提交状态；不再给写动作。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["nextAction", "tree", "nodes", "comments"] }, {
+      { remove: ["operation"], rule: "只回本人提交状态；不再给写动作。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["nextAction", "tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       vote: either(text, publicVote),
@@ -168,7 +168,7 @@ export const reviewerContracts = {
       vote: publicVote.optional(),
     }),
     receipt("reviewer-run-review-show-2", "当前节点或 --node",
-      { rule: "显式 --node 只给指定节点，无选项时给当前节点。已提交后禁止写动作。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree"] }, {
+      { nested: { node: reviewNodeProjection }, rule: "显式 --node 只给指定节点，无选项时给当前节点。已提交后禁止写动作。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       node: publicRunReviewShowNode.optional(),
@@ -177,7 +177,7 @@ export const reviewerContracts = {
       nextAction: action.optional(),
     }),
     receipt("reviewer-run-review-show-3", "--all · 本人完整评审树",
-      { rule: "显式 --all 可看本人各节点已存判断及该节点意见。 绑定身份隐式确定目标；动作使用 Session launcher。" }, {
+      { items: { nodes: reviewNodeProjection }, rule: "显式 --all 可看本人各节点已存判断及该节点意见。 绑定身份隐式确定目标；动作使用 Session launcher。" }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       nodes: list(publicRunReviewShowNode),
@@ -186,7 +186,7 @@ export const reviewerContracts = {
       nextAction: action.optional(),
     }),
     receipt("reviewer-run-review-show-4", "本人无当前节点 · 已存判断",
-      { rule: "只给可见节点结果和获准的已存意见。 绑定身份隐式确定目标；动作使用 Session launcher。" }, {
+      { items: { nodes: reviewNodeProjection }, rule: "只给可见节点结果和获准的已存意见。 绑定身份隐式确定目标；动作使用 Session launcher。" }, {
       progress: publicRunReviewAssignmentShowReviewprogress,
       nodes: list(publicRunReviewShowNode),
       status: text.optional(),
@@ -197,7 +197,7 @@ export const reviewerContracts = {
   ],
   "run external show": [
     receipt("reviewer-run-external-show-1", "冻结材料 · 文本预览",
-      { rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
+      { omitFalse: ["truncated"], rule: "只读选定对象。预览是授权正文；导出后 stdout 仅给文件回执。", omit: ["out"] }, {
       runId: text,
       id: text,
       contentType: text,
@@ -236,6 +236,7 @@ export const reviewerContracts = {
     }),
     receipt("reviewer-memory-list-2", "未指定引用 · Memory 摘要页",
       { rule: "无引用查 Memory 摘要；有引用查节点、父节点及可继续读取的 node_ref。显式 YAML 表达同一页。 使用本身份授权的 Project 或显式冻结范围。" }, {
+      project_name: text.optional(), revision: text.optional(),
       items: list(publicMemoryListEntryItem2),
       nextCursor: text.optional(),
     }),
@@ -347,7 +348,7 @@ export const reviewerContracts = {
   ],
   "run review comment add": [
     receipt("reviewer-run-review-comment-add-1", "修改本人意见",
-      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
+      { savedComments: true, remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -358,7 +359,7 @@ export const reviewerContracts = {
   ],
   "run review comment update": [
     receipt("reviewer-run-review-comment-update-1", "修改本人意见",
-      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
+      { savedComments: true, remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -369,7 +370,7 @@ export const reviewerContracts = {
   ],
   "run review comment delete": [
     receipt("reviewer-run-review-comment-delete-1", "修改本人意见",
-      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
+      { savedComments: true, remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -380,7 +381,7 @@ export const reviewerContracts = {
   ],
   "run review report": [
     receipt("reviewer-run-review-report-1", "保存节点判断",
-      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
+      { remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,
@@ -391,7 +392,7 @@ export const reviewerContracts = {
   ],
   "run review update": [
     receipt("reviewer-run-review-update-1", "保存节点判断",
-      { rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
+      { remove: ["operation"], omitEmpty: ["savedCommentIds"], rule: "操作标识仅限本人、该节点和本次保存。 绑定身份隐式确定目标；动作使用 Session launcher。", omit: ["tree", "nodes", "comments"] }, {
       status: text,
       progress: publicRunReviewAssignmentShowReviewprogress,
       operation: text,

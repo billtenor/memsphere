@@ -15,7 +15,7 @@ export const appContracts = {
   ],
   "app list": [
     receipt("cli-app-list-1", "成功",
-      { rule: "选择、安装所需身份/状态及后继；pendingCount 为总数。" }, {
+      { omitZero: ["pendingCount"], rule: "选择、安装所需身份/状态及后继；pendingCount 为总数。" }, {
       apps: list(publicAppListAppsItem),
       pendingCount: integer,
       nextCursor: text.optional(),
@@ -23,7 +23,7 @@ export const appContracts = {
   ],
   "app show": [
     receipt("cli-app-show-1", "成功",
-      { rule: "configuration 只允许配置定义的公开引用，projectStores 只给声明的绑定，缺绑定为 null。禁止 app.config 内容。" }, {
+      { omitFalse: ["descriptionTruncated"], omitEmpty: ["projectStores"], rule: "configuration 只允许配置定义的公开引用，projectStores 只给声明的绑定，缺绑定为 null。禁止 app.config 内容。" }, {
       id: text,
       name: text,
       version: text,
@@ -39,7 +39,7 @@ export const appContracts = {
   ],
   "app configure": [
     receipt("cli-app-configure-1", "成功",
-      { rule: "配置写入只给状态、revision、是否重启及其动作。" }, {
+      { omitFalse: ["restartRequired"], rule: "配置写入只给状态、revision、是否重启及其动作。" }, {
       id: text,
       status: text,
       revision: text,
@@ -49,7 +49,7 @@ export const appContracts = {
   ],
   "app enable": [
     receipt("cli-app-enable-1", "成功",
-      { rule: "enabled 表达实际状态；需重启时给动作。" }, {
+      { omitFalse: ["restartRequired"], rule: "enabled 表达实际状态；需重启时给动作。" }, {
       id: text,
       enabled: bool,
       restartRequired: bool,
@@ -58,7 +58,7 @@ export const appContracts = {
   ],
   "app disable": [
     receipt("cli-app-disable-1", "成功",
-      { rule: "enabled 表达实际状态；需重启时给动作。" }, {
+      { omitFalse: ["restartRequired"], rule: "enabled 表达实际状态；需重启时给动作。" }, {
       id: text,
       enabled: bool,
       restartRequired: bool,
@@ -67,7 +67,7 @@ export const appContracts = {
   ],
   "app check": [
     receipt("cli-app-check-1", "成功",
-      { rule: "每项只给 name/status，total 表示全部检查项；禁止原始探测响应。" }, {
+      { counts: { total: "items" }, rule: "每项只给 name/status，total 表示全部检查项；禁止原始探测响应。" }, {
       id: text,
       status: text,
       items: list(publicAppCheckEntryItem),

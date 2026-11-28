@@ -104,16 +104,20 @@ async function stepResult(g: GraphRuntime, snapshot: Snapshot, step: Step, proje
   if (!artifact) return base;
   const details = forRun(project, "step", "show", ...target);
   const rules = await g.rules(run, action);
-  const rulePreview = Object.entries(rules).flatMap(([scope, tree]) =>
-    flattenEffectiveRules(tree).map(entry => ({ scope, text: previewText(entry.text, 128).text }))).slice(0, 5);
-  const materials = Object.values(step.inputs ?? {}).flat().slice(0, 4).map(ref => ({
-    kind: ref.kind, id: ref.id, read: forRun(project, ref.kind, "show", "--run", run.id, "--" + ref.kind, ref.id)
+  const ruleEntries = Object.entries(rules).flatMap(([scope, tree]) =>
+    flattenEffectiveRules(tree).map(entry => ({ scope, text: entry.text })));
+  const rulePreview = ruleEntries.slice(0, 5).map(rule => ({ ...rule, text: previewText(rule.text, 128).text }));
+  const inputs = Object.entries(step.inputs ?? {}).flatMap(([group, refs]) => refs.map(ref => ({ ...ref, group })));
+  const materials = inputs.slice(0, 4).map(ref => ({
+    kind: ref.kind, id: ref.id, group: ref.group, read: forRun(project, ref.kind, "show", "--run", run.id, "--" + ref.kind, ref.id)
   }));
   const instruction = previewText(action.description, 256).text;
   const current = {
     ...base, actor: action.actor ?? "agent" as const, instruction,
     artifactName: previewText(artifact.name, 160).text, contentType: artifact.payload.contentType,
     model: artifact.model.definedBy, details,
+    materialCount: inputs.length > materials.length ? inputs.length : undefined,
+    rulesTruncated: ruleEntries.length > rulePreview.length || rulePreview.some((rule, i) => rule.text !== ruleEntries[i].text) || undefined,
     ...(rulePreview.length ? { rules: rulePreview } : {}),
     ...(materials.length ? { materials } : {})
   };
@@ -152,9 +156,13 @@ export async function graphNext(g: GraphRuntime, snapshot: Snapshot, project: st
     await createCommandState(project, run.id, entered.step.id).catch(() => undefined);
     return stepResult(g, entered.snapshot, entered.step, project, statusOnly);
   }
-  if (ready.length === 1) return { ...base, eligibleSteps: 1, nextAction: enterStep(ready[0]) };
-  if (ready.length > 1) return { ...base, eligibleSteps: ready.length, nextAction: {
-    kind: "choose", choices: ready.slice(0, 10).map(enterStep), ...(ready.length > 10 ? { more: show } : {})
+  if (ready.length === 1) return { ...base, nextAction: enterStep(ready[0]) };
+  if (ready.length > 1) return { ...base, eligibleSteps: ready.length > 10 ? ready.length : undefined, nextAction: {
+    kind: "choose", choices: ready.slice(0, 10).map(step => {
+      const action = g.action(run, step);
+      const label = previewText(action.description || action.id, 96);
+      return { ...enterStep(step), label: label.text + (label.truncated ? "…" : "") };
+    }), ...(ready.length > 10 ? { more: show } : {})
   } };
   const reviewing = snapshot.steps.filter(s => effectiveStep(run, s.id) && s.status === "awaiting_review");
   if (reviewing.length === 1) return stepResult(g, snapshot, reviewing[0], project);
@@ -389,7 +397,7 @@ export async function graphCommand(operation: string, input: object, scope?: Con
       ...graphStoreReceipt(result.artifact), nextAction: next.nextAction,
       dependencies: result.artifact.dependencies.slice(0, 20), dependencyCount: result.artifact.dependencies.length,
       nextStep: next.stepId, nextInstruction: next.instruction, nextActor: next.actor, nextDetails: next.details,
-      nextMaterials: next.materials, nextRules: next.rules
+      nextMaterials: next.materials, nextMaterialCount: next.materialCount, nextRules: next.rules, nextRulesTruncated: next.rulesTruncated
     }), { locale: run.language, saved });
   });
 }
@@ -400,6 +408,7 @@ const graphReceiptSchema = z.object({
   storeId: z.string().optional(), modelRef: z.string().optional(), dataId: z.string().optional(),
   dependencies: z.array(runEvidenceSchema.omit({ read: true })).max(20).optional(),
   dependencyCount: z.number().int().nonnegative().optional(),
+  nextRulesTruncated: z.literal(true).optional(), nextMaterialCount: z.number().int().nonnegative().optional(),
   nextMaterials: z.array(runEvidenceSchema).max(4).optional(),
   nextRules: z.array(z.object({ scope: z.string(), text: z.string() }).strict()).max(5).optional(),
   nextStep: z.string().optional(), nextInstruction: z.string().optional(),

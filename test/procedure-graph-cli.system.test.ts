@@ -13,6 +13,7 @@ import type { GraphProcedureMemory } from "../src/memory/ast.js";
 
 import { openContextControl } from "../src/project/context-control.js";
 import { requireCommandState } from "../src/home/command-state-store.js";
+import { unpackCliArgv } from "../src/prompts/cli-command.js";
 import { ownTestProcess } from "./helpers/owned-process.js";
 
 
@@ -96,7 +97,9 @@ test("graph CLI auto-enters one Step, binds Continue and leaves show read-only",
   assert.equal(await readFile(join(f.root, "data/context_control/steps", start.runId, `${step.id}.json`), "utf8"), before);
   const help = await f.invoke("continue", "--help"); assert.match(help.stdout, new RegExp(step.id));
   const result = await f.call("continue", "report", "--artifact", "done");
-  assert.equal(result.stepId, step.id); assert.equal(result.status, "done");
+  assert.equal(Object.hasOwn(result, "stepId"), false);
+  assert.equal(result.status, "done");
+  assert.equal((await f.inspect(start.runId)).steps.find((s: any) => s.id === step.id)?.status, "done");
   assert.ok(result.nextAction.args.includes("finish"));
   await assert.rejects(f.invoke("continue", "report", "--artifact", "duplicate"), /RUN_FINISHED/);
   await f.call("run", "finish", "--run", start.runId);
@@ -258,11 +261,26 @@ test("CLI module failed auxiliary Continue store preserves the running Step and 
   await mkdir(join(f.home, "data"), { recursive: true });
   const invalid = join(f.home, "data", "runner-sessions"); await writeFile(invalid, "not a directory");
   const start = await f.call("run", "start", "--file", f.procedure, "--name", "context recovery");
-  assert.deepEqual(start.nextAction.args.slice(2, 7), ["run", "report", "--run", start.runId, "--step"]);
   const before = await f.call("run", "show", "--run", start.runId); assert.equal(before.steps.length, 1); assert.equal(before.steps[0].status, "running");
+  const stepId = before.steps[0].id;
+  assert.deepEqual(start.nextAction, { kind: "command", launcher: "memsphere",
+    args: ["--project", "test-project", "run", "report", "--run", start.runId, "--step", stepId, "--artifact-file", "<file>"] });
   await rm(invalid);
-  const recovered = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", before.steps[0].id);
-  assert.match(recovered.stdout, /memsphere continue report/);
+  const recovered = await f.invoke("run", "step", "enter", "--run", start.runId, "--step", stepId);
+  const command = recovered.stdout.split(/\r?\n/).find(line => line.startsWith("memsphere "));
+  assert.ok(command, recovered.stdout);
+  // The template has one quoted placeholder on Bash and an encoded argument on Windows.
+  const args = unpackCliArgv([process.execPath, ...command.split(" ")]).slice(2);
+  const placeholder = process.platform === "win32" && !process.env.MSYSTEM ? "<file>" : "'<file>'";
+  assert.deepEqual(args, ["continue", "report", "--artifact-file", placeholder]);
+  const artifact = join(f.directory, "recovered step.txt");
+  await writeFile(artifact, "Recovered Continue report");
+  const submitted = await f.call(...args.slice(0, -1), artifact);
+  assert.equal(Object.hasOwn(submitted, "runId"), false);
+  const after = await f.inspect(start.runId);
+  assert.equal(after.steps.find((step: any) => step.id === stepId)?.status, "done");
+  assert.ok(submitted.artifactId);
+  assert.equal(after.artifacts.find((item: any) => item.id === submitted.artifactId)?.stepId, stepId);
 });
 
 test('CLI rewind preview is read only, preserves Continue, and requires explicit enter', {timeout:60000}, async t=>{
@@ -343,7 +361,8 @@ for (const path of ['status', 'branch-report', 'branch-review']) test(`CLI modul
   await f.invoke('run', 'step', 'enter', '--run', start.runId, '--step', target);
   assert.ok((await f.invoke('continue', '--help')).stdout.includes(target));
   const accepted = await f.call('continue', 'report', '--artifact', 'new A');
-  assert.equal(accepted.stepId, target);
+  assert.equal(Object.hasOwn(accepted, 'stepId'), false);
+  assert.equal((await f.inspect(start.runId)).steps.find((s: any) => s.id === target)?.status, 'done');
   assert.equal(accepted.status, 'done');
 });
 
@@ -398,7 +417,8 @@ test("graph native and Continue reports validate business options before writing
   await assert.rejects(f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"unexpected":true}'));
   assert.equal((await store.list({}, {})).items.length, 1);
   const done = await f.call("continue", "report", "--artifact", '{"name":"continue"}', "--write-options", '{"data_id":"continue"}');
-  assert.equal(done.runId, second.runId);
+  assert.equal(Object.hasOwn(done, "runId"), false);
+  assert.equal((await f.inspect(second.runId)).steps[0].status, "done");
   assert.equal(done.status, "done");
   assert.deepEqual((await store.get({}, "continue") as { value: unknown }).value, { name: "continue" });
 });

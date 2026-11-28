@@ -1,21 +1,5 @@
-已读取记录 {{id}}。
-存储：{{storeId}}
-模型：{{modelRef}}
-{{#unlessNil project}}
-项目：{{project}}
-{{/unlessNil}}
-{{#unlessNil revision}}
-版本：{{revision}}
-{{/unlessNil}}
-{{#unlessNil contentType}}
-内容类型：{{contentType}}
-{{/unlessNil}}
-{{#unlessNil createdAt}}
-创建时间：{{createdAt}}
-{{/unlessNil}}
-{{#unlessNil updatedAt}}
-更新时间：{{updatedAt}}
-{{/unlessNil}}
+{{#unlessNil project}}{{project}} / {{/unlessNil}}{{storeId}} / {{id}} · {{modelRef}}{{#unlessNil revision}} · 版本 {{revision}}{{/unlessNil}}{{#unlessNil contentType}} · {{contentType}}{{/unlessNil}}
+{{#unlessNil createdAt}}创建 {{createdAt}}{{/unlessNil}}{{#unlessNil updatedAt}} 更新 {{updatedAt}}{{/unlessNil}}
 {{#unlessNil deleted}}
-已删除：{{deleted}}
+已删除 {{deleted}}
 {{/unlessNil}}

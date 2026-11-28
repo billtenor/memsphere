@@ -83,11 +83,41 @@ test("CLI report resolves tag dependencies to the actual source Artifact",{timeo
  assert.equal((await findCommandStates("test-project",run.id,f.home))[0].value.sessionId,"cli-test-session");
  assert.ok((await f.call("run","status")).runs.some((r:any)=>r.runId===run.id));
 });
+test("only the reporting session can reopen a complete candidate list after its reading window advances", { timeout: 60_000 }, async t => {
+  const f = await boundExplorationFixture(t, "private candidates");
+  const previous = await f.call("continue", "report", "--name", "previous", "--artifact", "previous");
+  const expected: string[] = [];
+  for (let index = 0; index < 20; index++) {
+    const material = await f.service.addExternal(f.run.id, "source " + index, { content: textContent("private source") });
+    await f.call("run", "external", "show", "--run", f.run.id, "--external", material.id);
+    expected.push("external:" + material.id);
+  }
+  expected.push("artifact:" + previous.artifactId);
+  const result = await f.call("continue", "report", "--name", "submission", "--artifact", "output");
+  assert.deepEqual(result.candidates, expected.slice(0, 20));
+  assert.equal(result.candidateCount, 21);
+  assert.equal(result.runId, undefined);
+  assert.ok(result.candidateDetails.args.includes("--candidates"));
+  const args = [...result.candidateDetails.args, "--output", "json"];
+  const env = { ...process.env, MEMSPHERE_HOME: f.home, CODEX_THREAD_ID: "cli-test-session", TRAECLI_THREAD_ID: "", CLAUDE_CODE_SESSION_ID: "" };
+  const read = (session: string) => exec(process.execPath, [cli, ...args], { cwd: f.cwd, env: { ...env, CODEX_THREAD_ID: session } });
+  const next = await f.call("run", "report", "--run", f.run.id, "--name", "later", "--artifact", "later");
+  assert.equal(next.candidateDetails, undefined);
+  assert.deepEqual(next.candidates, ["artifact:" + result.artifactId]);
+  assert.deepEqual(JSON.parse((await read("cli-test-session")).stdout), { runId: f.run.id, stepId: result.stepId, candidates: expected });
+  await assert.rejects(read("other-session"), (error: { stdout?: string; stderr?: string }) => {
+    assert.equal(error.stdout, "");
+    assert.equal(JSON.parse(error.stderr!).error.code, "NOT_FOUND");
+    return true;
+  });
+});
 test("CLI review create retains multiple feedback comments",{timeout:30000},async t=>{
  const f=await artifactFixture(t);
  const review=await f.call("run","review","create","--run",f.run.id,"--artifact",f.original.id,"--reviewer","human","--comment","恢复路径","--comment","补充测试");
- assert.equal(review.comments.length,2);
- assert.deepEqual(review.comments.map((c:any)=>c.body),["恢复路径","补充测试"]);
+ assert.equal(review.comments,undefined);
+ const detail=await f.call(...review.details.args.slice(2));
+ assert.deepEqual(review.commentIds,detail.comments.map((c:any)=>c.commentId));
+ assert.deepEqual(detail.comments.map((c:any)=>c.body),["恢复路径","补充测试"]);
 });
 test("CLI revision replaces the output while preserving original Artifact bytes",{timeout:30000},async t=>{
  const f=await artifactFixture(t);
@@ -151,7 +181,7 @@ for (const kind of ["artifact", "external"]) for (const length of [199, 200, 201
     const args = ["run", kind, "show", "--run", run.runId, `--${kind}`, id];
     const result = await f.call(...args);
     assert.equal(result.content, Array.from(value).slice(0, 200).join(""));
-    assert.equal(result.truncated, length > 200);
+    assert.equal(result.truncated, length > 200 ? true : undefined);
     assert.equal(!!result.nextAction, length > 200);
     const text = await f.invoke(...args); assert.ok(text.stdout.includes(result.content));
     assert.equal(text.stderr, "");

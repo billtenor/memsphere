@@ -18,7 +18,7 @@ export async function memoryChangeShowCommand(changeId: string, options: {
       return memoryChangePart({ change, files }, options);
     }
   });
-  await writeCliChunk(JSON.stringify(validateCommandResult("memory change show", payload), null, 2) + "\n");
+  await writeCliChunk(JSON.stringify(validateCommandResult("memory change show", payload)) + "\n");
 }
 
 type Detail = Parameters<Parameters<typeof withMemoryChangeDetailSnapshot>[0]["use"]>[0];

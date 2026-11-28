@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 import { parse } from 'yaml';
 import { ciProfile, createCiPlan } from '../../scripts/ci/ci-plan.mjs';
-import { selectTests } from '../../scripts/ci/test-plan.mjs';
+import { selectTests, selectWindowsPackageSmokeTests } from '../../scripts/ci/test-plan.mjs';
 const workflow = parse(await readFile('.github/workflows/ci.yml', 'utf8'));
 const files = ['memory.unit.test.ts', 'nested/new.unit.test.ts', 'business.module.test.ts', 'future/business.module.test.ts', 'platform/process/future-native.integration.test.ts', 'platform/filesystem/future-paths.integration.test.ts', 'domain.integration.test.ts', 'browser.system.test.ts', 'journey.e2e.test.ts'];
 const sources = Object.fromEntries(files.map(file => [file, file === 'browser.system.test.ts' ? 'helpers/browser' : '']));
@@ -110,6 +110,22 @@ test('full-only system and packaged tests have thirty-minute deadlines', () => {
     assert.deepEqual(rows.map(row=>row.os),profile==='full'?systems:[]);
     for(const row of rows){assert.equal(row.suite,'system');assert.equal(row.browser,true);assert.deepEqual(selectTests(files,sources,row.suite),['browser.system.test.ts']);}
   }
+});
+
+test('Windows packaged system tests belong to the existing Full CI package job exactly once', () => {
+  const packaged = 'packaged-cli/windows-package-smoke.system.test.ts';
+  const discovered = [...files, packaged];
+  const texts = { ...sources, [packaged]: '' };
+  for (const profile of ['default', 'full']) {
+    const plan = createCiPlan(profile, discovered, texts);
+    assert.deepEqual(plan, createCiPlan(profile, files, sources));
+    for (const row of plan.include) assert(!selectTests(discovered, texts, row.suite).includes(packaged));
+  }
+  assert.deepEqual(selectWindowsPackageSmokeTests(discovered), [packaged]);
+  const job = workflow.jobs['windows-package-smoke'];
+  assert.equal(job.if, "needs.plan.outputs.profile == 'full'");
+  assert.equal(job['runs-on'], 'windows-latest');
+  assert.equal(job.steps.filter(step => step.run === 'node scripts/ci/windows-package-smoke.mjs').length, 1);
 });
 
 

@@ -45,7 +45,7 @@ async function representations(fixture: Fixture, args: string[], input?: string)
   const [json, text, implicit] = results;
   const value = JSON.parse(json.stdout);
   assert.equal(json.stdout, `${JSON.stringify(value)}\n`, "JSON remains one compact value followed by a newline");
-  if (args[0] === "data" && args[1] === "read") assert.match(text.stdout, /\n(?:项目|Project)[:：] ?test-project\n/);
+  if (args[0] === "data" && args[1] === "read") assert.match(text.stdout, /^test-project \/ records \/ a · record\.json/);
   else assert.match(text.stdout, /\nproject[:：] ?test-project\n/);
   assert.throws(() => JSON.parse(text.stdout), SyntaxError, "text must no longer be pretty-printed JSON");
   for (const field of ["modelRef", "id", "storeId", "nextCursor"]) {
@@ -120,16 +120,16 @@ for (const domain of ["model", "data", "store"] as const) {
     const f = await fixture(t);
     await mutateModel({}, f.root, "create", "planned.json", { source: JSON.stringify(schema) });
     const plans = {
-      model: { args: ["model", "update", "planned.json", "--name", "true", "--description", "line: # note\nnext", "--dry-run"], input: undefined, operation: "model.update" },
-      data: { args: ["data", "create", "planned", "--store", "records", "--value-file", "-", "--dry-run"], input: JSON.stringify(value), operation: "data.create" },
-      store: { args: ["data", "store", "create", "planned", "--model", "record.json", "--kind", "value", "--factory", "memsphere/filesystem-json", "--config-file", "-", "--dry-run"], input: '{"directory":"data/planned"}', operation: "data.store.create" }
+      model: { args: ["model", "update", "planned.json", "--name", "true", "--description", "line: # note\nnext", "--dry-run"], input: undefined },
+      data: { args: ["data", "create", "planned", "--store", "records", "--value-file", "-", "--dry-run"], input: JSON.stringify(value) },
+      store: { args: ["data", "store", "create", "planned", "--model", "record.json", "--kind", "value", "--factory", "memsphere/filesystem-json", "--config-file", "-", "--dry-run"], input: '{"directory":"data/planned"}' }
     };
     const before = await snapshotTree(f.root);
     const result = cli(f, plans[domain].args, domain === "data" ? undefined : "text", plans[domain].input);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, "");
     assert.match(result.stdout, /project[:：] ?test-project/);
-    assert.ok(result.stdout.includes(plans[domain].operation));
+    assert.ok(result.stdout.startsWith(plans[domain].args.slice(0, domain === "store" ? 3 : 2).join(" ")));
     assert.match(result.stdout, /dryRun[:：] ?true/);
     if (domain === "model") assert.match(result.stdout, /"name":"true"/);
     assert.throws(() => JSON.parse(result.stdout), SyntaxError);
@@ -281,13 +281,13 @@ test("update and edit dry-runs preserve the stored record in both representation
       assert.equal(result.stderr, "");
       if (format) {
         const receipt = JSON.parse(result.stdout);
-        assert.equal(receipt.operation, "data." + verb);
+        assert.equal(Object.hasOwn(receipt, "operation"), false);
         assert.equal(receipt.dryRun, true);
         assert.equal(receipt.id, "a");
         assert.equal(receipt.storeId, "records");
         assert.equal(receipt.value, undefined);
       } else {
-        assert.ok(result.stdout.includes("data." + verb));
+        assert.ok(result.stdout.startsWith("data " + verb));
         assert.match(result.stdout, /dryRun[:：] ?true/);
       }
     }

@@ -27,7 +27,7 @@ export const runOverviewSchema = z.object({
 export const runEvidenceSchema = z.object({
   kind: z.enum(["artifact", "external"]),
   id: z.string(),
-  read: cliCommandSchema.optional()
+  group: z.string().optional(), read: cliCommandSchema.optional()
 }).strict();
 
 export const runProgressSchema = runSummarySchema.extend({
@@ -59,6 +59,7 @@ export const runProgressSchema = runSummarySchema.extend({
   ruleCount: z.number().int().nonnegative().optional(),
   memoryRun: z.string().optional(),
   rules: z.array(z.object({ scope: z.string(), text: z.string() }).strict()).optional(),
+  rulesTruncated: z.literal(true).optional(), materialCount: z.number().int().nonnegative().optional(),
   materials: z.array(runEvidenceSchema).optional(),
   details: cliCommandSchema.optional(),
   nextAction

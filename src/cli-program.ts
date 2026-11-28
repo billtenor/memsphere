@@ -422,6 +422,7 @@ registerResultAction(runStep
   .description("Show the detailed contract and instructions for one Run step.")
   .requiredOption("--run <id>", "run id")
   .requiredOption("--step <ref>", "step ref from run show")
+  .option("--candidates", "Read the reporting session's full list of undeclared materials for this exploration Step")
   .addOption(new Option("--output <format>", "output format").choices(["json", "text"]).default("text")), runStepShowCommand);
 
 const runArtifact = run
